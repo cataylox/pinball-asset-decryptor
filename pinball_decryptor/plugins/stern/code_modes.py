@@ -372,6 +372,48 @@ def recipe_films(ex):
     return out
 
 
+def _clock(seconds):
+    """1:32:29 or 26:47 (a time into a film), 0:05 under a minute"""
+    s = int(round(float(seconds or 0)))
+    h, m, s = s // 3600, s // 60 % 60, s % 60
+    return "%d:%02d:%02d" % (h, m, s) if h else "%d:%02d" % (m, s)
+
+
+def _length(seconds):
+    v = float(seconds or 0)
+    return ("%d s" % v) if v == int(v) else ("%.1f s" % v)
+
+
+def recipe_lines(recipe):
+    """The film recipe as sentences a person reads, one per part, in the Assets pane's order:
+    ``Clip: 8 s of Invasion of Astro-Monster (1965) from 1:32:29, filling the frame``. The recipe's
+    own ``what`` notes are measurement records (match scores, the bed finder's numbers), so they are
+    not shown. An empty list for no recipe."""
+    r = recipe or {}
+    out = []
+
+    def title(p):
+        return FILM_TITLES.get(p.get("film"), p.get("film") or "a film")
+
+    c = r.get("clip")
+    if c:
+        out.append("Clip: %s of %s from %s, %s" % (_length(c.get("length")), title(c), _clock(c.get("from")),
+                                                   "keeping its letterbox" if c.get("crop") == "letterbox"
+                                                   else "filling the frame"))
+    a = r.get("art")
+    if a:
+        out.append("Picture: the frame of %s at %s" % (title(a), _clock(a.get("at"))))
+    m = r.get("music")
+    if m:
+        out.append("Music: %s of %s from %s, looped" % (_length(m.get("length")), title(m), _clock(m.get("from"))))
+    calls = r.get("calls") or {}
+    if calls:
+        out.append("Calls: " + "; ".join("%s, %s of %s from %s" % (cue, _length(p.get("length")), title(p),
+                                                                   _clock(p.get("from")))
+                                          for cue, p in calls.items()))
+    return out
+
+
 def find_film(key, dirs):
     """The path of film *key* (:data:`FILMS`) in the first of *dirs* that holds it, or None."""
     name = FILMS.get(key, key)

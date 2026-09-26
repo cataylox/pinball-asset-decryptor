@@ -632,7 +632,8 @@ function CodePane({ s }) {
             ${c.screen && !c.screen_art ? html` <span class="swatch" style=${`background:${c.panel_color};width:14px;height:14px;vertical-align:-2px`}></span> <span class="swatch" style=${`background:${c.title_color};width:14px;height:14px;vertical-align:-2px`}></span>` : null}</span>
           <span class="k">Clip</span><span class="row">${c.clip || "none"}${c.files && c.files.clip ? html`<${Button} size="xs" kind="ghost" icon="play" onClick=${() => s._showClip(c.files.clip, c.name)}>Play<//>` : null}</span>
           <span class="k">Music</span><span class="row">${c.music || "none"}<${PlayButton} path=${c.files && c.files.music} /></span>
-          <span class="k">Film recipe</span><span>${c.recipe || "none"}</span>
+          <span class="k">Film recipe</span><span class="stack small" style="gap:2px">${(c.recipe || []).length
+            ? c.recipe.map((line) => html`<span class="wrap" key=${line}>${line}</span>`) : "none"}</span>
         </div>
         ${c.files && c.files.art ? html`<div class="thumb modes-preview"><img src=${mediaUrl(c.files.art)} alt="The mode's picture" /></div>` : null}
         ${(c.calls || []).length ? html`<div class="stack" style="gap:2px"><span class="lbl">Calls</span>
@@ -780,6 +781,9 @@ function useEndScroll(ref, value) {
 }
 
 const TRY_ON_TIP = "The Emulate tab's card: Try it boots it and builds the modes for it.";
+//: what the empty "Try it on" box says: a project that never visited the Emulate tab names no card yet,
+//: and the box alone did not say that Browse… is how to give it one (the preview testers asked)
+const NO_CARD = "No card to try it on yet: press Browse… and pick the card image (the same box as the Emulate tab's).";
 
 function TryFooter({ s }) {
   const t = s.tryit || {};
@@ -796,10 +800,12 @@ function TryFooter({ s }) {
       <div class="row modes-tryon">
         <span class="lbl nw">Try it on</span>
         <div class="grow modes-tryon-path" ref=${cardRef}>
-          <${Field} value=${emu.card} mono readOnly=${!emu.box} placeholder="The card in the Emulate tab's box"
+          <${Field} value=${emu.card} mono readOnly=${!emu.box} placeholder=${NO_CARD}
             onCommit=${(v) => setField("modes", "try_on", v, { flush: true })} title=${emu.card ? emu.card + "\n" + TRY_ON_TIP : TRY_ON_TIP} />
         </div>
-        <${Button} disabled=${!emu.box || working} onClick=${() => call("modes.browse_card")}>Browse…<//>
+        <${Button} kind=${emu.box && !emu.card && s.project ? "primary" : undefined} disabled=${!emu.box || working}
+          title=${emu.card ? "Pick another card image to try the modes on." : NO_CARD}
+          onClick=${() => call("modes.browse_card")}>Browse…<//>
         ${emu.verdict ? html`<${Chip} kind=${emu.verdict_kind} dot title=${emu.verdict_tip}>${emu.verdict}<//>` : null}
       </div>
       <div class="row modes-tryrow">
@@ -819,6 +825,7 @@ function TryFooter({ s }) {
           onClick=${() => call("modes.check_game")}>Check this game<//>
         <span class="grow"></span>
         ${working || live ? html`<${Button} kind="ghost" size="sm" icon="emulate" onClick=${() => call("modes.goto_emulate")}>Emulate tab<//>`
+          : s.project && !s.tryit_line && emu.box && !emu.card ? html`<span class="small warn-ink modes-tryhint">${NO_CARD}</span>`
           : s.project && !s.tryit_line ? html`<span class="small dim modes-tryhint" ...${tip(tryTip(s))}>${idleWords(s)}</span>` : null}
       </div>
       ${(t.state && t.state !== "idle") || s.tryit_line ? html`<div class="row modes-tryline" role="status">

@@ -1854,7 +1854,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 panel_color=spec.panel_color, title_color=spec.title_color, clip=spec.clip,
                 music=spec.music, calls=calls, files=files, describe=words,
                 summary=self._code_words_one(spec),
-                recipe=str(film.get("recipe") or ""),
+                recipe=CM.recipe_lines(film.get("recipe")),
                 needs_films=needs, needs_files=needs_files,
                 status=("Cannot be built for this card yet: " + self._refusal()
                         if self._refusal() else

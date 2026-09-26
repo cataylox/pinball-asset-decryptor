@@ -391,3 +391,23 @@ def test_the_recipes_file_is_plain_json_with_the_films_named():
     assert set(doc["films"]) == set(doc["titles"])
     for name in doc["films"].values():
         assert name.endswith(".mp4") and "\\" not in name and "/" not in name
+
+
+def test_a_film_recipe_reads_as_sentences_not_a_dict():
+    """The Assets pane shows a code example's film recipe as one sentence per part (the preview testers
+    saw the raw Python dict there): the film's title, the time into it, the length, the crop; the
+    recipe's own measurement notes are not shown."""
+    ex = next(e for e in CM.EXAMPLES if e["recipe"].get("clip") and e["recipe"].get("calls"))
+    lines = CM.recipe_lines(ex["recipe"])
+    assert lines[0].startswith("Clip: ") and lines[-1].startswith("Calls: ")
+    text = " ".join(lines)
+    for part in ("{", "}", "'film'", "what", "chroma", "match"):
+        assert part not in text
+    clip = ex["recipe"]["clip"]
+    assert CM.FILM_TITLES[clip["film"]] in lines[0]
+    assert "filling the frame" in lines[0]
+    assert CM.recipe_lines({"clip": {"film": "g54", "from": 65, "length": 2.5, "crop": "letterbox"}}) == [
+        "Clip: 2.5 s of %s from 1:05, keeping its letterbox" % CM.FILM_TITLES["g54"]]
+    assert CM.recipe_lines({"art": {"film": "g54", "at": 3725}}) == [
+        "Picture: the frame of %s at 1:02:05" % CM.FILM_TITLES["g54"]]
+    assert CM.recipe_lines(None) == [] and CM.recipe_lines({}) == []
