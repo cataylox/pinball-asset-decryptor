@@ -529,3 +529,48 @@ site agent_begin      0x0058f9d4 0xe590c004 0xe1a00001
 
 # ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
 scene hud                  fb70914f6b52e9c3d8f2db191946bbafe87ae44f
+
+# ---- the game's own modes (item 165): its RULE OBJECTS answer for themselves. Each House (a map under the
+# House manager, [0x87e610] + 0x4c, keyed by house) and each TransientRule (the vector at [0x87f2b4]) overrides
+# the running test at vtable slot 15; the manager's check 0xdbe60 and the rules walk 0xf489c both call it.
+# Objects read off a game (static, the same every boot); the multiballs (House Party, the garage ones, ...) are
+# left to balls_in_play, the skill shots out.
+value mode_rule_slot       15
+data mode_rule_1          0x00877224      # ABOB_Rule, House 0
+text mode_rule_name_1     A Bucket of Blood
+data mode_rule_2          0x008776bc      # AOTGL_Rule, House 1
+text mode_rule_name_2     Attack of the Giant Leeches
+data mode_rule_3          0x0087abec      # EEGAH_Rule, House 3
+text mode_rule_name_3     Eegah
+data mode_rule_4          0x0087f364      # MTHOF_Rule, House 9
+text mode_rule_name_4     Manos The Hands of Fate
+data mode_rule_5          0x0087ff14      # NOTLD_Rule, House 11
+text mode_rule_name_5     Night of the Living Dead
+data mode_rule_6          0x00881cd4      # SCCTM_Rule, House 12
+text mode_rule_name_6     Santa Claus Conquers the Martians
+data mode_rule_7          0x00884a74      # TFOS_Rule, House 14
+text mode_rule_name_7     Teenagers from Outer Space
+data mode_rule_8          0x00883f34      # TBTWD_Rule, House 15
+text mode_rule_name_8     The Brain That Wouldn't Die
+data mode_rule_9          0x0088534c      # TGGM_Rule, House 17
+text mode_rule_name_9     The Giant Gila Monster
+data mode_rule_10         0x0088665c      # TKS_Rule, House 18
+text mode_rule_name_10    The Killer Shrews
+data mode_rule_11         0x00886b94      # TM_Rule, House 19
+text mode_rule_name_11    The Manster
+data mode_rule_12         0x008884e4      # TSROD_Rule, House 20
+text mode_rule_name_12    The Satanic Rites of Dracula
+data mode_rule_13         0x0088990c      # TWW_Rule, House 22
+text mode_rule_name_13    The Wasp Woman
+data mode_rule_14         0x00888e3c      # TWOW_Rule, House 23
+text mode_rule_name_14    The Werewolf of Washington
+data mode_rule_15         0x00885e28      # TheyCameFromSpaceRule, House 25
+text mode_rule_name_15    They Came from Space
+data mode_rule_16         0x00879704      # DanceFeverRule
+text mode_rule_name_16    Dance Fever
+data mode_rule_17         0x0087ee44      # MakeOutMayhemRule
+text mode_rule_name_17    Make Out Mayhem
+data mode_rule_18         0x008818a4      # RunForYourLifeRule
+text mode_rule_name_18    Run for Your Life
+data mode_rule_19         0x00883244      # ScreamTestRule
+text mode_rule_name_19    Scream Test

@@ -341,6 +341,20 @@ def _stack_bytes(data):
     return bool(data.get("mode_running_1"))
 
 
+#: item 165: the titles whose modes are C++ RULE OBJECTS that answer for themselves (``data mode_rule_1`` .. and
+#: ``value mode_rule_slot``: the runtime calls each object's own running test, as the game does): the builds where
+#: a ``stack no`` mode was seen held back by one of them in the emulator, and started again once it ended
+STACK_OBJECTS_PROVEN = frozenset({
+    "elvira3-1.13",                   # 2026-09-26: nothing running -> started; a House started (0xdd12c) ->
+                                      # "one of the game's modes (The Werewolf of Washington)", refused; the ball's
+                                      # end closed the House -> nothing, started
+})
+
+
+def _stack_objects(data, values):
+    return bool(data.get("mode_rule_1")) and bool(values.get("mode_rule_slot"))
+
+
 #: item 165: a multiballs-only title where the app DOES see the other modes but waiting for them would keep a
 #: mode from ever starting - the note says why instead of "cannot yet see" (``%s`` is the title's label)
 STACK_NOTE_WHY = {
@@ -814,6 +828,8 @@ def profile_from_port(path):
         pass                                  # item 165: its timed modes too, from the framework's live records
     elif _stack_balls(sites) and key in STACK_BALLS_PROVEN and _stack_bytes(data) and key in STACK_BYTES_PROVEN:
         pass                                  # item 165: its modes too, from their own running bytes
+    elif _stack_balls(sites) and key in STACK_BALLS_PROVEN and _stack_objects(data, values)             and key in STACK_OBJECTS_PROVEN:
+        pass                                  # item 165: its modes too, from their own rule objects
     elif _stack_balls(sites) and key in STACK_BALLS_PROVEN:
         stack_note = (STACK_NOTE_WHY.get(key) or
                       "On %s a mode of yours waits only for the game's multiballs: the app cannot yet "

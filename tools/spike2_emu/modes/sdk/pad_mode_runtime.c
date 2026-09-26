@@ -2549,6 +2549,40 @@ static int stock_bytes(void)
     return 0;
 }
 
+/* item 165: a title whose modes are C++ RULE OBJECTS that answer for themselves (Elvira 1.13: its fifteen House
+ * rules - NOTLD_Rule, TWOW_Rule .. - under the House manager, and its TransientRules - Dance Fever,
+ * Scream Test ..). Each class overrides the running test at vtable slot `value mode_rule_slot` (15 on Elvira; the
+ * House manager's own check 0xdbe60 and the rules walk 0xf489c both call it), so the byte behind it differs
+ * from class to class. The port names each object (`data mode_rule_1` .. `mode_rule_32`, static objects) and the
+ * mode's name (`text mode_rule_name_N`); the runtime calls the object's own test, as the game does. */
+static char stock_objects_what[80];
+
+static int stock_objects_route(void)
+{
+    return data("mode_rule_1") != 0 && pm_port_value("mode_rule_slot", 0) > 0;
+}
+
+static int stock_objects(void)
+{
+    unsigned i, obj, vt, f, slot = (unsigned)pm_port_value("mode_rule_slot", 0);
+    char name[28];
+    const char *label;
+    for (i = 1; i <= 32; i++) {
+        pm_snprintf(name, sizeof name, "mode_rule_%u", i);
+        obj = data(name);
+        if (!obj) break;
+        vt = *(const unsigned *)(unsigned long)obj;
+        f = vt ? ((const unsigned *)(unsigned long)vt)[slot] : 0;
+        if (f && ((unsigned (*)(unsigned))(unsigned long)f)(obj)) {
+            pm_snprintf(name, sizeof name, "mode_rule_name_%u", i);
+            label = pm_port_text(name);
+            pm_snprintf(stock_objects_what, sizeof stock_objects_what, "one of the game's modes (%s)", label ? label : name);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int stock_balls(unsigned kinds)
 {
     unsigned n;
@@ -2556,11 +2590,14 @@ static int stock_balls(unsigned kinds)
     stock_flags_what[0] = 0;
     stock_records_what[0] = 0;
     stock_bytes_what[0] = 0;
+    stock_objects_what[0] = 0;
     if (stock_flags_route() && (kinds & (PM_STOCK_BATTLE | PM_STOCK_ANY)) && stock_flags())
         return (int)PM_STOCK_BATTLE;
     if (stock_records_route() && (kinds & (PM_STOCK_BATTLE | PM_STOCK_ANY)) && stock_records())
         return (int)PM_STOCK_BATTLE;
     if (stock_bytes_route() && (kinds & (PM_STOCK_BATTLE | PM_STOCK_ANY)) && stock_bytes())
+        return (int)PM_STOCK_BATTLE;
+    if (stock_objects_route() && (kinds & (PM_STOCK_BATTLE | PM_STOCK_ANY)) && stock_objects())
         return (int)PM_STOCK_BATTLE;
     n = ((unsigned (*)(void))(unsigned long)fn("balls_in_play"))() & 0xffu;
     return n >= 2 && (kinds & (PM_STOCK_MULTIBALL | PM_STOCK_ANY)) ? (int)PM_STOCK_MULTIBALL : 0;
@@ -2588,6 +2625,9 @@ int pm_stock_mode_running(unsigned kinds)
         else if (stock_balls_route() && stock_bytes_route())
             say("stock modes: can tell a multiball, from the game's balls in play, and its modes, from their own "
                 "running bytes");
+        else if (stock_balls_route() && stock_objects_route())
+            say("stock modes: can tell a multiball, from the game's balls in play, and its modes, from their own "
+                "rule objects");
         else if (stock_balls_route())
             say("stock modes: can tell a multiball, from the game's balls in play (not its other modes)");
         else say("stock modes: %s%s%s%s", data("stock_mode_manager") ? "can tell" : "this port cannot tell (no stock_mode_manager)",
@@ -2615,6 +2655,7 @@ const char *pm_stock_mode_what(unsigned kind)
     if ((kind & PM_STOCK_BATTLE) && stock_flags_what[0]) return stock_flags_what;
     if ((kind & PM_STOCK_BATTLE) && stock_records_what[0]) return stock_records_what;
     if ((kind & PM_STOCK_BATTLE) && stock_bytes_what[0]) return stock_bytes_what;
+    if ((kind & PM_STOCK_BATTLE) && stock_objects_what[0]) return stock_objects_what;
     if ((kind & PM_STOCK_BATTLE) && stock_generic_on) return "one of the game's modes";
     if (kind & PM_STOCK_BATTLE) return "a battle";
     if (kind & PM_STOCK_MULTIBALL) return "a multiball";

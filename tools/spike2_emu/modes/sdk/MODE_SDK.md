@@ -1102,8 +1102,24 @@ text mode_records_name_1   Villain Mode
 Proven 2026-09-26: started with nothing running; the start called, "one of the game's modes (Villain
 Mode)" and refused; the framework's kill 0x11d92c(137, 138) called, nothing, started again.
 
-**Not yet.** Elvira's modes are `TransientRule` objects run by managers built at run time (the House
-manager comes from 0xdb694, its start 0xdd12c refuses unless a house is lit): multiballs only there.
+**Elvira's modes are rule objects that answer for themselves.** Each House (fifteen of them, A Bucket of
+Blood to They Came from Space, in a map under the House manager at `[0x87e610] + 0x4c`) and each
+TransientRule (Dance Fever, Make Out Mayhem, Run for Your Life, Scream Test and the multiballs, in the
+vector at `[0x87f2b4]`) overrides the running test at vtable slot 15, and the game asks exactly that: the
+manager's check 0xdbe60 asks each House, and the rules walk 0xf489c every mode start calls asks each
+TransientRule. The objects are static, so the port names them, and the runtime calls each one's own test:
+
+```
+value mode_rule_slot       15
+data mode_rule_14         0x00888e3c      # TWOW_Rule, House 23
+text mode_rule_name_14    The Werewolf of Washington
+```
+
+The objects were read off a running game (the rule vector and the House map, each object's class from its
+RTTI) and the names are the game's own house titles. The multiballs are left to `balls_in_play`, the skill
+shots out. `mode_project.STACK_OBJECTS_PROVEN` (2026-09-26: started with nothing running; a House started
+through 0xdd12c on the manager, "one of the game's modes (The Werewolf of Washington)" and refused; the
+ball's end closed the House, nothing, started again).
 
 ## Ports: why your mode runs on any game
 
