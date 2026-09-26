@@ -15,6 +15,7 @@ log = logging.getLogger(__name__)
 
 #: (module, ns, Tk stable key, rail label, rail group, icon)
 TABS = (
+    ("card", "card", "Select Card", "Select card", "Card", "sd"),
     ("extract", "extract", "Extract", "Extract", "Card", "extract"),
     ("audio", "audio", "Replace Audio", "Audio", "Replace", "audio"),
     ("video", "video", "Replace Video", "Video", "Replace", "video"),

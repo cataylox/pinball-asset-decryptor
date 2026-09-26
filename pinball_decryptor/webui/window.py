@@ -369,6 +369,7 @@ class WebWindow:
         caps = mfr.capabilities
         g = lambda name: bool(getattr(caps, name, False))   # noqa: E731
         gates = {
+            "Select Card": g("extract") or g("capture"),
             "Extract": g("extract") or g("capture"),
             "Replace Audio": g("replace_audio"),
             "Replace Video": g("replace_video"),

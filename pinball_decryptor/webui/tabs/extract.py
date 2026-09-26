@@ -764,17 +764,19 @@ class ExtractTab(TabService):
                 else bool(self.extract_input_var.get().strip()))
         if not have:
             if ssd_mode:
-                return f"Select the {medium} to read from first."
+                return (f"Select the {medium} to read from on the Select "
+                        "card tab first.")
             noun = getattr(mfr, "extract_input_label", None) if mfr else None
             article = "an" if noun and noun[:1].lower() in "aeiou" else "a"
             thing = f"{article} {noun}" if noun else "a file"
-            return f"Pick {thing} to extract first."
+            return f"Pick {thing} on the Select card tab first."
         if not self.extract_output_var.get().strip():
             return "Choose an output folder first."
         if (not ssd_mode and self._done_key is not None
                 and self._run_key() == self._done_key):
             return ("Already extracted into this project folder. Pick the "
-                    "card again (or change an option) to extract again.")
+                    "card again on the Select card tab (or change an "
+                    "option) to extract again.")
         return ""
 
     def _run_key(self, in_path=None, out_path=None):
@@ -1187,6 +1189,7 @@ class ExtractTab(TabService):
         self._stats_seq += 1
         seq = self._stats_seq
         folder = self._project_folder()
+        self._publish_extract_state(folder)
         if not folder:
             self.set(project=None)
             return
@@ -1224,6 +1227,15 @@ class ExtractTab(TabService):
                              name="extract-stats")
         self._stats_thread = t
         t.start()
+
+    def _publish_extract_state(self, folder):
+        """The shell's ``project_state``: the rail greys out (and says why)
+        the tabs that need an extract while this project has none."""
+        try:
+            state = H.extract_state(folder)
+        except Exception:                               # noqa: BLE001
+            state = None
+        self.store.set("shell", project_state=state)
 
     def _apply_stats(self, seq, folder, name, rows, details):
         if seq != self._stats_seq:

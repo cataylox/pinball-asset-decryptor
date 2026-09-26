@@ -7,6 +7,7 @@ import { Component } from "./vendor/preact-htm.js";
 import { useNs, useLog, useConnected, useEvent, state } from "./core/store.js";
 import { call, onCallError } from "./core/rpc.js";
 import { DialogHost, openDialog } from "./core/dialogs.js";
+import { tabLock } from "./core/locks.js";
 // The app-wide windows (Tips, Preview features, disk space, the Project
 // menu's windows) register themselves on import; ShellxOverlays draws the
 // progress windows the shellx service drives (docs/plans/web_ui_tabs/shellx.md).
@@ -375,13 +376,34 @@ function Rail({ shell }) {
   return html`<nav class="rail" aria-label="Tabs">
     ${groups.map(([g, items], gi) => html`
       <div class="eyebrow group">${g}</div>${gi > 0 ? html`<hr class="gsep" />` : null}
-      ${items.map((t) => html`<button type="button" class=${cx("item", shell.tab === t.ns && "on")}
+      ${items.map((t) => {
+        // PAD-224: a tab with nothing to work on yet is greyed out but still
+        // opens, under a banner that says why
+        const lock = tabLock(t.ns, t.label, shell.project_state);
+        return html`<button type="button" class=${cx("item", shell.tab === t.ns && "on", lock && "locked")}
           aria-current=${shell.tab === t.ns ? "page" : undefined}
-          onClick=${() => call("ui.select_tab", t.ns)} ...${tip(t.label)}>
+          onClick=${() => call("ui.select_tab", t.ns)} ...${tip(lock ? t.label + ": " + lock.short : t.label)}>
           <${Icon} name=${t.icon} /><span class="lbl">${t.label}</span>
-          ${t.badge != null && t.badge !== "" ? html`<span class="n">${t.badge}</span>` : null}
-        </button>`)}`)}
+          ${lock ? html`<span class="lk"><${Icon} name="lock" /></span>`
+            : t.badge != null && t.badge !== "" ? html`<span class="n">${t.badge}</span>` : null}
+        </button>`;
+      })}`)}
   </nav>`;
+}
+
+// The open tab can't do anything yet (PAD-224): say why, and where to go.
+function LockBanner({ shell }) {
+  const x = useNs("extract");
+  const t = (shell.tabs || []).find((r) => r.ns === shell.tab);
+  const lock = t ? tabLock(t.ns, t.label, shell.project_state) : null;
+  if (!lock) return null;
+  const haveCard = !!(x.ssd ? x.drive : x.input);
+  const pickFirst = lock.need === "extract" && !haveCard;
+  return html`<div class="banner warn sx-lock" role="status">
+    <${Icon} name="lock" /><div class="body-text">${lock.long}</div>
+    ${pickFirst ? html`<${Button} size="sm" kind="primary" icon="sd" onClick=${() => call("ui.select_tab", "card")}>Select card<//>` : null}
+    <${Button} size="sm" kind=${pickFirst ? "" : "primary"} icon="extract" onClick=${() => call("ui.select_tab", "extract")}>Go to Extract<//>
+  </div>`;
 }
 
 // ------------------------------------------------------------ status bar
@@ -885,6 +907,7 @@ export function Shell() {
       <div class="body">
         <${Rail} shell=${shell} />
         <main class="main">
+          <${LockBanner} shell=${shell} />
           <${TabHost} ns=${shell.tab} />
           <${LogSplit} open=${logOpen} setOpen=${setLogOpen} height=${logH} setHeight=${setLogH} />
           <${StatusBar} shell=${shell} />

@@ -81,6 +81,11 @@ a:hover { filter: brightness(1.12); }
 .rail .item .n { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--ink-3); background: var(--panel); border-radius: 10px; padding: 0 7px; line-height: 18px; }
 .rail .item.on .n { color: var(--accent); }
 .rail .item .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* PAD-224: a tab that needs an extract the project doesn't have yet */
+.rail .item.locked { color: var(--ink-3); }
+.rail .item.locked:not(.on) svg { opacity: .55; }
+.rail .item .lk { margin-left: auto; display: flex; color: var(--ink-3); }
+.rail .item .lk svg { width: 13px; height: 13px; flex: 0 0 13px; opacity: 1; }
 .main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .page { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 18px 24px 20px; display: flex; flex-direction: column; gap: 14px; }
 .page.fill { overflow: hidden; }
@@ -311,7 +316,7 @@ html.w-rail { --rail-w: 60px; }
 html.w-rail .rail { padding: 8px 6px; align-items: stretch; }
 html.w-rail .rail .group { display: none; }
 html.w-rail .rail .item { justify-content: center; padding: 9px 0; gap: 0; }
-html.w-rail .rail .item .lbl, html.w-rail .rail .item .n { display: none; }
+html.w-rail .rail .item .lbl, html.w-rail .rail .item .n, html.w-rail .rail .item .lk { display: none; }
 html.w-rail .rail hr.gsep { display: block; }
 .rail hr.gsep { display: none; border: 0; height: 1px; background: var(--line); margin: 6px 8px; }
 html.w-stack .cols.c75, html.w-stack .cols.c57, html.w-stack .grid2, html.w-stack .cols.side { grid-template-columns: minmax(0, 1fr); }
