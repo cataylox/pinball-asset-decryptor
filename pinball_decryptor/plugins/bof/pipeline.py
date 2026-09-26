@@ -234,7 +234,7 @@ class _BasePipeline:
     def _gdre_prefix(self):
         """Return the shell prefix to invoke GDRE Tools headlessly.
 
-        Only packs without a Godot 4.5 file directory reach GDRE at all
+        Only packs without a Godot 4 file directory reach GDRE at all
         (see :func:`pick_pck_unpacker`); every current BOF build is
         unpacked and repacked natively."""
         if _platform() == "darwin":
@@ -263,29 +263,31 @@ def _mac_gdre_binary():
     """Where a Mac's GDRE Tools would be if someone put it there.  Nothing
     in this app installs it (the Mac has no Install Prerequisites step for
     it), so on most Macs this path does not exist - which is fine, because
-    only packs without a Godot 4.5 file directory ever need it."""
+    only packs without a Godot 4 file directory ever need it."""
     return os.path.expanduser("~/.local/share/gdre_tools/Godot RE Tools")
 
 
 def pick_pck_unpacker(local_binary):
     """Which unpacker a Godot binary's PCK gets, as ``(name, detail)``:
 
-    * ``"directory"`` - the pack carries a Godot 4.5 (format v3) file
-      directory that :mod:`pck_directory` can read.  Every current BOF
-      build does (Labyrinth, Dune, Winchester), and that directory is what
+    * ``"directory"`` - the pack carries a Godot 4 file directory that
+      :mod:`pck_directory` can read: format v3 (Godot 4.5, Dune and
+      Winchester) or format v2 (Godot 4.0-4.4, Labyrinth's January 2026
+      code, PAD-223).  Every current BOF build does, and that directory is what
       the running game itself uses to find each resource, so the native
       extractor writes every entry from its exact offset and size with no
       GDRE Tools involved.
     * ``"may"`` - no readable directory, but BOF's May 2026+ custom layout
       (:func:`may_extractor.is_may_format`); the native sidecar scan.
-    * ``"gdre"`` - neither: an older (pre-4.5) stock Godot pack.  GDRE
+    * ``"gdre"`` - neither: a Godot 3 (format v1) stock pack.  GDRE
       Tools is the only thing that can unpack it.
 
     Labyrinth's January 2026 code used to go to GDRE Tools because the
     choice was made on ``is_may_format`` alone, which says no to a stock
-    4.5 pack whose first entry is a compiled script.  On a Mac, where
-    nothing installs GDRE Tools, that extract "succeeded" with an empty
-    pck/ folder (PAD-222).
+    pack whose first entry is a compiled script.  On a Mac, where nothing
+    installs GDRE Tools, that extract "succeeded" with an empty pck/ folder
+    (PAD-222).  The PAD-222 fix read format v3 only, but that pack is
+    Godot 4.4.1 (format v2), so it still went to GDRE (PAD-223).
     """
     from . import pck_directory
     from .may_extractor import find_pck_section, is_may_format
@@ -311,7 +313,7 @@ def pick_pck_unpacker(local_binary):
         return "gdre", f"could not read the PCK header ({ex})"
     if is_may_format(head):
         return "may", "BOF May 2026+ custom layout"
-    return "gdre", dir_note or "no Godot 4.5 file directory in this pack"
+    return "gdre", dir_note or "no Godot 4 file directory in this pack"
 
 
 def missing_gdre_text(platform=None, detail=""):
@@ -708,7 +710,7 @@ class DecryptPipeline(_BasePipeline):
         if self.unpack_pck:
             self._set_phase(2)  # still in extract phase visually
 
-            # Which unpacker: the pack's own Godot 4.5 file directory
+            # Which unpacker: the pack's own Godot 4 file directory
             # (every current BOF build; native, no GDRE Tools), BOF's May
             # custom layout (native sidecar scan), or - for an older
             # stock pack only - GDRE Tools.
@@ -1080,9 +1082,11 @@ class ModifyPipeline(_BasePipeline):
         except Exception:
             return False
 
-    def _detect_v3_directory(self, binary_wsl):
-        """True when the binary's PCK carries a Godot 4.5 (format v3) file
-        directory - the header the extract's :func:`pick_pck_unpacker`
+    def _detect_pck_directory(self, binary_wsl):
+        """True when the binary's PCK carries a Godot 4 file directory
+        (format v3 at ``dir_offset``, or format v2 right after the header
+        with a non-zero ``file_count``) - the header the extract's
+        :func:`pick_pck_unpacker`
         keys on, sniffed through the executor the way
         :meth:`_detect_may_format` does.  Such a pack is repacked natively
         (``may_packer`` -> ``pck_directory.rewrite``), so a current
@@ -1104,7 +1108,11 @@ class ModifyPipeline(_BasePipeline):
             hdr = _b64.b64decode(hdr_b64)
             if len(hdr) < 104 or hdr[:4] not in (b"GDPC", b"GBOF"):
                 return False
-            if _struct.unpack("<I", hdr[4:8])[0] < 3:
+            version = _struct.unpack("<I", hdr[4:8])[0]
+            if version == 2:
+                # Godot 4.0-4.4 (Labyrinth, PAD-223): u32 file_count at 96.
+                return _struct.unpack("<I", hdr[96:100])[0] > 0
+            if version < 3:
                 return False
             dir_off = _struct.unpack("<Q", hdr[32:40])[0]
             return 0 < dir_off < pck_size
@@ -1958,8 +1966,8 @@ class ModifyPipeline(_BasePipeline):
             use_may_packer = self._detect_may_format(binary_wsl)
             native_why = ("BOF May 2026+ custom PCK format (GDRE Tools "
                           "can't write this format)")
-            if not use_may_packer and self._detect_v3_directory(binary_wsl):
-                # A stock Godot 4.5 pack with its own file directory
+            if not use_may_packer and self._detect_pck_directory(binary_wsl):
+                # A stock Godot 4 pack with its own file directory
                 # (Labyrinth): the native packer rewrites that directory,
                 # so no GDRE Tools here either.
                 use_may_packer = True

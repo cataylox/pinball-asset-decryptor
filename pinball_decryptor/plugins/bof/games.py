@@ -5,7 +5,7 @@ GAME_DB = {
         "display": "Jim Henson's Labyrinth",
         "fun_file": "lab.fun",
         "passphrase": "funkey",
-        "platform": "Arch Linux, FAST hardware, Godot 4.5 custom build",
+        "platform": "Arch Linux, FAST hardware, Godot 4.4.1 (PCK format v2)",
     },
     "dune": {
         "display": "Dune",

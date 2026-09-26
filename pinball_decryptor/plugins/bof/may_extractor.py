@@ -392,7 +392,7 @@ def extract_pck(binary_path, out_dir, log_cb=None, progress_cb=None):
     stats = _extract_via_directory(binary_path, out_dir, log_cb, progress_cb)
     if stats is not None:
         return stats
-    _log("No v3 PCK directory — reconstructing file bounds from the "
+    _log("No PCK file directory — reconstructing file bounds from the "
          "sidecar markers (heuristic; expect gaps)", "warning")
 
     pck_start, pck_end = find_pck_section(binary_path)
