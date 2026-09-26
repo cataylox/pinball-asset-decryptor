@@ -91,8 +91,11 @@ def build_prerequisites(platform=None):
     """
     platform = platform or sys.platform
     if platform == "darwin":
-        gpg_hint = ("Install Missing installs it with Homebrew "
-                    "(brew install gnupg)")
+        # Whichever this Mac has: cooltoy's had MacPorts and read
+        # "Homebrew" here while the install ran port (PAD-221).
+        gpg_hint = ("Install Missing installs it with Homebrew or MacPorts, "
+                    "whichever this Mac has (brew install gnupg / "
+                    "port install gnupg2)")
         tar_hint = "tar ships with macOS; reinstall Xcode Command Line Tools"
     else:
         gpg_hint = "apt-get install gnupg (in WSL)"

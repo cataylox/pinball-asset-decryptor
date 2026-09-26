@@ -266,7 +266,8 @@ def missing_gpg_text(platform=None):
             "GPG-encrypted, so nothing can be read from it until it is.")
     if platform == "darwin":
         fix = ("Press Install Missing on the Prerequisites strip (it "
-               "installs gnupg with Homebrew), or run: brew install gnupg")
+               "installs gnupg with Homebrew or MacPorts, whichever this "
+               "Mac has), or run: brew install gnupg")
     elif platform == "win32":
         fix = ("Press Install Missing on the Prerequisites strip, or in "
                "WSL run: sudo apt-get install gnupg")
