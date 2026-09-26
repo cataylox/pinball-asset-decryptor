@@ -1,4 +1,14 @@
-"""Read and rewrite BOF's Godot v3 PCK directory.
+"""Read and rewrite BOF's Godot 4 PCK directory.
+
+Two pack formats (``pack_format_version`` at header offset 4):
+
+* **v3** (Godot 4.5: Dune, Winchester) - the directory is at the header's
+  ``dir_offset``, after the file data.  Everything below is about v3.
+* **v2** (Godot 4.0-4.4: Labyrinth's January 2026 code, PAD-223) - no
+  ``dir_offset``; the u32 ``file_count`` and the entries follow the header
+  at offset 96, before the file data at ``file_base``.  Same entry layout
+  and same encryption flag.  ``rewrite`` keeps it in place: new entries are
+  the same width, so the header and ``file_base`` never move.
 
 Both BOF May/April builds ship a **Godot v3 PCK directory** at the byte
 offset stored in the PCK header (header offset 32, a u64 ``dir_offset``).
@@ -47,6 +57,8 @@ import struct
 import sys
 
 PACK_DIR_ENCRYPTED = 1   # pack_flags bit0
+PACK_REL_FILEBASE = 2    # pack_flags bit1: file_base is pack-relative
+V2_DIR_OFFSET = 96       # format v2: file_count right after the header
 
 # Byte fingerprint of the engine's key-derivation arithmetic
 # (lea eax,[rax+rcx*2]; or eax,ecx; mov r12d,eax; sar eax,4; shl r12d,4; or r12d,eax)
@@ -159,7 +171,8 @@ class PckDirectory:
     """Parsed Godot v3 PCK directory + everything needed to rewrite it."""
 
     def __init__(self, binary_path, pck_off, base, flags, dir_off,
-                 file_count, entries, encrypted, key, iv):
+                 file_count, entries, encrypted, key, iv,
+                 version=3, pck_size=None):
         self.binary_path = binary_path
         self.pck_off = pck_off          # file offset of the PCK section
         self.base = base                # file_base (offsets are relative to this)
@@ -170,6 +183,8 @@ class PckDirectory:
         self.encrypted = encrypted
         self.key = key                  # AES key (encrypted dirs) or None
         self.iv = iv                    # AES iv (encrypted dirs) or None
+        self.version = version          # pack_format_version (2 or 3)
+        self.pck_size = pck_size        # trailer pck_size (pck_off..end)
 
     def by_path(self):
         """Map pck-relative path (bytes, NUL-trimmed) -> entry dict."""
@@ -222,11 +237,26 @@ def _parse(binary_path, binary):
     hdr = binary[pck_off:pck_off + 104]
     if hdr[:4] not in (b"GDPC", b"GBOF"):
         return None
-    if struct.unpack("<I", hdr[4:8])[0] < 3:             # pack_format_version
+    version = struct.unpack("<I", hdr[4:8])[0]           # pack_format_version
+    if version < 2:
         return None
     flags = struct.unpack("<I", hdr[20:24])[0]
     base = struct.unpack("<Q", hdr[24:32])[0]
-    dir_off = struct.unpack("<Q", hdr[32:40])[0]
+    if version == 2:
+        # Godot 4.0-4.4: no dir_offset field; the directory follows the
+        # 16 reserved u32s at once.  Labyrinth's January 2026 code is one
+        # (Godot 4.4.1, PAD-223).  Without PACK_REL_FILEBASE the stored
+        # file_base is absolute in the file, not relative to the pack.
+        dir_off = V2_DIR_OFFSET
+        if not flags & PACK_REL_FILEBASE:
+            base -= pck_off
+        if not V2_DIR_OFFSET + 4 <= base <= pck_size:
+            return None
+        if struct.unpack("<I", binary[pck_off + dir_off:
+                                      pck_off + dir_off + 4])[0] == 0:
+            return None
+    else:
+        dir_off = struct.unpack("<Q", hdr[32:40])[0]
     if dir_off == 0 or pck_off + dir_off + 4 > len(binary):
         return None
     o = pck_off + dir_off
@@ -262,7 +292,8 @@ def _parse(binary_path, binary):
         entries.append({"praw": praw, "ofs": ofs, "size": size,
                         "md5": md5, "flags": ef})
     return PckDirectory(binary_path, pck_off, base, flags, dir_off,
-                        file_count, entries, encrypted, key, iv)
+                        file_count, entries, encrypted, key, iv,
+                        version=version, pck_size=pck_size)
 
 
 def rewrite(pckdir, substitutions, output_path, log_cb=None, progress_cb=None):
@@ -322,6 +353,9 @@ def rewrite(pckdir, substitutions, output_path, log_cb=None, progress_cb=None):
     out_path = long_prefix + os.path.abspath(output_path)
     _log(f"Rewriting PCK directory ({len(subs)} substitution(s), "
          f"net {total_delta:+d} bytes)...")
+    if pckdir.version == 2:
+        return _rewrite_v2(pckdir, subs, dir_blob, total_delta,
+                           in_path, out_path, progress_cb)
 
     pck_bytes_written = 0
     total_out = pck_off + new_dir_off + len(dir_blob) + 12
@@ -367,4 +401,59 @@ def rewrite(pckdir, substitutions, output_path, log_cb=None, progress_cb=None):
 
     return {"substitutions": len(subs), "net_delta": total_delta,
             "new_dir_off": new_dir_off, "new_pck_size": new_pck_size,
+            "new_binary_size": pck_off + new_pck_size + 12}
+
+
+def _rewrite_v2(pckdir, subs, dir_blob, total_delta, in_path, out_path,
+                progress_cb):
+    """``rewrite`` for a format v2 pack (Godot 4.0-4.4).  Its directory sits
+    in front of the file data at header offset 96, and a new one is the
+    same length as the old (same paths, fixed-width fields), so the header
+    and ``file_base`` stay put: only the directory, the data and the
+    trailer's ``pck_size`` change."""
+    pck_off, base, dir_off = pckdir.pck_off, pckdir.base, pckdir.dir_off
+    pck_end = pck_off + pckdir.pck_size
+    if dir_off + len(dir_blob) > base:
+        raise DirectoryError("the new directory would overrun the file data")
+    total_out = pck_end + total_delta + 12
+    written = 0
+
+    with open(in_path, "rb") as src, open(out_path, "wb") as dst:
+        def _copy(start, end):
+            nonlocal written
+            src.seek(start)
+            remaining = end - start
+            while remaining > 0:
+                chunk = src.read(min(_COPY_CHUNK, remaining))
+                if not chunk:
+                    break
+                dst.write(chunk)
+                remaining -= len(chunk)
+                written += len(chunk)
+                if progress_cb:
+                    progress_cb(written, total_out, "Writing binary…")
+
+        # 1) ELF prefix + header, the new directory, padding up to file_base.
+        _copy(0, pck_off + dir_off)
+        dst.write(dir_blob)
+        written += len(dir_blob)
+        _copy(pck_off + dir_off + len(dir_blob), pck_off + base)
+
+        # 2) File data to the end of the pack, with the substitutions.
+        cursor = base
+        for ofs, old_size, new_bytes in subs:
+            _copy(pck_off + cursor, pck_off + base + ofs)
+            dst.write(new_bytes)
+            written += len(new_bytes)
+            cursor = base + ofs + old_size
+        _copy(pck_off + cursor, pck_end)
+
+        # 3) Trailer: <u64 pck_size><magic>, the magic preserved.
+        new_pck_size = pckdir.pck_size + total_delta
+        src.seek(-4, os.SEEK_END)
+        magic = src.read(4)
+        dst.write(struct.pack("<Q", new_pck_size) + magic)
+
+    return {"substitutions": len(subs), "net_delta": total_delta,
+            "new_dir_off": dir_off, "new_pck_size": new_pck_size,
             "new_binary_size": pck_off + new_pck_size + 12}
