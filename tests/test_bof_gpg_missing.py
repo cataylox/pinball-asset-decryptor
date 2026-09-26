@@ -32,6 +32,9 @@ class _NoGpg(CommandExecutor):
 
 def _extract(tmp_path, monkeypatch, platform):
     monkeypatch.setattr(bp.sys, "platform", platform)
+    # the resolver's first look is at the host's own /usr/bin/gpg and friends,
+    # and the CI runners HAVE one; this is a machine with none anywhere
+    monkeypatch.setattr(bp.DecryptPipeline, "_resolve_gpg", lambda self: None)
     fun = tmp_path / "lab.fun"
     fun.write_bytes(bytes(4096))
     out = tmp_path / "out"

@@ -51,7 +51,9 @@ def test_host_probe_looks_in_the_homebrew_folders_on_a_mac(monkeypatch):
     /opt/homebrew/bin, so a PATH-only lookup called an installed gpg
     missing."""
     monkeypatch.setattr(prereqs.sys, "platform", "darwin")
-    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    # the launchd PATH, joined with THIS host's separator: the test runs on
+    # Windows (";") as well as on the Linux and macOS CI legs (":")
+    monkeypatch.setenv("PATH", prereqs.os.pathsep.join(["/usr/bin", "/bin"]))
     seen = {}
 
     def which(name, path=None):
@@ -64,7 +66,7 @@ def test_host_probe_looks_in_the_homebrew_folders_on_a_mac(monkeypatch):
     assert ok is True
     parts = seen["path"].split(prereqs.os.pathsep)
     assert parts[:2] == ["/opt/homebrew/bin", "/usr/local/bin"]
-    assert parts[-1] == "/usr/bin:/bin"
+    assert parts[-2:] == ["/usr/bin", "/bin"]
 
 
 def test_host_probe_off_a_mac_is_the_plain_path_lookup(monkeypatch):

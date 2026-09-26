@@ -28,7 +28,7 @@ def test_host_probe_uses_which_and_never_execs(monkeypatch):
     """An installed tool resolves via which with NO subprocess — the path that
     stays reliable while an extract is thrashing the machine."""
     monkeypatch.setattr(prereqs.shutil, "which",
-                        lambda name: r"C:\ffmpeg\ffmpeg.exe")
+                        lambda name, path=None: r"C:\ffmpeg\ffmpeg.exe")
 
     def _boom(*a, **k):
         raise AssertionError("subprocess.run must not be called when the "
@@ -43,7 +43,7 @@ def test_host_probe_uses_which_and_never_execs(monkeypatch):
 def test_host_probe_timeout_under_load_when_not_on_path(monkeypatch):
     """When the tool genuinely isn't on PATH, a slow/timed-out exec still
     reports missing (no false green)."""
-    monkeypatch.setattr(prereqs.shutil, "which", lambda name: None)
+    monkeypatch.setattr(prereqs.shutil, "which", lambda name, path=None: None)
 
     def _timeout(*a, **k):
         raise subprocess.TimeoutExpired(cmd="ffmpeg -version",
@@ -57,7 +57,7 @@ def test_host_probe_timeout_under_load_when_not_on_path(monkeypatch):
 
 def test_check_prerequisite_ffmpeg_present(monkeypatch):
     monkeypatch.setattr(prereqs.shutil, "which",
-                        lambda name: "/usr/bin/ffmpeg")
+                        lambda name, path=None: "/usr/bin/ffmpeg")
     p = Prerequisite(name="ffmpeg", where="host", probe="ffmpeg -version",
                      reason="x")
     res = check_prerequisite(p)
@@ -84,7 +84,7 @@ def _wsl_env(monkeypatch):
     Virtualization-specific tests override this."""
     monkeypatch.setattr(prereqs.sys, "platform", "win32")
     monkeypatch.setattr(prereqs.shutil, "which",
-                        lambda name: r"C:\Windows\System32\wsl.exe")
+                        lambda name, path=None: r"C:\Windows\System32\wsl.exe")
     monkeypatch.setattr(prereqs, "_wsl_boot_wait_failed", False)
     monkeypatch.setattr(prereqs, "_virtualization_disabled", lambda: False)
 
