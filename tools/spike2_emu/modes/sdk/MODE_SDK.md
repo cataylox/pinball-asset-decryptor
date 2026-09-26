@@ -1097,14 +1097,19 @@ multiballs but The Beatles' (0x136, 0xf8, 0x7c), then two zero words on the stac
 with the attract or tilt bits up in the mode mask, or with no ball devices, and 1 once its serving
 process is up. The runtime passes exactly those; `value multiball_arg3` overrides r3.
 
-**What is measured.** Nothing in a mode yet. The call is the one every build's own multiballs
-make, and the item 164 provers called it by hand on eleven builds (`stackp: call 0x... it
-returned 0x1`, the balls served, `a multiball` answered by the stack route), but a mode file's
-`multiball` line has not run in the emulator. `mode_project.MULTIBALL_PROVEN` lists the builds
-where it has, and the tab greys Multiball until a build is there. Not measured either: a
-machine; the rig on a SWELF-generation build (it cannot serve their balls: no coils in the
-derived device table); a multiball ending while the mode's clock still runs (the balls stay in
-play, the game's ball code goes on); two players.
+**What is measured (emulator-proven 2026-09-26, `C:\tmp\pad_generic\mb\mb_e2e.sh`, one scripted game
+each on Godzilla Pro 1.15 and The Beatles 1.29 and Godzilla Premium 1.16, the app's rig, muted).** A mode file with `multiball 3 10`,
+`add_ball <shot> 1` and `seconds 0`, started by its trigger file with one ball in play: `[pad] multiball: 3
+balls asked for (3 in play now) ... the game is serving` and `MULTIBALL: 3 balls asked for` in the same
+millisecond, two jackpot shots paid (+1,000,000, +2,000,000) while the balls were out, the add-a-ball shot
+asked for a fourth (`4 ball(s) in play`), and the rig's drains, one every 6-7 s after the ball save had run
+out, took the count 4, 3, 2, 1 with `END (one ball left)` 2 s after the count read one; the last drain then
+gave the game's own end of ball (`ball_end`, then `bonus_start`). Health: segv 0, fatal 0 on every run.
+`mode_project.MULTIBALL_PROVEN` lists the proven builds, and the tab greys Multiball on every other build
+until it is proven the same way (the call is the same on all of them, found by its code). Not measured: a
+machine; the rig on a SWELF-generation build (it cannot serve their balls: no coils in the derived device
+table); a multiball ending while the mode's clock still runs (the balls stay in play, the game's ball code
+goes on); two players; a mode of yours with `stack no` refused while your own multiball runs.
 
 ## Ports: why your mode runs on any game
 

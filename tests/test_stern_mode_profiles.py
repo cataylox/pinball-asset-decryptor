@@ -191,7 +191,7 @@ def test_stack_needs_the_ports_own_mode_queries_as_the_runtime_asks_for_them(tmp
     (tmp_path / "godzilla_le-1.16.port").write_text(bare, encoding="utf-8")
     p = MP.profile_from_port(str(tmp_path / "godzilla_le-1.16.port"))
     assert not p.can("stack") and "tells that one of its own modes is running" in p.why_not("stack")
-    assert [part for part in MP.PARTS if not p.can(part)] == ["stack"] + sorted(_mb("godzilla_pro-1.15"))
+    assert [part for part in MP.PARTS if not p.can(part)] == ["stack", "multiball"]   # no count: no multiball either
     # with the count alone it is the balls route, greyed until seen (item 164's STACK_BALLS_PROVEN)
     only = "\n".join(line for line in text.splitlines() if "stock_" not in line)
     (tmp_path / "godzilla_le-1.16.port").write_text(only, encoding="utf-8")
