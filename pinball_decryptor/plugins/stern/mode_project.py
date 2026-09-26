@@ -240,7 +240,7 @@ PORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 
 #: The parts of a mode a title may be unable to do. The tab greys each one it cannot,
 #: with :meth:`TitleProfile.why_not`, and :func:`runtime_cfg` leaves its lines out.
-PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events")
+PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball")
 
 #: What ``stack no`` (item 140) needs from a port before pad_mode_runtime.c's
 #: pm_stock_mode_running can tell a battle or a multiball is on: (sites, data). Without
@@ -267,6 +267,39 @@ STACK_PROVEN = frozenset({
 #: item 164: the titles with no cmode rules (plain C, Elvira's Rule classes) - the framework's own count of
 #: the balls in play, called by the runtime: it sees a multiball there, not the other modes (sites)
 STACK_BALLS_NEEDS = ("balls_in_play",)
+
+#: item 167: a multiball of the mode's own needs the framework's start-a-multiball (`site
+#: multiball_serve`: serve balls until N are in play, with a ball save) and its count of the balls in
+#: play, as pad_mode_runtime.c multiball_arm checks them.
+MULTIBALL_NEEDS = ("multiball_serve", "balls_in_play")
+#: item 167: the builds where a mode file's `multiball` line was seen served in the emulator: the
+#: framework's count rose to the balls asked for while the mode ran, and the mode ended on "one ball
+#: left" once they drained. Until a build is here the tab greys Multiball and says so.
+MULTIBALL_PROVEN = frozenset({
+})
+
+
+def _multiball_route(sites):
+    return all(n in sites for n in MULTIBALL_NEEDS)
+
+
+def _multiball_cannot(key, label, sites=None):
+    """The ``cannot`` entry for a multiball of the mode's own on build ``key`` (``<game>-<version>``),
+    or () when it can: the port has the two sites and the build is proven."""
+    if sites is not None and not _multiball_route(sites):
+        return (("multiball", "The app has not found how %s serves extra balls, so a mode of yours "
+                              "cannot be a multiball on it yet." % label),)
+    if key in MULTIBALL_PROVEN:
+        return ()
+    return (("multiball", "The app has found how %s serves the balls of a multiball but has not yet "
+                          "seen a mode of yours start one in the emulator, so a mode cannot be a "
+                          "multiball here yet." % label),)
+
+
+#: item 167: the hand-written profile carries the same verdict as its port (its port names the
+#: framework's serve call; the tab offers Multiball once the build is in MULTIBALL_PROVEN)
+GODZILLA_PRO_1_15 = replace(GODZILLA_PRO_1_15, cannot=_multiball_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15"))
+PROFILES = {p.key: p for p in (GODZILLA_PRO_1_15,)}
 
 #: item 164: the builds where a ``stack no`` mode was seen held back by a multiball that count showed, and
 #: started again once it ended
@@ -758,6 +791,7 @@ def profile_from_port(path):
         no("stack", "The app has not found how %(label)s tells that one of its own modes is "
                     "running, so a mode of yours cannot wait for them and always runs beside "
                     "them.")
+    cannot += list(_multiball_cannot(key, label, sites))     # item 167
     events = tuple(name for name, _kind, needs in port["event"] if needs in sites)
     if not events:
         no("events", "The app does not know any of %(label)s's events yet (a ball starting, a "
@@ -1277,6 +1311,14 @@ class ModeSpec:
     priority: int = 0                    # display priority 1-255 while it runs; 0 = none (180 a mode's)
     light_shots: str = ""                # "" = off; "#rrggbb": the inserts of every shot that scores
     light_shots_pattern: str = "blink"   # solid | blink | pulse | chase
+    # item 167: a multiball of the mode's own (MODE_SDK.md "A multiball of your own"): when it starts
+    # the game serves balls until `balls` are in play, with its own ball save; the mode ends when one
+    # ball is left (its clock still counts when `seconds` is not 0). A shot may add a ball.
+    multiball: bool = False
+    balls: int = 3                       # 2-6 in play together (cut to what the machine has)
+    ball_save: int = 10                  # seconds a drained ball comes back for, 0-60
+    add_ball_shot: str = ""              # a shot that puts one more ball in play; "" = none
+    add_ball_max: int = 1                # ... up to this many times a run, 1-6
 
     # ---- JSON ----------------------------------------------------------------
     def to_json(self):
@@ -1430,6 +1472,8 @@ def _switch_off_what_it_cannot(spec, p):
         spec.lights = False
     if not p.can("countdown"):
         spec.countdown = False
+    if not p.can("multiball"):
+        spec.multiball = False
     return spec
 
 
@@ -1551,6 +1595,10 @@ def _retarget_advanced(out, old_key, p, names, dropped):
         if out.end_shot not in dropped:
             dropped.append(out.end_shot)
         out.end_shot = ""
+    if isinstance(out.add_ball_shot, str) and out.add_ball_shot and out.add_ball_shot not in names:
+        if out.add_ball_shot not in dropped:                # item 167
+            dropped.append(out.add_ball_shot)
+        out.add_ball_shot = ""
     if old_key == p.key or not isinstance(out.callout_at, list):
         return
     try:
@@ -1849,7 +1897,7 @@ def validate(spec, folder=None):
         out.append("Pick the shot that starts the mode.")
     if int(spec.start_count) < 1:
         out.append("It has to take at least one shot to start.")
-    if int(spec.seconds) < 1:
+    if int(spec.seconds) < 1 and not (spec.multiball and int(spec.seconds) == 0):
         out.append("It has to run for at least a second.")
     if not spec.scoring_shots:
         out.append("Pick at least one shot that scores while it runs.")
@@ -1881,7 +1929,46 @@ def validate(spec, folder=None):
     out += validate_parameters(spec, p, folder)
     out += _validate_starts_ends(spec, p)
     out += validate_display_lights(spec)
+    out += validate_multiball(spec, p)
     return out
+
+
+# ---- item 167: a multiball of the mode's own -------------------------------------------
+MULTIBALL_BALLS = (2, 6)
+BALL_SAVE_MAX = 60
+ADD_BALL_MAX = 6
+
+
+def validate_multiball(spec, p):
+    """Every reason the multiball part cannot be built; nothing when the mode is not one."""
+    out = []
+    if not spec.multiball:
+        return out
+    if not p.can("multiball"):
+        out.append("A multiball of the mode's own is not on %s yet (Mode says why)." % p.label)
+    balls = _int_or_none(spec.balls)
+    if balls is None or not MULTIBALL_BALLS[0] <= balls <= MULTIBALL_BALLS[1]:
+        out.append("A multiball puts %d to %d balls in play." % MULTIBALL_BALLS)
+    save = _int_or_none(spec.ball_save)
+    if save is None or not 0 <= save <= BALL_SAVE_MAX:
+        out.append("The multiball's ball save is 0 to %d seconds." % BALL_SAVE_MAX)
+    if spec.add_ball_shot:
+        if spec.add_ball_shot not in dict(p.shots):
+            out.append("%s has no shot called %r to add a ball." % (p.label, spec.add_ball_shot))
+        n = _int_or_none(spec.add_ball_max)
+        if n is None or not 1 <= n <= ADD_BALL_MAX:
+            out.append("A shot adds a ball 1 to %d times a multiball." % ADD_BALL_MAX)
+    return out
+
+
+def multiball_lines(spec, p):
+    """The runtime lines of the multiball part: nothing unless the mode is one and the title can."""
+    if not spec.multiball or not p.can("multiball"):
+        return []
+    lines = ["multiball      %d %d" % (int(spec.balls), int(spec.ball_save))]
+    if spec.add_ball_shot:
+        lines.append("add_ball       0x%08x %d" % (p.mask([spec.add_ball_shot]), int(spec.add_ball_max)))
+    return lines
 
 
 # ---- item 142: cuts from a film ------------------------------------------------------
@@ -2007,6 +2094,7 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
         "shots          0x%08x" % p.mask(spec.scoring_shots),
         "award          %d" % int(spec.award),
     ]
+    lines += multiball_lines(spec, p)       # item 167: nothing unless the mode is a multiball
     if spec.screen and p.can("screen"):
         lines += [
             "screen_scene   %s" % p.hud_scene,

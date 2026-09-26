@@ -33,6 +33,10 @@ const T = {
   cooldown: "0 = no wait. The wait runs from the moment the mode ends, and carries on through the end of a ball.",
   starts: "Counted for each player. Once a ball starts again on the player's next ball; once a game, and up to N times, start again in the next game.",
   stack: "On: the mode starts whenever its shot is made, even during one of the game's own battles or multiballs. Off: it waits until the game's own battle or multiball ends, and the next start shot after that starts it.",
+  multiball: "When the mode starts, the game serves balls from the trough until this many are in play, through the game's own ball code, with a ball save of its own. The mode ends when one ball is left (and when its time runs out, if it has a clock). The shots that score are its jackpots; the game's own multiball screens and music stay off, so the mode's screen, clip, sounds and lights are what the player sees and hears.",
+  balls: "How many balls are in play together, 2 to 6. A machine with fewer balls serves what it has.",
+  ballSave: "For this many seconds after the balls are served, a drained ball is served back.",
+  addBall: "A shot that puts one more ball in play while the multiball runs, up to that many times. It still scores if it is also a scoring shot.",
   lit: "While the mode runs, the insert in front of every shot that scores (and every shot with its own points) shows this colour and pattern, over the game's own light shows; every other insert keeps doing what the game wants. They go back to the game the moment the mode ends. Blink and Pulse repeat about twice a second and every 1.6 s; Chase lights one of them at a time.",
   priority: "How the mode's screen and clip sit among the game's own displays while it runs, on the game's own scale (1-255). At 180 the game's full-screen shot awards wait until the mode ends (on Godzilla: LOOPS and BATTLE IS LIT); its jackpots, multiball and battle starts and the tilt warning still come through, and the mode's screen is back when they end. Higher holds more back (190: starts and jackpots wait too). 0 leaves the game's display order as it is.",
   film: "Cut this mode's clip, its sound or its screen's picture from a video file of your own (a film, an episode, anything): pick the video, a start time and a length (up to 30 seconds), and whether to keep its letterbox or fill the frame. The mode keeps only the cut (clip.mp4, end.wav, art.png), never the video.",
@@ -290,6 +294,10 @@ function ModePage({ s, f, off, dis, rs }) {
     ? [{ value: f.start_shot, label: f.start_shot }, ...shots.map((x) => ({ value: x, label: x }))]
     : shots.map((x) => ({ value: x, label: x }));
   const evOff = off || dis.events;
+  const mbOff = off || dis.multiball;
+  const mbIn = mbOff || !f.multiball;
+  const balls = (prof.ball_shots || ["(none)"]).map((x) => ({ value: x, label: x }));
+  const ballOpts = f.add_ball_shot && !balls.some((o) => o.value === f.add_ball_shot) ? [{ value: f.add_ball_shot, label: f.add_ball_shot }, ...balls] : balls;
   return html`<div class="modes-grid2">
       <div class="stack">
         <label class="lbl" for="m-name">Name</label>
@@ -297,7 +305,7 @@ function ModePage({ s, f, off, dis, rs }) {
       </div>
       <div class="stack">
         <span class="lbl">Runs for</span>
-        <div class="row"><${Num} k="seconds" value=${f.seconds} disabled=${off} width=${84} /><span class="dim">seconds</span></div>
+        <div class="row"><${Num} k="seconds" value=${f.seconds} disabled=${off} width=${84} /><span class="dim">seconds${f.multiball ? " (0 = until one ball is left)" : ""}</span></div>
       </div>
       <${Sec} title="Starts on" reason=${rs.events}>
         <div class="row wrap">
@@ -338,6 +346,18 @@ function ModePage({ s, f, off, dis, rs }) {
       <//>
       <${Sec} title="The game's own modes" reason=${rs.stack}>
         <${Check} label="Can run during the game's own modes" checked=${f.stack} disabled=${off || dis.stack} title=${T.stack} ns="modes" k="f:stack" />
+      <//>
+      <${Sec} title="Multiball" reason=${rs.multiball}>
+        <${Check} label="A multiball: the game serves more balls when it starts" checked=${f.multiball} disabled=${mbOff} title=${T.multiball} ns="modes" k="f:multiball" />
+        <div class="row wrap">
+          <span class="dim nw">Balls in play</span><${Num} k="balls" value=${f.balls} disabled=${mbIn} width=${56} title=${T.balls} />
+          <span class="dim nw" style="margin-left:10px">Ball save</span><${Num} k="ball_save" value=${f.ball_save} disabled=${mbIn} width=${64} title=${T.ballSave} /><span class="dim">seconds</span>
+        </div>
+        <div class="row wrap">
+          <span class="dim nw">Add a ball on</span>
+          <${Select} value=${f.add_ball_shot} options=${ballOpts} ns="modes" k="f:add_ball_shot" disabled=${mbIn || !shots.length} width=${180} title=${T.addBall} />
+          <span class="dim nw">up to</span><${Num} k="add_ball_max" value=${f.add_ball_max} disabled=${mbIn} width=${56} title=${T.addBall} /><span class="dim nw">times</span>
+        </div>
       <//>
     </div>
     <${Sec} title="Shots that score while it runs"

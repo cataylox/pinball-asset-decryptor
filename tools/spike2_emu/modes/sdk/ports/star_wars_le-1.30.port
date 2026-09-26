@@ -628,3 +628,14 @@ site find_text        0x0044e560 0xe92d4070 0xe24dd008
 
 # ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
 scene hud                  9db420cfd5ec648153ce2e0f17dfcbc3a6b43df6
+
+# ---- the framework's count of the balls in play (The Beatles 1.29 0x1fd194, found here by its code,
+# 20/20 words alike); two or more is a multiball (the stack section) and a multiball of the mode's own
+# watches it (item 167)
+site balls_in_play         0x002d3ae0 0xe92d4010 0xe3064e40
+
+# ---- a multiball of the mode's own (item 167): the framework's start-a-multiball (The Beatles 1.29
+# 0x1fd310, found here by its code, 24/24 words alike): serve balls until r0 are in play, r1 0, r2 the
+# ball save in ticks (62 a second), r3 0xbb as this build's own multiballs pass it, two zero words on the
+# stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
+site multiball_serve       0x002d3c5c 0xe92d41f0 0xe30fe7da

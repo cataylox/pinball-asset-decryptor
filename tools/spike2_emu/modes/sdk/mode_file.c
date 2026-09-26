@@ -65,6 +65,10 @@ struct mode_cfg {
     unsigned roster_slot_1;           /* item 146: `roster_slot <n>` + 1; 0 = no roster slot */
     unsigned roster_callout_1;        /* item 146: `roster_callout <id>` + 1; 0 = not given (the slot is silent) */
     unsigned display_priority;        /* item 154 display: `priority <n>`, 0 = none (the display as before) */
+    /* item 167: `multiball <balls> [ball save s]` - the mode is a multiball of its own; `seconds 0` is then no
+     * clock (it ends when one ball is left). `add_ball <mask> [times]`: a shot that adds a ball */
+    unsigned mball_balls, mball_save_s, add_ball_max;
+    uint64_t add_ball_bits;
 };
 
 struct slot {
@@ -90,6 +94,13 @@ static struct {
     uint64_t total, score_at_start;
     unsigned long started_ms;
     unsigned restore_ticks;
+    /* item 167: a multiball of the mode's own */
+    int no_clock;                     /* `seconds 0`: the clock never runs it out */
+    int mball_on, mball_seen2;        /* the game is serving; two or more balls were seen in play */
+    int mball_last;                   /* the count last logged */
+    unsigned mball_grace_ticks;       /* the ball save and the serving: one ball in play does not end it yet */
+    unsigned mball_one_ticks;         /* ticks with one ball (or none) in play since */
+    unsigned add_balls_left;
 } run;
 
 static int running(const struct slot *M) { return run.active && run.slot == M; }
@@ -143,6 +154,38 @@ static void rest_of_line(char *dst, unsigned cap, const char *src)
 
 /* `stack yes|no` (item 140): may this mode start while the game's own battle or multiball is
  * active? `yes` (and no key at all) is how every mode behaved before the key existed. */
+/* item 167: a multiball of the mode's own (MODE_SDK.md "A multiball of your own")
+ *   multiball <balls> [ball save s]    when it starts the game serves balls until <balls> (2-6) are in
+ *                                      play, with a ball save of that many seconds (10 when absent);
+ *                                      the mode ends when one ball is left, and `seconds 0` is no clock
+ *   add_ball <mask> [times]            a shot that puts one more ball in play, up to <times> (1) a run */
+#define MBALL_GRACE_S    3           /* after the ball save: the serving, and a saved ball coming back */
+#define MBALL_ONE_S      2           /* one ball in play this long, after the grace, ends the mode */
+#define MBALL_SAVE_DEFAULT_S 10
+static int multiball_line(struct slot *M, const char *line)
+{
+    const char *a;
+    if ((a = key_is(line, "multiball")) != 0) {
+        cfg.mball_balls = (unsigned)num(&a);
+        cfg.mball_save_s = MBALL_SAVE_DEFAULT_S;
+        while (is_space(*a)) a++;
+        if (*a >= '0' && *a <= '9') cfg.mball_save_s = (unsigned)num(&a);
+        if (cfg.mball_balls < 2) cfg.mball_balls = 2;
+        if (cfg.mball_balls > 6) cfg.mball_balls = 6;
+        if (cfg.mball_save_s > 120) cfg.mball_save_s = 120;
+        return 1;
+    }
+    if ((a = key_is(line, "add_ball")) != 0) {
+        cfg.add_ball_bits = num(&a);
+        cfg.add_ball_max = 1;
+        while (is_space(*a)) a++;
+        if (*a >= '0' && *a <= '9') cfg.add_ball_max = (unsigned)num(&a);
+        if (cfg.add_ball_max > 6) cfg.add_ball_max = 6;
+        return 1;
+    }
+    return 0;
+}
+
 static int stack_line(struct slot *M, const char *line)
 {
     const char *a = key_is(line, "stack");
@@ -1173,7 +1216,7 @@ static void trigger_on_validate(struct slot *M)
         pm_log("starts_on event: the trigger shots are ignored");
         cfg.trigger_bits = 0;
     }
-    cfg.valid = cfg.seconds && cfg.start_event >= 0;
+    cfg.valid = (cfg.seconds || cfg.mball_balls) && cfg.start_event >= 0;
     pm_log("starts on event %s (id %d) x%u, ends on %s%s%s", cfg.start_event_name, cfg.start_event,
            cfg.start_event_count, cfg.end_on == END_CLOCK ? "its clock" : cfg.end_on == END_EVENT ? "event " : "the drain",
            cfg.end_on == END_EVENT ? cfg.end_event_name : "",
@@ -1229,6 +1272,7 @@ static void cfg_line(struct slot *M, const char *line)
     if (own_sounds_key(M, line)) return;
     if (starts_line(M, line)) return;
     if (stack_line(M, line)) return;
+    if (multiball_line(M, line)) return;     /* item 167 */
     if (params_line(M, line)) return;
     if (trigger_on_line(M, line)) return;
     if (roster_line(M, line)) return;
@@ -1259,13 +1303,20 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
             if (*s && *s != '#') cfg_line(M, s);
         }
     }
-    cfg.valid = cfg.seconds && cfg.trigger_count;
+    cfg.valid = (cfg.seconds || cfg.mball_balls) && cfg.trigger_count;   /* a multiball may have no clock */
     trigger_on_validate(M);
     pm_log("loaded \"%s\": trigger %08x_%08x x%u, %u s, shots %08x_%08x, award %llu%s",
            cfg.name, (unsigned)(cfg.trigger_bits >> 32), (unsigned)cfg.trigger_bits, cfg.trigger_count, cfg.seconds,
            (unsigned)(cfg.shot_bits >> 32), (unsigned)cfg.shot_bits, (unsigned long long)cfg.award,
            cfg.valid ? "" : "  - NOT VALID, it needs seconds and a trigger count");
     if (cfg.stack_no) pm_log("\"%s\": stack no - waits while the game's own battle or multiball runs", cfg.name);
+    if (cfg.mball_balls)
+        pm_log("\"%s\": a multiball of its own - %u balls, ball save %u s, %s%s", cfg.name, cfg.mball_balls,
+               cfg.mball_save_s, cfg.seconds ? "its clock or one ball left ends it" : "one ball left ends it (no clock)",
+               pm_can(PM_CAN_MULTIBALL) ? "" : "  - this game's port cannot serve balls: it will not start");
+    if (cfg.add_ball_bits)
+        pm_log("\"%s\": add a ball on %08x_%08x, up to %u time(s)", cfg.name, (unsigned)(cfg.add_ball_bits >> 32),
+               (unsigned)cfg.add_ball_bits, cfg.add_ball_max);
     params_loaded(M);
 }
 
@@ -1365,6 +1416,22 @@ static void mode_start(struct slot *M, const char *why)
     if (!starts_allowed(M, why)) return;     /* item 139: how often it can start */
     if (!stack_allows(M, why)) return;       /* item 140: the game's own modes */
     if (!pm_begin()) return;                 /* a mode written in C is running */
+    run.mball_on = 0;
+    if (cfg.mball_balls) {                   /* item 167: the game serves the balls, or the mode does not start */
+        if (!pm_multiball_start(cfg.mball_balls, cfg.mball_save_s)) {
+            pm_log("%s not started (%s): the game did not serve its balls%s", cfg.name, why,
+                   pm_can(PM_CAN_MULTIBALL) ? "" : " - this game's port cannot serve balls");
+            pm_end();
+            return;
+        }
+        run.mball_on = 1;
+        run.mball_seen2 = 0;
+        run.mball_last = -1;
+        run.mball_one_ticks = 0;
+        run.mball_grace_ticks = (cfg.mball_save_s + MBALL_GRACE_S) * TICKS_PER_S;
+        run.add_balls_left = cfg.add_ball_bits ? cfg.add_ball_max : 0;
+    }
+    run.no_clock = cfg.seconds == 0;
     run.active = 1;
     run.slot = M;
     run.player = pm_player();
@@ -1396,6 +1463,9 @@ static void mode_start(struct slot *M, const char *why)
     starts_count(M, why);
     pm_log("%s START (%s): slot %u, player %u, %u s, score %llu", cfg.name, why, M->index,
            run.player, cfg.seconds, (unsigned long long)run.score_at_start);
+    if (run.mball_on)
+        pm_log("%s MULTIBALL: %u balls asked for, ball save %u s, %d in play now%s", cfg.name, cfg.mball_balls,
+               cfg.mball_save_s, pm_balls_in_play(), run.add_balls_left ? ", add a ball armed" : "");
     own_sounds_start(M);
     own_lights_start(M);                     /* item mode-leds: its inserts, while it runs */
 }
@@ -1555,6 +1625,44 @@ static void roster_sync(struct slot *M)
     }
 }
 
+/* ---- item 167: the multiball, while it runs ------------------------------------------------
+ * The game's own end of ball comes only when the LAST ball drains, so the mode watches the
+ * framework's count: two or more balls means the multiball is on; one (or none) for MBALL_ONE_S,
+ * once the ball save and the serving are over (MBALL_GRACE_S after the save), ends it. A ball the
+ * game could not serve (the rig with no coils, a machine with a stuck ball) ends it the same way. */
+static void multiball_tick(struct slot *M)
+{
+    int n = pm_balls_in_play();
+    if (n != run.mball_last) {
+        pm_log("%s: %d ball(s) in play", cfg.name, n);
+        run.mball_last = n;
+    }
+    if (n >= 2) {
+        run.mball_seen2 = 1;
+        run.mball_one_ticks = 0;
+    }
+    if (run.mball_grace_ticks) {
+        run.mball_grace_ticks--;
+        return;
+    }
+    if (n >= 2) return;
+    if (++run.mball_one_ticks >= MBALL_ONE_S * TICKS_PER_S)
+        mode_end(run.mball_seen2 ? "one ball left" : "no second ball was served");
+}
+
+static void multiball_shot(struct slot *M, uint64_t mask)
+{
+    if (!run.add_balls_left || !(mask & cfg.add_ball_bits)) return;
+    if (!pm_multiball_add(1, cfg.mball_save_s)) {
+        pm_log("%s: add a ball - the game refused", cfg.name);
+        return;
+    }
+    run.add_balls_left--;
+    run.mball_grace_ticks = (cfg.mball_save_s + MBALL_GRACE_S) * TICKS_PER_S;
+    pm_log("%s: add a ball on %08x_%08x - %d in play, %u more add(s) left", cfg.name, (unsigned)(mask >> 32),
+           (unsigned)mask, pm_balls_in_play(), run.add_balls_left);
+}
+
 /* ---- the game check (the Modes tab's Check this game) -------------------------------------
  * With /dump/gamecheck.on there at the first tick (tryit.sh install puts it there), every shot,
  * event and end of ball is logged as a `check` line, and so is each switch mark gamecheck.sh
@@ -1580,6 +1688,7 @@ static void on_shot(uint64_t mask)
                (unsigned long long)asked, run.hits, (unsigned long long)run.total);
         own_sounds_shot(M, run.hits);
     }
+    if (run.active && (M = run.slot) != 0 && p == run.player && run.mball_on) multiball_shot(M, mask);
     end_shot_seen(mask, p);
     if (p < 1 || p > 4) return;
     for (k = 0; k < MODES_MAX; k++) {
@@ -1750,6 +1859,11 @@ static void on_tick(void)
         return;
     }
     own_sounds_tick(M, ticks);
+    if (run.mball_on) {
+        multiball_tick(M);
+        if (!run.active) return;
+    }
+    if (run.no_clock) return;                /* item 167: a multiball with no clock */
     if (run.ticks_left) run.ticks_left--;
     secs = (run.ticks_left + TICKS_PER_S - 1) / TICKS_PER_S;
     if (secs != run.secs_shown) {

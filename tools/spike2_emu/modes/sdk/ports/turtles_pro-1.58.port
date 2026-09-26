@@ -103,3 +103,14 @@ scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 
 # ---- examples a template mode can use on this game ------------------------------------------------
 text example_start_shot     Center loop
+
+# ---- the framework's count of the balls in play (The Beatles 1.29 0x1fd194, found here by its code,
+# 17/20 words alike); two or more is a multiball (the stack section) and a multiball of the mode's own
+# watches it (item 167)
+site balls_in_play         0x00186978 0xe92d4010 0xe30449d0
+
+# ---- a multiball of the mode's own (item 167): the framework's start-a-multiball (The Beatles 1.29
+# 0x1fd310, found here by its code, 22/24 words alike): serve balls until r0 are in play, r1 0, r2 the
+# ball save in ticks (62 a second), r3 0xbb as this build's own multiballs pass it, two zero words on the
+# stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
+site multiball_serve       0x00186af4 0xe92d41f0 0xe306e5c2

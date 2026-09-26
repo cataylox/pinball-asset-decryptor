@@ -480,3 +480,14 @@ data typeinfo_vmi           0x004d0424
 # find_text to Radium::Text; found through the lookup, Godzilla LE 1.16 0x587bac, by the class each casts to),
 # the node's set-visible (Sprite slot 42) and the scene inside a scene player
 site find_text        0x00431a98 0xe92d4070 0xe24dd008
+
+# ---- the framework's count of the balls in play (The Beatles 1.29 0x1fd194, found here by its code,
+# 20/20 words alike); two or more is a multiball (the stack section) and a multiball of the mode's own
+# watches it (item 167)
+site balls_in_play         0x0037ec30 0xe92d4010 0xe3014eb0
+
+# ---- a multiball of the mode's own (item 167): the framework's start-a-multiball (The Beatles 1.29
+# 0x1fd310, found here by its code, 24/24 words alike): serve balls until r0 are in play, r1 0, r2 the
+# ball save in ticks (62 a second), r3 0xbb as this build's own multiballs pass it, two zero words on the
+# stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
+site multiball_serve       0x0037edac 0xe92d41f0 0xe302eb9e

@@ -2482,6 +2482,60 @@ const char *pm_stock_mode_what(unsigned kind)
     return kind ? "a stock mode" : "nothing";
 }
 
+/* ---- a multiball of the mode's own (item 167) ---------------------------------------------------
+ * Every build shares the framework's ball code, and its multiballs go through ONE call of it (The
+ * Beatles 1.29 0x1fd310, Godzilla Pro 1.15 0x398660; found on every build by its code, `site
+ * multiball_serve`): serve balls until r0 are in play. Read off every caller in the 34 latest builds
+ * and the game's own multiballs (armmbcall, 2026-09-26): r1 is 0 (a few titles pass a small id of
+ * their own), r2 the ball save in ticks (the title's adjustment x 62; 0x138 = 5 s in the framework's
+ * own add-a-ball), r3 a second span the framework keeps beside it (0xbb on every build but The
+ * Beatles' own, which pass 0x136 / 0xf8 / 0x7c; `value multiball_arg3` overrides), then two zero
+ * words on the stack. It answers 0 with no game in play (the mode mask's attract and tilt bits),
+ * or when the ball manager has no trough to serve from, and 1 once its serving process is up.
+ * The count of the balls in play is the framework's (`site balls_in_play`, the stack section). */
+static int have_sites(const char *const *names);     /* the gate section, below */
+static int multiball_ok(void)
+{
+    return (can & PM_CAN_MULTIBALL) != 0;
+}
+
+int pm_balls_in_play(void)
+{
+    if (!fn("balls_in_play")) return -1;
+    return (int)(((unsigned (*)(void))(unsigned long)fn("balls_in_play"))() & 0xffu);
+}
+
+int pm_multiball_start(unsigned balls, unsigned ballsave_s)
+{
+    unsigned r, arg3;
+    if (!multiball_ok() || !pm_in_game()) return 0;
+    if (balls < 2) balls = 2;
+    if (balls > 6) balls = 6;
+    if (ballsave_s > 120) ballsave_s = 120;
+    arg3 = (unsigned)pm_port_value("multiball_arg3", 0xbb);
+    r = ((unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned))(unsigned long)fn("multiball_serve"))
+            (balls, 0, ballsave_s * 62u, arg3, 0, 0);
+    say("multiball: %u balls asked for (%d in play now), ball save %u s: the game %s", balls, pm_balls_in_play(),
+        ballsave_s, r ? "is serving" : "refused");
+    return r ? 1 : 0;
+}
+
+int pm_multiball_add(unsigned n, unsigned ballsave_s)
+{
+    int now = pm_balls_in_play();
+    if (!multiball_ok() || now < 0 || !n) return 0;
+    return pm_multiball_start((unsigned)now + n, ballsave_s);
+}
+
+static void multiball_arm(void)
+{
+    static const char *const mb_s[] = { "multiball_serve", "balls_in_play", 0 };
+    if (!have_sites(mb_s)) return;
+    can |= PM_CAN_MULTIBALL;
+    say("multiball: a mode's own, through the game's serve at 0x%08x (arg3 0x%lx)", fn("multiball_serve"),
+        pm_port_value("multiball_arg3", 0xbb));
+}
+
 /* ---- the game's own rules: a shot that COUNTS AS one of theirs (item 160) ------------ STOCK BEGIN
  * A rule the game shipped with (a battle, a multiball) is a compiled object with a vtable, and
  * its SHOT HANDLER (one vtable slot) tests the RAW shot mask against fixed bits: Godzilla's
@@ -4457,6 +4511,7 @@ static void pad_mode_start(void)
     }
     lamps_arm();                                    /* the port's named inserts (lights section) */
     stock_arm();                                    /* item 160: the port's `rule` lines (stock rules section) */
+    multiball_arm();                                /* item 167: a multiball of the mode's own */
     EACH_MODE(m) modes += m != 0;
     if (fn("score_add32") && data("score_mult"))
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, multiplier byte 0x%08x)", fn("score_add32"),
@@ -4465,11 +4520,11 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
-        can & PM_CAN_AWARD_SCREEN ? " award-screen" : "");
+        can & PM_CAN_AWARD_SCREEN ? " award-screen" : "", can & PM_CAN_MULTIBALL ? " multiball" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }

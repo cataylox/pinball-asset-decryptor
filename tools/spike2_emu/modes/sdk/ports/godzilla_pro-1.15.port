@@ -440,3 +440,13 @@ site tank_destroy     0x00107754 0xe3520000 0xe3a03000  # delta; (obj, record, c
 site tank_advance     0x00107be8 0xe5903000 0xe92d4ff0  # delta
 site tank_award_screen_kill 0x00106970 0xe92d43f0 0xe24dd01c  # delta
 
+# ---- the framework's count of the balls in play (The Beatles 1.29 0x1fd194, found here by its code,
+# 20/20 words alike); two or more is a multiball (the stack section) and a multiball of the mode's own
+# watches it (item 167)
+site balls_in_play         0x003984e4 0xe92d4010 0xe30a4b48
+
+# ---- a multiball of the mode's own (item 167): the framework's start-a-multiball (The Beatles 1.29
+# 0x1fd310, found here by its code, 24/24 words alike): serve balls until r0 are in play, r1 0, r2 the
+# ball save in ticks (62 a second), r3 0xbb as this build's own multiballs pass it, two zero words on the
+# stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
+site multiball_serve       0x00398660 0xe92d41f0 0xe30bea5a

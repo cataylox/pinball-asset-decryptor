@@ -1039,6 +1039,73 @@ found (0x4a8b8, flag 70, cleared by 0x4a97c), the other four were not, so it sta
 X-Men keeps its state in each mode's object (its starts are called through vtables); Guardians, Bond
 60th, Metallica and Elvira show no mode flag set by a start: multiballs only there.
 
+## A multiball of your own (item 167)
+
+Every Spike 2 build shares the framework's ball code, and the game's own multiballs all go
+through ONE call of it: "serve balls until N are in play, with a ball save" (The Beatles 1.29
+`0x1fd310`, Godzilla Pro 1.15 `0x398660`; found on every build by its code). A mode of yours
+calls the same function, so the trough, the auto-launcher and the ball saver do for it what they
+do for the game's own multiballs, and the game's own end of ball comes only when the LAST ball
+drains (`.ball_end`, the bonus, the events: as ever).
+
+In C:
+
+```c
+if (!pm_multiball_start(3, 15)) { pm_log("no multiball: the game refused"); return; }
+...                                        /* jackpots: score the shots you like */
+if (pm_balls_in_play() <= 1) { /* it is over */ }
+pm_multiball_add(1, 15);                   /* an add-a-ball */
+```
+
+In a mode file:
+
+```
+multiball      3 15          # balls in play when it starts, and its ball save in seconds
+add_ball       0x08000000 1  # a shot that adds a ball, and how many times
+seconds        0             # no clock: it ends when one ball is left
+```
+
+The Modes tab's Mode page has it under Multiball: the balls, the ball save and the add-a-ball
+shot; `Runs for` 0 is no clock.
+
+**What the runtime does.** At the start it asks the game for the balls; the mode does not start
+when the game refuses (no game in play, a tilt, a port without the call) and keeps its trigger
+count. It then watches the framework's count of the balls in play (`site balls_in_play`, the
+count the stack section uses on the titles with no cmode rules): two or more is the multiball
+running; one (or none) for 2 s, once the ball save and 3 s more have passed, ends the mode
+(`END (one ball left)`; `no second ball was served` when two were never seen, as in the rig on a
+build whose balls it cannot serve). The game never knows the multiball is yours: its mode
+manager runs nothing for it, so its own multiball screens, jackpots and music stay off, while
+its ball code shows what it knows (a ball-save insert, BALLS IN PLAY). Your screen, clip, sounds
+and lights are the show. A `stack no` mode of yours started later sees `a multiball` while yours
+runs, as it would for the game's own.
+
+**The port lines.** Every shipped port carries them (`port_tool.py` places them on another
+build by signature, and the app's derived ports get them the same way):
+
+```
+site multiball_serve       0x001fd310 0xe92d41f0 0xe304e5de   # the framework's start-a-multiball
+site balls_in_play         0x001fd194 0xe92d4010 0xe3084ab0   # its count of the balls in play
+value multiball_arg3       0xbb                            # optional: the fourth word (below)
+```
+
+The call's words, read off every caller in the 34 latest builds (2026-09-26, `armmbcall`): r0
+the balls wanted in play (the framework cuts it to the balls installed), r1 0 (Batman, Metallica,
+Bond and Guardians pass a small id of their own), r2 the ball save in ticks (62 a second: the
+title's adjustment, 0x138 = 5 s in the framework's own add-a-ball), r3 0xbb on every build's own
+multiballs but The Beatles' (0x136, 0xf8, 0x7c), then two zero words on the stack. It answers 0
+with the attract or tilt bits up in the mode mask, or with no ball devices, and 1 once its serving
+process is up. The runtime passes exactly those; `value multiball_arg3` overrides r3.
+
+**What is measured.** Nothing in a mode yet. The call is the one every build's own multiballs
+make, and the item 164 provers called it by hand on eleven builds (`stackp: call 0x... it
+returned 0x1`, the balls served, `a multiball` answered by the stack route), but a mode file's
+`multiball` line has not run in the emulator. `mode_project.MULTIBALL_PROVEN` lists the builds
+where it has, and the tab greys Multiball until a build is there. Not measured either: a
+machine; the rig on a SWELF-generation build (it cannot serve their balls: no coils in the
+derived device table); a multiball ending while the mode's clock still runs (the balls stay in
+play, the game's ball code goes on); two players.
+
 ## Ports: why your mode runs on any game
 
 A mode calls the game's own compiled functions, and they sit at different addresses in

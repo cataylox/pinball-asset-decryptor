@@ -366,3 +366,10 @@ value game_flags_at         4
 data game_flag_count        0x00561288
 value mode_flag_1           58
 value mode_flag_2           71
+
+
+# ---- a multiball of the mode's own (item 167): the framework's start-a-multiball (The Beatles 1.29
+# 0x1fd310, found here by its code, 22/24 words alike): serve balls until r0 are in play, r1 0, r2 the
+# ball save in ticks (62 a second), r3 0xbb as this build's own multiballs pass it, two zero words on the
+# stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
+site multiball_serve       0x003ab154 0xe92d41f0 0xe30ee26a

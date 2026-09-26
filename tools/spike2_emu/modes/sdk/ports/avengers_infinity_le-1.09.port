@@ -392,3 +392,14 @@ lamp 217              0              INFINITY STONE 3  # node/channel 7/27
 lamp 218              0              INFINITY STONE 4  # node/channel 7/28
 lamp 219              0              INFINITY STONE 5  # node/channel 7/29
 lamp 220              0              INFINITY STONE 6  # node/channel 7/30
+
+# ---- the framework's count of the balls in play (The Beatles 1.29 0x1fd194, found here by its code,
+# 17/20 words alike); two or more is a multiball (the stack section) and a multiball of the mode's own
+# watches it (item 167)
+site balls_in_play         0x0018f798 0xe92d4010 0xe30c4758
+
+# ---- a multiball of the mode's own (item 167): the framework's start-a-multiball (The Beatles 1.29
+# 0x1fd310, found here by its code, 22/24 words alike): serve balls until r0 are in play, r1 0, r2 the
+# ball save in ticks (62 a second), r3 0xbb as this build's own multiballs pass it, two zero words on the
+# stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
+site multiball_serve       0x0018f914 0xe92d41f0 0xe301ecfe
