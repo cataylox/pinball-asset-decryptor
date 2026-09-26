@@ -314,11 +314,39 @@ STACK_RECORDS_PROVEN = frozenset({
     "aerosmith_le-1.15",              # 2026-09-26: Double Scoring (ids 237..238) held a stack no mode back, and
                                       # 60 s later its records were gone and the mode started
     "guardians_le-1.14",              # the same with its Double Scoring (ids 232..233)
+    # later the same day: each title's Headphone Hurryup (its start creates the record without asking first;
+    # Aerosmith 235..236, Guardians 230..231) was named and held the mode back, and was gone after its kill
+    "metallica_spike-1.03",           # a song mode (Battery's first start 0xc5248 creates 182): named and
+                                      # refused; the framework's kill 182..184 -> nothing, started
 })
 
 
 def _stack_records(sites, values):
     return "live_records" in sites and "mode_records_1" in values
+
+
+#: item 165: the titles whose modes are C++ singletons with a RUNNING byte of their own (``data mode_running_1``
+#: .., set by the mode's start, cleared by its stop): the builds where a ``stack no`` mode was seen held back by
+#: one of them in the emulator, and started again once it stopped
+STACK_BYTES_PROVEN = frozenset({
+    "uncanny_xmen_le-0.98",           # 2026-09-26: nothing running -> started; A Fiery Assault's start called ->
+                                      # "one of the game's modes (A Fiery Assault)", refused; its own stop called
+                                      # -> nothing, started (the score shows Fiery Assault's 500,000 had paid)
+})
+
+
+def _stack_bytes(data):
+    return bool(data.get("mode_running_1"))
+
+
+#: item 165: a multiballs-only title where the app DOES see the other modes but waiting for them would keep a
+#: mode from ever starting - the note says why instead of "cannot yet see" (``%s`` is the title's label)
+STACK_NOTE_WHY = {
+    # measured 2026-09-26: a song's framework record is alive from the ball's start (It Won't Be Long in one
+    # game, Ticket to Ride in another), each song start adds its own, and all of them clear at the ball's end
+    "beatles-1.29": ("On %s a mode of yours waits only for the game's multiballs: one of its songs is always "
+                     "running, so waiting for the songs too would keep it from ever starting."),
+}
 
 
 def _stack_balls(sites):
@@ -782,9 +810,12 @@ def profile_from_port(path):
     elif _stack_balls(sites) and key in STACK_BALLS_PROVEN and _stack_records(sites, values) \
             and key in STACK_RECORDS_PROVEN:
         pass                                  # item 165: its timed modes too, from the framework's live records
+    elif _stack_balls(sites) and key in STACK_BALLS_PROVEN and _stack_bytes(data) and key in STACK_BYTES_PROVEN:
+        pass                                  # item 165: its modes too, from their own running bytes
     elif _stack_balls(sites) and key in STACK_BALLS_PROVEN:
-        stack_note = ("On %s a mode of yours waits only for the game's multiballs: the app cannot yet "
-                      "see its other modes." % label)
+        stack_note = (STACK_NOTE_WHY.get(key) or
+                      "On %s a mode of yours waits only for the game's multiballs: the app cannot yet "
+                      "see its other modes.") % label
     elif _stack_balls(sites):
         no("stack", "The app has found how %(label)s tells a multiball is running but has not yet "
                     "seen a mode of yours wait for one in the emulator, so it always runs beside them.")

@@ -350,3 +350,6 @@ value mode_records_2       0x00ee00ed      # Double Scoring: ids 237..238
 text mode_records_name_2   Double Scoring
 value mode_records_3       0x00f300f2      # Upper Playfield Orbit Rule: ids 242..243
 text mode_records_name_3   Upper Playfield Orbit Rule
+value mode_records_4       0x00ec00eb      # Headphone Hurryup: ids 235..236 (its start 0x61b78 creates 235 without
+#   asking first; its stop 0x61c38 asks 235..236 and kills them)
+text mode_records_name_4   Headphone Hurryup

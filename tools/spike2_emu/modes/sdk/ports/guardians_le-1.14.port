@@ -349,3 +349,6 @@ value mode_records_1       0x00ec00ea      # Super Scoring: ids 234..236
 text mode_records_name_1   Super Scoring
 value mode_records_2       0x00e900e8      # Double Scoring: ids 232..233
 text mode_records_name_2   Double Scoring
+value mode_records_3       0x00e700e6      # Headphone Hurryup: ids 230..231 (its start 0x662e8 creates 230; its stop
+#   0x6639c, Aerosmith's 0x61c38 by shape, asks 230..231 and kills them)
+text mode_records_name_3   Headphone Hurryup

@@ -225,7 +225,7 @@ def test_stack_on_the_titles_with_no_cmode_rules_is_multiballs_only(tmp_path):
     for key in MP.STACK_BALLS_PROVEN:
         q = MP.profile(key.replace("-", "_").replace(".", "_"))
         assert q.can("stack"), key
-        if key in MP.STACK_FLAGS_PROVEN or key in MP.STACK_RECORDS_PROVEN:
+        if key in MP.STACK_FLAGS_PROVEN or key in MP.STACK_RECORDS_PROVEN or key in MP.STACK_BYTES_PROVEN:
             assert q.stack_note == "", key      # item 164/165: its other modes too, from their flags or records
         else:
             assert "waits only for the game's multiballs" in q.stack_note, key

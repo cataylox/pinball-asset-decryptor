@@ -1055,16 +1055,44 @@ and the runtime answers "one of the game's modes (Drive My Car)"; `mode_project.
 lists the builds where a `stack no` mode was seen held back by it in the emulator: Aerosmith and
 Guardians (2026-09-26: nothing running, the mode started; Double Scoring's start called, the runtime
 named it and the mode was refused; a minute later its records were gone and the mode started again).
-The Beatles asks the same question (its five songs, ids 190..199) but its songs run TOGETHER: one is
-alive from the ball's start (It Won't Be Long in one game, Ticket to Ride in another), each start
-adds its own, and all of them clear at the ball's end - so a `stack no` mode there would almost
-never start, and the lines were not kept. Metallica's starts take a song index and refuse a bare
-call, so its lines (derived the same way) were not kept either until a run proves them.
+A mode whose start does not ask first may still CREATE its record: Aerosmith's and Guardians' Headphone
+Hurryup (0x61b78 creates 235, 0x662e8 creates 230; their stops ask 235..236 and 230..231 and kill them),
+so the same lines name them. Metallica's song modes are on the route too, but name no song: the stock
+table's audit labels do not follow its record ids, so each line says "a song mode"; its first starts take
+no argument and create the record themselves (0xc5248 -> 182, 0xc7834 -> 187), while the functions the
+table calls starts only run once that record is alive. All three proven in the emulator (2026-09-26):
+the game's mode started by its own start, named and refused; its record killed by the framework's own
+kill, and the mode started again.
 
-**Not yet.** Aerosmith's Headphone Hurryup and Guardians' take no such question first; Bond 60th's
-film modes are not in the stock table at all (only its multiballs are audited); X-Men keeps its
-state in each mode's object (`Mode_Shared` singletons, their starts called through vtables by
-`GamePlayModes`) and Elvira's modes are `TransientRule` objects: multiballs only there.
+The Beatles asks the same question (its five songs, ids 190..199) but its songs run TOGETHER: one is
+alive from the ball's start (It Won't Be Long in one game, Ticket to Ride in another), each start adds
+its own, and all of them clear at the ball's end - so a `stack no` mode there would almost never start,
+and the lines are not kept. Its note says so (`mode_project.STACK_NOTE_WHY`).
+
+**Singletons with a running byte (item 165).** Uncanny X-Men LE 0.98's modes are C++ singletons
+(`Mode_Shared` and eleven classes on it, one static object each, 0x644f68..0x647248). A start - the
+shared `Mode_Shared::v[2]` or the mode's own for Escape Nimrod and Future Hurry Up - sets the object's
+byte +0x74 (Mode_Shared's +0x6c; it sits at +8), and the mode's stop (its own `v[3]`, through
+`Mode_Shared::v[1]`) and its completion check (`Mode_Shared::v[5]`) clear it. Each object was found from
+the calls of its own class's virtuals with r0 loaded (the dispatcher 0x9c9ec starts seven of them).
+The port names each byte and the mode:
+
+```
+data mode_running_1         0x00646764      # A Fiery Assault at 0x006466f0 + 0x74
+text mode_running_name_1   A Fiery Assault
+```
+
+and the runtime answers "one of the game's modes (A Fiery Assault)"; `mode_project.STACK_BYTES_PROVEN`
+(2026-09-26: started with nothing running; A Fiery Assault's start called, named and refused; its own
+stop called, started again). A per-player start COUNT sits at +0xc and never resets within a ball: it is
+not the running byte.
+
+**Not yet.** Bond 60th's film modes are not in the stock table at all (only its multiballs are
+audited): its villain modes are objects in an array of eight at 0x5f53e0 (0x60 bytes each, reached
+through 0xd1c98) whose start, a method at 0x9bb14, creates framework record 131 for its intro and sets a
+per-player state word; which of those says "running" is not measured. Elvira's modes are `TransientRule`
+objects run by managers built at run time (the House manager comes from 0xdb694, its start 0xdd12c
+refuses unless a house is lit): multiballs only there.
 
 ## Ports: why your mode runs on any game
 

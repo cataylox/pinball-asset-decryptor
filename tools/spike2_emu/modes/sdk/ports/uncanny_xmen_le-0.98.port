@@ -447,3 +447,31 @@ site agent_begin      0x00523b64 0xe590c004 0xe1a00001
 
 # ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
 scene hud                  0da52941985fea0ac31857f47794e990638156bb
+
+# ---- the game's own modes (item 165): each is a C++ singleton with a RUNNING byte of its own. Its start (the
+# shared Mode_Shared::v[2] 0xa8ce4, or the mode's own for Escape Nimrod and Future Hurry Up) sets the object's
+# byte +0x74 (Mode_Shared's +0x6c, the base at +8); its stop (the mode's v[3] -> Mode_Shared::v[1] 0xa8c90)
+# and its completion check (Mode_Shared::v[5] 0xa8f2c) clear it. Instances from the calls of each class's
+# own virtuals with r0 loaded (the dispatcher 0x9c9ec starts seven of them). Any byte set is one of its modes.
+data mode_running_1         0x00646764      # A Fiery Assault at 0x006466f0 + 0x74
+text mode_running_name_1   A Fiery Assault
+data mode_running_2         0x00646604      # Bitter Rivalry at 0x00646590 + 0x74
+text mode_running_name_2   Bitter Rivalry
+data mode_running_3         0x00644fdc      # Escape Nimrod at 0x00644f68 + 0x74
+text mode_running_name_3   Escape Nimrod
+data mode_running_4         0x006464f4      # Genosha Under Siege at 0x00646480 + 0x74
+text mode_running_name_4   Genosha Under Siege
+data mode_running_5         0x0064641c      # Mayhem in Midtown at 0x006463a8 + 0x74
+text mode_running_name_5   Mayhem in Midtown
+data mode_running_6         0x0064631c      # Rescue the Innocent at 0x006462a8 + 0x74
+text mode_running_name_6   Rescue the Innocent
+data mode_running_7         0x006461fc      # Sentinel Facility Raid at 0x00646188 + 0x74
+text mode_running_name_7   Sentinel Facility Raid
+data mode_running_8         0x006460d4      # Smuggled Cargo at 0x00646060 + 0x74
+text mode_running_name_8   Smuggled Cargo
+data mode_running_9         0x00645ff4      # Stopping a Juggernaut at 0x00645f80 + 0x74
+text mode_running_name_9   Stopping a Juggernaut
+data mode_running_10        0x006450d4      # Future Hurry Up at 0x00645060 + 0x74
+text mode_running_name_10  Future Hurry Up
+data mode_running_11        0x006472bc      # Surrender Mutants at 0x00647248 + 0x74
+text mode_running_name_11  Surrender Mutants

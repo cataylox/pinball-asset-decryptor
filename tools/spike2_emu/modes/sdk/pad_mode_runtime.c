@@ -2517,15 +2517,50 @@ static int stock_records(void)
     return 0;
 }
 
+/* item 165: a title whose modes are C++ SINGLETONS with a running byte of their own (Uncanny X-Men LE 0.98:
+ * eleven Mode_Shared objects, 0x644f68..0x647248, each start - the shared one at Mode_Shared::v[2] or the
+ * mode's own - sets the object's byte +0x74 (Mode_Shared's +0x6c; it sits at +8), and the mode's stop
+ * (its own v[3], through Mode_Shared::v[1]) and its completion check clear it). The port names each byte
+ * (`data mode_running_1` .. `mode_running_32`) and the mode's name (`text mode_running_name_N`); any of them
+ * non-zero is one of the game's modes. */
+static char stock_bytes_what[80];
+
+static int stock_bytes_route(void)
+{
+    return data("mode_running_1") != 0;
+}
+
+static int stock_bytes(void)
+{
+    unsigned i, at;
+    char name[28];
+    const char *label;
+    for (i = 1; i <= 32; i++) {
+        pm_snprintf(name, sizeof name, "mode_running_%u", i);
+        at = data(name);
+        if (!at) break;
+        if (*(const unsigned char *)(unsigned long)at) {
+            pm_snprintf(name, sizeof name, "mode_running_name_%u", i);
+            label = pm_port_text(name);
+            pm_snprintf(stock_bytes_what, sizeof stock_bytes_what, "one of the game's modes (%s)", label ? label : name);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int stock_balls(unsigned kinds)
 {
     unsigned n;
     if (!pm_player()) return 0;
     stock_flags_what[0] = 0;
     stock_records_what[0] = 0;
+    stock_bytes_what[0] = 0;
     if (stock_flags_route() && (kinds & (PM_STOCK_BATTLE | PM_STOCK_ANY)) && stock_flags())
         return (int)PM_STOCK_BATTLE;
     if (stock_records_route() && (kinds & (PM_STOCK_BATTLE | PM_STOCK_ANY)) && stock_records())
+        return (int)PM_STOCK_BATTLE;
+    if (stock_bytes_route() && (kinds & (PM_STOCK_BATTLE | PM_STOCK_ANY)) && stock_bytes())
         return (int)PM_STOCK_BATTLE;
     n = ((unsigned (*)(void))(unsigned long)fn("balls_in_play"))() & 0xffu;
     return n >= 2 && (kinds & (PM_STOCK_MULTIBALL | PM_STOCK_ANY)) ? (int)PM_STOCK_MULTIBALL : 0;
@@ -2550,6 +2585,9 @@ int pm_stock_mode_running(unsigned kinds)
         else if (stock_balls_route() && stock_records_route())
             say("stock modes: can tell a multiball, from the game's balls in play, and its timed modes, from the "
                 "framework's live records");
+        else if (stock_balls_route() && stock_bytes_route())
+            say("stock modes: can tell a multiball, from the game's balls in play, and its modes, from their own "
+                "running bytes");
         else if (stock_balls_route())
             say("stock modes: can tell a multiball, from the game's balls in play (not its other modes)");
         else say("stock modes: %s%s%s%s", data("stock_mode_manager") ? "can tell" : "this port cannot tell (no stock_mode_manager)",
@@ -2576,6 +2614,7 @@ const char *pm_stock_mode_what(unsigned kind)
     if (kind && stock_generic_on && stock_generic_what[0]) return stock_generic_what;
     if ((kind & PM_STOCK_BATTLE) && stock_flags_what[0]) return stock_flags_what;
     if ((kind & PM_STOCK_BATTLE) && stock_records_what[0]) return stock_records_what;
+    if ((kind & PM_STOCK_BATTLE) && stock_bytes_what[0]) return stock_bytes_what;
     if ((kind & PM_STOCK_BATTLE) && stock_generic_on) return "one of the game's modes";
     if (kind & PM_STOCK_BATTLE) return "a battle";
     if (kind & PM_STOCK_MULTIBALL) return "a multiball";
