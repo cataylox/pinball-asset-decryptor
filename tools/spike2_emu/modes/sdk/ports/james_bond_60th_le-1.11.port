@@ -460,3 +460,11 @@ site agent_begin      0x004e0574 0xe590c004 0xe1a00001
 
 # ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
 scene hud                  91b0658329efa06d4da89c23a162b41dfcee5202
+
+# ---- the game's own modes (item 165): the framework's LIVE RECORDS (u16 id at +0, next at +0x84, list at
+# [0x5f8708]); 0x11dba4(lo, hi) says whether one in the range is alive. A Villain Mode's start (0x9bb10, on the
+# VillainMode object 0x5f20e0) starts timer 2 of the eight game timers at 0x5f53e0, and a timer runs while its
+# record [timer+0x18] = 137 or [timer+0x1a] = 138 is alive (its own test 0x634bc asks 0x11db5c of each).
+site live_records          0x0011dba4 0xe3082708 0xe340205f
+value mode_records_1       0x008a0089      # Villain Mode: ids 137..138 (timer 2)
+text mode_records_name_1   Villain Mode

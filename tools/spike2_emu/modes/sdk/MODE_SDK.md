@@ -1087,12 +1087,23 @@ and the runtime answers "one of the game's modes (A Fiery Assault)"; `mode_proje
 stop called, started again). A per-player start COUNT sits at +0xc and never resets within a ball: it is
 not the running byte.
 
-**Not yet.** Bond 60th's film modes are not in the stock table at all (only its multiballs are
-audited): its villain modes are objects in an array of eight at 0x5f53e0 (0x60 bytes each, reached
-through 0xd1c98) whose start, a method at 0x9bb14, creates framework record 131 for its intro and sets a
-per-player state word; which of those says "running" is not measured. Elvira's modes are `TransientRule`
-objects run by managers built at run time (the House manager comes from 0xdb694, its start 0xdd12c
-refuses unless a house is lit): multiballs only there.
+**Bond 60th's Villain Modes** are not in the stock table (only its multiballs are audited), but they
+run on the same live records. The game keeps eight timers in an array at 0x5f53e0 (0x60 bytes each, handed
+out by 0xd1c98), and a timer runs while its record, `[timer+0x18]` or `[timer+0x1a]`, is alive (the
+timer's own test 0x634bc asks 0x11db5c of each). A Villain Mode's start (0x9bb10, on the `VillainMode`
+object 0x5f20e0) starts timer 2, whose records are 137 and 138:
+
+```
+site live_records          0x0011dba4 0xe3082708 0xe340205f
+value mode_records_1       0x008a0089      # Villain Mode: ids 137..138 (timer 2)
+text mode_records_name_1   Villain Mode
+```
+
+Proven 2026-09-26: started with nothing running; the start called, "one of the game's modes (Villain
+Mode)" and refused; the framework's kill 0x11d92c(137, 138) called, nothing, started again.
+
+**Not yet.** Elvira's modes are `TransientRule` objects run by managers built at run time (the House
+manager comes from 0xdb694, its start 0xdd12c refuses unless a house is lit): multiballs only there.
 
 ## Ports: why your mode runs on any game
 

@@ -318,6 +318,8 @@ STACK_RECORDS_PROVEN = frozenset({
     # Aerosmith 235..236, Guardians 230..231) was named and held the mode back, and was gone after its kill
     "metallica_spike-1.03",           # a song mode (Battery's first start 0xc5248 creates 182): named and
                                       # refused; the framework's kill 182..184 -> nothing, started
+    "james_bond_60th_le-1.11",        # a Villain Mode (its start 0x9bb10 runs game timer 2, records 137..138):
+                                      # named and refused; the framework's kill 137..138 -> nothing, started
 })
 
 
