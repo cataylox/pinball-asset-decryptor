@@ -706,7 +706,8 @@ function LogDrawer({ open, height, setHeight }) {
 // The Prerequisites strip (Tk reset_prereqs / set_prereq_result): hidden
 // until a probe CONFIRMS something is missing, then every prerequisite as a
 // [?] / [✓] / [✗] chip with its status, reason and fix on hover; Re-check and
-// Install Missing everywhere but macOS.
+// Install Missing on every desktop (a Mac installs its host tools with
+// Homebrew or MacPorts, core.mac_install).
 function prereqTip(r, hints) {
   if (r.state === "checking") return r.name + "\n\nChecking...\n\nWhy: " + (r.reason || "");
   const ok = r.state === "ok";

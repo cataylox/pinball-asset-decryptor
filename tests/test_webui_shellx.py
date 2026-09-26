@@ -255,8 +255,9 @@ def test_prereq_actions(tmp_path):
         from pinball_decryptor import app as app_module
         from pinball_decryptor.webui import compat
         assert app_module.messagebox is compat.messagebox
-        assert w.state("shell")["prereq_buttons"] == (os.sys.platform
-                                                      != "darwin")
+        # on every desktop, a Mac included (PAD-220: Install Missing
+        # installs a Mac's host tools with Homebrew or MacPorts)
+        assert w.state("shell")["prereq_buttons"] is True
 
 
 # ------------------------------------------------------------ updates

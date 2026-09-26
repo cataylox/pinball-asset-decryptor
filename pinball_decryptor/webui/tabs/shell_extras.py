@@ -119,8 +119,11 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
         # the first-run theme is decided once it has (see _first_run_theme)
         if not (getattr(self.app, "_settings", None) or {}).get("theme"):
             self.ctx.loop.post(self._first_run_theme)
-        self.ctx.store.set("shell", prereq_buttons=sys.platform != "darwin",
-                           help_items=[])
+        # Re-check / Install Missing on every desktop.  macOS used to hide
+        # both, back when nothing on a Mac was probed for real; now a Mac's
+        # host tools are (Barrels of Fun's gpg, PAD-220) and Install Missing
+        # installs them with Homebrew or MacPorts (core.mac_install).
+        self.ctx.store.set("shell", prereq_buttons=True, help_items=[])
         self.publish_settings_items()
         if sys.platform == "win32":
             try:
