@@ -18,7 +18,7 @@ function TabRow({ t, lock }) {
       title=${lock ? lock.long : "Open the " + t.label + " tab"}>
     <${Icon} name=${t.icon} />
     <span class="c-name">${t.label}</span>
-    <span class="c-what">${WHAT[t.ns] || ""}${lock ? html`<span class="c-why">${lock.short}</span>` : null}</span>
+    <span class="c-what">${WHAT[t.ns] || ""}</span>
     ${lock ? html`<${Icon} name="lock" cls="c-state" />` : html`<${Icon} name="check" cls="c-state ok-ink" />`}
   </button>`;
 }
@@ -32,6 +32,12 @@ function WhatCard({ shell }) {
   const anyLocked = folder.concat(needs).some((t) => tabLock(t.ns, t.label, ps));
   const project = ps ? html`<${Chip} kind="acc" title=${ps.folder}>${ps.name}<//>` : null;
   return html`<${Card} cls="c-what-card" title="What you can do with it">
+    <div class="note"><${Icon} name=${anyLocked ? "lock" : "info"} /><div class="body-text">
+      ${!ps ? html`There is no project folder yet. Extract the card into one to unlock the tabs marked with a lock; until then they are greyed out in the list on the left.`
+        : anyLocked && ps.archived ? html`Project ${project} is archived. Extract into it again to unlock the tabs marked with a lock; until then they are greyed out in the list on the left.`
+        : anyLocked ? html`Project ${project} has no extract yet. Extract the card into it to unlock the tabs marked with a lock; until then they are greyed out in the list on the left.`
+        : html`Project ${project} holds an extract, so every tab is ready.`}
+    </div></div>
     ${direct.length ? html`<div class="stack c-sec">
         <span class="lbl">Works straight from the card, no extract needed</span>
         ${direct.map((t) => html`<${TabRow} t=${t} lock=${null} />`)}
@@ -44,12 +50,6 @@ function WhatCard({ shell }) {
         <span class="lbl">Needs the card extracted into a project folder</span>
         ${needs.map((t) => html`<${TabRow} t=${t} lock=${tabLock(t.ns, t.label, ps)} />`)}
       </div>` : null}
-    <div class="note"><${Icon} name=${anyLocked ? "lock" : "info"} /><div class="body-text">
-      ${!ps ? html`There is no project folder yet. Extract the card into one to unlock the tabs marked with a lock; until then they are greyed out in the list on the left.`
-        : anyLocked && ps.archived ? html`Project ${project} is archived. Extract into it again to unlock the tabs marked with a lock; until then they are greyed out in the list on the left.`
-        : anyLocked ? html`Project ${project} has no extract yet. Extract the card into it to unlock the tabs marked with a lock; until then they are greyed out in the list on the left.`
-        : html`Project ${project} holds an extract, so every tab is ready.`}
-    </div></div>
   <//>`;
 }
 
