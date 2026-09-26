@@ -86,8 +86,12 @@ def build_prerequisites(platform=None):
     wherever they will run.  With ``where="wsl"`` a Mac answered "n/a" for
     both, the strip stayed green, and a Mac without GnuPG only found out at
     "bash: gpg: command not found" under an Extract Failed box that blamed
-    the .fun file (PAD-220).  GDRE Tools and xvfb stay ``wsl``: on a Mac the
-    Write path uses its own GDRE install under ~/.local/share and no xvfb.
+    the .fun file (PAD-220).  GDRE Tools and xvfb stay ``wsl``: nothing
+    installs GDRE Tools on a Mac, and nothing current needs it there - every
+    BOF build to date carries a Godot 4.5 file directory that the plugin
+    unpacks and repacks natively (``pipeline.pick_pck_unpacker``).  Only an
+    older stock pack would reach GDRE, and the extract then says so instead
+    of finishing "successfully" over an empty pck/ (PAD-222).
     """
     platform = platform or sys.platform
     if platform == "darwin":
@@ -118,7 +122,10 @@ def build_prerequisites(platform=None):
             # invocation traverses the slow appended Windows PATH and
             # failed intermittently even with GDRE correctly installed.
             probe="test -x /opt/gdre_tools/gdre_tools.x86_64",
-            reason="Godot RE Tools — required to repack the PCK on Write.",
+            reason=("Godot RE Tools — only older (pre-Godot 4.5) packs "
+                    "need it to unpack or repack the PCK; current "
+                    "Labyrinth, Dune and Winchester code is handled "
+                    "natively."),
             install_hint=(
                 "Click \"Install Prerequisites\" — auto-downloads "
                 "GDRE Tools to /opt/gdre_tools.")),
@@ -260,8 +267,9 @@ class BOFManufacturer(Manufacturer):
 
     def extract_input_help(self):
         return ("Decrypt a Barrels of Fun `.fun` update file (Labyrinth, "
-                "Dune, Winchester). Requires GPG and (optionally) GDRE Tools "
-                "for Godot PCK extraction.")
+                "Dune, Winchester). Requires GPG; the game's assets are "
+                "unpacked from the Godot PCK natively (GDRE Tools only for "
+                "older, pre-Godot 4.5 packs).")
 
     def write_install_help(self):
         return ("1. Copy the output .fun file to a USB drive (FAT32).\n"

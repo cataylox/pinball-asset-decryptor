@@ -232,12 +232,15 @@ class _BasePipeline:
         return None
 
     def _gdre_prefix(self):
-        """Return the shell prefix to invoke GDRE Tools headlessly."""
-        if sys.platform == "darwin":
-            install_dir = os.path.expanduser("~/.local/share/gdre_tools")
+        """Return the shell prefix to invoke GDRE Tools headlessly.
+
+        Only packs without a Godot 4.5 file directory reach GDRE at all
+        (see :func:`pick_pck_unpacker`); every current BOF build is
+        unpacked and repacked natively."""
+        if _platform() == "darwin":
             return (
                 "GODOT_SILENCE_ROOT_WARNING=1 "
-                f"'{install_dir}/Godot RE Tools' --headless "
+                f"'{_mac_gdre_binary()}' --headless "
             )
         # Linux / WSL: needs xvfb for headless display
         return (
@@ -249,6 +252,83 @@ class _BasePipeline:
 
     def run(self):
         raise NotImplementedError
+
+
+def _platform():
+    """``sys.platform``, behind a name a capture can stand in for."""
+    return sys.platform
+
+
+def _mac_gdre_binary():
+    """Where a Mac's GDRE Tools would be if someone put it there.  Nothing
+    in this app installs it (the Mac has no Install Prerequisites step for
+    it), so on most Macs this path does not exist - which is fine, because
+    only packs without a Godot 4.5 file directory ever need it."""
+    return os.path.expanduser("~/.local/share/gdre_tools/Godot RE Tools")
+
+
+def pick_pck_unpacker(local_binary):
+    """Which unpacker a Godot binary's PCK gets, as ``(name, detail)``:
+
+    * ``"directory"`` - the pack carries a Godot 4.5 (format v3) file
+      directory that :mod:`pck_directory` can read.  Every current BOF
+      build does (Labyrinth, Dune, Winchester), and that directory is what
+      the running game itself uses to find each resource, so the native
+      extractor writes every entry from its exact offset and size with no
+      GDRE Tools involved.
+    * ``"may"`` - no readable directory, but BOF's May 2026+ custom layout
+      (:func:`may_extractor.is_may_format`); the native sidecar scan.
+    * ``"gdre"`` - neither: an older (pre-4.5) stock Godot pack.  GDRE
+      Tools is the only thing that can unpack it.
+
+    Labyrinth's January 2026 code used to go to GDRE Tools because the
+    choice was made on ``is_may_format`` alone, which says no to a stock
+    4.5 pack whose first entry is a compiled script.  On a Mac, where
+    nothing installs GDRE Tools, that extract "succeeded" with an empty
+    pck/ folder (PAD-222).
+    """
+    from . import pck_directory
+    from .may_extractor import find_pck_section, is_may_format
+
+    dir_note = ""
+    pckdir = None
+    try:
+        pckdir = pck_directory.read(local_binary)
+    except pck_directory.DirectoryError as ex:
+        dir_note = f"the pack's file directory is present but unreadable ({ex})"
+    except Exception as ex:                             # noqa: BLE001
+        dir_note = f"could not read the pack's file directory ({ex})"
+    if pckdir is not None:
+        return "directory", (
+            f"{len(pckdir.entries)} entries, "
+            f"{'encrypted' if pckdir.encrypted else 'plaintext'} directory")
+    try:
+        pck_start, _pck_end = find_pck_section(local_binary)
+        with open(local_binary, "rb") as f:
+            f.seek(pck_start)
+            head = f.read(200)
+    except Exception as ex:                             # noqa: BLE001
+        return "gdre", f"could not read the PCK header ({ex})"
+    if is_may_format(head):
+        return "may", "BOF May 2026+ custom layout"
+    return "gdre", dir_note or "no Godot 4.5 file directory in this pack"
+
+
+def missing_gdre_text(platform=None, detail=""):
+    """What Extract says when a pack needs GDRE Tools and there is none
+    where this plugin runs.  Spelled for *platform* (``sys.platform`` by
+    default).  *detail* is :func:`pick_pck_unpacker`'s reason."""
+    platform = platform or _platform()
+    why = (f"This game's code is an older Godot pack ({detail}), and only "
+           f"GDRE Tools can unpack it.")
+    if platform == "darwin":
+        return (f"{why}\n\nGDRE Tools is not installed on this Mac (looked "
+                f"for {_mac_gdre_binary()}). Current Labyrinth, Dune and "
+                f"Winchester code needs no GDRE Tools; if this is an older "
+                f".fun, extract it on a Windows PC with the prerequisites "
+                f"installed.")
+    return (f"{why}\n\nGDRE Tools was not found. Click Install Missing on "
+            f"the Prerequisites strip, then extract again.")
 
 
 def missing_gpg_text(platform=None):
@@ -621,34 +701,38 @@ class DecryptPipeline(_BasePipeline):
             _patch_pck_magic(self.executor, binary_name,
                              _BOF_PCK_MAGIC, _GODOT_PCK_MAGIC, self._log)
 
-        # Optional: unpack PCK
+        # Optional: unpack PCK.  ``unpack_error`` is why it did not happen
+        # when it did not; the run then ends as a failure that says so,
+        # instead of "assets extracted to pck/" over an empty folder.
+        unpack_error = ""
         if self.unpack_pck:
             self._set_phase(2)  # still in extract phase visually
 
-            # First — check whether this is BOF's May 2026+ custom PCK
-            # format.  If so, GDRE Tools can't read it and our own
-            # may_extractor handles it natively.
+            # Which unpacker: the pack's own Godot 4.5 file directory
+            # (every current BOF build; native, no GDRE Tools), BOF's May
+            # custom layout (native sidecar scan), or - for an older
+            # stock pack only - GDRE Tools.
             local_binary = (os.path.join(self.output_dir,
                                           os.path.basename(binary_name))
                             if binary_name else None)
-            use_may_extractor = False
+            unpacker, unpack_detail = "gdre", "no local copy of the binary"
             if local_binary and os.path.isfile(local_binary):
-                try:
-                    from .may_extractor import is_may_format, find_pck_section
-                    pck_start, pck_end = find_pck_section(local_binary)
-                    # Read just enough to detect format (first 200 bytes
-                    # of PCK section is sufficient).
-                    with open(local_binary, "rb") as f:
-                        f.seek(pck_start)
-                        pck_head = f.read(200)
-                    if is_may_format(pck_head):
-                        use_may_extractor = True
-                        self._log(
-                            "Detected BOF May 2026+ custom PCK format "
-                            "— using native extractor (GDRE can't read this format).",
-                            "info")
-                except Exception as _e:
-                    pass  # Fall through to GDRE
+                unpacker, unpack_detail = pick_pck_unpacker(local_binary)
+            if unpacker == "directory":
+                self._log(
+                    f"Godot pack with its own file directory "
+                    f"({unpack_detail}) — unpacking natively; GDRE Tools "
+                    f"is not needed.", "info")
+            elif unpacker == "may":
+                self._log(
+                    "Detected BOF May 2026+ custom PCK format "
+                    "— using native extractor (GDRE can't read this format).",
+                    "info")
+            else:
+                self._log(
+                    f"Older Godot pack ({unpack_detail}) — only GDRE Tools "
+                    f"can unpack it.", "info")
+            use_may_extractor = unpacker in ("directory", "may")
 
             if use_may_extractor:
                 from .may_extractor import extract_pck
@@ -732,9 +816,15 @@ class DecryptPipeline(_BasePipeline):
                     self._progress(100, 100,
                                    f"{stats['files_written']} files extracted")
                 except Exception as e:
-                    self._log(
-                        f"BOF May extractor failed: {e}", "error")
+                    unpack_error = f"The native PCK unpack failed: {e}"
+                    self._log(unpack_error, "error")
                 # Skip GDRE path entirely
+            elif (_platform() == "darwin"
+                  and not os.path.isfile(_mac_gdre_binary())):
+                # Say so before bash does ("No such file or directory"
+                # under a success banner was cooltoy's PAD-222).
+                unpack_error = missing_gdre_text("darwin", unpack_detail)
+                self._log(unpack_error, "error")
             else:
                 self._log("Unpacking Godot PCK with GDRE Tools...", "info")
                 self._progress(0, 100, "Starting...")
@@ -819,9 +909,10 @@ class DecryptPipeline(_BasePipeline):
                     self._log(f"PCK unpacked to pck/ subfolder ({final} files).",
                               "success")
                 except CommandError as e:
-                    self._log(
-                        f"GDRE Tools failed (PCK may still be usable as binary): {e.output}",
-                        "error")
+                    unpack_error = (
+                        f"GDRE Tools failed (PCK may still be usable as "
+                        f"binary): {e.output}")
+                    self._log(unpack_error, "error")
 
         # Phase 3 — Checksums
         self._set_phase(3)
@@ -842,10 +933,21 @@ class DecryptPipeline(_BasePipeline):
             pass
         self._log("Cleanup complete.", "success")
 
+        if unpack_error:
+            # The .fun was decrypted, but pck/ is empty: the Replace tabs
+            # would show nothing and a Write would have nothing to patch.
+            # That is a failed extract, and it says why.
+            self._done(False,
+                f"{game_info['display']} was decrypted, but its game "
+                f"assets were NOT unpacked, so there is nothing for the "
+                f"Replace tabs to show.\n\n{unpack_error}\n\n"
+                f"Output: {self.output_dir}")
+            return
+        tail = ("Game assets extracted to the pck/ subfolder."
+                if self.unpack_pck else "")
         self._done(True,
             f"{game_info['display']} decrypted successfully.\n\n"
-            f"Output: {self.output_dir}\n\n"
-            f"Game assets extracted to the pck/ subfolder.")
+            f"Output: {self.output_dir}\n\n{tail}".rstrip())
 
 
 # ---------------------------------------------------------------------------
@@ -975,6 +1077,37 @@ class ModifyPipeline(_BasePipeline):
                 pck_head = b"GDPC" + pck_head[4:]
             from .may_extractor import is_may_format
             return is_may_format(pck_head)
+        except Exception:
+            return False
+
+    def _detect_v3_directory(self, binary_wsl):
+        """True when the binary's PCK carries a Godot 4.5 (format v3) file
+        directory - the header the extract's :func:`pick_pck_unpacker`
+        keys on, sniffed through the executor the way
+        :meth:`_detect_may_format` does.  Such a pack is repacked natively
+        (``may_packer`` -> ``pck_directory.rewrite``), so a current
+        Labyrinth build Writes on a Mac without GDRE Tools too."""
+        import base64 as _b64
+        import struct as _struct
+        try:
+            trailer_b64 = self.executor.run(
+                f"tail -c 12 {binary_wsl!r} | base64", timeout=30).strip()
+            trailer = _b64.b64decode(trailer_b64)
+            if len(trailer) != 12 or trailer[8:12] not in (b"GDPC", b"GBOF"):
+                return False
+            pck_size = _struct.unpack("<Q", trailer[:8])[0]
+            if pck_size < 104:
+                return False
+            hdr_b64 = self.executor.run(
+                f"tail -c $(({pck_size} + 12)) {binary_wsl!r} | "
+                f"head -c 104 | base64", timeout=30).strip()
+            hdr = _b64.b64decode(hdr_b64)
+            if len(hdr) < 104 or hdr[:4] not in (b"GDPC", b"GBOF"):
+                return False
+            if _struct.unpack("<I", hdr[4:8])[0] < 3:
+                return False
+            dir_off = _struct.unpack("<Q", hdr[32:40])[0]
+            return 0 < dir_off < pck_size
         except Exception:
             return False
 
@@ -1823,6 +1956,15 @@ class ModifyPipeline(_BasePipeline):
             # executor's filesystem, which on Windows is reachable via
             # /mnt/c or \\wsl$\Ubuntu\... — both equivalent.
             use_may_packer = self._detect_may_format(binary_wsl)
+            native_why = ("BOF May 2026+ custom PCK format (GDRE Tools "
+                          "can't write this format)")
+            if not use_may_packer and self._detect_v3_directory(binary_wsl):
+                # A stock Godot 4.5 pack with its own file directory
+                # (Labyrinth): the native packer rewrites that directory,
+                # so no GDRE Tools here either.
+                use_may_packer = True
+                native_why = ("Godot pack with its own file directory "
+                              "(GDRE Tools not needed)")
 
             # GDRE only recognises stock "GDPC" magic.  If this is a newer
             # BOF binary with "GBOF" magic, temporarily swap it so GDRE can
@@ -1839,10 +1981,8 @@ class ModifyPipeline(_BasePipeline):
                 was_bof_magic = True   # will be preserved by may_packer
 
             if use_may_packer:
-                self._log(
-                    "Detected BOF May 2026+ custom PCK format — using "
-                    "native packer (GDRE Tools can't write this format).",
-                    "info")
+                self._log(f"Detected {native_why} — using native packer.",
+                          "info")
                 self._set_band(33, 78)   # native pack owns 33–78%
                 self._may_pack_binary(binary_wsl, pck_dir, changed_pck)
                 # may_packer preserves the GBOF magic natively, so no
