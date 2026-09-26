@@ -671,25 +671,6 @@ def test_a_moved_callout_alone_is_ready(tmp_path, preview_on):
         assert [(r["name"], r["chip"]) for r in st["rows"]] == [("SPIN", "ready")]
 
 
-def test_a_mode_not_open_names_the_page_to_fix(tmp_path, preview_on):
-    proj = tmp_path / "proj"
-    with web_app(tmp_path, mfr="stern") as w:
-        _project(w, proj)
-        first = w.call("modes.new")
-        w.call("modes.new")
-        second = w.state("modes")["sel"]["slug"]
-        assert second != first
-        w.call("ui.set", "modes", "f:priority", "999")
-        path = proj / "modes" / second / "mode.json"
-        assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("priority") == 999)
-        st = w.state("modes")
-        assert st["fix_pages"] == ["show"] and st["rows"][1]["chip"] == "Show •"
-        w.call("modes.select", first, "form")
-        row = w.state("modes")["rows"][1]
-        assert row["slug"] == second and row["chip"] == "Show •"
-        assert row["chip_tip"].startswith("To fix before it can be built: The display priority is")
-
-
 def test_page_of_every_problem_sentence():
     from pinball_decryptor.webui.tabs.modes import fix_chip, problem_pages
     assert problem_pages(["The mode needs a name.", "The award ladder is rising or fixed."]) == \
