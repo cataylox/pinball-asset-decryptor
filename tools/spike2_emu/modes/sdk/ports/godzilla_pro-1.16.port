@@ -467,3 +467,4 @@ site balls_in_play         0x0037101c 0xe92d4010 0xe30744e4
 # ball save in ticks (62 a second), r3 0xbb as this build's own multiballs pass it, two zero words on the
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x00371198 0xe92d41f0 0xe305e8ea
+# EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, drains 3-2-1, END (one ball left). PROVEN.

@@ -350,7 +350,7 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
         except OSError as exc:
             say("  devices      FAILED to write %s: %s" % (dev_dest, exc))
             recs = None
-    _swelf_coils(dev_dest, elf, game, say)       # item 167: SWELF titles' coils (idempotent)
+    _swelf_coils(dev_dest, elf, game, say)       # item 167: SWELF and Foo Fighters coils (idempotent)
     if recs is not None:
         made["device_xy.txt"] = dev_dest
         counts = devicexy.counts(recs)

@@ -145,7 +145,7 @@ def test_a_profile_per_port(name):
     assert p.key == "%s_%s" % (game, version.replace(".", "_"))
     assert len(p.shots) == shots and len({n for n, _m in p.shots}) == shots
     assert p.shot_mask_bits == bits and p.proven is proven
-    cannot = set(cannot) | _mb(name)
+    cannot = (set(cannot) - {"multiball"}) | _mb(name)
     assert {part for part in MP.PARTS if not p.can(part)} == cannot
     for part in MP.PARTS:
         assert bool(p.why_not(part)) == (part in cannot)

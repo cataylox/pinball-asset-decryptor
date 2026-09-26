@@ -1,9 +1,10 @@
 """Item 167: the SWELF titles' coils reach the rig's device table, so its ball feeder sees the trough eject.
 
 devicexy.py finds no device records on the SWELF generation (Aerosmith, Avengers, Batman, Guardians,
-Iron Maiden, Mando, Rush, Stranger Things, Sword of Rage), so their device_xy.txt held no coil and a game
-there asked for balls the rig never served. swelf.coils() reads the coils out of the same device table the
-switch walk reads; mktables.py appends them once. Desk only: synthetic coils, and the real ELFs when this
+Iron Maiden, Mando, Rush, Stranger Things, Sword of Rage), nor any coil on Foo Fighters' older 48-byte
+records, so their device_xy.txt held no coil and a game there asked for balls the rig never served.
+swelf.coils() reads the coils out of the same device table the switch walk reads; mktables.py appends
+them once. Desk only: synthetic coils, and the real ELFs when this
 machine has them.
 """
 import os
@@ -58,7 +59,7 @@ ELFS = r"C:\tmp\pad_generic\elfs"
 
 @pytest.mark.parametrize("key, title", [("aerosmith_le-1.15", "aerosmith_le"), ("batman-1.13", "batman"),
                                         ("stranger_things_le-1.12", "stranger_things_le"),
-                                        ("rush_le-1.18", "rush_le")])
+                                        ("rush_le-1.18", "rush_le"), ("foo_fighters_le-1.04", "foo_fighters_le")])
 def test_the_real_device_tables_name_the_trough_on_node_8(key, title):
     elf = os.path.join(ELFS, key + ".0.elf")
     if not os.path.isfile(elf):

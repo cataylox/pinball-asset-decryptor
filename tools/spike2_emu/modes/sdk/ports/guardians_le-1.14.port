@@ -338,3 +338,4 @@ scene hud                  4853b69e9fd122157772aaac5db81948331def2b
 # ball save in ticks (62 a second), r3 0xbb as this build's own multiballs pass it, two zero words on the
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x003833f0 0xe92d41f0 0xe306e7e6
+# EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, drains 3-2-1, END (one ball left). PROVEN.

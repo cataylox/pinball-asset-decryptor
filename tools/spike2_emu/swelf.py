@@ -765,7 +765,8 @@ def rows(elf_path, title):
     return _rows_roots(e, roots) or _rows_gen2(e)
 
 
-#: item 167: the device table's coil kind on the 24-byte generation (switch 7, LED 4)
+#: item 167: the device table's coil kind, the same on the 24-byte generation (switch 7, LED 4)
+#: and the 48-byte one (switch 1, lamp 3)
 KIND_COIL = 2
 #: device_xy.txt's group for a coil row written from here: past every real group, so no
 #: derivation but the connector column (which names the bus node) can map it
@@ -773,9 +774,10 @@ COIL_GROUP_BASE = 64
 
 
 def coils(elf_path, title):
-    """[(name, bus node, index)] - the COILS of a 24-byte-generation device table (the SWELF
-    titles: Aerosmith, Avengers, Batman, Guardians, Iron Maiden, Mando, Rush, Stranger Things,
-    Sword of Rage), [] when anything does not check out.
+    """[(name, bus node, index)] - the COILS of a derived device table (the SWELF titles:
+    Aerosmith, Avengers, Batman, Guardians, Iron Maiden, Mando, Rush, Stranger Things, Sword
+    of Rage on the 24-byte records; Foo Fighters on the 48-byte ones), [] when anything does
+    not check out.
 
     ★ WHY (item 167, 2026-09-26). devicexy.py finds no device records on these titles, so
     their device_xy.txt held no coil and ballfeed.py never saw the trough eject: the game
@@ -785,6 +787,9 @@ def coils(elf_path, title):
     switches: the switch list (rows(), the rig's own) names each switch's bus node, and the
     device table names each switch's slot, so a slot maps to the one node its switches
     share. A slot whose switches disagree, or that carries none, gives its coils no node.
+    Foo Fighters LE 1.04 (the same day) had the same gap on the 48-byte records, where
+    devicexy.py reads its lamps and switches but no coil: every DERIVED_LAYOUTS entry is
+    tried, the first whose table places a coil wins (TROUGH slot 7 index 1 there).
     """
     rws = rows(elf_path, title)
     if not rws:
@@ -794,15 +799,21 @@ def coils(elf_path, title):
     except (OSError, struct.error):
         return []
     idx = _gen2_words(e)
-    lay = DERIVED_LAYOUTS[1]                   # the 24-byte records
-    dev = _gen2_find_dev(e, idx, lay)
-    if not dev:
-        return []
-    start, count = dev
-    node_of = collections.defaultdict(set)
     by_name = collections.defaultdict(set)
     for _id, _num, node, _bit, name in rws:
         by_name[name].add(node)
+    for lay in DERIVED_LAYOUTS:
+        dev = _gen2_find_dev(e, idx, lay)
+        got = _coils_in(e, dev, lay, by_name) if dev else []
+        if got:
+            return got
+    return []
+
+
+def _coils_in(e, dev, lay, by_name):
+    """coils() on one layout's table: [] when it names no coil a switch's slot can place."""
+    start, count = dev
+    node_of = collections.defaultdict(set)
     out = []
     for i in range(count):
         r = start + i * lay["stride"]
