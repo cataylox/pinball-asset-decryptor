@@ -1101,9 +1101,22 @@ class App:
                 "Install Prerequisites",
                 "Nothing is missing for %s." % mfr.display)
             return True
-        plan = mac_install.install_plan(missing)
+        # plan_for checks a MacPorts BEFORE anything is promised: cooltoy's
+        # refused every command after a macOS upgrade, and the app asked
+        # for his password first and then only logged the refusal
+        # (PAD-221).
+        plan = mac_install.plan_for(missing)
         if plan is None:
             return False
+        if plan.get("blocked"):
+            self.window.append_log(
+                "[prerequisites] %s" % plan["blocked"], "error")
+            messagebox.showerror(
+                "Install Prerequisites",
+                plan["blocked"] + "\n\nInstall Missing cannot use it until "
+                "that is repaired. A Mac with Homebrew is installed with "
+                "Homebrew instead.")
+            return True
         if not messagebox.askyesno(
                 "Install Prerequisites",
                 "This will:\n\n"
@@ -1113,18 +1126,35 @@ class App:
             return True
         self.window.append_log(
             "[prerequisites] installing %s with %s: %s"
-            % (plan["label"], plan["manager"], " ".join(plan["install"])),
+            % (plan["label"], plan["manager"],
+               mac_install.plan_command_line(plan)),
             "info")
 
         def _run():
-            ok = mac_install.run_plan(
-                plan, lambda line: self.msg_queue.put(
-                    LogMsg("[prerequisites] " + line, "info")))
+            lines = []
+
+            def _log(line):
+                lines.append(line)
+                self.msg_queue.put(LogMsg("[prerequisites] " + line, "info"))
+
+            ok = mac_install.run_plan(plan, _log)
             self.msg_queue.put(LogMsg(
                 "[prerequisites] %s installed; checking again."
                 % plan["label"] if ok else
                 "[prerequisites] the install did not finish; the lines "
                 "above say why.", "success" if ok else "error"))
+            if not ok:
+                # The reason in a box, not only in the log: a failed run
+                # under a password dialog read as "it errors and does
+                # nothing" (PAD-221).
+                why = "\n".join(mac_install.failure_lines(lines))
+                text = ("%s did not install.\n\n%s said:\n\n%s\n\nThe log "
+                        "below has every line it printed."
+                        % (plan["label"], plan["manager"],
+                           why or "nothing (exit code only)"))
+                self.msg_queue.put(UiCallMsg(
+                    lambda: messagebox.showerror("Install Prerequisites",
+                                                 text)))
             self.msg_queue.put(UiCallMsg(self._recheck_prereqs))
 
         threading.Thread(target=_run, daemon=True).start()
