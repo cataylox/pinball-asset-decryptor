@@ -462,4 +462,4 @@ scene hud                  91b0658329efa06d4da89c23a162b41dfcee5202
 # ball save in ticks (62 a second), r3 0xbb as this build's own multiballs pass it, two zero words on the
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x0016bbe8 0xe92d41f0 0xe306e49e
-# EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, drains 3-2-1, END (one ball left). PROVEN.
+# EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.

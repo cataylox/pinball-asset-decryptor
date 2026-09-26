@@ -137,6 +137,8 @@ def _resolve():
     got = [by_name[n] for n in _TROUGH_NAMES if n in by_name]
     if len(got) == 6:
         ids["trough"] = tuple(got)
+    # item 167: the van's balls are neither home nor in play, so a drain must not count them
+    ids["van"] = ballmodel.Van.from_names(by_name)
     return ids
 
 
@@ -374,7 +376,9 @@ def do_drain(m):
     line prints, and the game goes on believing a ball is in play.
     """
     padsw.take(m, TROUGH)
-    plan = ballmodel.plan_drain(_model(), _mrg(m), SHOOTER, _held(m, SHOOTER))
+    van = _IDS.get("van")
+    plan = ballmodel.plan_drain(_model(), _mrg(m), SHOOTER, _held(m, SHOOTER),
+                                van.count(_mrg(m)) if van else 0)
     if plan.refused:
         print(plan.refused)
         return 1
