@@ -76,6 +76,29 @@ def _read(path):
         return ""
 
 
+def _swelf_coils(dev_dest, elf, game, say):
+    """Item 167: a device table with NO coil row gets the SWELF device table's coils appended
+    (swelf.coil_lines), so ballfeed.py sees the trough eject on those titles. Run on a cached
+    table too: a table already holding a coil row is left alone, so this fires once per title.
+    """
+    try:
+        with open(dev_dest) as f:
+            text = f.read()
+    except OSError:
+        return
+    if any(line.startswith("coil") for line in text.splitlines()) or not elf or not os.path.exists(elf):
+        return
+    try:
+        lines = swelf.coil_lines(elf, game)
+    except (OSError, SystemExit, ValueError):
+        lines = []
+    if not lines:
+        return
+    _write(dev_dest, text.rstrip("\n") + "\n# item 167: coils from the device table (swelf.coils)\n"
+           + "\n".join(lines) + "\n")
+    say("  devices      + %d coil(s) from the device table (the trough eject for the ball feeder)" % len(lines))
+
+
 def switch_dump_complete(log_path):
     """Whether `log_path` holds a switch dump that has FINISHED.
 
@@ -327,6 +350,7 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
         except OSError as exc:
             say("  devices      FAILED to write %s: %s" % (dev_dest, exc))
             recs = None
+    _swelf_coils(dev_dest, elf, game, say)       # item 167: SWELF titles' coils (idempotent)
     if recs is not None:
         made["device_xy.txt"] = dev_dest
         counts = devicexy.counts(recs)

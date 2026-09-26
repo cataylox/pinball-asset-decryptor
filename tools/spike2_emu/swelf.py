@@ -79,6 +79,7 @@ uncanny_xmen_le, venom_le. Full detail and the discovery scripts' shape are
 in plans/TODO.md under item 57.
 """
 import os
+import collections
 import struct
 import sys
 
@@ -762,6 +763,70 @@ def rows(elf_path, title):
     if not roots:
         return _rows_gen2(e)
     return _rows_roots(e, roots) or _rows_gen2(e)
+
+
+#: item 167: the device table's coil kind on the 24-byte generation (switch 7, LED 4)
+KIND_COIL = 2
+#: device_xy.txt's group for a coil row written from here: past every real group, so no
+#: derivation but the connector column (which names the bus node) can map it
+COIL_GROUP_BASE = 64
+
+
+def coils(elf_path, title):
+    """[(name, bus node, index)] - the COILS of a 24-byte-generation device table (the SWELF
+    titles: Aerosmith, Avengers, Batman, Guardians, Iron Maiden, Mando, Rush, Stranger Things,
+    Sword of Rage), [] when anything does not check out.
+
+    ★ WHY (item 167, 2026-09-26). devicexy.py finds no device records on these titles, so
+    their device_xy.txt held no coil and ballfeed.py never saw the trough eject: the game
+    asked for a ball that never came. The records are in the same table the switch walk
+    reads: kind 2 is a coil, +16 its board slot, +18 its index on that board (TROUGH 1, AUTO
+    PLUNGER 4 on every one, as on Godzilla). The BUS NODE of a slot is read off the
+    switches: the switch list (rows(), the rig's own) names each switch's bus node, and the
+    device table names each switch's slot, so a slot maps to the one node its switches
+    share. A slot whose switches disagree, or that carries none, gives its coils no node.
+    """
+    rws = rows(elf_path, title)
+    if not rws:
+        return []
+    try:
+        e = Elf(elf_path)
+    except (OSError, struct.error):
+        return []
+    idx = _gen2_words(e)
+    lay = DERIVED_LAYOUTS[1]                   # the 24-byte records
+    dev = _gen2_find_dev(e, idx, lay)
+    if not dev:
+        return []
+    start, count = dev
+    node_of = collections.defaultdict(set)
+    by_name = collections.defaultdict(set)
+    for _id, _num, node, _bit, name in rws:
+        by_name[name].add(node)
+    out = []
+    for i in range(count):
+        r = start + i * lay["stride"]
+        kind = e.u16(r + lay["kind"])
+        slot = e.u16(r + lay["slotbit"])
+        name = _gen2_name(e, r, lay)
+        if kind == lay["switch"] and name in by_name and len(by_name[name]) == 1:
+            node_of[slot] |= by_name[name]
+        elif kind == KIND_COIL and name:
+            out.append((name, slot, e.u16(r + lay["slotbit"] + 2)))
+    got = []
+    for name, slot, index in out:
+        nodes = node_of.get(slot, set())
+        if len(nodes) == 1 and index is not None and index < 64:
+            got.append((name, next(iter(nodes)), index))
+    return got
+
+
+def coil_lines(elf_path, title):
+    """The device_xy.txt rows for coils(): `coil NAME 0 0 0 0 <grp> <index> <bus node> -`, the
+    group COIL_GROUP_BASE + node and the connector the bus node (coilmap.connector_group_node)."""
+    return ["coil      %-36s %5d %5d %4d %4d %4d %5d  %-5s %s" % (name, 0, 0, 0, 0, COIL_GROUP_BASE + node, index,
+                                                             str(node), "-")
+            for name, node, index in coils(elf_path, title)]
 
 
 def _rows_roots(e, roots):
