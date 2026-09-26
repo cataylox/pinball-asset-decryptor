@@ -47,19 +47,31 @@ class Prerequisite:
 
     Attributes:
         name: Short label shown in the GUI indicator (e.g. ``"gpg"``).
-        where: ``"host"`` to probe on the Windows/macOS/Linux host, or
+        where: ``"host"`` to probe on the Windows/macOS/Linux host;
             ``"wsl"`` to probe inside WSL on Windows (a no-op everywhere
-            else, since BOF/JJP/Spooky use Docker on macOS instead).
+            else, since JJP/Spooky use Docker on macOS instead); or
+            ``"native"`` to probe wherever the plugin's own executor runs,
+            which is WSL on Windows and the host itself on macOS/Linux.
+            Barrels of Fun is the ``native`` case: its gpg and tar run in
+            WSL on Windows and straight on the Mac, so a Mac without gpg
+            used to pass the check as "n/a" and then fail the extract with
+            a "corrupted file" hint (PAD-220).
         probe: Shell command string whose exit-zero == "available".
         reason: Human-readable explanation for the tooltip / install hint.
         install_hint: Optional text shown to the user if missing
             (e.g. ``"Run Install Prerequisites from the Start Menu"``).
+        mac_pkg: The Homebrew formula (MacPorts port of the same name unless
+            :mod:`.mac_install` spells it differently) that supplies the
+            tool on a Mac, so Install Missing can install it there itself
+            instead of sending the user to a terminal.  Empty when the tool
+            is not a host tool on macOS.
     """
     name: str
-    where: str  # "host" or "wsl"
+    where: str  # "host", "wsl" or "native"
     probe: str
     reason: str
     install_hint: str = ""
+    mac_pkg: str = ""
 
 
 @dataclass(frozen=True)
@@ -100,6 +112,11 @@ def check_prerequisite(prereq: Prerequisite) -> PrerequisiteResult:
             ok, msg = _probe_host(prereq.probe)
         elif prereq.where == "wsl":
             ok, msg, hint_override = _probe_wsl(prereq.probe)
+        elif prereq.where == "native":
+            if _native_location() == "wsl":
+                ok, msg, hint_override = _probe_wsl(prereq.probe)
+            else:
+                ok, msg = _probe_host(prereq.probe)
         else:
             ok, msg = False, f"unknown probe location: {prereq.where!r}"
     except Exception as e:
@@ -113,7 +130,7 @@ def check_prerequisite(prereq: Prerequisite) -> PrerequisiteResult:
     # missing a package, it is OUR image missing one, and "apt-get install
     # partclone" would have the user modifying a distro he did not build to
     # work around a bug he cannot see.  Say what it actually is.
-    if not ok and prereq.where == "wsl" and runtime.wsl_distro():
+    if (not ok and probes_wsl(prereq) and runtime.wsl_distro()):
         hint = (
             "This is one of the tools the app's own Linux (%s) is built with, "
             "so this is a fault in the app rather than something missing from "
@@ -155,6 +172,37 @@ def check_prerequisites(prereqs) -> List[PrerequisiteResult]:
     return [check_prerequisite(p) for p in prereqs]
 
 
+def _native_location() -> str:
+    """Where a ``where="native"`` prerequisite is probed: ``"wsl"`` on
+    Windows, ``"host"`` on macOS and Linux - the same split the plugins'
+    executors make (bof/executor.py's ``create_executor``)."""
+    return "wsl" if sys.platform == "win32" else "host"
+
+
+def probes_wsl(prereq: Prerequisite) -> bool:
+    """True when *prereq* is answered by WSL on this machine - a ``"wsl"``
+    prerequisite anywhere, or a ``"native"`` one on Windows.  What the
+    "which Linux was that" log line and the our-own-Linux hint key on."""
+    return (prereq.where == "wsl"
+            or (prereq.where == "native" and _native_location() == "wsl"))
+
+
+#: Where Homebrew (Apple Silicon, Intel), MacGPG and MacPorts put their
+#: binaries.  A GUI app on a Mac inherits launchd's PATH, which has none of
+#: them, so a host probe that only looked at PATH would call an installed
+#: gpg missing.  The same list bof/executor.py's MacExecutor prepends.
+MAC_TOOL_DIRS = ("/opt/homebrew/bin", "/usr/local/bin",
+                 "/usr/local/MacGPG2/bin", "/opt/local/bin")
+
+
+def _host_path() -> Optional[str]:
+    """The PATH a host probe looks along: on a Mac, the tool folders above
+    ahead of the inherited PATH; elsewhere None (= the process PATH)."""
+    if sys.platform != "darwin":
+        return None
+    return os.pathsep.join(MAC_TOOL_DIRS + (os.environ.get("PATH", ""),))
+
+
 # ---------------------------------------------------------------------------
 # Host-side probe — uses the OS's default shell.
 # ---------------------------------------------------------------------------
@@ -194,8 +242,15 @@ def _probe_host(cmd: str) -> Tuple[bool, str]:
     # idle said OK.  Only fall through to running the command when the tool
     # ISN'T on PATH (a genuine "not installed") or the probe is compound.
     exe = _probe_presence_exe(cmd)
-    if exe and shutil.which(exe):
+    path = _host_path()
+    found = shutil.which(exe, path=path) if (exe and path) else (
+        shutil.which(exe) if exe else None)
+    if found:
         return True, f"{exe} on PATH"
+    env = None
+    if path:
+        env = dict(os.environ)
+        env["PATH"] = path
     try:
         result = subprocess.run(
             cmd,
@@ -204,6 +259,7 @@ def _probe_host(cmd: str) -> Tuple[bool, str]:
             text=True,
             timeout=PROBE_TIMEOUT,
             creationflags=_CREATE_FLAGS,
+            env=env,
         )
     except subprocess.TimeoutExpired:
         return False, f"timed out after {PROBE_TIMEOUT}s"

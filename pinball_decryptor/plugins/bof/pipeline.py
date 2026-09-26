@@ -198,7 +198,15 @@ class _BasePipeline:
         return _Ctx()
 
     def _resolve_gpg(self):
-        """Return full path to gpg, ensuring it's found even in macOS .app bundles."""
+        """Full path to gpg (found even from a macOS .app bundle), or None
+        when there is no gpg where this plugin runs.
+
+        None used to be spelled "gpg" as a last resort, which sent a Mac
+        without GnuPG into the decrypt anyway and out of it with "bash: gpg:
+        command not found" under a "check that the .fun file is not
+        corrupted" hint (PAD-220); the callers now stop first and say what
+        is missing (:func:`missing_gpg_text`).
+        """
         # 1. On macOS/Linux: check common paths directly from Python (no bash)
         if sys.platform != "win32":
             for candidate in [
@@ -221,7 +229,7 @@ class _BasePipeline:
                 return path
         except Exception:
             pass
-        return "gpg"  # last resort
+        return None
 
     def _gdre_prefix(self):
         """Return the shell prefix to invoke GDRE Tools headlessly."""
@@ -241,6 +249,37 @@ class _BasePipeline:
 
     def run(self):
         raise NotImplementedError
+
+
+def missing_gpg_text(platform=None):
+    """What Extract / Write say when there is no gpg where they run.
+
+    Spelled for *platform* (``sys.platform`` by default): the .fun is
+    GPG-encrypted, so nothing can be read from it without GnuPG, and the
+    fix differs by desktop - on a Mac, Install Missing on the Prerequisites
+    strip installs it with Homebrew; on Windows it is a WSL package; on
+    Linux a distro package.  cooltoy's Mac was told to check the file for
+    corruption instead (PAD-220).
+    """
+    platform = platform or sys.platform
+    head = ("GnuPG (gpg) is not installed, and the .fun file is "
+            "GPG-encrypted, so nothing can be read from it until it is.")
+    if platform == "darwin":
+        fix = ("Press Install Missing on the Prerequisites strip (it "
+               "installs gnupg with Homebrew), or run: brew install gnupg")
+    elif platform == "win32":
+        fix = ("Press Install Missing on the Prerequisites strip, or in "
+               "WSL run: sudo apt-get install gnupg")
+    else:
+        fix = "Install it with your package manager: apt-get install gnupg"
+    return "%s\n\n%s\n\nThen try again." % (head, fix)
+
+
+def _gpg_absent_output(output):
+    """True when a decrypt's shell output says gpg itself was not there."""
+    text = (output or "").lower()
+    return "gpg" in text and ("command not found" in text
+                              or "no such file or directory" in text)
 
 
 def check_prerequisites(executor):
@@ -468,6 +507,8 @@ class DecryptPipeline(_BasePipeline):
         fun_wsl = self.executor.to_exec_path(self.fun_path)
         out_wsl = self.executor.to_exec_path(self.output_dir)
         gpg_bin = self._resolve_gpg()
+        if not gpg_bin:
+            raise PipelineError("Decrypt", missing_gpg_text())
         self._log(f"Using gpg: {gpg_bin}", "info")
 
         # Phase 1 — Decrypt
@@ -489,6 +530,8 @@ class DecryptPipeline(_BasePipeline):
                     timeout=GPG_DECRYPT_TIMEOUT,
                 )
         except CommandError as e:
+            if _gpg_absent_output(e.output):
+                raise PipelineError("Decrypt", missing_gpg_text())
             raise PipelineError("Decrypt",
                 f"GPG decryption failed:\n{e.output}\n\n"
                 f"Check that the .fun file is not corrupted.")
@@ -1582,6 +1625,8 @@ class ModifyPipeline(_BasePipeline):
         passphrase = game_info["passphrase"]
         game_key = self.game_key
         gpg_bin = self._resolve_gpg()
+        if not gpg_bin:
+            raise PipelineError("Decrypt", missing_gpg_text())
         self._log(f"Using gpg: {gpg_bin}", "info")
 
         fun_wsl = self.executor.to_exec_path(self.original_fun)
@@ -1607,6 +1652,8 @@ class ModifyPipeline(_BasePipeline):
                     timeout=GPG_DECRYPT_TIMEOUT,
                 )
         except CommandError as e:
+            if _gpg_absent_output(e.output):
+                raise PipelineError("Decrypt", missing_gpg_text())
             raise PipelineError("Decrypt",
                 f"GPG decryption failed:\n{e.output}\n\n"
                 f"Check that the original .fun file is valid.")

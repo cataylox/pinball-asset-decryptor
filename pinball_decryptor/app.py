@@ -15,7 +15,7 @@ from .core.config import APP_NAME, SETTINGS_FILE
 from .core.extract_source import write_extract_source
 from .core.messages import (DoneMsg, LinkMsg, LogLineMsg, LogMsg, PhaseMsg,
                             PrereqMsg, ProgressMsg, UiCallMsg)
-from .core.prereqs import check_prerequisite
+from .core.prereqs import check_prerequisite, probes_wsl
 from .core.registry import all_manufacturers, get_manufacturer, load_plugins
 from .core.updater import (check_for_update, download_installer,
                            install_update_macos, launch_installer_windows,
@@ -966,7 +966,7 @@ class App:
             # never got an answer across four more tickets), so it goes in
             # the log the user pastes rather than staying a question in the
             # first reply.
-            if any(p.where == "wsl" for p in prereqs):
+            if any(probes_wsl(p) for p in prereqs):
                 try:
                     from .core.prereqs import wsl_release_lines
                     for i, line in enumerate(wsl_release_lines()):
@@ -976,6 +976,9 @@ class App:
                     pass
 
             missing = [r for r in results if not r.ok]
+            # What Install Missing on a Mac reads (core.mac_install): the
+            # rows that failed, so it installs those and nothing else.
+            self._prereq_results = {r.name: r for r in results}
             if not missing:
                 self.msg_queue.put(LogMsg(
                     f"All prerequisites OK for {target_display}. "
@@ -1014,6 +1017,8 @@ class App:
     def _launch_install_prereqs(self):
         """Spawn install_prerequisites.ps1 in an elevated PowerShell."""
         if sys.platform == "darwin":
+            if self._install_prereqs_darwin():
+                return
             messagebox.showinfo(
                 "Install Prerequisites",
                 "The auto-installer is Windows/Linux-only.\n\n"
@@ -1075,6 +1080,55 @@ class App:
             f"Start-Process powershell -Verb RunAs -ArgumentList "
             f"'-NoProfile -ExecutionPolicy Bypass -File \"{script}\"'",
         ])
+
+    def _install_prereqs_darwin(self):
+        """Install Missing on a Mac: install the missing host tools with the
+        package manager this Mac already has, here, in this window.
+
+        NOBODY IS SENT TO A TERMINAL - the Emulate tab's "Set up emulator…"
+        rule (David, 2026-08-19).  True when the strip's missing rows were
+        something this can install (or nothing is missing); False hands the
+        caller its old advice box, which still covers Docker.
+        """
+        from .core import mac_install
+        results = getattr(self, "_prereq_results", None) or {}
+        mfr = self._current_mfr
+        prereqs = tuple(getattr(mfr, "prerequisites", ()) or ())
+        missing = [p for p in prereqs
+                   if p.name in results and not results[p.name].ok]
+        if prereqs and results and not missing:
+            messagebox.showinfo(
+                "Install Prerequisites",
+                "Nothing is missing for %s." % mfr.display)
+            return True
+        plan = mac_install.install_plan(missing)
+        if plan is None:
+            return False
+        if not messagebox.askyesno(
+                "Install Prerequisites",
+                "This will:\n\n"
+                + "\n\n".join("  •  " + s for s in plan["steps"])
+                + "\n\nIt runs here, in this window, and you can watch it "
+                  "in the log below. Nothing is removed.\n\nGo ahead?"):
+            return True
+        self.window.append_log(
+            "[prerequisites] installing %s with %s: %s"
+            % (plan["label"], plan["manager"], " ".join(plan["install"])),
+            "info")
+
+        def _run():
+            ok = mac_install.run_plan(
+                plan, lambda line: self.msg_queue.put(
+                    LogMsg("[prerequisites] " + line, "info")))
+            self.msg_queue.put(LogMsg(
+                "[prerequisites] %s installed; checking again."
+                % plan["label"] if ok else
+                "[prerequisites] the install did not finish; the lines "
+                "above say why.", "success" if ok else "error"))
+            self.msg_queue.put(UiCallMsg(self._recheck_prereqs))
+
+        threading.Thread(target=_run, daemon=True).start()
+        return True
 
     @staticmethod
     def _find_prereqs_script():

@@ -5,6 +5,7 @@ into the unified manufacturer contract (4-callback BasePipeline).
 """
 
 import os
+import sys
 
 from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
@@ -76,6 +77,56 @@ class _WriteWrapper(ModifyPipeline):
         super().run()
 
 
+def build_prerequisites(platform=None):
+    """BOF's prerequisite rows, spelled for *platform* (``sys.platform`` by
+    default; a capture passes ``"darwin"`` to show a Mac's).
+
+    gpg and tar are ``native``: the plugin's executor runs them inside WSL
+    on Windows and straight on the host on macOS/Linux, so they are probed
+    wherever they will run.  With ``where="wsl"`` a Mac answered "n/a" for
+    both, the strip stayed green, and a Mac without GnuPG only found out at
+    "bash: gpg: command not found" under an Extract Failed box that blamed
+    the .fun file (PAD-220).  GDRE Tools and xvfb stay ``wsl``: on a Mac the
+    Write path uses its own GDRE install under ~/.local/share and no xvfb.
+    """
+    platform = platform or sys.platform
+    if platform == "darwin":
+        gpg_hint = ("Install Missing installs it with Homebrew "
+                    "(brew install gnupg)")
+        tar_hint = "tar ships with macOS; reinstall Xcode Command Line Tools"
+    else:
+        gpg_hint = "apt-get install gnupg (in WSL)"
+        tar_hint = "apt-get install tar (in WSL)"
+    return (
+        Prerequisite(name="gpg", where="native",
+                     probe="command -v gpg",
+                     reason=".fun GPG decryption + re-encryption",
+                     install_hint=gpg_hint, mac_pkg="gnupg"),
+        Prerequisite(name="tar", where="native",
+                     probe="command -v tar",
+                     reason="Archive packing/unpacking",
+                     install_hint=tar_hint),
+        Prerequisite(
+            name="gdre_tools", where="wsl",
+            # Check the canonical install path directly — the exact
+            # binary the installer writes (install_gdre.sh) and the
+            # Write pipeline runs (see pipeline._gdre_prefix).  The old
+            # probe used `which`, whose PATH lookup inside the WSL
+            # invocation traverses the slow appended Windows PATH and
+            # failed intermittently even with GDRE correctly installed.
+            probe="test -x /opt/gdre_tools/gdre_tools.x86_64",
+            reason="Godot RE Tools — required to repack the PCK on Write.",
+            install_hint=(
+                "Click \"Install Prerequisites\" — auto-downloads "
+                "GDRE Tools to /opt/gdre_tools.")),
+        Prerequisite(
+            name="xvfb-run", where="wsl",
+            probe="command -v xvfb-run",
+            reason="Headless X server — GDRE Tools needs it on Linux/WSL.",
+            install_hint="apt-get install xvfb (in WSL)"),
+    )
+
+
 class BOFManufacturer(Manufacturer):
     key = "bof"
     display = "Barrels of Fun"
@@ -118,34 +169,7 @@ class BOFManufacturer(Manufacturer):
     # repack the embedded PCK on Write.  All four show up in the
     # prereq panel so the user can see missing pieces at a glance
     # before kicking off a flow that's going to fail mid-pipeline.
-    prerequisites = (
-        Prerequisite(name="gpg", where="wsl",
-                     probe="command -v gpg",
-                     reason=".fun GPG decryption + re-encryption",
-                     install_hint="apt-get install gnupg (in WSL)"),
-        Prerequisite(name="tar", where="wsl",
-                     probe="command -v tar",
-                     reason="Archive packing/unpacking",
-                     install_hint="apt-get install tar (in WSL)"),
-        Prerequisite(
-            name="gdre_tools", where="wsl",
-            # Check the canonical install path directly — the exact
-            # binary the installer writes (install_gdre.sh) and the
-            # Write pipeline runs (see pipeline._gdre_prefix).  The old
-            # probe used `which`, whose PATH lookup inside the WSL
-            # invocation traverses the slow appended Windows PATH and
-            # failed intermittently even with GDRE correctly installed.
-            probe="test -x /opt/gdre_tools/gdre_tools.x86_64",
-            reason="Godot RE Tools — required to repack the PCK on Write.",
-            install_hint=(
-                "Click \"Install Prerequisites\" — auto-downloads "
-                "GDRE Tools to /opt/gdre_tools.")),
-        Prerequisite(
-            name="xvfb-run", where="wsl",
-            probe="command -v xvfb-run",
-            reason="Headless X server — GDRE Tools needs it on Linux/WSL.",
-            install_hint="apt-get install xvfb (in WSL)"),
-    )
+    prerequisites = build_prerequisites()
 
     def detect(self, path):
         key = detect_game(path)

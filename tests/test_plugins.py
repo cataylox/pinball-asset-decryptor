@@ -50,7 +50,7 @@ def test_manufacturer_prereqs_shape(manufacturers_by_key, key):
     for p in mfr.prerequisites:
         assert isinstance(p, Prerequisite)
         assert p.name and p.probe and p.reason
-        assert p.where in ("host", "wsl"), \
+        assert p.where in ("host", "wsl", "native"), \
             f"{key}.{p.name}.where = {p.where!r}"
 
 
