@@ -353,3 +353,10 @@ text mode_records_name_3   Upper Playfield Orbit Rule
 value mode_records_4       0x00ec00eb      # Headphone Hurryup: ids 235..236 (its start 0x61b78 creates 235 without
 #   asking first; its stop 0x61c38 asks 235..236 and kills them)
 text mode_records_name_4   Headphone Hurryup
+
+# ---- a multiball of the mode's own (item 167): the framework's start-a-multiball (The Beatles 1.29
+# 0x1fd310, found here by its code, 22/24 words alike): serve balls until r0 are in play, r1 0, r2 the
+# ball save in ticks (62 a second), r3 0xbb as this build's own multiballs pass it, two zero words on the
+# stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
+site multiball_serve       0x001868f0 0xe92d41f0 0xe306ef6e
+# EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.

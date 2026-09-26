@@ -798,6 +798,31 @@ operator makes on a dragon-less machine; the emulator does not (yet) seed it
 automatically, so the artwork/positions ✅ above is unconditional but the
 "live, E2E-played" claim depends on that adjustment having been made on the
 card's saved NVRAM.
+**TMNT LE/Premium, 2026-09-26 (item 167): THE VAN.** Its Party Wagon is a
+physical ball lock the rig had no model of - LOWER LOCK 1-2 and UPPER LOCK 1-3
+(optos), VAN ENTER OPTO, coils LOWER LOCK and UPPER LOCK - and a coil probe
+(`c:\tmp\pad_generic\mb\vanprobe.py`) showed what the game does with it: in
+attract it auto-plunges a ball INTO the van, drops it with UPPER LOCK, lets it
+out with LOWER LOCK, three at a time every ~15 s. With no van every one of
+those balls was lost: Start waited ~150 s for the trough to run dry, and in a
+game a multiball's count collapsed at the first ball search, ending a mode's
+multiball with no drain. `ballmodel.Van` + `ballfeed.py` now answer it: an
+attract launch goes into the van (upper section), UPPER/LOWER LOCK move and
+release it, and an attract ball the van lets out rolls home even if somebody
+has pressed Start since; once the game's ball 1 waits in the shooter lane for
+its plunge (attract never lets a ball wait) a game is on and launches go onto
+the playfield - served into the van, the game took them for locked balls and
+its count climbed to 7. Back to attract when an auto plunge follows an eject
+from a full, quiet trough. `in_play`/`plan_drain` (and `plunge.py drain`) count
+the van's balls as neither home nor in play. **What is still not modelled:**
+David's machine has 8 balls and the rig 6, so the game still searches for two
+in attract and takes Start when that search gives up (up to seven presses in
+the proof harness) - `DISABLE VAN` is the operator's way to a six-ball TMNT LE,
+the same as DnD's dragon, and the rig does not set it (the NVM ring is a
+mirror; the board NVRAM rewrites it). Knobs for measuring: `PAD_BALL_VAN_STOCK`
+(balls in the van at boot, 0: a rig booted with two watched the game empty it
+at once), `PAD_BALL_VAN_STOCK_AT`, `PAD_BALL_EXTRA` (balls queued behind the
+trough's last switch, 0). A player shooting the van in a game is not modelled.
 
 **CORRECTION, same session, right after this table's first version shipped:**
 the first pass checked the CONSOLE pane for the live switch dump

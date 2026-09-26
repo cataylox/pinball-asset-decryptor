@@ -166,6 +166,124 @@ class Trough:
                 % (k, ",".join(str(p) for p in made) or "-", k))
 
 
+#: ★ ITEM 167 (2026-09-26): THE VAN, a physical ball lock (TMNT LE and Premium; David: "turtles le/premium
+#: has the van which locks balls"). Five optos, bottom first - LOWER LOCK 1-2 hold the balls the LOWER LOCK
+#: coil lets out onto the playfield, UPPER LOCK 1-3 the ones the UPPER LOCK coil lets down into the lower
+#: section - and VAN ENTER OPTO at its mouth. MEASURED in the rig with a coil probe (2026-09-26): IN ATTRACT
+#: THE AUTO PLUNGER SHOOTS INTO THE VAN - three balls every ~15 s, each dropped by UPPER LOCK and let out by
+#: LOWER LOCK, and the game takes Start only while that cycle works. With no van every such ball was lost:
+#: Start refused for ~150 s, and a multiball's count collapsed at its first ball search (a multiball of the
+#: mode's own ended with no drain). IN A GAME the served balls go onto the playfield: sent into the van,
+#: the game took them for locked balls, held them 12-26 s and its count climbed to 7. How the feeder tells
+#: the two apart is in ballfeed.py (the game's ball 1 waits in the lane for its plunge; attract's never
+#: does). The names are the only thing that makes a title a van title.
+VAN_STACK = ("LOWER LOCK 1", "LOWER LOCK 2", "UPPER LOCK 1", "UPPER LOCK 2", "UPPER LOCK 3")
+VAN_LOWER = 2                    # the first two of VAN_STACK are the lower section
+VAN_ENTER = "VAN ENTER OPTO"
+VAN_COIL_LOWER = "LOWER LOCK"
+VAN_COIL_UPPER = "UPPER LOCK"
+#: from the auto plunger to the van's mouth, and how long a ball covers its opto
+VAN_FLIGHT_S = 0.8
+VAN_ENTER_S = 0.15
+#: how long a ball takes to drop one place inside the van
+VAN_DROP_S = 0.3
+#: A ball that waits this long in the shooter lane after its eject is a GAME's ball waiting for its plunge:
+#: attract auto-plunges every one within ~1 s (the probe). From then on launches go onto the playfield...
+VAN_GAME_LANE_S = 3.0
+#: Balls put in the van when the feeder first sees it empty with the trough full, in the section
+#: PAD_BALL_VAN_STOCK_AT names (lower or upper). 0 by default and on purpose: David says the TMNT LE has 8
+#: balls installed (a six-ball trough), but a rig booted with two in the van watched the game empty it at
+#: once (UPPER LOCK, LOWER LOCK, twice) - the van is empty at rest. Kept as a knob for that measurement.
+VAN_STOCK = int(os.environ.get("PAD_BALL_VAN_STOCK") or 0)
+VAN_STOCK_AT = (os.environ.get("PAD_BALL_VAN_STOCK_AT") or "lower").lower()
+#: ...until an auto plunge follows an eject from a FULL trough with no ball home for this long - attract
+#: again after game over. A ball save's re-serve comes a second or two after its drain, so it keeps the game.
+VAN_ATTRACT_QUIET_S = 10.0
+
+
+class Van:
+    """The van's balls, read off its optos in the merged array every time - like Trough, it decides
+    nothing about which switches the van is (from_names does, by name) and holds no count of its own."""
+
+    def __init__(self, stack, enter):
+        self.stack = list(stack)
+        self.enter = enter
+
+    @classmethod
+    def from_names(cls, by_name):
+        """A Van from {SWITCH NAME: id}, or None on a title without all six of its switches."""
+        ids = [by_name.get(n) for n in VAN_STACK]
+        enter = by_name.get(VAN_ENTER)
+        if None in ids or enter is None:
+            return None
+        return cls(ids, enter)
+
+    def flags(self, mrg):
+        return [bool(mrg[i]) for i in self.stack]
+
+    def count(self, mrg):
+        return sum(self.flags(mrg))
+
+    def plan_load(self, mrg):
+        """A launched ball flies into the van: VAN ENTER, then the lowest free place of the UPPER section, where
+        the UPPER LOCK post holds it - the lower section only fills when that coil drops a ball down. (The
+        first live run put it in the lower section: the game kicked each one straight out with LOWER LOCK and
+        ran its van check again every ~16 s, for ever, and never took a Start.)"""
+        flags = self.flags(mrg)
+        free = [i for i in range(VAN_LOWER, len(self.stack)) if not flags[i]]
+        if not free:
+            return Plan(refused="the van's upper lock is full - the ball stays on the playfield")
+        k = free[0]
+        return Plan([("wait", VAN_FLIGHT_S, "the flight to the van"),
+                     ("set", self.enter, 1, "van enter %d closed (a ball at the van)" % self.enter),
+                     ("wait", VAN_ENTER_S, "the ball passing the opto"),
+                     ("set", self.enter, 0, "van enter %d opened" % self.enter),
+                     ("set", self.stack[k], 1, "%s (%d) closed (a ball in the van)" % (VAN_STACK[k], self.stack[k]))])
+
+    def plan_stock(self, mrg, n=None, at=None):
+        """The van's resting balls, put there once at start-up (VAN_STOCK): refused unless it is empty."""
+        n = VAN_STOCK if n is None else n
+        at = VAN_STOCK_AT if at is None else at
+        if self.count(mrg):
+            return Plan(refused="the van already holds balls")
+        places = list(range(VAN_LOWER)) if at == "lower" else list(range(VAN_LOWER, len(self.stack)))
+        places = places[:max(0, n)]
+        if not places:
+            return Plan(refused="no balls to stock")
+        return Plan([("set", self.stack[k], 1, "%s (%d) closed (a resting ball in the van)" % (VAN_STACK[k], self.stack[k]))
+                     for k in places])
+
+    def plan_release(self, mrg):
+        """LOWER LOCK fired: the bottom ball leaves for the playfield and the one above drops into its place."""
+        flags = self.flags(mrg)
+        if not flags[0]:
+            return Plan(refused="LOWER LOCK fired with no ball at %s" % VAN_STACK[0])
+        steps = [("set", self.stack[0], 0, "%s (%d) opened (a ball left the van)" % (VAN_STACK[0], self.stack[0]))]
+        if flags[1]:
+            steps += [("wait", VAN_DROP_S, "the ball above drops"),
+                      ("set", self.stack[1], 0, "%s (%d) opened" % (VAN_STACK[1], self.stack[1])),
+                      ("set", self.stack[0], 1, "%s (%d) closed" % (VAN_STACK[0], self.stack[0]))]
+        return Plan(steps)
+
+    def plan_drop(self, mrg):
+        """UPPER LOCK fired: the bottom ball of the upper section drops into the lower one (lowest free place),
+        and the upper balls move down one."""
+        flags = self.flags(mrg)
+        low = [i for i in range(VAN_LOWER) if not flags[i]]
+        if not flags[VAN_LOWER]:
+            return Plan(refused="UPPER LOCK fired with no ball at %s" % VAN_STACK[VAN_LOWER])
+        if not low:
+            return Plan(refused="UPPER LOCK fired with the lower lock full")
+        steps = [("set", self.stack[VAN_LOWER], 0, "%s (%d) opened" % (VAN_STACK[VAN_LOWER], self.stack[VAN_LOWER])),
+                 ("wait", VAN_DROP_S, "the ball drops"),
+                 ("set", self.stack[low[0]], 1, "%s (%d) closed" % (VAN_STACK[low[0]], self.stack[low[0]]))]
+        for i in range(VAN_LOWER + 1, len(self.stack)):
+            if flags[i]:
+                steps += [("set", self.stack[i], 0, "%s (%d) opened" % (VAN_STACK[i], self.stack[i])),
+                          ("set", self.stack[i - 1], 1, "%s (%d) closed" % (VAN_STACK[i - 1], self.stack[i - 1]))]
+        return Plan(steps)
+
+
 def plan_eject(tr, mrg, lane_id=None, lane_made=False,
                flight_s=LANE_FLIGHT_S):
     """The game fired the trough eject. Answer it.
@@ -207,7 +325,7 @@ def plan_launch(lane_id, lane_made):
                   "shooter lane %d opened (ball launched)" % lane_id)])
 
 
-def in_play(tr, mrg, lane_id=None, lane_made=False):
+def in_play(tr, mrg, lane_id=None, lane_made=False, held=0):
     """Balls the game believes are out on the playfield - DERIVED, never counted.
 
     installed - trough - lane. A ball waiting in the shooter lane is not in
@@ -216,10 +334,11 @@ def in_play(tr, mrg, lane_id=None, lane_made=False):
     fault, not a machine state. jjpball.Feeder.in_play is the JJP twin.
     """
     lane = 1 if lane_id is not None and lane_made else 0
-    return max(0, len(tr.positions) - tr.count(mrg) - lane)
+    # `held`: balls a lock holds (the van, item 167) - neither home nor in play
+    return max(0, len(tr.positions) - tr.count(mrg) - lane - held)
 
 
-def plan_drain(tr, mrg, lane_id=None, lane_made=False):
+def plan_drain(tr, mrg, lane_id=None, lane_made=False, held=0):
     """A ball in play drained. It arrives at the FAR end of the trough.
 
     THIS IS THE HALF NOTHING CAN OBSERVE, so it is an action and not an event.
@@ -243,7 +362,7 @@ def plan_drain(tr, mrg, lane_id=None, lane_made=False):
     home = tr.arriving(mrg)
     if home is None:
         return Plan(refused="the trough is already full - no ball is in play")
-    if not in_play(tr, mrg, lane_id, lane_made):
+    if not in_play(tr, mrg, lane_id, lane_made, held):
         return Plan(refused="the ball is still in the shooter lane - "
                             "Plunge it first")
     # ★ THE BALL ROLLS DOWN THE RAMP FIRST (PAD-186, David's live Mechagodzilla

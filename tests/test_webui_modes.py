@@ -691,7 +691,9 @@ def test_spinboxes_carry_the_tk_bounds(tmp_path, preview_on):
     from pinball_decryptor.plugins.stern import mode_project as MP
     with web_app(tmp_path, mfr="stern") as w:
         spin = w.state("modes")["spin"]
-        assert spin["seconds"] == [1, 300] and spin["start_count"] == [1, 20]
+        assert spin["seconds"] == [0, 300] and spin["start_count"] == [1, 20]   # 0: a multiball with no clock
+        assert spin["balls"] == [2, 6] and spin["ball_save"] == [0, MP.BALL_SAVE_MAX]
+        assert spin["add_ball_max"] == [1, MP.ADD_BALL_MAX]
         assert spin["starts_count"] == [1, MP.STARTS_MAX]
         assert spin["cooldown"] == [0, MP.COOLDOWN_MAX]
         assert spin["restore_after"] == [1, MP.RESTORE_AFTER_MAX]

@@ -468,3 +468,10 @@ scene hud                  91b0658329efa06d4da89c23a162b41dfcee5202
 site live_records          0x0011dba4 0xe3082708 0xe340205f
 value mode_records_1       0x008a0089      # Villain Mode: ids 137..138 (timer 2)
 text mode_records_name_1   Villain Mode
+
+# ---- a multiball of the mode's own (item 167): the framework's start-a-multiball (The Beatles 1.29
+# 0x1fd310, found here by its code, 24/24 words alike): serve balls until r0 are in play, r1 0, r2 the
+# ball save in ticks (62 a second), r3 0xbb as this build's own multiballs pass it, two zero words on the
+# stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
+site multiball_serve       0x0016bbe8 0xe92d41f0 0xe306e49e
+# EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.

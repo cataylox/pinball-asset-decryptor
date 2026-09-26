@@ -360,4 +360,27 @@ void pm_stock_rule_unhook(unsigned rule);           /* the wrap stays; it passes
  * `to` must be ONE bit outside `from`. 1 = the table now holds it. */
 int pm_stock_counts_as(unsigned rule, uint64_t from, uint64_t to);
 
+/* ---- a multiball of your own (item 167; MODE_SDK.md "A multiball of your own") ---------------
+ * Every Spike 2 build shares the framework's ball code, and one call of it is how the game's
+ * own multiballs put balls in play: "serve balls until `balls` are in play, with a ball save".
+ * The port names it (`site multiball_serve`, found on every build by its code) beside the
+ * framework's count of the balls in play (`site balls_in_play`). A mode calls it when it
+ * starts; the game's trough and auto-launcher do the serving, its ball saver hands a drained
+ * ball back for `ballsave_s` seconds, and the game's own end of ball comes only when the LAST
+ * ball drains (the events, `.ball_end`, the bonus: all as the game's multiballs have them).
+ * The game never knows the multiball is yours: its mode manager runs nothing for it, so its
+ * own multiball display, jackpots and music stay off - the mode's screen, clip, sounds and
+ * lights are what the player sees and hears.
+ * pm_multiball_start: 1 = the game is serving; 0 = it refused (no game in play, a tilt, the
+ * port lacks the call). `balls` is the TOTAL wanted in play, 2 to 6, cut to the balls the
+ * machine has. pm_multiball_add asks for `n` more than are in play now (an add-a-ball).
+ * pm_balls_in_play: the framework's count (2 or more during a multiball; while balls are being
+ * served it answers the balls asked for); -1 when the port has no balls_in_play site. A mode
+ * ends its multiball itself: when the count has been 1 for a couple of seconds after the ball
+ * save is over (mode_file.c does exactly that). */
+#define PM_CAN_MULTIBALL    0x10000u  /* pm_multiball_start / pm_multiball_add (and pm_balls_in_play) */
+int pm_multiball_start(unsigned balls, unsigned ballsave_s);
+int pm_multiball_add(unsigned n, unsigned ballsave_s);
+int pm_balls_in_play(void);
+
 #endif

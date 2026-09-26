@@ -599,3 +599,11 @@ value mode_records_4       0x00e100df      # a song mode: ids 223..225
 text mode_records_name_4   a song mode
 value mode_records_5       0x00e800e7      # a song mode: ids 231..232
 text mode_records_name_5   a song mode
+
+
+# ---- a multiball of the mode's own (item 167): the framework's start-a-multiball (The Beatles 1.29
+# 0x1fd310, found here by its code, 24/24 words alike): serve balls until r0 are in play, r1 0, r2 the
+# ball save in ticks (62 a second), r3 0xbb as this build's own multiballs pass it, two zero words on the
+# stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
+site multiball_serve       0x0036ac04 0xe92d41f0 0xe306e956
+# EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.

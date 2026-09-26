@@ -69,6 +69,7 @@ PORTS = {
 
 #: the lines a part of a mode puts in the runtime file
 PART_KEYS = {
+    "multiball": ("multiball", "add_ball"),                  # item 167
     "screen": ("screen_scene", "screen_node", "screen_text"),
     "clip": ("clip_start", "clip_end"),
     "lights": ("light_owner", "light_on", "light_off"),
@@ -105,6 +106,12 @@ def _port(name):
     return str(SDK / "ports" / (name + ".port"))
 
 
+def _mb(name):
+    """Item 167: a multiball of the mode's own is a part every port names the call for, greyed
+    until the build is emulator-proven (MULTIBALL_PROVEN); the PORTS table says nothing of it."""
+    return set() if name in MP.MULTIBALL_PROVEN else {"multiball"}
+
+
 def _check_runtime_file(p, spec, slug):
     return _check_text(p, MP.runtime_cfg(spec, slug), spec.start_shot)
 
@@ -138,6 +145,7 @@ def test_a_profile_per_port(name):
     assert p.key == "%s_%s" % (game, version.replace(".", "_"))
     assert len(p.shots) == shots and len({n for n, _m in p.shots}) == shots
     assert p.shot_mask_bits == bits and p.proven is proven
+    cannot = (set(cannot) - {"multiball"}) | _mb(name)
     assert {part for part in MP.PARTS if not p.can(part)} == cannot
     for part in MP.PARTS:
         assert bool(p.why_not(part)) == (part in cannot)
@@ -176,11 +184,19 @@ def test_stack_needs_the_ports_own_mode_queries_as_the_runtime_asks_for_them(tmp
     for key in ("godzilla_pro_1_15", "godzilla_le_1_16"):
         assert MP.profile(key).can("stack")
     text = open(_port("godzilla_le-1.16"), encoding="utf-8").read()
-    bare = "\n".join(line for line in text.splitlines() if "stock_" not in line)
+    # item 167 gave every port the framework's count of the balls in play, which is the stack route
+    # on the titles with no cmode rules: without it too, a Godzilla port cannot stack at all
+    bare = "\n".join(line for line in text.splitlines()
+                     if "stock_" not in line and not line.startswith("site balls_in_play"))
     (tmp_path / "godzilla_le-1.16.port").write_text(bare, encoding="utf-8")
     p = MP.profile_from_port(str(tmp_path / "godzilla_le-1.16.port"))
     assert not p.can("stack") and "tells that one of its own modes is running" in p.why_not("stack")
-    assert [part for part in MP.PARTS if not p.can(part)] == ["stack"]
+    assert [part for part in MP.PARTS if not p.can(part)] == ["stack", "multiball"]   # no count: no multiball either
+    # with the count alone it is the balls route, greyed until seen (item 164's STACK_BALLS_PROVEN)
+    only = "\n".join(line for line in text.splitlines() if "stock_" not in line)
+    (tmp_path / "godzilla_le-1.16.port").write_text(only, encoding="utf-8")
+    p = MP.profile_from_port(str(tmp_path / "godzilla_le-1.16.port"))
+    assert not p.can("stack") and "tells a multiball is running but has not yet seen" in p.why_not("stack")
     # a stack no mode still makes a file every title's runtime reads (one that cannot tell
     # logs so and starts it anyway), and so do the other items' keys
     assert {"stack", "starts", "cooldown"} <= _mode_file_keys()
@@ -317,8 +333,10 @@ def test_godzilla_pro_1_15_is_unchanged_and_is_what_its_port_says():
     assert g.hud_scene == "32e6ae280ddaec08e203a02289bb39a04968e7b0"
     assert g.bank_scene == "60ed7e5036b8ce09d35a3e101ea6fc1380b37d97"
     assert (g.version, g.port) == ("1.15", "godzilla_pro-1.15.port")
-    assert all(g.can(part) for part in MP.PARTS)
+    assert all(g.can(part) for part in MP.PARTS if part not in _mb("godzilla_pro-1.15"))
+    assert not any(g.can(part) for part in _mb("godzilla_pro-1.15"))   # item 167: greyed until proven
     derived = MP.profile_from_port(MP.port_path(g))
+    assert derived.why_not("multiball") == g.why_not("multiball")
     for f in ("key", "label", "game_dir", "shots", "callout_countdown", "callout_ten_seconds",
               "callout_time_up", "light_owner", "light_lts", "hud_scene", "bank_scene",
               "runtime_can", "example_start_shot", "sound_note"):

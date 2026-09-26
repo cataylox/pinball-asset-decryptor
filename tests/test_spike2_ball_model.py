@@ -527,6 +527,14 @@ def _feeder(ballfeed, tr, lane=62):
     f.last_claim = None
     f.human_at = None
     f.holding = False
+    f.van = f.van_lower = f.van_upper = None
+    f.van_attract = 0
+    f.van_game = False
+    f.eject_at, f.eject_from_full = None, False
+    f.home_at, f.home_count = 0.0, None
+    f.van_stocked = True
+    f.extra = f.extra_max = 0
+    f.homebound = []
     return f
 
 
@@ -747,3 +755,187 @@ def test_plunge_only_ever_launches_and_never_takes_a_ball_from_the_trough(
     assert lane[padsw.OFF_SCR_HELD + 62] == 0
     assert held(lane) == [1, 1, 1, 1, 1, 0]
     assert "ball launched" in capsys.readouterr().out
+
+
+# --- the van (item 167, TMNT LE/Premium) ------------------------------------
+#
+# The LE's van is a physical ball lock the rig had no model of: in attract the
+# game loads a ball into it and lets it straight out again, and with no van
+# every one of those balls was lost - Start refused for ~150 s, and a
+# multiball's count collapsed after the game's first ball search. Its real
+# switch ids off turtles_le's switch list: LOWER LOCK 1-2 = 50, 51, UPPER LOCK
+# 1-3 = 52..54, VAN ENTER OPTO = 84.
+
+VAN_NAMES = {"LOWER LOCK 1": 50, "LOWER LOCK 2": 51, "UPPER LOCK 1": 52, "UPPER LOCK 2": 53,
+             "UPPER LOCK 3": 54, "VAN ENTER OPTO": 84, "SHOOTER LANE": 69}
+
+
+def test_only_a_title_with_all_six_van_switches_has_a_van(ballmodel):
+    assert ballmodel.Van.from_names({"SHOOTER LANE": 69}) is None
+    half = dict(VAN_NAMES)
+    del half["UPPER LOCK 3"]
+    assert ballmodel.Van.from_names(half) is None
+    van = ballmodel.Van.from_names(VAN_NAMES)
+    assert van.stack == [50, 51, 52, 53, 54] and van.enter == 84
+
+
+def test_a_ball_loads_past_the_opto_into_the_upper_lock(ballmodel):
+    van = ballmodel.Van.from_names(VAN_NAMES)
+    plan = van.plan_load(mrg_with())
+    assert plan.switches() == [(84, 1), (84, 0), (52, 1)]
+    assert van.plan_load(mrg_with(52)).switches()[-1] == (53, 1)
+    assert van.plan_load(mrg_with(50, 51, 52)).switches()[-1] == (53, 1)   # the lower lock is not in the way
+    assert van.plan_load(mrg_with(52, 53, 54)).refused                    # the upper lock is full
+
+
+def test_lower_lock_lets_the_bottom_ball_out_and_the_next_drops(ballmodel):
+    van = ballmodel.Van.from_names(VAN_NAMES)
+    assert van.plan_release(mrg_with()).refused
+    assert van.plan_release(mrg_with(50)).switches() == [(50, 0)]
+    assert van.plan_release(mrg_with(50, 51)).switches() == [(50, 0), (51, 0), (50, 1)]
+
+
+def test_upper_lock_drops_a_ball_into_the_lower_section(ballmodel):
+    van = ballmodel.Van.from_names(VAN_NAMES)
+    assert van.plan_drop(mrg_with(50)).refused                       # nothing up there
+    assert van.plan_drop(mrg_with(50, 51, 52)).refused               # nowhere to go
+    assert van.plan_drop(mrg_with(52)).switches() == [(52, 0), (50, 1)]
+    assert van.plan_drop(mrg_with(50, 52, 53, 54)).switches() == [
+        (52, 0), (51, 1), (53, 0), (52, 1), (54, 0), (53, 1)]
+
+
+def test_a_ball_in_the_van_is_neither_home_nor_drainable(ballmodel, tr):
+    # five home, one in the van: nothing is in play, so a drain has nothing to take
+    m = mrg_with(*FULL[:5])
+    assert ballmodel.in_play(tr, m) == 1
+    assert ballmodel.in_play(tr, m, held=1) == 0
+    assert ballmodel.plan_drain(tr, m, held=1).refused
+    assert not ballmodel.plan_drain(tr, m).refused
+
+
+def _van_feeder(ballfeed, ballmodel, tr, monkeypatch, padsw):
+    f = _feeder(ballfeed, tr, lane=62)
+    f.van = ballmodel.Van.from_names(VAN_NAMES)
+    f.van_lower, f.van_upper = (8, 7), (8, 8)
+    f.eject_coil, f.plunge_coil = (8, 1), (8, 4)
+    for k in ("VAN_FLIGHT_S", "VAN_ENTER_S", "VAN_DROP_S"):
+        monkeypatch.setattr(ballmodel, k, 0.0)
+
+    def confirmed(m, sw, v):                    # the guest's merge, at once
+        m[padsw.OFF_SCR_HELD + sw] = v
+        m[padsw.OFF_MRG + sw] = v
+        return True
+    monkeypatch.setattr(padsw, "set_confirmed", confirmed)
+    return f
+
+
+def _led(coilmap):
+    d = bytearray(coilmap.PADLED_READ)
+    d[0:4] = (coilmap.PADLED_MAGIC).to_bytes(4, "little")
+    return d
+
+
+def _fire(coilmap, d, node, idx):
+    d[coilmap.COIL_OFF + node * coilmap.COIL_N + idx] += 1
+
+
+def test_in_attract_a_launch_goes_into_the_van_and_its_release_comes_home(
+        tmp_path, monkeypatch, tr, ballmodel, coilmap):
+    """The game's attract van check, as the probe measured it: auto plunger, the ball arrives in the van,
+    LOWER LOCK lets it out, and with nobody at the machine the way home takes it back to the trough."""
+    ballfeed, padsw = _sw(tmp_path, monkeypatch)
+    f = _van_feeder(ballfeed, ballmodel, tr, monkeypatch, padsw)
+    m = _block(padsw, *FULL[:5], 62)            # a ball waiting in the lane, nobody here
+    d = _led(coilmap)
+    f.poll(m, d, 1.0)                           # seeds every counter
+    _fire(coilmap, d, 8, 4)                     # AUTO PLUNGER
+    f.poll(m, d, 2.0)
+    assert m[padsw.OFF_MRG + 62] == 0           # launched...
+    assert m[padsw.OFF_MRG + 52] == 1           # ...into the van's upper lock
+    assert f.pending == []                      # so not a ball on the playfield
+    _fire(coilmap, d, 8, 8)                     # UPPER LOCK: down into the lower lock
+    f.poll(m, d, 2.5)
+    assert m[padsw.OFF_MRG + 52] == 0 and m[padsw.OFF_MRG + 50] == 1
+    _fire(coilmap, d, 8, 7)                     # LOWER LOCK: out
+    f.poll(m, d, 3.0)
+    assert m[padsw.OFF_MRG + 50] == 0 and f.homebound == [3.0] and f.pending == []
+    f.human_at = 3.5                            # somebody presses Start mid-check...
+    f.poll(m, d, 9.0)
+    assert f.homebound == [] and m[padsw.OFF_MRG + FULL[5]] == 1   # ...and the ball still rolls home
+
+
+def test_in_a_game_the_served_ball_goes_onto_the_playfield_not_the_van(
+        tmp_path, monkeypatch, tr, ballmodel, coilmap):
+    """The fourth live run: a multiball's served balls sent into the van were taken for locked balls, held
+    12-26 s, and the game's count climbed to 7."""
+    ballfeed, padsw = _sw(tmp_path, monkeypatch)
+    f = _van_feeder(ballfeed, ballmodel, tr, monkeypatch, padsw)
+    m = _block(padsw, *FULL[:5], 62)
+    d = _led(coilmap)
+    f.poll(m, d, 1.0)
+    f.van_game = True                           # the game's ball 1 waited for its plunge
+    _fire(coilmap, d, 8, 4)
+    f.poll(m, d, 2.0)
+    assert m[padsw.OFF_MRG + 62] == 0 and m[padsw.OFF_MRG + 52] == 0     # onto the playfield
+    assert len(f.pending) == 1
+
+
+def test_start_pressed_while_an_attract_ball_is_in_the_van_still_sends_it_home(
+        tmp_path, monkeypatch, tr, ballmodel, coilmap):
+    """The first live runs' fault: Start pressed while the attract's balls were in the van, those balls were
+    kept on the playfield for the new player, the game counted them missing and ignored Start."""
+    ballfeed, padsw = _sw(tmp_path, monkeypatch)
+    f = _van_feeder(ballfeed, ballmodel, tr, monkeypatch, padsw)
+    m = _block(padsw, *FULL[:5], 62)
+    d = _led(coilmap)
+    f.poll(m, d, 1.0)
+    _fire(coilmap, d, 8, 4)
+    f.poll(m, d, 2.0)                           # loaded with nobody here
+    f.human_at = 2.2                            # Start
+    _fire(coilmap, d, 8, 8)
+    f.poll(m, d, 2.5)
+    _fire(coilmap, d, 8, 7)
+    f.poll(m, d, 3.0)
+    assert f.homebound == [3.0] and f.pending == []
+
+
+def test_a_ball_waiting_in_the_lane_means_a_game_and_a_quiet_full_trough_means_attract_again(
+        tmp_path, monkeypatch, tr, ballmodel, coilmap):
+    ballfeed, padsw = _sw(tmp_path, monkeypatch)
+    f = _van_feeder(ballfeed, ballmodel, tr, monkeypatch, padsw)
+    monkeypatch.setattr(ballfeed.time, "monotonic", lambda: 0.0)   # the retry gap reads this clock
+    m = _block(padsw, *FULL)                    # every ball home
+    d = _led(coilmap)
+    f.poll(m, d, 1.0)
+    _fire(coilmap, d, 8, 1)                     # the game's ball 1: eject...
+    f.poll(m, d, 2.0)
+    assert m[padsw.OFF_MRG + 62] == 1 and f.eject_from_full
+    f.poll(m, d, 4.0)
+    assert not f.van_game                       # attract plunges within a second or so
+    f.poll(m, d, 5.5)
+    assert f.van_game                           # ...this one waits for its player
+    m[padsw.OFF_SCR_HELD + 62] = m[padsw.OFF_MRG + 62] = 0         # plunged; later the game is over,
+    for i in FULL:                                                   # every ball home and quiet
+        m[padsw.OFF_SCR_HELD + i] = m[padsw.OFF_MRG + i] = 1
+    f.poll(m, d, 30.0)
+    _fire(coilmap, d, 8, 1)                     # attract's eject from the full trough
+    f.poll(m, d, 45.0)
+    _fire(coilmap, d, 8, 4)                     # and its auto plunge
+    f.poll(m, d, 45.5)
+    assert not f.van_game and m[padsw.OFF_MRG + 52] == 1                # into the van again
+
+
+def test_the_van_starts_with_its_resting_balls_once_the_trough_is_full(
+        tmp_path, monkeypatch, tr, ballmodel, coilmap):
+    """David: 8 balls installed, a 6-ball trough - two live in the van. An empty van at boot was a machine two
+    balls short, and its attract searched for them for ever."""
+    van = ballmodel.Van.from_names(VAN_NAMES)
+    assert van.plan_stock(mrg_with(), 2, "lower").switches() == [(50, 1), (51, 1)]
+    assert van.plan_stock(mrg_with(), 2, "upper").switches() == [(52, 1), (53, 1)]
+    assert van.plan_stock(mrg_with(52), 2, "lower").refused
+    ballfeed, padsw = _sw(tmp_path, monkeypatch)
+    f = _van_feeder(ballfeed, ballmodel, tr, monkeypatch, padsw)
+    f.van_stocked = False
+    m = _block(padsw, *FULL)
+    f.poll(m, _led(coilmap), 1.0)
+    assert f.van_stocked and f.van.count(m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]) == ballmodel.VAN_STOCK

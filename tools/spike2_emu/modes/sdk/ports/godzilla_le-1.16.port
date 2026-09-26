@@ -471,3 +471,15 @@ site tank_award_screen_kill 0x001091a8 0xe92d43f0 0xe24dd01c  # (obj, 0xc94, val
 # (MODE_SDK.md, "Insider Connected: no score leaves a machine that carries modes")
 site agent_header     0x005d5bd0 0xe92d40f8 0xe2505000
 site agent_begin      0x005e053c 0xe590c004 0xe1a00001
+
+# ---- the framework's count of the balls in play (The Beatles 1.29 0x1fd194, found here by its code,
+# 20/20 words alike); two or more is a multiball (the stack section) and a multiball of the mode's own
+# watches it (item 167)
+site balls_in_play         0x00388e0c 0xe92d4010 0xe3034930
+
+# ---- a multiball of the mode's own (item 167): the framework's start-a-multiball (The Beatles 1.29
+# 0x1fd310, found here by its code, 24/24 words alike): serve balls until r0 are in play, r1 0, r2 the
+# ball save in ticks (62 a second), r3 0xbb as this build's own multiballs pass it, two zero words on the
+# stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
+site multiball_serve       0x00388f88 0xe92d41f0 0xe301e16a
+# EMU 2026-09-26 (mb_e2e.sh): served 3 on a mode file's start, add-a-ball to 4, drains to 1, END (one ball left). PROVEN.

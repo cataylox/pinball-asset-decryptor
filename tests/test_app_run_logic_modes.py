@@ -1440,6 +1440,8 @@ def test_modes_tab_premium_1_16_project_offers_godzillas_names(tmp_path):
         w.call("modes.example", "KAIJU RUSH")
         st = _st(w)
         assert "Ready to build" in st["status"]
+        if "godzilla_le-1.16" not in MP.MULTIBALL_PROVEN:   # item 167: greyed until emulator-proven
+            assert "not yet seen a mode of yours start one" in st["reasons"].pop("multiball")
         assert st["reasons"] == {}, st["reasons"]
         assert not st["dis"]["lights"]
         spec = MP.load(str(project / "modes" / "kaiju_rush" / "mode.json"))

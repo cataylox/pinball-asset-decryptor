@@ -999,8 +999,8 @@ multiball" asked for two), `a multiball` answered within 5 s and the mode refuse
 `nothing` again once the multiball was over. Proven on: The Beatles 1.29, Bond 60th LE 1.11,
 Bond LE 1.06, Metallica 1.03, Star Wars ELG 1.10, Stranger Things LE 1.12, X-Men LE 0.98,
 Batman 66 1.13, Guardians LE 1.14, Aerosmith LE 1.15 and Elvira 3 1.13 (`mode_project.STACK_BALLS_PROVEN`; the tab says the mode
-waits for multiballs only). The rig cannot serve a SWELF-generation build's balls (its derived
-device table has no coils), so on those the answer was asked 0.3 s after the
+waits for multiballs only). The rig could not serve a SWELF-generation build's balls then (its derived
+device table had no coils; item 167 added them), so on those the answer was asked 0.3 s after the
 start, before the ball the game could not serve ended the multiball (Batman, Guardians and
 Aerosmith).
 
@@ -1120,6 +1120,94 @@ RTTI) and the names are the game's own house titles. The multiballs are left to 
 shots out. `mode_project.STACK_OBJECTS_PROVEN` (2026-09-26: started with nothing running; a House started
 through 0xdd12c on the manager, "one of the game's modes (The Werewolf of Washington)" and refused; the
 ball's end closed the House, nothing, started again).
+
+## A multiball of your own (item 167)
+
+Every Spike 2 build shares the framework's ball code, and the game's own multiballs all go
+through ONE call of it: "serve balls until N are in play, with a ball save" (The Beatles 1.29
+`0x1fd310`, Godzilla Pro 1.15 `0x398660`; found on every build by its code). A mode of yours
+calls the same function, so the trough, the auto-launcher and the ball saver do for it what they
+do for the game's own multiballs, and the game's own end of ball comes only when the LAST ball
+drains (`.ball_end`, the bonus, the events: as ever).
+
+In C:
+
+```c
+if (!pm_multiball_start(3, 15)) { pm_log("no multiball: the game refused"); return; }
+...                                        /* jackpots: score the shots you like */
+if (pm_balls_in_play() <= 1) { /* it is over */ }
+pm_multiball_add(1, 15);                   /* an add-a-ball */
+```
+
+In a mode file:
+
+```
+multiball      3 15          # balls in play when it starts, and its ball save in seconds
+add_ball       0x08000000 1  # a shot that adds a ball, and how many times
+seconds        0             # no clock: it ends when one ball is left
+```
+
+The Modes tab's Mode page has it under Multiball: the balls, the ball save and the add-a-ball
+shot; `Runs for` 0 is no clock.
+
+**What the runtime does.** At the start it asks the game for the balls; the mode does not start
+when the game refuses (no game in play, a tilt, a port without the call) and keeps its trigger
+count. It then watches the framework's count of the balls in play (`site balls_in_play`, the
+count the stack section uses on the titles with no cmode rules): two or more is the multiball
+running; one (or none) for 2 s, once the ball save and 3 s more have passed, ends the mode
+(`END (one ball left)`; `no second ball was served` when two were never seen, as in the rig on a
+build whose balls it cannot serve). The game never knows the multiball is yours: its mode
+manager runs nothing for it, so its own multiball screens, jackpots and music stay off, while
+its ball code shows what it knows (a ball-save insert, BALLS IN PLAY). Your screen, clip, sounds
+and lights are the show. A `stack no` mode of yours started later sees `a multiball` while yours
+runs, as it would for the game's own.
+
+**The port lines.** Every shipped port carries them (`port_tool.py` places them on another
+build by signature, and the app's derived ports get them the same way):
+
+```
+site multiball_serve       0x001fd310 0xe92d41f0 0xe304e5de   # the framework's start-a-multiball
+site balls_in_play         0x001fd194 0xe92d4010 0xe3084ab0   # its count of the balls in play
+value multiball_arg3       0xbb                            # optional: the fourth word (below)
+```
+
+The call's words, read off every caller in the 34 latest builds (2026-09-26, `armmbcall`): r0
+the balls wanted in play (the framework cuts it to the balls installed), r1 0 (Batman, Metallica,
+Bond and Guardians pass a small id of their own), r2 the ball save in ticks (62 a second: the
+title's adjustment, 0x138 = 5 s in the framework's own add-a-ball), r3 0xbb on every build's own
+multiballs but The Beatles' (0x136, 0xf8, 0x7c), then two zero words on the stack. It answers 0
+with the attract or tilt bits up in the mode mask, or with no ball devices, and 1 once its serving
+process is up. The runtime passes exactly those; `value multiball_arg3` overrides r3.
+
+**What is measured (emulator-proven 2026-09-26 on all 36 shipped builds, the app's rig, muted:
+`C:\tmp\pad_generic\mb\mb_e2e.sh`, one scripted game each, driven over every build by `mb_batch.sh`).** A
+mode file with `multiball 3 10`, `add_ball <shot> 1`, two jackpot shots and `seconds 0`, started by its
+trigger file with one ball in play: `[pad] multiball: 3 balls asked for (3 in play now) ... the game is
+serving` and `MULTIBALL: 3 balls asked for` in the same millisecond, both jackpot shots paid (+1,000,000,
++2,000,000: `2 shots, awarded 3000000`) while the balls were out, the add-a-ball shot asked for a fourth
+(`4 ball(s) in play`), and the rig's drains, one every ~7 s after the ball save had run out, took the count
+4, 3, 2, 1, each drop within a second of its drain, with `END (one ball left)` 2 s after the count read
+one; the last drain then gave the game's own end of ball. The same on every build; health segv 0, fatal 0
+on every run. The shots were pressed as switches: on a port with `switch` lines, the port's own; on one
+without, the switch the app's Check this game run saw raise that shot (on the SWELF generation the rig's
+switch ids are not the port's, so its check-run ids).
+
+What the rig needed first, all of it the rig and none of it the mode: the SWELF generation (Aerosmith,
+Avengers, Batman, Guardians, Iron Maiden, Mando, Rush, Stranger Things, Sword of Rage) and Foo Fighters had
+no coil in their derived device table, so the rig never saw the trough eject and no ball came (`swelf.coils`
+reads them out of the device table now, 24-byte and 48-byte records alike, and `mktables.py` appends them);
+Foo Fighters holds its first ball on a song picker until it is launched; Munsters writes a ball off ~30 s
+after the last playfield switch, so its run presses one between drains; and **TMNT LE's van**, a physical
+ball lock the rig had no model of: its attract auto-plunges balls into the van and lets them out, and with
+no van those balls were lost, Start waited for the trough to run dry and a multiball's count collapsed at
+the game's first ball search. The rig's ball feeder has a van now (`ballmodel.Van`, the rig README), and
+TMNT LE passed with it. The rig still has 6 balls where the LE has 8, so the game searches for two in
+attract and takes Start when that search gives up.
+
+`mode_project.MULTIBALL_PROVEN` lists the proven builds, and the tab greys Multiball on any build the app
+derived a port for until it is proven the same way. Not measured: a machine; a multiball ending while the
+mode's clock still runs (the balls stay in play, the game's ball code goes on); two players; a mode of yours
+with `stack no` refused while your own multiball runs; a player shooting TMNT LE's van.
 
 ## Ports: why your mode runs on any game
 

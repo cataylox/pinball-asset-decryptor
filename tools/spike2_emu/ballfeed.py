@@ -265,6 +265,31 @@ class Feeder:
         coils = coilmap.load(gameinfo.table("device_xy.txt", self.game) or "")
         self.eject_coil = coilmap.eject_address(coils)
         self.plunge_coil = coilmap.address(coils, coilmap.AUTO_PLUNGER)
+        # item 167: a title with a van (TMNT LE/Premium) - see ballmodel.VAN_STACK
+        self.van = ballmodel.Van.from_names({(r.get("name") or "").upper().strip(): r["id"] for r in rows})
+        self.van_lower = coilmap.address(coils, ballmodel.VAN_COIL_LOWER) if self.van else None
+        self.van_upper = coilmap.address(coils, ballmodel.VAN_COIL_UPPER) if self.van else None
+        if self.van_lower is None or self.van_upper is None:
+            self.van = None
+        #: how many of the van's balls went in during attract: those roll home when the van lets them
+        #: out, whoever has walked up since
+        self.van_attract = 0
+        #: a game is on (the game's ball waited in the lane for its plunge - ballmodel.VAN_GAME_LANE_S)
+        self.van_game = False
+        #: when the last eject was answered, whether the trough was full before it, when a ball last came home
+        self.eject_at = None
+        self.eject_from_full = False
+        self.home_at = 0.0
+        self.home_count = None
+        #: the van's resting balls have been put in (once, at start-up - ballmodel.VAN_STOCK)
+        self.van_stocked = False
+        #: balls queued on the ramp BEHIND the trough's last switch (PAD_BALL_EXTRA): an eject from a
+        #: full trough takes one of these and the trough still reads full; a ball home to a full
+        #: trough joins them
+        self.extra_max = _num("PAD_BALL_EXTRA", 0)
+        self.extra = self.extra_max
+        #: balls like that, let out and on their way home (release times)
+        self.homebound = []
         self.seen = {}
         self.last_feed = 0.0
         self.said = {}
@@ -335,6 +360,10 @@ class Feeder:
         out.append("auto plunger %s"
                    % ("node %d index %d" % self.plunge_coil if self.plunge_coil
                       else "not in the device table"))
+        if self.van:
+            out.append("van: locks %s, enter %d, LOWER LOCK node %d index %d, UPPER LOCK node %d index %d"
+                       % ((",".join(str(i) for i in self.van.stack), self.van.enter)
+                          + self.van_lower + self.van_upper))
         return out
 
     def usable(self):
@@ -415,7 +444,16 @@ class Feeder:
             else:
                 plan = ballmodel.plan_eject(self.trough, mrg, self.lane,
                                             lane_made, FLIGHT_S)
+                full_before = self.trough.full(mrg)
+                if full_before and self.extra and not plan.refused:
+                    # the stack rolls down one and a ball from behind the trough takes the last place
+                    out = plan.steps[0][1]
+                    plan.steps[1:1] = [("wait", ballmodel.ROLL_S, "the stack rolls down"),
+                                       ("set", out, 1, "trough switch %d closed (a ball from behind the "
+                                                       "trough rolled in, %d left there)" % (out, self.extra - 1))]
+                    self.extra -= 1
                 if self.run_plan(m, plan, "eject:"):
+                    self.eject_at, self.eject_from_full = now, full_before
                     self.last_feed = time.monotonic()
                     self.fed += 1
                     publish(self.fed)
@@ -428,10 +466,58 @@ class Feeder:
                          and bool(padsw.merged(m, self.lane)))
             if self.run_plan(m, ballmodel.plan_launch(self.lane, lane_made),
                              "auto plunger:"):
-                # The claim from the TOP of this poll, not a fresh read: our own
-                # launch write has moved the script generation by now, and
-                # _claim() has already adopted it.
-                self.pending.append((now, claim))
+                # ★ ITEM 167: IN ATTRACT, ON A VAN TITLE, THE AUTO PLUNGER SHOOTS INTO THE VAN; in a
+                # game onto the playfield (ballmodel.VAN_STACK has the measurements). A person at the
+                # controls is NOT the test - three rules built on it broke Start or the game's count.
+                if self.van and self.van_game and self.eject_from_full \
+                        and now - self.home_at >= ballmodel.VAN_ATTRACT_QUIET_S:
+                    self.van_game = False
+                    say("van: an auto plunge from a full, quiet trough - attract again")
+                vplan = (self.van.plan_load(m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID])
+                         if self.van and not self.van_game else None)
+                if vplan and self.run_plan(m, vplan, "van:"):
+                    self.van_attract += 1
+                    say("the launched ball went into the van (%d there now)"
+                        % self.van.count(m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]))
+                else:
+                    # The claim from the TOP of this poll, not a fresh read: our own
+                    # launch write has moved the script generation by now, and
+                    # _claim() has already adopted it.
+                    self.pending.append((now, claim))
+        if self.van and not self.van_stocked:
+            mrg = m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
+            if self.trough.full(mrg):
+                self.van_stocked = True
+                if self.run_plan(m, self.van.plan_stock(mrg), "van stock:"):
+                    say("the van holds its %d resting ball(s): %d installed, %d in the trough"
+                        % (self.van.count(m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]),
+                           len(self.trough.positions) + ballmodel.VAN_STOCK, len(self.trough.positions)))
+        if self.van:
+            mrg = m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
+            n = self.trough.count(mrg)
+            if self.home_count is not None and n > self.home_count:
+                self.home_at = now
+            self.home_count = n
+            lane_now = self.lane is not None and bool(padsw.merged(m, self.lane))
+            if not self.van_game and lane_now and self.eject_at is not None \
+                    and now - self.eject_at >= ballmodel.VAN_GAME_LANE_S:
+                self.van_game = True
+                say("van: the ball waits in the lane for its plunge - a game is on, launches go "
+                    "onto the playfield")
+            if self.fired(d, self.van_lower) and self.run_plan(m, self.van.plan_release(mrg), "van LOWER LOCK:"):
+                if self.van_attract:
+                    # an attract ball: nobody plays a ball in attract, so it rolls home even if
+                    # somebody pressed Start while it was in the van
+                    self.van_attract -= 1
+                    self.homebound.append(now)
+                else:
+                    # a game's ball: an ordinary launched ball from here on (a person drains it,
+                    # the way home takes it if the room empties)
+                    self.pending.append((now, claim))
+            mrg = m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
+            if self.fired(d, self.van_upper):
+                self.run_plan(m, self.van.plan_drop(mrg), "van UPPER LOCK:")
+        self._van_home(m, now)
         self._way_home(m, now, claim)
         return fed
 
@@ -480,6 +566,22 @@ class Feeder:
         return (self._u32(m, padsw.OFF_GEN), self._u32(m, padsw.OFF_SPIN_GEN),
                 self.hands)
 
+    def _van_home(self, m, now):
+        """An attract ball the van let out drains home HOME_S later, claims or not (item 167)."""
+        if not self.homebound or now - self.homebound[0] < (HOME_S or 5.0):
+            return
+        mrg = m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
+        lane_made = self.lane is not None and bool(padsw.merged(m, self.lane))
+        dplan = ballmodel.plan_drain(self.trough, mrg, self.lane, lane_made, self.van.count(mrg))
+        if dplan.refused and self.trough.full(mrg) and self.extra < self.extra_max:
+            self.extra += 1
+            self.homebound.pop(0)
+            say("the attract ball stopped behind the full trough (%d there)" % self.extra)
+        elif self.run_plan(m, dplan, "van check, home:"):
+            self.homebound.pop(0)
+            say("the attract ball the van let out rolled home (%d more to come)" % len(self.homebound))
+        # else: a ball waiting in the lane holds it up - it comes home on a later poll (dropping it lost a ball)
+
     def _way_home(self, m, now, claim):
         """A launched ball nobody is playing drains back to the trough.
 
@@ -527,9 +629,12 @@ class Feeder:
         mrg = m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
         lane_made = (self.lane is not None
                      and bool(padsw.merged(m, self.lane)))
-        if self.run_plan(m, ballmodel.plan_drain(self.trough, mrg, self.lane,
-                                                 lane_made),
-                         "way home:"):
+        dplan = ballmodel.plan_drain(self.trough, mrg, self.lane, lane_made,
+                                     self.van.count(mrg) if self.van else 0)
+        if dplan.refused and self.trough.full(mrg) and self.extra < self.extra_max:
+            self.extra += 1                         # home, behind the trough's last switch
+            say("way home: the ball stopped behind the full trough (%d there)" % self.extra)
+        elif self.run_plan(m, dplan, "way home:"):
             say("launched ball came home untouched (%.1f s, nobody at the "
                 "controls)%s"
                 % (now - t0,

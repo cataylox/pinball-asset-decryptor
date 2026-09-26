@@ -303,3 +303,15 @@ value node_visible_vfn      0xa8
 
 # ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
 scene hud                  297053bbcfae2550c2caeee5a28b70634acf9126/dbfc32cef3a745637ee4e6f03a7461a7f63df3ed
+
+# ---- the framework's count of the balls in play (The Beatles 1.29 0x1fd194, found here by its code,
+# 20/20 words alike); two or more is a multiball (the stack section) and a multiball of the mode's own
+# watches it (item 167)
+site balls_in_play         0x0016b544 0xe92d4010 0xe3004be8
+
+# ---- a multiball of the mode's own (item 167): the framework's start-a-multiball (The Beatles 1.29
+# 0x1fd310, found here by its code, 24/24 words alike): serve balls until r0 are in play, r1 0, r2 the
+# ball save in ticks (62 a second), r3 0xbb as this build's own multiballs pass it, two zero words on the
+# stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
+site multiball_serve       0x0016b6c0 0xe92d41f0 0xe307e7da
+# EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
