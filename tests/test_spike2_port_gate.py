@@ -377,7 +377,9 @@ def test_the_beatles_profile():
     # item 164: Lights go through its named inserts (every insert in the mode's colour)
     # item 164: its screen was seen; with no time-up call known, a mode's own end sound rides a carrier
     # (heard at time-up in the emulator), so nothing is left out
-    assert cannot == set() and p.light_route == "inserts"
+    # item 167: a multiball of the mode's own is greyed until the build is emulator-proven
+    assert cannot == (set() if "beatles-1.29" in MP.MULTIBALL_PROVEN else {"multiball"})
+    assert p.light_route == "inserts"
     assert "multiballs" in p.stack_note          # item 164: the framework's balls in play, multiballs only
     for part in cannot:
         # the reasons a person reads name the game and no internal word
