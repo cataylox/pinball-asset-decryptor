@@ -1541,9 +1541,10 @@ HELP_CONTENT = {
          "both alone — though a country picked earlier stays stored in the "
          "machine. Power is the mains. 60 Hz is how the emulator has always "
          "run. European machine is a 50 Hz board on 50 Hz mains, which runs "
-         "normally. US machine is a 60 Hz board on 50 Hz mains, which the "
-         "game refuses to run, and the emulator leaves that refusal up rather "
-         "than pressing past it. Both are remembered for every project, not per "
+         "normally. US machine is a 60 Hz board on 50 Hz mains, which some "
+         "games refuse to run and some do not; with a card picked, the line "
+         "under Power says which this game does. A refusal is left up rather "
+         "than pressed past. Both are remembered for every project, not per "
          "project, and take effect at the next Start."),
         ("Reset windows",
          "Puts the emulator's windows back where they started. The rig "
