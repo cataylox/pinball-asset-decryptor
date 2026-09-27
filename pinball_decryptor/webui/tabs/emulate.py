@@ -200,6 +200,8 @@ class EmulateTab(TabService):
         self._which_token = 0
         self._which = None
         self._browsed = None
+        self._mains_note = ""       # PAD-173: what this game does about 50 Hz
+        self._mains_key = None
         self._slots_rows = None
         self._slots_total = None
         self._slots_free = None
@@ -209,6 +211,8 @@ class EmulateTab(TabService):
                       "audio": "—"}
 
         self.emulate_card_var.trace_add("write", self._on_card_changed)
+        # PAD-173: the note belongs to the pair (card, Power), so both move it.
+        self.emulate_power_var.trace_add("write", lambda *_a: self._mains_kick())
         self.emulate_overrides_var.trace_add(
             "write", lambda *_a: self._overrides_paint())
         self._volume_var.trace_add("write", self._on_volume_change)
@@ -242,7 +246,7 @@ class EmulateTab(TabService):
             slots_sum=("The slots appear with the next status poll."
                        if sys.platform == "win32" else
                        "Slot management is available on Windows (WSL)."),
-            game=None, which=None,
+            game=None, which=None, mains_note="",
             assets="", ovr_hint=rig.OVR_OFF, ovr_refused=False,
             cache=None, rename=None)
         self._run_label(False, False)
@@ -423,6 +427,7 @@ class EmulateTab(TabService):
         self._precache_kick()
         self._select_probe_kick()
         self._which_kick()
+        self._mains_kick()
 
     # -- which card this is, next to the project (PAD-199) ----------------
     def _which_kick(self):
@@ -629,6 +634,44 @@ class EmulateTab(TabService):
             if not self._select_touched and self._select_menu is not None:
                 self._select_var.set(self._select_menu)
         self._select_hint()
+
+    # -- does this game HAVE a mains lock? (PAD-173) -----------------------
+    #
+    # The Power row's "50 Hz mains, US machine" is the setup a US game refuses
+    # to run on, and the emulator sets it up faithfully - but whether the
+    # refusal comes is the GAME'S decision, and the builds do not agree (see
+    # plugins/stern/mains_check.py, where both shapes are decoded).  Sam
+    # picked it twice, saw his game start both times, and reported it as a
+    # bug; it was his game's own code.  So the card is asked, and the answer
+    # sits beside the row rather than the app promising a lock.
+    def _mains_kick(self):
+        """Probe the picked card, off the loop, when the lock is selected."""
+        card = self._card()
+        want = (self.emulate_power_var.get() == rig.POWER_CHOICES[2][0]
+                and bool(card))
+        if not want:
+            self._mains_note = ""
+            self.set(mains_note="")
+            return
+        from ...plugins.stern import mains_check
+        stamp = mains_check.cache_stamp(card)
+        key = (card, stamp)
+        if key == self._mains_key:
+            return
+        self._mains_key = key
+
+        def run():
+            title, verdict = mains_check.verdict_card(card)
+            self._post(self._mains_apply, key,
+                       mains_check.sentence(title, verdict))
+
+        self._thread(run)
+
+    def _mains_apply(self, key, note):
+        if key != self._mains_key:      # the card or the row moved on
+            return
+        self._mains_note = note
+        self.set(mains_note=note)
 
     # -- the machine row (PAD-149) -----------------------------------------
     def _machine_env(self):
@@ -2008,6 +2051,10 @@ class EmulateTab(TabService):
             self._refuse_start(self.get("hint") or "")
             return
         env = self._launch_env(src)
+        # PAD-173: a lock this game will not give is worth saying once more
+        # here, because the log is what a user sends when it "did not work".
+        if self._mains_note:
+            self._log("[emulate] " + self._mains_note)
         ovr_request = self._overrides_wanted()
         ovr_selector = bool(self._select_var.get())
         prepare_card = self._card()

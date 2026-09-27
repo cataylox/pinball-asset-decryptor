@@ -272,6 +272,67 @@ def test_machine_settings_restore_globally(tmp_path):
         assert w.window.emulate_power_var.get() == "60 Hz mains"
 
 
+def test_a_game_with_no_mains_lock_says_so_under_the_power_row(tmp_path,
+                                                               monkeypatch):
+    """PAD-173: the Power row can ask for the 50 Hz refusal, but whether it
+    comes is the GAME's decision - two titles have no check at all and the
+    Godzilla-era builds answer the question themselves at power-up. Sam read
+    that as the setting being broken, twice, so the card is asked and the
+    answer sits beside the row."""
+    from pinball_decryptor.plugins.stern import mains_check
+    card = tmp_path / "jurassic_park_the_pin-1_05_0.Release.8G.sdcard.raw"
+    card.write_bytes(b"\0" * 512)
+    asked = []
+
+    def fake(path, title=None):
+        asked.append(path)
+        return "jurassic_park_the_pin", mains_check.NONE
+    monkeypatch.setattr(mains_check, "verdict_card", fake)
+
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        w.run(lambda: w.window.emulate_card_var.set(str(card)))
+        w.drain()
+        # 60 Hz asks for no lock, so the card is not read at all.
+        assert w.state(NS)["mains_note"] == ""
+        assert asked == []
+
+        w.call("ui.set", NS, "power", "50 Hz mains, US machine")
+        _wait(w, lambda: w.state(NS)["mains_note"])
+        note = w.state(NS)["mains_note"]
+        assert "jurassic_park_the_pin" in note and "no mains check" in note
+        assert asked == [str(card)]
+
+        # ...and it is in the log at Start, which is what a user sends.
+        rec = _patch(svc, monkeypatch)
+        w.call(NS + ".toggle")
+        _wait(w, lambda: any("watch.sh" in " ".join(c) for c in rec.calls))
+        _wait(w, lambda: svc._proc is None and not svc._starting)
+        w.drain()
+        assert any("no mains check" in ln for ln in _lines(w))
+
+        # Back to 60 Hz and the note goes: it belongs to the pair.
+        w.call("ui.set", NS, "power", "60 Hz mains")
+        w.drain()
+        assert w.state(NS)["mains_note"] == ""
+
+
+def test_a_game_that_does_refuse_says_nothing(tmp_path, monkeypatch):
+    """The lock working is the promise the row already makes; a note there
+    would be noise on every 50 Hz run."""
+    from pinball_decryptor.plugins.stern import mains_check
+    card = tmp_path / "stranger_things_le-1_12_0.Release.8G.sdcard.raw"
+    card.write_bytes(b"\0" * 512)
+    monkeypatch.setattr(mains_check, "verdict_card",
+                        lambda *a, **kw: ("stranger_things_le",
+                                          mains_check.SHOWS))
+    with web_app(tmp_path, mfr="stern") as w:
+        w.run(lambda: w.window.emulate_card_var.set(str(card)))
+        w.call("ui.set", NS, "power", "50 Hz mains, US machine")
+        w.drain()
+        assert w.state(NS)["mains_note"] == ""
+
+
 def test_no_rig_means_no_probe_and_no_poll(tmp_path):
     with web_app(tmp_path, mfr="stern") as w:
         svc = _svc(w)

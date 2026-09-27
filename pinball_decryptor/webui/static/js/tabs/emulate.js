@@ -178,6 +178,8 @@ function CardSource({ s }) {
       <div class="stack emu-lblf"><label class="lbl" for="emu-power">Power</label>
         <${Select} id="emu-power" ns="emulate" k="power" value=${s.power} options=${powers} title=${s.power_tip} /></div>
     </div>
+    ${s.mains_note ? html`<div class="note warn emu-mains" role="status">
+      <span class="small warn-ink">${s.mains_note}</span></div>` : null}
     <div class="row emu-flags">
       <${Check} checked=${s.select} label="Boot selector" title=${s.select_tip}
         onChange=${(v) => call("emulate.set_select", v)} />
