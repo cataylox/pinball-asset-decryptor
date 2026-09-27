@@ -530,12 +530,23 @@ NSCLEAN=$DDIR/nsclean.sh
 # accident, two bugs cancelling.
 PAD_NS_KEEP=${CARD_KEEP:-}
 export PAD_NS_KEEP
+# ...AND A RIG SLOT'S ROOTFS (padpath.sh, "RIG SLOTS"). Slot 0's rootfs is a
+# plain directory on / and survives this sweep untouched; a slot's is an
+# OVERLAY MOUNTED AT $R, and sweeping it away left the `mount --bind $R $R`
+# below binding the empty mountpoint directory underneath. criu then staged
+# an empty root and died on its first mountpoint - "Can't stat mountpoint
+# .../dev/shm" - in both mount engines (first save-state load in rig 1,
+# 2026-09-27). Kept only when it IS a mountpoint, so slot 0 is unchanged.
+PAD_NS_KEEP_ROOT=
+mountpoint -q "$R" 2>/dev/null && PAD_NS_KEEP_ROOT=$R
+export PAD_NS_KEEP_ROOT
 cat > "$NSCLEAN" <<EOF
 mount --make-rprivate /
 awk '\$5 != "/" && \$5 != "/proc" && \$5 != "/dev" && \$5 != "/dev/pts" { print \$5 }' \
     /proc/self/mountinfo | sort -r | while IFS= read -r mp; do
     mp=\$(printf '%b' "\$mp")
     [ -n "\$PAD_NS_KEEP" ] && [ "\$mp" = "\$PAD_NS_KEEP" ] && continue
+    [ -n "\$PAD_NS_KEEP_ROOT" ] && [ "\$mp" = "\$PAD_NS_KEEP_ROOT" ] && continue
     umount -l "\$mp" 2>/dev/null
 done
 umount -l /proc 2>/dev/null

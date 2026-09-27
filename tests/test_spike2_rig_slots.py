@@ -437,3 +437,13 @@ kill -0 $a && kill -0 $c && ! kill -0 $b 2>/dev/null && echo "only slot 2 died"
 kill $a $c; rm -f "$S"
 ''')
     assert "ok1" in out and "only slot 2 died" in out, out + err
+
+
+def test_a_save_state_load_keeps_a_rigs_overlay_root():
+    """restorestate.sh sweeps every mount out of the restore's namespace; a
+    rig's rootfs IS a mount, and sweeping it left criu an empty root ("Can't
+    stat mountpoint .../dev/shm", the first load in rig 1). Kept only when it
+    is a mountpoint, so rig 0 - a plain directory - is unchanged."""
+    s = _src("restorestate.sh")
+    assert 'mountpoint -q "$R" 2>/dev/null && PAD_NS_KEEP_ROOT=$R' in s
+    assert r'[ "\$mp" = "\$PAD_NS_KEEP_ROOT" ] && continue' in s

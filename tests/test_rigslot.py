@@ -115,3 +115,13 @@ def test_the_colours_match_the_playfield_band():
         css = fh.read()
     for n, c in enumerate(rigslot.COLOURS):
         assert "--rig-%d: %s" % (n, c) in css
+
+
+def test_every_rig_command_carries_the_rig(board, monkeypatch):
+    from pinball_decryptor.webui import emulate_core
+    monkeypatch.setattr(emulate_core.runtime, "distro_for", lambda _k: None)
+    assert not [e for e in emulate_core._rig_env() if e.startswith("PAD_SLOT")]
+    monkeypatch.setenv("PAD_SLOT", "3")
+    monkeypatch.setenv("PAD_LABEL", "item/48")
+    env = emulate_core._rig_env()
+    assert "PAD_SLOT=3" in env and "PAD_LABEL=item/48" in env

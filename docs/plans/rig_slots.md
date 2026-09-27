@@ -168,18 +168,76 @@ my rigs were up, and both of my playfield windows disappeared. The old
 `killgame.sh`'s Windows backstop kills every `playfield.py` on the PC, across
 distros. After merge, rig 0's Stop matches only unmarked windows.
 
+**2026-09-27, pass 2: the app, the triage dashboard, save states in a rig.**
+
+- **The app** (`core/rigslot.py`): every rig command carries `PAD_SLOT` and
+  `PAD_LABEL` (through `emulate_core._rig_env`). A copy launched for a triage
+  ticket (`PAD_TICKET`, no `PAD_SLOT`) claims the first free rig on the board
+  at startup and gives it back on exit, so two ticket windows never share a
+  rig; its title bar says `[rig 2: PAD-231]`. The playfield window the app
+  opens itself gets the marker and label. The **Emulate tab** shows an
+  "Emulator rigs" strip (each rig's colour chip, holder, what it is doing;
+  this window's rig outlined) whenever this window has a rig of its own or
+  another rig is held or running. Checked in a capture against a sample board
+  (`webui_shot.py --tab emulate`, zero page errors).
+- **The playfield page's band and chip**, captured with `playfield_demo.py`
+  as rig 1 / item/48: cyan band across the top, `rig 1 · item/48` chip.
+- **The triage dashboard** (`pad-triage` v0.8.19, commit `f28989a`, pushed):
+  `rigboard.py` reads the board (file reads only, cached 2 s); the header has
+  one square per rig in its colour (filled when held, pulsing while a game
+  runs) and "emulator: N of 5 rigs busy"; the list has an "Emulator rigs"
+  panel with each holder linked to its ticket; a ticket holding a rig shows a
+  chip on its card and its tab; `/api/rig`. Every claude session it spawns
+  (headless, browser terminal, console window) gets `PAD_TICKET=PAD-n` with
+  `PAD_TICKET/u` in WSLENV, so the rig titles its windows with the ticket.
+  The live dashboard shows it after a restart (tray: Restart).
+- **Save states in a rig, emulator-proven.** Checkpointable run (root,
+  `PAD_PIVOT=1`) of godzilla_pro in rig 1: `savegame.sh` wrote the slot into
+  rig 1's own `saves/` (48 MB, nothing in the base rig's); the first
+  `loadgame.sh` FAILED - `restorestate.sh` sweeps every mount out of the
+  restore's namespace, a rig's rootfs IS a mount, and criu was handed an empty
+  root ("Can't stat mountpoint .../dev/shm", both mount engines). Fixed by
+  keeping `$R` when it is a mountpoint (rig 0, a plain directory, unchanged).
+  Then, over a live rig 1 run: `[restore] ok`, the restored guest carries
+  `PAD_SLOT=1`, `status.sh` rig 1 `state=attract fps=59.9`, rig 0 still 0.
+- Tests: `tests/test_rigslot.py` (app side) and more in
+  `tests/test_spike2_rig_slots.py`; 52 pass under WSL, 50 + 2 `/proc` skips
+  under Git Bash; the diff's targeted zones (7661 tests) pass.
+
 **Owed**
 
-- The app: pass `PAD_SLOT`/`PAD_LABEL` through, show the board on the Emulate
-  tab, tag the app's title with its rig.
-- The triage dashboard (sibling repo `pad-triage`): rig panel, header badge,
-  `PAD_TICKET` into every session's environment (crossing into WSL via WSLENV).
-- The `/next` skill's lock protocol (`~/.claude/skills/next/SKILL.md`) and
-  `plans/TODO.md`'s non-negotiable move to `riglock.sh`. **Only at merge**:
-  the skill is live for every session, and main's scripts do not know slots
-  yet.
-- Tests.
-- A save state in a slot (criu over an overlay root): not tried yet.
+- **At merge, the session protocol moves to `riglock.sh`** (text below):
+  `~/.claude/skills/next/SKILL.md` "The rig lock" and "Starting the app",
+  `plans/TODO.md`'s non-negotiable, and the `reference_pad_rig_lock` memory.
+  Not before: the skill is live for every session, and main's scripts do not
+  know slots, so a session following it before the merge would be told to use
+  commands main does not have.
+- An app-driven run in a claimed rig in PAD-Runtime (the app's own distro).
+  Not run in this pass: another session was running the app in PAD-Runtime on
+  main's code, whose Stop is still machine-wide within that distro and on the
+  Windows side.
+- WSLg: this VM's X server was down all day (no socket in `/mnt/wslg`), so the
+  renderer windows were proven on a private Xvfb (`:7`) by title, not seen on
+  the desktop. The playfield windows were seen on the desktop.
+
+### The protocol text for the `/next` skill, at merge
+
+> **Rig slots - several rigs, one per session.** Take a rig of your own
+> before any build, run, Stop, save-state or rootfs change:
+>
+>     wsl -u root -e bash <rig>/riglock.sh take --any item/<N> <what is up>
+>
+> It prints `slot=N` and mounts rig N. Run EVERY rig command with
+> `PAD_SLOT=N` (`wsl -e bash -c "PAD_SLOT=N PAD_AUDIO=0 bash <rig>/watch.sh 8"`,
+> `PAD_SLOT=N bash killgame.sh`, `PAD_SLOT=N bash alive.sh`). Say what you
+> are doing as it changes: `riglock.sh note N <what>`. Give it back when
+> `PAD_SLOT=N alive.sh` reads 0: `riglock.sh release N item/<N>`.
+> `riglock.sh list` shows every rig; David sees the same board on the triage
+> dashboard and the Emulate tab. Rig 0 (`--slot 0`) is the ordinary rig and
+> the base every other rig is layered over: take it only to change the base
+> (a slot 0 build or `mktables`), and expect every rig's view of an unwritten
+> file to change with it. A rig's Stop and counts see only that rig; a
+> `wsl --shutdown` still ends every rig's run.
 
 ## How to test it
 
