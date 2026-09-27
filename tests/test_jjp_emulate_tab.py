@@ -328,30 +328,71 @@ def test_key_on_pc_is_only_asked_when_the_rig_cannot_see_the_key():
 
 # ------------------------------------------------------- the ISO is remembered --
 
-def test_the_game_iso_is_written_into_the_project_anchor():
-    """The Game ISO box came back EMPTY on every load with a project open.
-
-    It was saved to settings.json but never written into the project anchor -
-    and the restore reads the anchor first whenever a project is loaded.  So the
-    global copy was shadowed by an anchor that had no such key, and the box was
-    cleared however many launches had used the ISO.
-    """
-    import inspect
-    from pinball_decryptor import app as app_mod
-    src = inspect.getsource(app_mod)
-    # Written on BOTH anchor paths - the update of an existing one and the
-    # creation of the first - or half the projects still forget it.
-    assert "jjp_emulate_iso=jjp_emulate_iso" in src
-    assert '"jjp_emulate_iso": jjp_emulate_iso' in src
+def _jjp_project(tmp_path, **anchor):
+    from pinball_decryptor.core import project_file
+    folder = tmp_path / "jjp"
+    folder.mkdir(exist_ok=True)
+    project_file.save(project_file.anchor_path(str(folder)),
+                      manufacturer_key="jjp", paths={}, extract_options={},
+                      app_version="test")
+    if anchor:
+        project_file.update_anchor(str(folder), **anchor)
+    return str(folder)
 
 
-def test_an_older_anchor_falls_back_to_the_global_setting():
-    """An anchor written before the fix has no such key.  Without a fallback
-    this would only ever help projects created afterwards, and every existing
-    one would still come back blank."""
-    import inspect
-    from pinball_decryptor import app as app_mod
-    src = inspect.getsource(app_mod)
-    i = src.index('data.get("jjp_emulate_iso")')
-    window = src[i:i + 700]
-    assert '_settings.get("jjp_emulate_iso")' in window
+def _jjp_stub(settings=None, iso=""):
+    from types import SimpleNamespace
+
+    class _Var:
+        def __init__(self, v=""):
+            self.value = v
+
+        def get(self):
+            return self.value
+
+        def set(self, v):
+            self.value = v
+
+    var = _Var(iso)
+    stub = SimpleNamespace(
+        _settings=settings or {}, _capture_run=lambda: False,
+        multiboot_state=lambda: {},
+        window=SimpleNamespace(jjp_emulate_iso_var=var,
+                               service=lambda name: None))
+    return stub, var
+
+
+def test_the_game_iso_is_written_into_the_project_anchor(tmp_path):
+    """The Game ISO box came back EMPTY on every load with a project open:
+    it was saved to settings.json but never into the project anchor, which
+    the restore reads first.  It is a per-project field now, saved with the
+    rest of them."""
+    from pinball_decryptor.app import App, PROJECT_FIELDS
+    from pinball_decryptor.core import project_file
+    assert "jjp_emulate_iso" in [k for k, *_ in PROJECT_FIELDS]
+    folder = _jjp_project(tmp_path)
+    stub, _var = _jjp_stub(iso="D:/isos/sonic.iso")
+    assert App.save_project_state(stub, folder)
+    assert project_file.load_anchor(folder)["jjp_emulate_iso"] == \
+        "D:/isos/sonic.iso"
+
+
+def test_an_older_anchor_falls_back_to_the_global_setting(tmp_path):
+    """An anchor written before the ISO was saved into it has no such key.
+    The LAUNCH restores it from the global copy (the project open at the
+    last quit); opening another project later never does, so no project is
+    handed the last one's ISO."""
+    from pinball_decryptor.app import App
+    folder = _jjp_project(tmp_path)
+    settings = {"jjp_emulate_iso": "D:/isos/last.iso"}
+    stub, var = _jjp_stub(settings)
+    App._restore_emulate_card(stub, folder)
+    assert var.value == "D:/isos/last.iso"
+    stub, var = _jjp_stub(settings, iso="D:/isos/other.iso")
+    App._restore_emulate_card(stub, folder, startup=False)
+    assert var.value == ""
+    # a project's own value, empty included, always wins
+    folder = _jjp_project(tmp_path, jjp_emulate_iso="")
+    stub, var = _jjp_stub(settings)
+    App._restore_emulate_card(stub, folder)
+    assert var.value == ""

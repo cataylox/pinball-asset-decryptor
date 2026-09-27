@@ -912,6 +912,9 @@ class AudioTab(TabService):
                 "info")
 
     def _restore_change_filter(self, staged):
+        # a folder that doesn't say shows everything, whatever the last
+        # project was filtered to
+        self.audio_change_filter_var.set("All")
         val = staged.get("audio_change_filter")
         if val in _CHANGE_FILTER_VALUES:
             self.audio_change_filter_var.set(val)

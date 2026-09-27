@@ -2195,7 +2195,7 @@ def test_the_project_switch_saves_before_it_restores(tmp_path):
     stub.save_multiboot_state = (
         lambda folder: App.save_multiboot_state(stub, folder))
     stub.restore_multiboot_state = (
-        lambda folder: App.restore_multiboot_state(stub, folder))
+        lambda folder, *a, **k: App.restore_multiboot_state(stub, folder, *a, **k))
     App._apply_project_folder(stub, str(b), project_file.load_anchor(str(b)))
     assert project_file.load_anchor(str(a))["multiboot"]["card"] == \
         "an evenings work.raw"

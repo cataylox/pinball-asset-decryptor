@@ -334,10 +334,15 @@ class WebWindow:
     def _rail(self):
         rail = []
         for svc in self.tabs:
+            try:
+                needs = svc.rail_needs()
+            except Exception:                           # noqa: BLE001
+                needs = None
             rail.append({"ns": svc.ns, "key": svc.key, "label": svc.label,
                          "group": svc.group, "icon": svc.icon,
                          "visible": bool(getattr(svc, "_visible", False)),
-                         "badge": getattr(svc, "_badge", None)})
+                         "badge": getattr(svc, "_badge", None),
+                         "needs": needs})
         return rail
 
     def refresh_rail(self):

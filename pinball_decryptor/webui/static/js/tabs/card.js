@@ -8,7 +8,7 @@
 
 import { html, useEffect, useState, Button, Card, Chip, Icon, PageHead, Seg, call, cx, mediaUrl } from "../core/ui.js";
 import { useNs } from "../core/store.js";
-import { NEEDS, WHAT, tabLock } from "../core/locks.js";
+import { WHAT, needOf, tabLock } from "../core/locks.js";
 import { Booting } from "../core/booting.js";
 import { SourceBody, ExtractOverlays, DropZone, cardDrop, inputPhrase, useNoStrayDrops } from "./extract.js";
 
@@ -21,7 +21,7 @@ function TabRow({ t, lock }) {
       title=${lock ? lock.long : "Open the " + t.label + " tab"}>
     <${Icon} name=${t.icon} />
     <span class="c-name">${t.label}</span>
-    <span class="c-what">${WHAT[t.ns] || ""}</span>
+    <span class="c-what">${(t.ns === "write" && t.needs === "none" ? WHAT.write_flash : WHAT[t.ns]) || ""}</span>
     ${lock ? html`<${Icon} name="lock" cls="c-state" />` : html`<${Icon} name="check" cls="c-state ok-ink" />`}
   </button>`;
 }
@@ -29,10 +29,10 @@ function TabRow({ t, lock }) {
 function WhatCard({ shell }) {
   const ps = shell.project_state;
   const tabs = (shell.tabs || []).filter((t) => t.visible && !HIDE.has(t.ns));
-  const direct = tabs.filter((t) => !NEEDS[t.ns]);
-  const folder = tabs.filter((t) => NEEDS[t.ns] === "project");
-  const needs = tabs.filter((t) => NEEDS[t.ns] === "extract");
-  const anyLocked = folder.concat(needs).some((t) => tabLock(t.ns, t.label, ps));
+  const direct = tabs.filter((t) => !needOf(t));
+  const folder = tabs.filter((t) => needOf(t) === "project");
+  const needs = tabs.filter((t) => needOf(t) === "extract");
+  const anyLocked = folder.concat(needs).some((t) => tabLock(t, ps));
   const project = ps ? html`<${Chip} kind="acc" title=${ps.folder}>${ps.name}<//>` : null;
   return html`<${Card} cls="c-what-card" title="What you can do with it">
     <div class="note"><${Icon} name=${anyLocked ? "lock" : "info"} /><div class="body-text">
@@ -47,11 +47,11 @@ function WhatCard({ shell }) {
       </div>` : null}
     ${folder.length ? html`<div class="stack c-sec">
         <span class="lbl">Needs a project folder to save into, no extract needed</span>
-        ${folder.map((t) => html`<${TabRow} t=${t} lock=${tabLock(t.ns, t.label, ps)} />`)}
+        ${folder.map((t) => html`<${TabRow} t=${t} lock=${tabLock(t, ps)} />`)}
       </div>` : null}
     ${needs.length ? html`<div class="stack c-sec">
         <span class="lbl">Needs the card extracted into a project folder</span>
-        ${needs.map((t) => html`<${TabRow} t=${t} lock=${tabLock(t.ns, t.label, ps)} />`)}
+        ${needs.map((t) => html`<${TabRow} t=${t} lock=${tabLock(t, ps)} />`)}
       </div>` : null}
   <//>`;
 }

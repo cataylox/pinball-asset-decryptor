@@ -219,7 +219,7 @@ class ProjectsMixin:
         # an empty one rather than a copy (David, 2026-09-26: a new project
         # came up holding the last one's three images).
         try:
-            app.save_multiboot_state(app._project_folder() or "")
+            app.save_project_state(app._project_path or "")
         except Exception:                               # noqa: BLE001
             pass
         if app._current_mfr is not mfr:
@@ -233,9 +233,14 @@ class ProjectsMixin:
                 panel.restore_state({})
             except Exception:                           # noqa: BLE001
                 pass
+        # ...and so does every other per-project field (the Emulate card,
+        # the Compare pair, the Mod Pack transfer...): the defaults, never a
+        # copy of the project on screen.
+        app.apply_project_fields({})
         win.set_extract_options({})
         win.extract_input_var.set(stock)
         win.extract_output_var.set(folder)
+        app._adopt_project_write(folder, {})
         app._settings["project_dir"] = parent
         app._materialize_anchor(folder)
         app._save_settings()

@@ -13,6 +13,13 @@ export const NEEDS = {
   modes: "project", defaults: "project",
 };
 
+// What rail entry *t* needs: its tab's own answer for this manufacturer
+// (webui/tabs/base.py rail_needs) over the table above; undefined = nothing.
+export function needOf(t) {
+  const need = t && t.needs != null ? t.needs : NEEDS[t && t.ns];
+  return need === "none" ? undefined : need;
+}
+
 // one line per tab for the Select card tab's list
 export const WHAT = {
   partitions: "Browse the card's partitions and copy files off it.",
@@ -28,12 +35,14 @@ export const WHAT = {
   images: "Replace pictures.",
   text: "Replace on-screen text.",
   write: "Build a new card with your changes.",
+  write_flash: "Flash a card image onto an SD card, or build one with your changes.",
   modpack: "Share your changes as a zip, or apply someone else's.",
 };
 
-// null when the tab can be used, else {short, long, need}
-export function tabLock(ns, label, ps) {
-  const need = NEEDS[ns];
+// null when rail entry *t* can be used, else {short, long, need}
+export function tabLock(t, ps) {
+  const need = needOf(t);
+  const label = t.label;
   if (!need || ps === undefined) return null;
   const tab = "The " + label + " tab";
   if (need === "project") {

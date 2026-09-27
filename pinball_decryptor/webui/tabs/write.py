@@ -933,6 +933,39 @@ class WriteTab(TabService):
             self._write_output_auto = derived
             self.write_output_var.set(derived)
 
+    def rail_needs(self):
+        """Nothing, on a machine whose Build / flash dialog can write an
+        existing card image straight onto an SD card: coming in only to
+        burn a .raw needs no extract and no project (David, 2026-09-26).
+        Elsewhere Write builds from an extract, the table's default."""
+        mfr = self.mfr
+        if mfr is not None and getattr(mfr.capabilities, "flash_image",
+                                       False):
+            return "none"
+        return None
+
+    def adopt_project(self, folder, filename=""):
+        """The file name and build location of the project in *folder*,
+        replacing whatever the last project left here: its own name, else
+        the default one for its card, and its own build location (its
+        override, else ``<folder>/build``).  Called by the app when a
+        project is opened, restored or created."""
+        from ...core import project_file
+        self._write_filename_auto = ""
+        self.write_filename_var.set((filename or "").strip())
+        if not (filename or "").strip():
+            self._maybe_default_write_filename()
+        if folder:
+            try:
+                derived = os.path.normpath(
+                    project_file.project_build_dir(folder))
+            except Exception:                           # noqa: BLE001
+                derived = os.path.normpath(os.path.join(folder, "build"))
+            self._write_output_auto = derived
+            self.write_output_var.set(derived)
+        self._refresh_build_path_display()
+        self._update_write_filename_hint()
+
     def _default_write_filename(self):
         upd = self.write_upd_var.get().strip()
         if not upd:

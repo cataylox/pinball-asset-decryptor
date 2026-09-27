@@ -472,13 +472,11 @@ class VideoTab(BestQualityMixin, TabService):
             self._warn_dropped(staged.get("video"), scan_dir)
             self._restoring = True
             try:
-                if "video_trim" in staged:
-                    self.video_trim_var.set(bool(staged["video_trim"]))
-                if "video_no_conversion" in staged:
-                    self.video_no_conversion_var.set(
-                        bool(staged["video_no_conversion"]))
-                # Unlike the two above, never carried over from the last
-                # project: a folder that doesn't say is at the default.
+                # A folder that doesn't say is at the default, never the
+                # last project's setting.
+                self.video_trim_var.set(bool(staged.get("video_trim")))
+                self.video_no_conversion_var.set(
+                    bool(staged.get("video_no_conversion")))
                 self.video_best_quality_var.set(
                     bool(staged.get("video_best_quality")))
                 self._asis = {

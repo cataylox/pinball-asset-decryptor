@@ -26,6 +26,43 @@ from .webui.compat import filedialog, messagebox
 log = logging.getLogger(__name__)
 
 
+#: The form fields that belong to the PROJECT, not to the app (David,
+#: 2026-09-26: "all the form entries on any of the tabs should be saved per
+#: project"): ``(anchor key, variable, kind, default)``.  The variable is a
+#: window attribute, or ``"ns.attr"`` for one only its tab service holds.
+#: One rule for every one of them: a project's value wins, including an
+#: empty one, and a key the project has never written is the field's
+#: DEFAULT - never the last project's value (see
+#: :meth:`App.apply_project_fields` for the one migration exception).  The
+#: Multi-boot form, the Extract options and the Write file name / build
+#: location follow the same rule on rails of their own (a document, a dict,
+#: a derived default).  What stays global describes the person or the
+#: cabinet, not a card: theme, window, volumes, the Emulate machine row,
+#: flashed images, the Default Settings presets, Compare's rows per list.
+PROJECT_FIELDS = (
+    ("emulate_card", "emulate_card_var", "path", ""),
+    ("emulate_savestates", "emulate_savestates_var", "bool", False),
+    ("emulate_overrides", "emulate_overrides_var", "bool", False),
+    ("emulate_select", "emulate._select_var", "bool", False),
+    ("emulate_topper", "emulate._topper_var", "bool", True),
+    ("jjp_emulate_iso", "jjp_emulate_iso_var", "path", ""),
+    ("spike1_emulate_card", "spike1_emulate_card_var", "path", ""),
+    ("compare_a", "compare_a_var", "path", ""),
+    ("compare_b", "compare_b_var", "path", ""),
+    ("partition_image", "partition_image_var", "path", ""),
+    ("modpack_src", "transfer_src_var", "path", ""),
+    ("modpack_dst", "transfer_dst_var", "path", ""),
+    ("modpack_oldstock", "transfer_oldstock_var", "path", ""),
+    ("modpack_newimg", "transfer_newimg_var", "path", ""),
+)
+
+#: Fields anchors have carried since they first existed: a project file
+#: without one of these says "empty", so even the first launch after an
+#: update never fills it from the global copy.
+_ALWAYS_ANCHORED = frozenset(("emulate_card", "emulate_savestates",
+                              "emulate_overrides"))
+
+
 def _resolve_startup_manufacturer(manufacturers, settings):
     """The manufacturer to open directly on launch, or ``None`` to show the
     picker.  ``None`` when there's no saved ``last_manufacturer`` (first
@@ -433,6 +470,7 @@ class App:
             self._apply_manufacturer(last_mfr)
         else:
             self.window.show_picker()
+        self._session_started = True
         self._poll_queue()
         # Compose (not overwrite) the title: the manufacturer restore above
         # may already have detected the saved card and set its caption —
@@ -485,28 +523,7 @@ class App:
         if self._capture_run():
             return
         try:
-            from .core import project_file
-            folder = self._project_path
-            card_var = getattr(self.window, "emulate_card_var", None)
-            states_var = getattr(self.window, "emulate_savestates_var", None)
-            ovr_var = getattr(self.window, "emulate_overrides_var", None)
-            if folder and card_var is not None \
-                    and project_file.has_anchor(folder):
-                card = card_var.get().strip()
-                states = bool(states_var.get()) if states_var is not None \
-                    else False
-                overrides = bool(ovr_var.get()) if ovr_var is not None \
-                    else False
-                multi = self.multiboot_state()
-                data = project_file.load_anchor(folder)
-                if (data.get("emulate_card") or "") != card or \
-                        bool(data.get("emulate_savestates")) != states or \
-                        bool(data.get("emulate_overrides")) != overrides or \
-                        (data.get("multiboot") or {}) != multi:
-                    project_file.update_anchor(folder, emulate_card=card,
-                                               emulate_savestates=states,
-                                               emulate_overrides=overrides,
-                                               multiboot=multi)
+            App.save_project_state(self, self._project_path)
         except Exception:
             pass
         try:
@@ -606,6 +623,10 @@ class App:
 
     def _on_manufacturer_change(self, mfr):
         if self._current_mfr is not None:
+            # The project being left keeps what is on screen (its Emulate
+            # card, Multi-boot form...): the switch restores the other
+            # manufacturer's project straight over it.
+            App.save_project_state(self, self._project_path)
             self._save_manufacturer_paths(self._current_mfr.key)
         self._apply_manufacturer(mfr)
         # Persist immediately so a crash before _on_close doesn't lose
@@ -643,7 +664,11 @@ class App:
         # that only runs on an explicit Project -> Open — so on an ordinary
         # startup the path sat in the anchor and was never fetched, and "Card
         # image to run" was empty every launch.
-        self._restore_emulate_card(folder if is_project else "")
+        # The launch's restore may take a field's global copy once (the
+        # project open at the last quit); a manufacturer switch later in the
+        # session may not.
+        startup = not getattr(self, "_session_started", False)
+        self._restore_emulate_card(folder if is_project else "", startup)
         # The Multi-boot tab's whole FORM rides the same rail - a document
         # rather than one path, because that tab is a card path, an image
         # list and a menu, and rebuilding all of it every launch is what
@@ -651,11 +676,166 @@ class App:
         # inside the one above: that one returns early on a window with no
         # Emulate tab, and this must not hang off that.
         self.restore_multiboot_state(folder if is_project else "")
+        anchor = None
+        if is_project:
+            try:
+                anchor = project_file.load_anchor(folder)
+            except (OSError, ValueError):
+                anchor = None
+        set_opts = getattr(self.window, "set_extract_options", None)
+        if anchor is not None and "extract_options" in anchor \
+                and callable(set_opts):
+            # the project's ticks, not the manufacturer's last ones
+            set_opts(anchor.get("extract_options") or {})
         self.window.apply_manufacturer(mfr)
+        if anchor is not None:
+            App._adopt_project_write(self, folder, anchor)
         # Kick off the runtime-prereq check on a background thread.  The
         # GUI is already showing "[?] name" placeholders; results trickle
         # in via PrereqMsg.
         self._kick_off_prereq_check(mfr)
+
+    # ------------------------------------------------------------------
+    # Per-project form fields (PROJECT_FIELDS)
+    # ------------------------------------------------------------------
+    def _project_var(self, where):
+        if "." in where:
+            ns, attr = where.split(".", 1)
+            service = getattr(self.window, "service", None)
+            svc = service(ns) if callable(service) else None
+            return getattr(svc, attr, None) if svc is not None else None
+        return getattr(self.window, where, None)
+
+    def project_fields_state(self):
+        """``{anchor key: value}`` of every :data:`PROJECT_FIELDS` field on
+        this window (a field whose tab is missing is left out)."""
+        out = {}
+        for key, where, kind, _default in PROJECT_FIELDS:
+            var = App._project_var(self, where)
+            if var is None:
+                continue
+            try:
+                value = var.get()
+            except Exception:
+                continue
+            out[key] = bool(value) if kind == "bool" \
+                else str(value or "").strip()
+        return out
+
+    def apply_project_fields(self, data, fallback=None):
+        """Put every :data:`PROJECT_FIELDS` field on screen from *data* (a
+        project's anchor, or the global copy when no project is open).
+
+        A key *data* lacks takes the field's default - the last project's
+        value is never left standing.  *fallback* (``{key: value}``) is the
+        ONE exception, for the first launch after these fields moved into
+        the anchor: the project restored at startup is the one that was open
+        at the last quit, so the global copy of a field its anchor has never
+        held IS its value.  Never passed on a project switch."""
+        from .core.admin import resolve_mapped_drive as _rmd
+        data = data if isinstance(data, dict) else {}
+        fallback = fallback if isinstance(fallback, dict) else {}
+        for key, where, kind, default in PROJECT_FIELDS:
+            var = App._project_var(self, where)
+            if var is None:
+                continue
+            if key in data:
+                value = data[key]
+            elif key in fallback and key not in _ALWAYS_ANCHORED:
+                value = fallback[key]
+            else:
+                value = default
+            if kind == "bool":
+                value = bool(value)
+            else:
+                value = str(value or "").strip()
+                value = _rmd(value) if value else ""
+            try:
+                same = var.get() == value
+            except Exception:
+                same = False
+            if not same:
+                try:
+                    var.set(value)
+                except Exception:
+                    pass
+
+    def _global_project_fields(self):
+        """The global copy of the per-project fields: what was on screen at
+        the last settings save, plus the older per-field keys it replaced
+        (and the Compare pair from this manufacturer's paths)."""
+        settings = getattr(self, "_settings", None) or {}
+        out = {k: settings[k] for k in (
+            "emulate_card", "emulate_savestates", "emulate_overrides",
+            "jjp_emulate_iso", "spike1_emulate_card") if k in settings}
+        mfr = getattr(self, "_current_mfr", None)
+        section = (settings.get("manufacturers") or {}).get(
+            getattr(mfr, "key", ""), {}) if mfr is not None else {}
+        for k in ("compare_a", "compare_b"):
+            if k in section:
+                out[k] = section[k]
+        saved = settings.get("project_fields")
+        if isinstance(saved, dict):
+            out.update(saved)
+        return out
+
+    def save_project_state(self, project_folder):
+        """Write everything on screen that belongs to *project_folder* into
+        its anchor: the :data:`PROJECT_FIELDS`, the Multi-boot form, the
+        Extract options and the Write file name.
+
+        THE OUTGOING PROJECT'S SAVE-POINT, on a quit, a project switch, a
+        manufacturer switch and a New project.  Only a folder that already
+        IS a project, only when something changed (the anchor's mtime is not
+        touched for nothing), and best-effort: a NAS hiccup on the way out of
+        a project must not stop what asked.  A capture run writes nothing."""
+        if self._capture_run():
+            return False
+        folder = (project_folder or "").strip()
+        if not folder:
+            return False
+        try:
+            from .core import project_file
+            if not project_file.has_anchor(folder):
+                return False
+            updates = dict(App.project_fields_state(self))
+            updates["multiboot"] = self.multiboot_state()
+            # each read on its own: one tab that cannot answer must not
+            # cost the project everything else on screen
+            get_opts = getattr(self.window, "get_extract_options", None)
+            name_var = getattr(self.window, "write_filename_var", None)
+            for key, read in (
+                    ("extract_options", get_opts),
+                    ("write_filename",
+                     (lambda: name_var.get().strip()) if name_var is not None
+                     else None)):
+                if callable(read):
+                    try:
+                        updates[key] = read()
+                    except Exception:
+                        pass
+            data = project_file.load_anchor(folder)
+            changed = {k: v for k, v in updates.items()
+                       if (data.get(k) if k in data else None) != v}
+            if changed:
+                return project_file.update_anchor(folder, **changed)
+        except Exception:
+            pass
+        return False
+
+    def _adopt_project_write(self, folder, data):
+        """The Write tab's file name and build location for *folder*: the
+        project's own name (or the default one, when it has none) and its
+        own build location (its override, else ``<folder>/build``), never
+        the last project's."""
+        service = getattr(self.window, "service", None)
+        svc = service("write") if callable(service) else None
+        adopt = getattr(svc, "adopt_project", None)
+        if callable(adopt):
+            try:
+                adopt(folder, str((data or {}).get("write_filename") or ""))
+            except Exception:
+                pass
 
     def _restore_emulate_machine(self):
         """PAD-149: the Emulate tab's machine row - the country the CPU
@@ -681,105 +861,36 @@ class App:
             if var is not None and value in allowed(key):
                 var.set(value)
 
-    def _restore_emulate_card(self, project_folder):
-        """Put the Emulate tab's "Card image to run" back after a restart.
+    def _restore_emulate_card(self, project_folder, startup=True):
+        """Put the per-project fields (:data:`PROJECT_FIELDS`: the Emulate
+        card and its ticks, the JJP ISO, the Spike 1 card, the Compare pair,
+        the Partition Explorer's image, the Mod Pack transfer) back for
+        *project_folder*, the active project, or "" when the restored folder
+        is not one.  The name is the first field it restored.
 
-        *project_folder* is the active project, or "" when the restored folder
-        is not one.
+        A PROJECT'S VALUE WINS ABSOLUTELY, INCLUDING WHEN IT IS EMPTY, and a
+        field the project has never written takes its default: falling back
+        to the global would put the last project's card on this one, the
+        leak this rule exists to prevent.  *startup* (the launch's restore,
+        not a switch) lets a field the anchor has never held take its global
+        copy once - see :meth:`apply_project_fields`.
 
-        A PROJECT'S VALUE WINS ABSOLUTELY, INCLUDING WHEN IT IS EMPTY, and that
-        is deliberate rather than an oversight: ``_apply_project_folder`` sets
-        the field even for an empty value so the box shows THIS project's state
-        and not the last one's, and falling back to the global here would
-        quietly reintroduce exactly the leak that rule exists to prevent.  Two
-        places deciding one thing differently is the failure this tree keeps
-        paying for.
-
-        The global fallback is therefore only for having no project open at all.
-        It also covers a gap the per-project save cannot: ``_on_close``'s anchor
-        write is skipped when ``has_anchor(folder)`` is false, so a card picked
-        against a plain folder had nowhere to live before this.
-
-        Best-effort throughout — an unreadable or half-written anchor on a NAS
-        must leave the field empty, never fail the startup that asked for it."""
-        card_var = getattr(self.window, "emulate_card_var", None)
-        states_var = getattr(self.window, "emulate_savestates_var", None)
-        ovr_var = getattr(self.window, "emulate_overrides_var", None)
-        if card_var is None:
-            return
-        card = ""
-        states = False
-        overrides = False
+        With no project open the global copy is used.  An unreadable or
+        half-written anchor on a NAS leaves every field at its default, and
+        never fails the startup that asked for it.  The Emulate machine row
+        is global and comes back whatever the project."""
         if project_folder:
             from .core import project_file
             try:
                 data = project_file.load_anchor(project_folder)
-                card = str(data.get("emulate_card") or "")
-                states = bool(data.get("emulate_savestates"))
-                overrides = bool(data.get("emulate_overrides"))
+                fallback = App._global_project_fields(self) if startup \
+                    else None
             except (OSError, ValueError):
-                card = ""
+                data, fallback = {}, None
         else:
-            card = str(self._settings.get("emulate_card") or "")
-            states = bool(self._settings.get("emulate_savestates"))
-            overrides = bool(self._settings.get("emulate_overrides"))
-        # Same mapped-drive treatment as every other restored path: a card
-        # saved as "W:\..." in a normal session stops resolving under an
-        # elevated relaunch, so restore its UNC equivalent instead.
-        from .core.admin import resolve_mapped_drive as _rmd
-        card_var.set(_rmd(card) if card else "")
-        if states_var is not None:
-            states_var.set(states)
-        # PAD-103's opt-in rides the same rail, and defaults OFF for every
-        # anchor written before it existed — which is what `bool(missing)`
-        # already says, and is the right default for something that changes
-        # what the guest reads.
-        if ovr_var is not None:
-            ovr_var.set(overrides)
+            data, fallback = App._global_project_fields(self), None
+        App.apply_project_fields(self, data, fallback)
         App._restore_emulate_machine(self)
-
-        # The JJP emulator's game ISO, restored the same way and with the same
-        # mapped-drive treatment, from its own key.
-        jjp_iso_var = getattr(self.window, "jjp_emulate_iso_var", None)
-        if jjp_iso_var is not None:
-            jjp_iso = ""
-            if project_folder:
-                from .core import project_file
-                try:
-                    data = project_file.load_anchor(project_folder)
-                    jjp_iso = str(data.get("jjp_emulate_iso") or "")
-                except (OSError, ValueError):
-                    jjp_iso = ""
-                # Anchors written before the ISO was saved into them have no
-                # such key.  Falling back to the global setting is what makes
-                # an EXISTING project restore instead of coming back blank -
-                # without it this fix would only help projects created after it.
-                if not jjp_iso:
-                    jjp_iso = str(self._settings.get("jjp_emulate_iso") or "")
-            else:
-                jjp_iso = str(self._settings.get("jjp_emulate_iso") or "")
-            jjp_iso_var.set(_rmd(jjp_iso) if jjp_iso else "")
-
-        # The Spike 1 emulator's card image — the third rider on this rail,
-        # under its OWN key for the same reason as the JJP ISO: one shared
-        # setting across manufacturers is a bug waiting for the first switch.
-        # Same anchor-first / global-fallback shape, same mapped-drive fix.
-        s1_var = getattr(self.window, "spike1_emulate_card_var", None)
-        if s1_var is not None:
-            s1_card = ""
-            if project_folder:
-                from .core import project_file
-                try:
-                    data = project_file.load_anchor(project_folder)
-                    s1_card = str(data.get("spike1_emulate_card") or "")
-                except (OSError, ValueError):
-                    s1_card = ""
-                if not s1_card:
-                    s1_card = str(
-                        self._settings.get("spike1_emulate_card") or "")
-            else:
-                s1_card = str(self._settings.get("spike1_emulate_card") or "")
-            s1_var.set(_rmd(s1_card) if s1_card else "")
 
     def multiboot_state(self):
         """The Multi-boot tab's form as a document (the panel's ``state()``),
@@ -838,7 +949,7 @@ class App:
         except Exception:
             pass
 
-    def restore_multiboot_state(self, project_folder):
+    def restore_multiboot_state(self, project_folder, startup=True):
         """Put the Multi-boot tab back the way it was left.
 
         *project_folder* is the active project, or "" when the restored
@@ -879,8 +990,12 @@ class App:
                 doc = ({} if project_file.has_anchor(project_folder)
                        else self._settings.get("multiboot_state"))
             else:
+                # an anchor written before the form was saved into it takes
+                # the global form on the LAUNCH only (the project open at the
+                # last quit); on a switch that global is another project's
                 doc = data.get("multiboot") if "multiboot" in data \
-                    else self._settings.get("multiboot_state")
+                    else (self._settings.get("multiboot_state")
+                          if startup else {})
         else:
             doc = self._settings.get("multiboot_state")
         try:
@@ -5145,6 +5260,12 @@ class App:
                 self._settings["spike1_emulate_card"] = s1_var.get().strip()
             except Exception:
                 pass
+        # Every per-project field, globally: the fallback for having no
+        # project, and the first launch's migration (apply_project_fields).
+        try:
+            self._settings["project_fields"] = App.project_fields_state(self)
+        except Exception:
+            pass
         # The Multi-boot tab's form, globally — the fallback for having no
         # project, which the anchor save cannot cover.  multiboot_state()
         # swallows a failed read, the way the try/except above each of these
@@ -5248,21 +5369,12 @@ class App:
         name_var = getattr(self.window, "write_filename_var", None)
         write_filename = name_var.get().strip() if name_var else ""
         opts = self.window.get_extract_options()
-        card_var = getattr(self.window, "emulate_card_var", None)
-        emulate_card = card_var.get().strip() if card_var else ""
-        states_var = getattr(self.window, "emulate_savestates_var", None)
-        emulate_savestates = bool(states_var.get()) if states_var else False
-        ovr_var = getattr(self.window, "emulate_overrides_var", None)
-        emulate_overrides = bool(ovr_var.get()) if ovr_var else False
-        # The JJP game ISO belongs in the anchor too.  It was saved to
-        # settings.json but never written HERE, while the restore reads the
-        # anchor first whenever a project is open - so with a project loaded the
-        # Game ISO box came back empty every time, however many launches had
-        # used it.
-        jjp_var = getattr(self.window, "jjp_emulate_iso_var", None)
-        jjp_emulate_iso = jjp_var.get().strip() if jjp_var else ""
-        s1_var = getattr(self.window, "spike1_emulate_card_var", None)
-        spike1_emulate_card = s1_var.get().strip() if s1_var else ""
+        # Every per-project field (PROJECT_FIELDS) belongs in the anchor.
+        # The JJP game ISO was once saved to settings.json but never written
+        # HERE, while the restore reads the anchor first whenever a project
+        # is open - so its box came back empty every time.  One table for
+        # all of them is what keeps the next field from doing the same.
+        fields = App.project_fields_state(self)
         # The Multi-boot tab's form belongs in the anchor for the same
         # reason the Emulate card does: it is per-project state, and the
         # global copy is only the no-project fallback.
@@ -5276,13 +5388,9 @@ class App:
                     paths=paths,
                     write_filename=write_filename,
                     extract_options=opts,
-                    emulate_card=emulate_card,
-                    emulate_savestates=emulate_savestates,
-                    emulate_overrides=emulate_overrides,
-                    jjp_emulate_iso=jjp_emulate_iso,
-                    spike1_emulate_card=spike1_emulate_card,
                     multiboot=multiboot,
-                    saved_with=__version__)
+                    saved_with=__version__,
+                    **fields)
             else:
                 # First anchor for this folder.  Compat rule: a custom Build
                 # Location (anything but the derived <folder>/build) is
@@ -5305,12 +5413,7 @@ class App:
                     # save() writes explicit fields over *extra*, so a field
                     # only this app version knows rides in extra and format-2
                     # readers ignore it.
-                    extra={"emulate_card": emulate_card,
-                           "emulate_savestates": emulate_savestates,
-                           "emulate_overrides": emulate_overrides,
-                           "jjp_emulate_iso": jjp_emulate_iso,
-                           "spike1_emulate_card": spike1_emulate_card,
-                           "multiboot": multiboot})
+                    extra=dict(fields, multiboot=multiboot))
                 self.window.append_log(
                     "This folder is now a project — picking it again "
                     "restores this whole setup.", "info")
@@ -5403,7 +5506,7 @@ class App:
         outgoing = (self._project_path or "").strip()
         if outgoing and os.path.normcase(os.path.normpath(outgoing)) != \
                 os.path.normcase(os.path.normpath(folder)):
-            self.save_multiboot_state(outgoing)
+            App.save_project_state(self, outgoing)
         mfr = get_manufacturer(data["manufacturer"])
         if self._current_mfr is not mfr:
             self._on_manufacturer_change(mfr)
@@ -5412,24 +5515,17 @@ class App:
             _rmd(str(data.get("stock_image") or "")))
         self.window.extract_output_var.set(_rmd(folder))
         self.window.set_extract_options(data.get("extract_options", {}))
-        name = str(data.get("write_filename") or "").strip()
-        name_var = getattr(self.window, "write_filename_var", None)
-        if name and name_var is not None:
-            name_var.set(name)
-        # The Emulate tab's card image follows the project too. Set even when
-        # empty: the field must show THIS project's state, not the last one's.
-        card_var = getattr(self.window, "emulate_card_var", None)
-        if card_var is not None:
-            card_var.set(_rmd(str(data.get("emulate_card") or "")))
-        # And its save-states opt-in (item 13) - same rule, set even when
-        # absent, so this project's OFF is not the last project's ON.
-        states_var = getattr(self.window, "emulate_savestates_var", None)
-        if states_var is not None:
-            states_var.set(bool(data.get("emulate_savestates")))
+        # Every per-project field (the Emulate card and its ticks, the JJP
+        # ISO, the Spike 1 card, the Compare pair, the Partition Explorer's
+        # image, the Mod Pack transfer) comes from THIS project, set even when
+        # empty or absent: the field must show this project's state, not the
+        # last one's.  The Write file name and build location likewise.
+        App.apply_project_fields(self, data)
+        App._adopt_project_write(self, folder, data)
         # ...and the Multi-boot tab's whole form, through the one spelling
         # the startup path uses, so an explicit Open and an ordinary launch
         # cannot come to disagree about which project's tab is on screen.
-        self.restore_multiboot_state(folder)
+        self.restore_multiboot_state(folder, startup=False)
         self._registry_touch(folder)
         self._set_loaded_project(folder)
         self._save_settings()

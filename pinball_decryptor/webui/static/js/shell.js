@@ -379,7 +379,7 @@ function Rail({ shell }) {
       ${items.map((t) => {
         // PAD-224: a tab with nothing to work on yet is greyed out but still
         // opens, under a banner that says why
-        const lock = tabLock(t.ns, t.label, shell.project_state);
+        const lock = tabLock(t, shell.project_state);
         return html`<button type="button" class=${cx("item", shell.tab === t.ns && "on", lock && "locked")}
           aria-current=${shell.tab === t.ns ? "page" : undefined}
           onClick=${() => call("ui.select_tab", t.ns)} ...${tip(lock ? t.label + ": " + lock.short : t.label)}>
@@ -395,7 +395,7 @@ function Rail({ shell }) {
 function LockBanner({ shell }) {
   const x = useNs("extract");
   const t = (shell.tabs || []).find((r) => r.ns === shell.tab);
-  const lock = t ? tabLock(t.ns, t.label, shell.project_state) : null;
+  const lock = t ? tabLock(t, shell.project_state) : null;
   if (!lock) return null;
   const haveCard = !!(x.ssd ? x.drive : x.input);
   const pickFirst = lock.need === "extract" && !haveCard;

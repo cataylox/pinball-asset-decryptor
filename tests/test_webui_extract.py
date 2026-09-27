@@ -960,9 +960,12 @@ const out = {};
 for (const [k, ps] of [["unknown", undefined], ["none", none], ["bare", bare], ["done", done], ["arch", arch]]) {
   out[k] = {};
   for (const ns of ["images", "write", "defaults", "partitions", "emulate"]) {
-    const l = tabLock(ns, ns, ps);
+    const l = tabLock({ ns, label: ns }, ps);
     out[k][ns] = l ? l.need + ": " + l.short : "";
   }
+  // Write on a machine whose Build / flash dialog flashes an existing image
+  const f = tabLock({ ns: "write", label: "Write", needs: "none" }, ps);
+  out[k].write_flash = f ? f.need : "";
 }
 console.log(JSON.stringify(out));
 """
@@ -990,6 +993,8 @@ def test_which_tabs_are_greyed_out_and_why(tmp_path):
     # no project folder: everything that needs one
     assert got["none"]["images"].startswith("extract: Needs an extract")
     assert got["none"]["write"].startswith("extract: ")
+    # ...but not on a machine that can flash a card image with no project
+    assert not any(got[k]["write_flash"] for k in got)
     assert got["none"]["defaults"].startswith("project: Needs a project")
     # a folder with no extract: the extract tabs only
     assert "nothing is extracted" in got["bare"]["images"]

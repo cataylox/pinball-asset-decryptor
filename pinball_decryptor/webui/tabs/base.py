@@ -104,6 +104,12 @@ class TabService:
     def on_close(self):
         pass
 
+    def rail_needs(self):
+        """What this tab needs before it can be used on this manufacturer:
+        ``None`` for the page's own table (static/js/core/locks.js NEEDS),
+        ``"none"``, ``"project"`` or ``"extract"`` to say otherwise."""
+        return None
+
     def on_field(self, key, value):
         """The page set ``key`` with no Var bound to it (plain state)."""
         self.set(**{key: value})

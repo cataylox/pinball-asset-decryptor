@@ -671,3 +671,50 @@ def test_disk_space_window(tmp_path, monkeypatch):
                     if r["level"] == 2]) == 1
         assert w.call("shellx.disk_close") is True
         assert w.state("shellx")["disk"] is None
+
+
+def test_every_form_field_belongs_to_its_project(tmp_path):
+    """David, 2026-09-26: "all the form entries on any of the tabs should be
+    saved per project".  Every PROJECT_FIELDS field, the Write file name and
+    the Write build location: set in A, at their defaults in a new B (never
+    A's), A's again when A is reopened, B's again when B is."""
+    from pinball_decryptor.app import PROJECT_FIELDS
+    from pinball_decryptor.core import project_file
+    with web_app(tmp_path, mfr="stern") as w:
+        app = w.app
+        a = _new_project(w, tmp_path, "A")
+        mine = {}
+        for key, where, kind, default in PROJECT_FIELDS:
+            var = w.run(app._project_var, where)
+            assert var is not None, key
+            value = (not default) if kind == "bool" \
+                else str(tmp_path / ("A-%s.raw" % key))
+            w.run(var.set, value)
+            mine[key] = value
+        w.run(w.window.write_filename_var.set, "A-build.raw")
+        custom_out = str(tmp_path / "A-elsewhere")
+        w.run(w.window.write_output_var.set, custom_out)
+        project_file.update_anchor(a, build_dir=custom_out)
+
+        def fields():
+            got = w.run(app.project_fields_state)
+            return {k: got[k] for k in mine}
+
+        defaults = {k: d for k, _w, _k, d in PROJECT_FIELDS}
+        b = _new_project(w, tmp_path, "B")
+        w.drain()
+        assert fields() == defaults
+        assert w.window.write_filename_var.get() == ""
+        assert w.window.write_output_var.get() == os.path.join(b, "build")
+
+        w.run(app._apply_project_folder, a, project_file.load_anchor(a))
+        w.drain()
+        assert fields() == mine
+        assert w.window.write_filename_var.get() == "A-build.raw"
+        assert os.path.normpath(w.window.write_output_var.get()) == \
+            os.path.normpath(custom_out)
+
+        w.run(app._apply_project_folder, b, project_file.load_anchor(b))
+        w.drain()
+        assert fields() == defaults
+        assert w.window.write_output_var.get() == os.path.join(b, "build")

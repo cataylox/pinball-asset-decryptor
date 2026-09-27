@@ -137,6 +137,23 @@ class PartitionsTab(TabService):
     def on_show(self):
         self._push_history()
         self._default_from_extract()
+        self._follow_image()
+
+    def _follow_image(self):
+        """Open the image the Card Image box names when it is not the one
+        on screen: a project switch puts that project's image in the box
+        (app.PROJECT_FIELDS), and the tree must not go on showing the last
+        project's partitions under it."""
+        if self._busy:
+            return
+        path = (self.partition_image_var.get() or "").strip()
+        if not path or not os.path.isfile(path):
+            return
+        shown = self._image_path or ""
+        if shown and os.path.normcase(os.path.normpath(shown)) == \
+                os.path.normcase(os.path.normpath(path)):
+            return
+        self.open_image()
 
     def on_close(self):
         if self._cancel is not None:

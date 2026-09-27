@@ -496,9 +496,8 @@ class ImagesTab(TabService):
                 self._warn_dropped_assignments(staged.get("image"),
                                                scan_dir)
                 self._restore_change_filter(staged)
-                if "image_group_by_scene" in staged:
-                    self.image_group_by_scene_var.set(
-                        bool(staged["image_group_by_scene"]))
+                self.image_group_by_scene_var.set(
+                    bool(staged.get("image_group_by_scene")))
                 tags = staged.get("image_group_tags")
                 self._group_tags = (
                     {str(k): str(v).strip()[:50] for k, v in tags.items()
@@ -506,8 +505,8 @@ class ImagesTab(TabService):
                     if isinstance(tags, dict) else {})
                 self._seed_group_tags_from_library(scan_dir)
                 srcf = staged.get("image_source_filter")
-                if srcf in SOURCES:
-                    self.image_source_filter_var.set(srcf)
+                self.image_source_filter_var.set(
+                    srcf if srcf in SOURCES else "All sources")
             else:
                 self._assignments = {
                     rel: rep for rel, rep in self._assignments.items()
@@ -835,6 +834,9 @@ class ImagesTab(TabService):
                 "info")
 
     def _restore_change_filter(self, staged):
+        # a folder that doesn't say shows everything, whatever the last
+        # project was filtered to
+        self.image_change_filter_var.set("All")
         val = staged.get("image_change_filter")
         if val in CHANGE_FILTER_VALUES:
             self.image_change_filter_var.set(val)

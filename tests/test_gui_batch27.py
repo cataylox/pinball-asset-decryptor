@@ -95,8 +95,8 @@ def _apply_mfr(tmp_path, folder):
         # and the Multi-boot tab's form ride along in the same method and
         # have their own tests in test_emulate_tab.py and
         # test_multiboot_tab.py.
-        _restore_emulate_card=lambda folder: None,
-        restore_multiboot_state=lambda folder: None,
+        _restore_emulate_card=lambda folder, *a, **k: None,
+        restore_multiboot_state=lambda folder, *a, **k: None,
         window=SimpleNamespace(apply_manufacturer=lambda mfr: None),
     )
     App._apply_manufacturer(stub, SimpleNamespace(key="stern"))

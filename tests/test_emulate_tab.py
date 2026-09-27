@@ -293,12 +293,12 @@ def _restore(folder, settings=None):
     # code or this stops testing the thing that was broken, which was the call
     # site and not the restore.
     stub._restore_emulate_card = (
-        lambda folder: App._restore_emulate_card(stub, folder))
+        lambda folder, *a, **k: App._restore_emulate_card(stub, folder, *a, **k))
     # The Multi-boot tab's form rides the same rail out of _apply_manufacturer
     # and has its own tests in test_multiboot_tab.py; the real one is bound
     # here rather than stubbed, and finds no panel on this window.
     stub.restore_multiboot_state = (
-        lambda folder: App.restore_multiboot_state(stub, folder))
+        lambda folder, *a, **k: App.restore_multiboot_state(stub, folder, *a, **k))
     App._apply_manufacturer(stub, SimpleNamespace(key="stern"))
     return var.value
 

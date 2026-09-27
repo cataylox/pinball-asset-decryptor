@@ -122,9 +122,13 @@ def test_restore_prefers_the_new_key_over_the_old_boolean():
 
 
 def test_restore_ignores_a_bad_value_and_an_empty_sidecar():
+    """A project whose sidecar doesn't say (or says nonsense) shows
+    everything: the filter is the project's, never the last project's
+    (David, 2026-09-26: form entries are saved per project)."""
     assert _restore("audio", {"audio_change_filter": "changed"},
-                    current="Changed") == "Changed"
-    assert _restore("audio", {}, current="Unchanged") == "Unchanged"
+                    current="Changed") == "All"
+    assert _restore("audio", {}, current="Unchanged") == "All"
+    assert _restore("image", {}, current="Changed") == "All"
 
 
 # ---------------------------------------------------------------------------
