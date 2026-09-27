@@ -137,8 +137,13 @@ included. Neither is how Stern presents a mode.
   4: MELTDOWN's other calls played the carrier's stock line on the swap titles), and logs each swap the game
   looks up. The examples carry all 25 calls again (GHIDORAH's regrow, OXYGEN's lost, FINAL WARS's phase2,
   MELTDOWN's heat and lost). Pro 1.16's random request 123 is its last music carrier.
-- **Owed:** a hardware run (Premium and Pro). Cues past the carrier limit (GHIDORAH's regrow and others) are not
-  carried. Four other titles' ports miss the same display values Pro 1.16 did (Foo Fighters, John Wick, King
+  EMULATOR-PROVEN the same day in rig 3 (runs sSL, sP116, sP115 in `C:\tmp\pad_hud`, `run3s.sh`, checked by
+  `swapcheck.py <run> <tryit>`): every swap the game looked up is one the build wrote, for the mode that was
+  running, on its own record (BAD: none on all three). Premium 1.16: 17 swaps, five carriers played two or three
+  modes' own sounds (request 1076: GHIDORAH, MASER, MELTDOWN). Pro 1.16: 26 swaps, 25 records; request 86 played
+  all six modes' own music and request 1848 five modes' calls. Pro 1.15: 20 swaps, the same five shared
+  carriers as Premium. segv 0, fatal 0, the same 6 throws as the runs before the change, no render gap.
+- **Owed:** a hardware run (Premium and Pro). Four other titles' ports miss the same display values Pro 1.16 did (Foo Fighters, John Wick, King
   Kong, Metallica): not this branch's; a separate task.
 
 ## How to test it
