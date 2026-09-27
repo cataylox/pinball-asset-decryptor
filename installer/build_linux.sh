@@ -155,6 +155,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.stock_modes" \
     --hidden-import "pinball_decryptor.plugins.stern.stock_mode_tables" \
     --hidden-import "pinball_decryptor.plugins.stern.lampmap" \
+    --hidden-import "pinball_decryptor.plugins.stern.mains_check" \
     --hidden-import "pinball_decryptor.plugins.stern.port_derive" \
     --hidden-import "pinball_decryptor.plugins.stern.portgen" \
     --hidden-import "pinball_decryptor.plugins.stern.portshots" \
