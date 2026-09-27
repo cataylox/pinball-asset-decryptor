@@ -9,6 +9,7 @@
 import { html, useEffect, useState, Button, Card, Chip, Icon, PageHead, Seg, call, cx, mediaUrl } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { NEEDS, WHAT, tabLock } from "../core/locks.js";
+import { Booting } from "../core/booting.js";
 import { SourceBody, ExtractOverlays, DropZone, cardDrop, inputPhrase, useNoStrayDrops } from "./extract.js";
 
 export const css = true;
@@ -56,19 +57,6 @@ function WhatCard({ shell }) {
 }
 
 // ------------------------------------------------------------ the glass
-// While the card is read: a ball rolls the length of the screen over a row
-// of chasing insert lamps, and the stage says what is being read.
-function Booting({ p }) {
-  const games = p && p.games;
-  return html`<div class="c-boot" role="status" aria-live="polite">
-    <div class="c-sweep"></div>
-    <div class="c-lane"><span class="c-ball"></span></div>
-    <div class="c-lamps" aria-hidden="true">${[0, 1, 2, 3, 4, 5, 6].map((i) => html`<i style=${`--i:${i}`}></i>`)}</div>
-    <div class="c-boot-txt">${(p && p.stage) || "Reading the card…"}</div>
-    ${games ? html`<div class="c-boot-sub">Multi-boot card · ${games} games</div>` : null}
-  </div>`;
-}
-
 // The machine's own picture of the card, in the space the drop zone had.
 // It still takes a dropped card, which replaces this one.
 function Glass({ p, droppable }) {
@@ -92,7 +80,7 @@ function Glass({ p, droppable }) {
   return html`<figure class="c-figure">
     <div class=${cx("c-glass", on && "on", over && "over")} style=${`aspect-ratio: ${ratio}`} ...${drop}>
       ${src ? html`<img key=${src} src=${src} alt=${"The card's " + what.toLowerCase()} onLoad=${() => setLit(src)} />` : null}
-      ${on ? null : html`<${Booting} p=${p} />`}
+      ${on ? null : html`<${Booting} stage=${p.stage} sub=${p.games ? `Multi-boot card · ${p.games} games` : ""} />`}
       ${over ? html`<div class="c-glass-drop"><${Icon} name="upload" /><span>Drop to use this card instead</span></div>` : null}
     </div>
     ${on ? html`<figcaption class="small">

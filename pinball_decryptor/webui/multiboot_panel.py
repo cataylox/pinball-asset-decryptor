@@ -951,6 +951,7 @@ class WebMultibootPanel(_Base):
             "hl": hl,
             "sketch": None,
             "placeholder": "",
+            "working": self._web_working(),
         }
         if frame is None:
             if self._rows:
@@ -960,6 +961,22 @@ class WebMultibootPanel(_Base):
                                      "selector itself.\nAdd two images and "
                                      "it appears; every change redraws it.")
         out["preview"] = pv
+
+    def _web_working(self):
+        """What the page's preview says while the picture is being made, or
+        ``''``: reading a card (the old picture is another card's), or the
+        selector drawing a menu that has no frame yet.  A redraw over a
+        frame already on the screen says nothing - that is every keystroke,
+        and the frame stays up until the new one replaces it."""
+        if self._busy and self._run_kind == "load":
+            return "Reading the card…"
+        if self._pv_src or len(self._rows) < 2:
+            return ""
+        # the draw itself, or the debounce in front of it (a card just read
+        # has no frame and one is on its way)
+        if self._pv_busy or self._pv_debounce_job is not None:
+            return "Drawing the boot menu…"
+        return ""
 
     def _sketch(self, hl):
         """The menu drawn from the form, in its own colours, for the page to
@@ -1203,7 +1220,7 @@ class WebMultibootPanel(_Base):
 
     def _set_busy(self, busy):
         super()._set_busy(busy)
-        self._dirty("busy", "rows")
+        self._dirty("busy", "rows", "preview")
 
     def _sync_build_button(self):
         self._dirty("busy")

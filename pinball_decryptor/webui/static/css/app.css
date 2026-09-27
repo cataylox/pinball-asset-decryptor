@@ -329,3 +329,46 @@ html.h-short .page { padding-top: 12px; gap: 10px; }
 .col-grip:hover::after { background: var(--accent); width: 2px; }
 .tbl .th .c { align-self: stretch; display: flex; align-items: center; }
 .tbl .th .c.num { justify-content: flex-end; }
+
+/* A machine's screen while it starts (core/booting.js): a ball rolls the
+   screen's length over chasing insert lamps; .crt-on brings the picture in
+   like a CRT, a line across the middle opening to the whole screen.  Dark in
+   either theme: it is the machine's glass, not the app's. */
+.boot { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; color: #d9d6cc; overflow: hidden; z-index: 2;
+  background: radial-gradient(120% 90% at 50% 40%, #151820 0%, #07080b 70%);
+  --lamp: #e8a33d; }
+.boot::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(255,255,255,.035) 0 1px, transparent 1px 3px); }
+.boot-sweep { position: absolute; left: 0; right: 0; height: 30%; top: -30%; pointer-events: none;
+  background: linear-gradient(180deg, transparent, rgba(232,163,61,.07), transparent); animation: boot-sweep 2.6s linear infinite; }
+@keyframes boot-sweep { to { top: 100%; } }
+.boot-lane { position: relative; width: 62%; height: 22px; border-bottom: 1px solid rgba(255,255,255,.12); }
+.boot-ball { position: absolute; bottom: 1px; left: 0; width: 20px; height: 20px; border-radius: 50%;
+  background: radial-gradient(circle at 34% 30%, #ffffff 0 12%, #cfd4da 26%, #7c848d 62%, #3b4046 100%);
+  box-shadow: 0 0 12px rgba(232,163,61,.35), 0 3px 4px rgba(0,0,0,.6);
+  animation: boot-roll 1.9s cubic-bezier(.45,.05,.55,.95) infinite alternate; }
+@keyframes boot-roll { from { left: 0; transform: rotate(0deg); } to { left: calc(100% - 20px); transform: rotate(720deg); } }
+.boot-lamps { display: flex; gap: 10px; }
+.boot-lamps i { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent;
+  border-bottom: 11px solid var(--lamp); opacity: .16; animation: boot-chase 1.4s linear infinite; animation-delay: calc(var(--i) * .2s); }
+@keyframes boot-chase {
+  0%, 100% { opacity: .16; filter: none; }
+  8%  { opacity: 1; filter: drop-shadow(0 0 6px var(--lamp)); }
+  30% { opacity: .16; filter: none; }
+}
+.boot-txt { font-family: var(--mono); font-size: 12.5px; letter-spacing: .14em; text-transform: uppercase; text-align: center; padding: 0 12px; }
+.boot-txt::after { content: "_"; margin-left: 2px; animation: boot-caret 1s steps(1) infinite; }
+@keyframes boot-caret { 50% { opacity: 0; } }
+.boot-sub { font-size: 12px; color: #9ea4ab; margin-top: -6px; }
+.crt-on { animation: crt-on .6s cubic-bezier(.2,.75,.25,1) both; }
+@keyframes crt-on {
+  0%   { opacity: 1; transform: scale(.04, .006); filter: brightness(5) saturate(0); }
+  30%  { opacity: 1; transform: scale(1, .006); filter: brightness(4) saturate(0); }
+  100% { opacity: 1; transform: scale(1, 1); filter: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .boot-sweep, .boot-ball, .boot-lamps i, .boot-txt::after, .crt-on { animation: none; }
+  .boot-lamps i { opacity: .6; }
+  .boot-ball { left: calc(50% - 10px); }
+}

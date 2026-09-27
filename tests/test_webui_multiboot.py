@@ -1037,3 +1037,107 @@ def test_a_form_saved_against_another_card_is_not_carried(tmp_path):
         w.run(panel.load_inspect, report, card, media)
         assert [r.title for r in panel._rows] == ["STERN 1.59.0", "TMNT 1987"]
         assert panel._carry_edits is None
+
+
+# ------------------------------------------------- following Select card
+def _follow_setup(w, monkeypatch, games=2):
+    """A Select card pick the tab would follow; load_card recorded, not run."""
+    from pinball_decryptor.plugins.stern import multiimage
+    monkeypatch.setattr(multiimage, "images_for_path", lambda p: ["g"] * games)
+    loads = []
+    panel = _panel(w)
+    monkeypatch.setattr(panel, "load_card", lambda p, asked=True: loads.append(p) or True)
+    return loads
+
+
+def test_opening_the_tab_reads_the_multiboot_card_picked_on_select_card(tmp_path, monkeypatch):
+    card = _raw(tmp_path, "three.multi.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        loads = _follow_setup(w, monkeypatch)
+        w.call("ui.set", "extract", "input", card)
+        w.call("ui.select_tab", "multiboot")
+        w.drain()
+        assert loads == [os.path.normpath(card)]
+        assert _panel(w)._out_var.get() == os.path.normpath(card)
+        # once per pick: back to the tab again reads nothing
+        w.call("ui.select_tab", "card")
+        w.call("ui.select_tab", "multiboot")
+        w.drain()
+        assert len(loads) == 1
+
+
+def test_a_single_game_card_is_not_followed(tmp_path, monkeypatch):
+    card = _raw(tmp_path, "one.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        loads = _follow_setup(w, monkeypatch, games=1)
+        w.call("ui.set", "extract", "input", card)
+        w.call("ui.select_tab", "multiboot")
+        w.drain()
+        assert loads == [] and _panel(w)._out_var.get() != card
+
+
+def test_following_asks_before_it_replaces_unsaved_edits(tmp_path, monkeypatch):
+    card = _raw(tmp_path, "three.multi.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        loads = _follow_setup(w, monkeypatch)
+        panel = _panel(w)
+        asked = []
+        monkeypatch.setattr(panel, "_confirm_discard", lambda p: asked.append(p) or False)
+        w.call("ui.set", "extract", "input", card)
+        w.call("ui.select_tab", "multiboot")
+        w.drain()
+        assert asked == [os.path.normpath(card)] and loads == []
+        # declined is remembered too: the next visit does not ask again
+        w.call("ui.select_tab", "card")
+        w.call("ui.select_tab", "multiboot")
+        w.drain()
+        assert len(asked) == 1
+
+
+def test_preview_says_it_is_working_until_the_first_frame(tmp_path):
+    """The page's booting animation: reading a card, then drawing a menu
+    that has no frame yet; a redraw over a frame on the screen says nothing."""
+    with web_app(tmp_path, mfr="stern") as w:
+        panel = _panel(w)
+
+        def working():
+            return w.run(panel._web_working)
+
+        assert working() == ""
+        panel._busy, panel._run_kind = True, "load"
+        assert working() == "Reading the card…"
+        panel._busy, panel._run_kind = False, ""
+        panel._rows = [object(), object()]
+        panel._pv_src, panel._pv_busy = None, True
+        assert working() == "Drawing the boot menu…"
+        panel._pv_src = ("frame.ppm", 0, 0, 1)
+        assert working() == ""
+        panel._pv_busy, panel._pv_src, panel._rows = False, None, []
+
+
+def test_a_restored_form_naming_the_pick_is_not_asked_about(tmp_path, monkeypatch):
+    """After a restart the form comes back holding the picked card, unread:
+    no question, and the tab's own restore read is left to read it."""
+    card = _raw(tmp_path, "three.multi.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        loads = _follow_setup(w, monkeypatch)
+        panel = _panel(w)
+        monkeypatch.setattr(panel, "_confirm_discard", lambda p: pytest.fail("asked"))
+        w.run(panel._out_var.set, card)
+        panel._rows = [object(), object(), object()]
+        w.call("ui.set", "extract", "input", card)
+        w.run(w.window.service("multiboot")._follow_select_card, panel)
+        assert loads == []
+        assert w.app._settings["multiboot_followed_card"] == os.path.normcase(os.path.normpath(card))
+        panel._rows = []
+
+
+def test_a_pick_followed_before_a_restart_is_not_followed_again(tmp_path, monkeypatch):
+    card = _raw(tmp_path, "three.multi.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        loads = _follow_setup(w, monkeypatch)
+        w.app._settings["multiboot_followed_card"] = os.path.normcase(os.path.normpath(card))
+        w.call("ui.set", "extract", "input", card)
+        w.call("ui.select_tab", "multiboot")
+        w.drain()
+        assert loads == []

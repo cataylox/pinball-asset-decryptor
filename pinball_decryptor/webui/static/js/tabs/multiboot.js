@@ -8,6 +8,7 @@
 import { html, useEffect, useRef, useState, PageHead, Card, Button, Field, Select, Check, Table, Modal, Note, openMenu,
          menuOpen, InfoBadge, tip, Icon, mediaUrl, call, setField, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
+import { Booting } from "../core/booting.js";
 
 export const css = true;
 
@@ -197,9 +198,18 @@ function Screen({ pv, tipText, busy, openFull, full }) {
   const onKey = arrowFlip;
   const f = pv.frame;
   const ar = f ? `${f.w} / ${f.h}` : "1360 / 768";
+  // While a card is read or the first frame is drawn, the machine "boots"
+  // (core/booting.js); the frame that ends it comes on like a CRT.  A redraw
+  // over a frame already up is every keystroke, so it just replaces it.
+  const booted = useRef(false);
+  const [reveal, setReveal] = useState(0);
+  useEffect(() => {
+    if (pv.working) booted.current = true;
+    else if (booted.current && f) { booted.current = false; setReveal((n) => n + 1); }
+  }, [pv.working, f && f.src]);
   let inner;
   if (f) {
-    inner = html`<div class="mb-frame">
+    inner = html`<div class=${cx("mb-frame", reveal && "crt-on")} key=${"crt" + reveal}>
       <img src=${mediaUrl(f.src)} alt="The boot menu, as the selector drew it" draggable="false" />
       ${(pv.clips || []).map((c) => html`<img class="mb-clip" key=${c.i} alt="" draggable="false"
         src=${mediaUrl(c.src) + "&v=" + c.v}
@@ -214,7 +224,8 @@ function Screen({ pv, tipText, busy, openFull, full }) {
   const size = full && f ? `;width:min(${f.w}px, 100%);max-width:calc((100vh - 240px) * ${f.w} / ${f.h})` : "";
   return html`<div class=${"thumb mb-screen" + (full ? " mb-full" : "")} style=${`aspect-ratio:${ar}${size}`} tabindex="0" onKeyDown=${onKey}
     aria-label="Boot menu preview" onContextMenu=${(e) => previewMenu(e, pv, busy, openFull)}
-    onDblClick=${full ? null : openFull} ...${full ? {} : tip(tipText)}>${inner}</div>`;
+    onDblClick=${full ? null : openFull} ...${full ? {} : tip(tipText)}>${inner}
+    ${pv.working ? html`<${Booting} stage=${pv.working} />` : null}</div>`;
 }
 
 // The menu drawn from the form, in its own colours, until the selector has

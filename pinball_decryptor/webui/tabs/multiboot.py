@@ -113,6 +113,8 @@ class MultibootTab(TabService):
         super().__init__(window)
         self._dlg = None
         self._broken = None
+        # the Select card pick last read here (see _follow_select_card)
+        self._followed = None
         self.set(dlg=None, broken=None)
         try:
             self._multiboot_panel = self._build_panel()
@@ -220,8 +222,70 @@ class MultibootTab(TabService):
         if self._broken:
             return
         panel = self._multiboot_panel
+        self._follow_select_card(panel)
         panel.on_shown()
         panel._refresh_facts()
+
+    def _follow_select_card(self, panel):
+        """Read the multi-boot card picked on the Select card tab, so the
+        menu, the images and the preview are here when this tab opens.
+
+        ONCE PER PICK: a pick that has been followed (or declined) is not
+        read again, so a card browsed to in this tab's own box stays put
+        until another card is picked on Select card.  The pick is kept in
+        the settings (``multiboot_followed_card``), so a restart is not a
+        new pick: the restored form comes back as it was, and when it names
+        the picked card the tab's own restore read (``on_shown``) reads it
+        without asking - David, 2026-09-26: "it should know that my
+        selection hasn't changed".  Only an image FILE
+        with two or more games (a card in a reader is read with From SD
+        card…), only on the Stern platform, never during a run, and never
+        over unsaved edits without the same question Browse… asks."""
+        ext = self.window.service("extract")
+        if ext is None or ext.get("ssd") or panel.platform != "stern":
+            return False
+        path = (ext.extract_input_var.get() or "").strip().strip('"')
+        if not path or not os.path.isfile(path):
+            return False
+        path = os.path.normpath(path)
+        key = os.path.normcase(path)
+        if key == self._followed_card():
+            return False
+
+        def same(p):
+            p = (p or "").strip().strip('"')
+            return bool(p) and os.path.normcase(os.path.normpath(p)) == key
+        if same(panel._loaded_card) or same(panel._out_var.get()):
+            # already this card, read or about to be (a restored form is
+            # read by on_shown, with its edits carried over)
+            self._remember_followed(key)
+            return False
+        try:
+            from ...plugins.stern.multiimage import images_for_path
+            multi = len(images_for_path(path)) >= 2
+        except Exception:                               # noqa: BLE001
+            multi = False
+        if not multi or panel._busy:
+            return False
+        self._remember_followed(key)
+        if not panel._confirm_discard(path):
+            return False
+        panel._out_var.set(path)
+        started = bool(panel.load_card(path))
+        self._done()
+        return started
+
+    def _followed_card(self):
+        if self._followed is None:
+            settings = getattr(self.app, "_settings", None) or {}
+            self._followed = settings.get("multiboot_followed_card") or ""
+        return self._followed
+
+    def _remember_followed(self, key):
+        self._followed = key
+        settings = getattr(self.app, "_settings", None)
+        if isinstance(settings, dict):
+            settings["multiboot_followed_card"] = key
 
     def on_close(self):
         if self._broken:
