@@ -3411,3 +3411,21 @@ def test_a_store_name_is_the_title_made_unique():
     assert f("TMNT 1987", taken={"tmnt-1987", "tmnt-1987-2"}) == "tmnt-1987-3"
     assert f("***") == "own"
     assert multiboot_core.SCORES_NAME_RE.match(f("Godzilla, Mothra & Rodan"))
+
+
+def test_the_plan_says_which_images_run_custom_modes():
+    text = "\n".join([
+        "== custom modes",
+        "modes image 0: 2 mode files, 0 code modes (the primary's own rootfs)",
+        "modes image 2: 0 mode files, 1 code mode (carried to /usr/local/codeselect/modes/img2, "
+        "bound over /usr/local/padmode when it boots)",
+        "every other image boots with no custom modes"])
+    info = parse_plan(text)
+    assert info["modes"] == {0: "2 mode files, 0 code modes", 2: "0 mode files, 1 code mode"}
+    assert parse_plan("")["modes"] == {}
+    rows, _w = multiboot_core.rows_from_inspect({"images": [
+        {"device": "/dev/mmcblk0p3", "title": "A", "modes": "1 mode file, 0 code modes"},
+        {"device": "/dev/mmcblk0p7", "title": "B", "modes": None}]})
+    assert [r.modes for r in rows] == ["1 mode file, 0 code modes", ""]
+    assert multiboot_core.modes_line(rows[1]) == "" and "runs custom modes (1 mode file" in \
+        multiboot_core.modes_line(rows[0])

@@ -462,6 +462,36 @@ def test_edit_dialog_gives_an_image_its_own_high_scores(tmp_path):
         assert s["rows"][1]["scores"] == "shared" and _panel(w)._rows[1].own_scores == ""
 
 
+def test_an_image_found_running_modes_gets_its_own_scores_once(tmp_path):
+    """PAD-226: the plan reads the modes off the .raw files; the first time an
+    image is seen to carry some it is ticked for its own high scores, the
+    table flags a modded image that shares, and an untick is the owner's
+    answer - a later plan does not tick it again."""
+    a = _raw(tmp_path, "a_pro-1_59_0.Release.8G.sdcard.raw")
+    b = _raw(tmp_path, "b_pro-1_59_0.Other.8G.sdcard.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _add(w, a)
+        _add(w, b)
+        p = _panel(w)
+        p._take_modes({1: "2 mode files, 0 code modes"})
+        s = _st(w)
+        assert s["rows"][1]["scores"] == "own" and s["rows"][1]["modes"]
+        assert s["rows"][0]["modes"] == "" and s["rows"][0]["scores"] == "shared"
+        assert p._rows[1].own_scores
+        # the owner unticks it: the table warns, and the next plan leaves it be
+        w.call("multiboot.edit", 1)
+        assert "runs custom modes (2 mode files" in _st(w)["ed"]["scores_modes"]
+        w.call("ui.set", "multiboot", "ed_own_scores", False)
+        w.call("multiboot.edit_ok")
+        p._take_modes({1: "2 mode files, 0 code modes"})
+        s = _st(w)
+        assert s["rows"][1]["scores"] == "shared" and s["rows"][1]["scores_warn"] is True
+        assert "SHARES its high-score table" in s["rows"][1]["scores_tip"]
+        # modes gone from the .raw: the fact goes, the owner's tick stays as it was
+        p._take_modes({})
+        assert p._rows[1].modes == "" and _st(w)["rows"][1]["scores_warn"] is False
+
+
 def test_a_late_edit_after_cancel_is_dropped(tmp_path):
     """The field's debounce (or its blur) can land after Cancel / Escape put
     the row back: in Tk nothing reaches a dialog that has gone."""

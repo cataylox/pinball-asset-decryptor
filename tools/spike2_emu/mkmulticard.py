@@ -2947,19 +2947,22 @@ def inject_commands(items, existing, times, existing_media=None):
 def read_mode_set(path):
     """{name: (bytes, mode)} - the custom modes on a source card's rootfs (PADMODE_DIR), {} when
     it carries none.  Plain files only, by the names the selector's own media accepts."""
+    # like the version read, it never breaks a plan: a card (or a host without debugfs) that
+    # cannot be read is a card with no modes to carry
     try:
         ref = select_ref(path)
-    except Exception:
+        if not debugfs_exists(ref, PADMODE_DIR):
+            return {}
+        out = {}
+        for e in debugfs_ls(ref, PADMODE_DIR):
+            name = e[4]
+            if name in (".", "..") or statmod.S_ISDIR(e[1]) or not MEDIA_NAME_RE.match(name):
+                continue
+            out[name] = (debugfs_cat(ref, PADMODE_DIR + "/" + name), 0o755 if name.endswith(".so") else 0o644)
+        return out
+    except Exception as e:
+        say("custom modes on %s could not be read (%s: %s): none are carried" % (path, type(e).__name__, e))
         return {}
-    if not debugfs_exists(ref, PADMODE_DIR):
-        return {}
-    out = {}
-    for e in debugfs_ls(ref, PADMODE_DIR):
-        name = e[4]
-        if name in (".", "..") or statmod.S_ISDIR(e[1]) or not MEDIA_NAME_RE.match(name):
-            continue
-        out[name] = (debugfs_cat(ref, PADMODE_DIR + "/" + name), 0o755 if name.endswith(".so") else 0o644)
-    return out
 
 
 def mode_summary(names):

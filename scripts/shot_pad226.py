@@ -7,8 +7,8 @@ writes <out-dir>/<prefix>_table.png (the tab) and <prefix>_edit.png (Edit
 image... on the modded image).  The server runs from THIS tree against a
 scratch settings folder (no WSL, no rig).  The card is a canned inspect
 report: three Godzilla Pro 1.15 images - stock, a modded one that keeps its
-own scores on the card (images.conf scores=1|heisei) and a re-theme that
-shares - fed to the panel's own load_inspect when the tab is first shown.
+own scores on the card (images.conf scores=1|heisei) and runs custom modes,
+and a re-theme that shares - fed to the panel's own load_inspect when the tab is first shown.
 """
 
 import json
@@ -37,9 +37,9 @@ mp.WebMultibootPanel.on_shown = on_shown
 sys.exit(host.main(sys.argv[1:]))
 '''
 
-IMAGES = [("GODZILLA", "Stock Stern 1.15", None),
-          ("HEISEI", "Custom modes", "heisei"),
-          ("ORCHESTRAL", "Re-themed music", None)]
+IMAGES = [("GODZILLA", "Stock Stern 1.15", None, None),
+          ("HEISEI", "Custom modes", "heisei", "7 mode files, 0 code modes"),
+          ("ORCHESTRAL", "Re-themed music", None, None)]
 
 
 def main():
@@ -60,8 +60,8 @@ def main():
                "anim": None, "music": None, "art_source": "none",
                "anim_source": "none", "source": None, "source_exists": False,
                "title_dir": "godzilla_pro", "bypass": True, "version": "1.15.0",
-               "own_scores": own}
-              for i, (d, (t, s, own)) in enumerate(zip(devs, IMAGES))]
+               "own_scores": own, "modes": modes}
+              for i, (d, (t, s, own, modes)) in enumerate(zip(devs, IMAGES))]
     report = {
         "card": card, "size": 31914983424, "layout": "multi",
         "images": images, "timeout": 15, "default": 0, "volume": 35,

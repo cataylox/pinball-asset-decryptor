@@ -586,6 +586,10 @@ class ImageRow:
     #: image of that game.  A GROUP card's value is its members'.  The name is
     #: kept once given, so renaming the image never strands its scores.
     own_scores: str = ""
+    #: THE CUSTOM MODES THIS IMAGE RUNS (PAD-226), as the tool says it
+    #: ("2 mode files, 0 code modes"), "" = none.  Like the version, a fact
+    #: read off the .raw (plan) or the card (inspect), never typed.
+    modes: str = ""
     #: HOW IT PICKS: one of ROLL_MODES.  "" reads as the card's own default,
     #: which is what a card built before there was a choice does.
     roll: str = ""
@@ -2145,6 +2149,15 @@ SCORES_NOTE = (
     "the same game; unticked images of that game share one table. The first "
     "time it boots it starts from a copy of the shared settings and scores: "
     "reset its high scores once in the service menu.")
+
+def modes_line(row):
+    """The Edit dialog's line about the custom modes this image runs, or ""."""
+    m = ((row.modes if row is not None else "") or "").strip()
+    if not m:
+        return ""
+    return ("This image runs custom modes (%s). On the card they run for this "
+            "image only; the others boot without them." % m)
+
 
 #: A store name, as mkmulticard.py and select.sh accept one (PAD-226).
 SCORES_NAME_RE = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}$")
@@ -3851,7 +3864,8 @@ def rows_from_inspect(info):
                        # read off the image itself, never typed and never
                        # guessed from a file name
                        version=(im.get("version") or "").strip(),
-                       own_scores=(im.get("own_scores") or "").strip())
+                       own_scores=(im.get("own_scores") or "").strip(),
+                       modes=(im.get("modes") or "").strip())
         if im.get("art_source"):
             row.art, row.art_video, row.art_time = \
                 split_art_source(im["art_source"])
@@ -4756,6 +4770,10 @@ _TOTAL_RE = re.compile(r"^image:\s+\d+\s+sectors\s+=\s+(\d+)\s+bytes")
 _VERSION_ROW_RE = re.compile(
     r"^\s*(\d+)\s+\S+\s+.*?\s(\d+\.\d+\.\d+|UNKNOWN)(?:\s|$)")
 
+#: ...and a line of its ``== custom modes`` block (PAD-226):
+#:     modes image 2: 2 mode files, 0 code modes (carried to ...)
+_MODES_ROW_RE = re.compile(r"^modes image (\d+): (.+?) \(")
+
 
 def parse_plan(text, platform="stern"):
     """What ``mkmulticard.py plan`` said: ``{"bytes": N or None, "fits":
@@ -4776,7 +4794,7 @@ def parse_plan(text, platform="stern"):
     nothing and is the same number by the same route (David: "the code
     column is not being populated for me when i load in images")."""
     info = {"bytes": None, "fits": {}, "versions": {}, "sizes": [],
-            "overhead": None, "free": None, "shared": None}
+            "overhead": None, "free": None, "shared": None, "modes": {}}
     be = backend_for(platform)
     fits_re, total_re = be.fits_re, be.total_re
     for line in (text or "").splitlines():
@@ -4805,6 +4823,10 @@ def parse_plan(text, platform="stern"):
         m = total_re.match(line.strip())
         if m:
             info["bytes"] = int(m.group(1))
+        m = _MODES_ROW_RE.match(line.strip())
+        if m:
+            info["modes"][int(m.group(1))] = m.group(2)
+            continue
         m = _VERSION_ROW_RE.match(line)
         if m and not line.lstrip().startswith("NOTE"):
             version = m.group(2)
@@ -7586,6 +7608,8 @@ class MultibootPanel:
             "code": list_code(row),
             "scores": self._scores_cell(row),
             "scores_tip": self._scores_tip(row),
+            "scores_warn": self._scores_warn(row),
+            "modes": (row.modes or "").strip(),
         }
 
     def _scores_cell(self, row):
@@ -7598,13 +7622,21 @@ class MultibootPanel:
 
     def _scores_tip(self, row):
         cell = self._scores_cell(row)
+        runs = ("Runs custom modes (%s). " % row.modes) if (row.modes or "").strip() else ""
         if cell == "own":
-            return ("Keeps its own high scores, settings and audits on the "
-                    "machine (store '%s' on the card)." % row.own_scores.strip())
+            return runs + ("Keeps its own high scores, settings and audits on the "
+                           "machine (store '%s' on the card)." % row.own_scores.strip())
         if cell == "shared":
+            if runs:
+                return runs + ("It SHARES its high-score table with the other images "
+                               "of the same game, so its modded scores mix with theirs.")
             return ("Shares its high scores, settings and audits with every "
                     "other image of the same game that shares.")
         return ""
+
+    def _scores_warn(self, row):
+        """A modded image that still shares its table: worth a second look."""
+        return self._scores_cell(row) == "shared" and bool((row.modes or "").strip())
 
     def _refresh_tree(self, select=None):
         """Rebuild the table from ``self._rows`` and settle everything that
@@ -9332,6 +9364,7 @@ class MultibootPanel:
             self._plan_failed = False
             self._plan_why = ""
             self._take_versions(self._plan_info.get("versions") or {})
+            self._take_modes(self._plan_info.get("modes") or {})
         else:
             self._plan_info = None
             self._plan_failed = True
@@ -9359,6 +9392,40 @@ class MultibootPanel:
         dlg = self._buildflash_dialog
         if dlg is not None:
             dlg.refresh(self._write_plan())
+
+    def _take_modes(self, modes):
+        """PAD-226: which images run custom modes, as the plan just read them
+        off the .raw files - keyed by IMAGE, put on the row that holds that
+        game (a random card's games are its members, and the card counts as
+        running modes when any of them does).
+
+        The FIRST time an image is seen to carry modes it is given high
+        scores of its own - custom modes change the scoring, so that is the
+        right answer for nearly every such image - and after that the tick is
+        the owner's: a later plan never ticks it again."""
+        if self._backend.key == "jjp":
+            return
+        form = self.form()
+        found = {}
+        for i, _path, ri, _mi in form_trees(form):
+            if modes.get(i):
+                found.setdefault(ri, modes[i])
+        changed = False
+        for ri, row in enumerate(self._rows):
+            if is_group(row) and row.keep:
+                continue
+            new = found.get(ri, "")
+            if new == (row.modes or ""):
+                continue
+            if new and not row.modes and not (row.own_scores or "").strip():
+                taken = {(r.own_scores or "").strip() for r in self._rows if r is not row}
+                row.own_scores = scores_name_for(row.title or list_title(row, ri), taken)
+                self._write("[multi-boot] image %d runs custom modes (%s): it keeps its own "
+                         "high scores (Edit image... to change that)" % (ri, new))
+            row.modes = new
+            changed = True
+        if changed:
+            self._refresh_tree(select=self._selected())
 
     def _take_versions(self, versions):
         """Put the game code versions the tool just read into the table.
