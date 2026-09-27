@@ -1422,6 +1422,15 @@ button's RGB light (LOCKDOWN BUTTON-R/G/B in the light table), tied to the butto
 flip is a hit, so a flipper button as a scoring shot pays on every flip. The three Godzilla ports
 carry these lines (`portswitch.switch_source` read their drains).
 
+Emulator-proven 2026-09-27 on Godzilla Pro 1.15, Pro 1.16 and Premium/LE 1.16, one boot each in a
+rig slot (`value switch_edge_log` on): in play the game's mode mask is 0, so every press is ONE hit,
+on its press edge (level 0; the release is level 1 and no hit); a mode scored the left and right
+flipper buttons (+1M, +2M on the ladder) and served its multiball on the Action button; the shim's
+LED view (node 1, channels 5/4/7 = R/G/B) showed the Action button held solid red for the whole run
+of the mode and the game's own animation before and after. In ATTRACT the mask is 0x0010 and
+`pm_in_game()` is 0, so nothing counts - and the Action button or a flipper there opens the game's DJ
+Mixer, which then ignores Start: a rig script must not press them before its game.
+
 #### A ball end from the bus
 
 Where no function runs only at the end of a ball, a port can name the bus id instead:

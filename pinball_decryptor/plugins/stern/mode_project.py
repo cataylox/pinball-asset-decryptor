@@ -526,7 +526,12 @@ SWITCH_SHOTS_PROVEN = frozenset({"beatles-1.29"})
 #: Builds whose shots from the framework's switch drain (site switch_edge, `switch` lines) were seen
 #: reaching a mode in the emulator, each switch once, as ``<game>-<version>`` (2026-09-23: The Beatles
 #: 1.29 and Star Wars ELG 1.10 of generation B, Batman 66 1.13 and Rush LE 1.18 of generation A).
-SWITCH_EDGE_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10", "batman-1.13", "rush_le-1.18"})
+#: PAD-228 (2026-09-27, rig 2): the Godzilla builds' cabinet buttons - Action 34, left flipper 60, right
+#: flipper 59 - one hit per press on the press edge (the game's mode mask is 0 in play), a mode scored the
+#: flipper buttons +1M and +2M and served its multiball on the Action button, and the shim's LED view had
+#: the Action button solid red for the whole run of the mode (the game's own animation before it).
+SWITCH_EDGE_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10", "batman-1.13", "rush_le-1.18",
+                                "godzilla_pro-1.15", "godzilla_pro-1.16", "godzilla_le-1.16"})
 
 
 def _core_names(port):
