@@ -28,7 +28,7 @@ Godzilla's slide-outs scene. A mode with a HUD needs no ``screen``.
 The CUES are the mode's own words (``pa_call(&own, "sever")`` in its C); the project maps each
 to a WAV. Write (and Try it, which is Write's own code) then does for a code mode what it does
 for a form mode: the screen into the HUD scene, the clip into the video bank, the music on a
-bed and each call on a carrier of its own (:mod:`.mode_sounds`), and the mode compiled into the
+bed and each call on a carrier, shared with the other modes' (:mod:`.mode_sounds`), and the mode compiled into the
 object the card carries with ``mode_file.c``. The carriers it chose go on the card as
 ``<slug>.assets`` beside ``mode.so`` (:func:`runtime_text`), which the mode reads through
 ``tools/spike2_emu/modes/sdk/pad_mode_assets.h``.
@@ -317,7 +317,9 @@ def runtime_text(slug, spec, prof, own_sounds=(), screen=False, clip=False):
             lines.append("music  %d%s" % (int(u["request"]), " %d" % int(u["sid"]) if u.get("sid") else ""))
     for u in mine:
         if u.get("stock_key") and u.get("our_key"):     # item 163: swapped in at run time
-            lines.append("swap   %d %s %s" % (int(u["request"]), u["stock_key"], u["our_key"]))
+            # hud-layers: and whose ("music" or "call:<cue>"): a carrier can take several of the
+            # mode's sounds' neighbours in other modes, so the mode picks its own swap by cue
+            lines.append("swap   %d %s %s %s" % (int(u["request"]), u["stock_key"], u["our_key"], u["key"]))
     for cue, _w, _p in spec.call_list():
         u = next((u for u in mine if u.get("key") == call_key(cue)), None)
         if u is None:

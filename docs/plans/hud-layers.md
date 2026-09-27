@@ -127,7 +127,16 @@ included. Neither is how Stern presents a mode.
   carries no music for OXYGEN (no free music slot) or ANGUIRUS (its slot request 123 plays one of 16 sounds at
   random). The game's own MASER CANNON AWARD (effect 192) comes through over GHIDORAH's ending on Premium and Pro:
   the final blow is the Maser, and 192 beats a mode's hold; left as the game's.
-- The six examples keep 20 calls: Premium 1.16 measures 21 call carriers (`mode_sounds.Carriers.calls`).
+- 2026-09-27, SHARED CARRIERS (David: "we have the ability to expand the data partition and add as many
+  sounds as we want"): space was never the limit, the carriers were (a sound plays through a request the
+  game has, and every sound took one of its own). Now a carrier is shared across modes: each sound is a
+  grown copy of its own HOST record (the carrier's own when free, else a stock record of the same channels
+  no longer than the carrier's), left un-pointed, and the mode swaps the carrier's key for it
+  (`engine._mode_shared_sound`, `mode_write._share_swapped`). Godzilla Premium 1.16 and Pro 1.15 swap their
+  calls too (their music keeps its hardware-proven beds). The runtime reads 24 swaps a mode, by cue (it read
+  4: MELTDOWN's other calls played the carrier's stock line on the swap titles), and logs each swap the game
+  looks up. The examples carry all 25 calls again (GHIDORAH's regrow, OXYGEN's lost, FINAL WARS's phase2,
+  MELTDOWN's heat and lost). Pro 1.16's random request 123 is its last music carrier.
 - **Owed:** a hardware run (Premium and Pro). Cues past the carrier limit (GHIDORAH's regrow and others) are not
   carried. Four other titles' ports miss the same display values Pro 1.16 did (Foo Fighters, John Wick, King
   Kong, Metallica): not this branch's; a separate task.

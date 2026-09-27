@@ -930,7 +930,7 @@ static void on_sound_worker(unsigned *r)
  * key, not on "the next lookup", holds when the worker thread looks it up later, and holds for a
  * looping descriptor that looks its key up again at every loop. */
 #define SWAPS_MAX 8
-static struct { unsigned request; int old; unsigned long until; unsigned char stock[8], ours[8]; } swaps[SWAPS_MAX];
+static struct { unsigned request; int old; unsigned long until; unsigned char stock[8], ours[8]; volatile int looked; } swaps[SWAPS_MAX];
 static volatile int swaps_live;
 
 int pm_sound_swap(unsigned request, const unsigned char stock[8], const unsigned char ours[8], int priority, unsigned ms)
@@ -944,7 +944,11 @@ int pm_sound_swap(unsigned request, const unsigned char stock[8], const unsigned
     if (free_i < 0) return 0;
     old = pm_sound_priority(request, priority, 0);
     if (swaps[free_i].request != request) swaps[free_i].old = old;
-    for (i = 0; i < 8; i++) { swaps[free_i].stock[i] = stock[i]; swaps[free_i].ours[i] = ours[i]; }
+    for (i = 0; i < 8; i++) {
+        if (swaps[free_i].ours[i] != ours[i]) swaps[free_i].looked = 0;     /* another record: say it again */
+        swaps[free_i].stock[i] = stock[i];
+        swaps[free_i].ours[i] = ours[i];
+    }
     swaps[free_i].until = pm_ms() + (ms ? ms + ms / 8 + 1000 : 10000);
     swaps[free_i].request = request;          /* last: the lookup hook reads it */
     swaps_live = 1;
@@ -987,6 +991,15 @@ static void on_sound_lookup(unsigned *r)
         for (i = 0; i < SWAPS_MAX; i++)
             if (swaps[i].request && key_is(k, swaps[i].stock)) {
                 r[1] = (unsigned)(unsigned long)swaps[i].ours;
+                if (!swaps[i].looked) {         /* once per record armed: the proof it was the one played */
+                    swaps[i].looked = 1;
+                    say("sound swap: request %u looked up %02x%02x%02x%02x%02x%02x%02x%02x, took "
+                        "%02x%02x%02x%02x%02x%02x%02x%02x", swaps[i].request,
+                        swaps[i].stock[0], swaps[i].stock[1], swaps[i].stock[2], swaps[i].stock[3],
+                        swaps[i].stock[4], swaps[i].stock[5], swaps[i].stock[6], swaps[i].stock[7],
+                        swaps[i].ours[0], swaps[i].ours[1], swaps[i].ours[2], swaps[i].ours[3],
+                        swaps[i].ours[4], swaps[i].ours[5], swaps[i].ours[6], swaps[i].ours[7]);
+                }
                 return;
             }
     }

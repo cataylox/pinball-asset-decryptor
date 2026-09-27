@@ -199,14 +199,21 @@ def test_code_sounds_off_or_on_a_title_without_carriers_are_left_out_with_a_line
     assert "no stock requests to carry them" in said[-1]
 
 
-def test_a_code_mode_asking_more_calls_than_carriers_keeps_the_ones_it_got(tmp_path):
+def test_a_code_modes_calls_share_the_carriers_less_the_ones_re_pointed_for_good(tmp_path):
+    """hud-layers: a swapped call is not given a carrier of its own at the desk: it gets every call
+    carrier the title has, less the ones re-pointed for good (*taken*), from its rank in its mode on
+    (longest first). The engine picks the one it takes, distinct within the mode."""
     cues = ["c%02d" % i for i in range(16)]
     project = _code_project(tmp_path, calls=cues, music=False)
     said = []
     got = MW.choose_code_sounds(project, CM.list_code(project), (True, ""), GZ,
                                 taken=list(MS._JP_CALLS[:10]), log=lambda m, *a: said.append(m))
-    assert len(got) == len(MS._JP_CALLS) - 10
-    assert any("is not put on this card" in s for s in said)
+    left = list(MS._JP_CALLS[10:])
+    assert len(got) == 16 and not said
+    for u in got:
+        assert u["swap"] and sorted(u["candidates"]) == sorted(left) and u["request"] == u["candidates"][0]
+    firsts = [u["candidates"][0] for u in got]
+    assert set(firsts) == set(left)                   # each rank starts at another carrier
 
 
 # ---- Write's plan -------------------------------------------------------------------------------------
@@ -321,8 +328,11 @@ def test_the_intricate_modes_are_the_code_examples_and_their_recipes_fit():
         for part in [r["music"]] + list(r["calls"].values()) + list(clips.values()):
             assert part["film"] in CM.FILMS and part["film"] in CM.FILM_TITLES
             assert "—" not in part.get("what", "")
-    total = sum(len(ex["recipe"]["calls"]) for ex in CM.EXAMPLES)
-    assert total <= len(MS._JP_CALLS)                  # every call of the six has a carrier
+    # hud-layers: the carriers are SHARED across modes, so what has to fit is one mode's calls (each
+    # takes another carrier within its mode); the six together carry more than there are carriers
+    for ex in CM.EXAMPLES:
+        assert len(ex["recipe"]["calls"]) <= len(MS._JP_CALLS), ex["name"]
+    assert sum(len(ex["recipe"]["calls"]) for ex in CM.EXAMPLES) > len(MS._JP_CALLS)
     assert len(CM.EXAMPLES) <= len(MS._BEDS_LE116)     # and every music a bed of its own
 
 

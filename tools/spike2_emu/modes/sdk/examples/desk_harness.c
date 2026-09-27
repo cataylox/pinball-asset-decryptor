@@ -309,8 +309,11 @@ int pm_sound_sid(unsigned request, unsigned sid)
 }
 int pm_sound_swap(unsigned request, const unsigned char stock[8], const unsigned char ours[8], int priority, unsigned ms)
 {
-    (void)stock; (void)ours;
-    printf("%6lu SWAP %u p%d %u\n", now_ms, request, priority, ms);
+    int i;
+    (void)stock;
+    printf("%6lu SWAP %u p%d %u ", now_ms, request, priority, ms);
+    for (i = 0; i < 8; i++) printf("%02x", ours[i]);            /* which record: the test reads it */
+    printf("\n");
     return 1;
 }
 int pm_sound_playing(unsigned *requests, unsigned *buses, int max)

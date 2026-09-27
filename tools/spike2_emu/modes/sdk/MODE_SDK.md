@@ -707,8 +707,15 @@ Write (and Try it, which is Write's code) then:
 
 - adds the screen to the HUD scene and the clip to the video bank, named after the folder
   (`PadMode_<folder>_Screen`, `PadMode_<folder>_Clip`), in the same pass as the form modes';
-- puts the music on a bed of its own and each call on a carrier of its own, from the same allocator
-  as the form modes' sounds (`mode_write.choose_code_sounds`), and grows and encodes them the same way;
+- puts the music on a bed of its own (or, on a title with no beds, swaps it in on a music carrier) and
+  each call on a CARRIER, from the same allocator as the form modes' sounds
+  (`mode_write.choose_code_sounds`), and grows and encodes them the same way. Carriers are SHARED across
+  modes (hud-layers): each sound is its own appended record - a grown copy of a HOST record, the
+  carrier's own when free, else a stock record of the same channels no longer than the carrier's - and
+  the mode swaps the carrier's key for its record for its own play (`pm_sound_swap`). Within one mode
+  each call takes another carrier, and a call is no longer than its carrier's record (the carrier's
+  descriptor says how long the play is). So what limits a mode is its own calls against the title's
+  carriers (21 on Godzilla), not every mode's together;
 - compiles the project's code modes with `mode_file.c` into the card's `mode.so` (build_mode.sh in the
   app's Linux) instead of the pinned object;
 - writes `<folder>.assets` beside it, naming what it carried:
@@ -719,7 +726,12 @@ screen PadMode_ghidorah_heads_Screen PadMode_ghidorah_heads_Screen.PadMode_ghido
 clip   start PadMode_ghidorah_heads_Clip
 music  125 576
 call   sever 1186 1400 4
+swap   1186 a20a51102c1c0020 d1eaa8b4ae100000 call:sever
 ```
+
+A `swap` line names the carrier, its own record key, the mode's appended record key, and whose it is
+(`call:<cue>` or `music`). The runtime logs `sound swap: request N looked up <stock>, took <ours>` the
+first time the game looks each one up: the proof the play was the mode's own record.
 
 The mode reads it with `pad_mode_assets.h` (a header, nothing added to the runtime):
 

@@ -665,6 +665,48 @@ def play_own(harness, dump_dir, *args):
     return r.stdout
 
 
+def _key(n):
+    return "%016x" % n
+
+
+def _swaps_run(harness, d, lines):
+    d.mkdir()
+    (d / "meltdown.assets").write_text("\n".join(lines) + "\n")
+    return play_own(harness, str(d), *(GT * 10), "secs", 1, *GT, "secs", 2, "trigger", "meltdown.heat=75",
+                    "secs", 2, "trigger", "meltdown.stop", "secs", 2)
+
+
+def test_every_call_swaps_in_its_own_record_past_the_old_four(harness, tmp_path):
+    """hud-layers: a mode reads up to PA_SWAPS_MAX swap lines (4 dropped MELTDOWN's other calls on
+    the swap titles, which then played the carrier's own line), and picks each call's swap by its
+    CUE: one carrier can hold several sounds, each its own record."""
+    name, bed, calls = ASSETS["meltdown"]
+    lines = ["name   %s" % name, "music  125 %d" % bed]
+    lines += ["swap   %d %s %s call:%s" % (req, _key(1), _key(req), cue) for cue, req in calls.items()]
+    lines += ["call   %s %d 1500 4" % (cue, req) for cue, req in calls.items()]
+    out = _swaps_run(harness, tmp_path / "swaps", lines)
+    order = list(calls.values())
+    played = sorted({int(r) for r in re.findall(r"^\s*\d+ SOUND (\d+)$", out, re.M) if int(r) in order})
+    assert len(played) >= 2, out[-2000:]
+    assert [r for r in played if order.index(r) >= 4], played        # a call past the fourth swap line
+    for r in played:
+        assert re.search(r"SWAP %d p\d+ \d+ %s$" % (r, _key(r)), out, re.M), r
+
+
+def test_a_swap_is_picked_by_its_cue_and_an_untagged_one_still_reads(harness, tmp_path):
+    name, bed, calls = ASSETS["meltdown"]
+    lit, lost = calls["lit"], calls["critical"]     # "lost": the critical call, as before the tag
+    lines = ["name   %s" % name, "music  125 %d" % bed,
+             "swap   %d %s %s call:heat" % (lit, _key(1), _key(0xbad)),      # another cue's, same request
+             "swap   %d %s %s call:lit" % (lit, _key(1), _key(0x11)),
+             "swap   %d %s %s" % (lost, _key(1), _key(0x22)),               # as before the tag: its one sound
+             "call   lit %d 1500 4" % lit, "call   critical %d 1500 4" % lost]
+    out = _swaps_run(harness, tmp_path / "tags", lines)
+    assert re.search(r"SWAP %d p\d+ \d+ %s$" % (lit, _key(0x11)), out, re.M), out[-2000:]
+    assert not re.search(r"SWAP %d p\d+ \d+ %s$" % (lit, _key(0xbad)), out, re.M)
+    assert re.search(r"SWAP %d p\d+ \d+ %s$" % (lost, _key(0x22)), out, re.M)
+
+
 def test_ghidorah_plays_its_music_clip_and_calls_and_gives_the_music_back(harness, dump):
     out = play_own(harness, dump, *POWERLINES, "secs", 1,
                    "shot", "Left ramp", "shot", "Powerline left", "secs", 12,

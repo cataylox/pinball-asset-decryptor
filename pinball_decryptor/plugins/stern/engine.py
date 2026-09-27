@@ -14320,6 +14320,10 @@ def _mode_swap_keys(used, params, log):
             continue
         p = byidx.get(int(u["idx"]), {})
         old, new = p.get("stock_findkey"), p.get("findkey")
+        if u.get("carrier_idx") is not None and int(u["carrier_idx"]) != int(u["idx"]):
+            # hud-layers: a shared carrier - the game looks up the CARRIER's record, not the host's
+            c = byidx.get(int(u["carrier_idx"]), {})
+            old = c.get("stock_findkey") if c.get("grown") else c.get("findkey")
         if not p.get("grown") or not old or not new or bytes(old) == bytes(new):
             used.remove(u)
             log("Modes: %s's own %s is not put on this card: its record's key did not come out of "
@@ -14388,6 +14392,109 @@ def _mode_music_level_refs(gr_path, img_path, params, sites, loop_idx, log, used
     return {int(i): int(ref) for i in loop_idx}
 
 
+def _mode_host_record(pc, clen, params, mine, audio_edits):
+    """A stock record to hold a shared carrier's sound beside the others (hud-layers): the same
+    channels as the carrier's record *pc*, no longer than it (*clen*: its descriptor says how long
+    the play is, so the grown copy is that long), not holding a sound already and not replaced by
+    the project; the longest such, the lowest idx among equals. Its own sound stays as it was (the
+    copy is appended, and no descriptor is pointed at it). ``None`` if there is none."""
+    chan = pc.get("chan")
+    best = None
+    for q in params:
+        i, n = q["idx"], int(q.get("length", 0) or 0)
+        if i in mine or i in audio_edits or q.get("grown") or not q.get("findkey"):
+            continue
+        if q.get("chan") != chan or n <= 0 or n > clen:
+            continue
+        if best is None or n > best[0] or (n == best[0] and i < best[1]):
+            best = (n, i)
+    return best[1] if best else None
+
+
+def _mode_shared_sound(s, what, ctx, audio_edits, grows, mine, work_dir, log):
+    """One SHARED carrier's sound (hud-layers): the first of its ``candidates`` its own mode does
+    not use, that resolves to one record and (a call) is long enough for it; its WAV grown into a
+    host record (:func:`_mode_host_record`, the carrier's own when free). Returns its *used* entry
+    (``request``, ``idx`` the host, ``carrier_idx``), or ``None`` after logging why not."""
+    from . import mode_sounds as _MS
+    from . import mode_write as _MW
+    from .spike2.emulator import emitted_length
+    wav = s["wav"]
+    want = _wav_frames_44k(wav)
+    if want is None:
+        log("Modes: %s is not put on this card: %s is not a WAV this app can read."
+            % (what, os.path.basename(wav)), "warning")
+        return None
+    slug = s.get("slug")
+    taken = ctx["by_mode"].setdefault(slug, set())
+    why = []
+    picked = None
+    fits = []                       # a call: every carrier that takes it, the shortest one wins
+    for req in (int(r) for r in s["candidates"]):
+        if req in taken:
+            continue
+        if req not in ctx["located"]:
+            try:
+                ctx["located"][req] = _MW.request_record(ctx["elf"], ctx["head"], ctx["params"],
+                                                         ctx["sites"], req, ctx["mask"])
+            except (RuntimeError, OSError, ValueError, LookupError, struct.error) as e:
+                ctx["located"][req] = e
+        cidx = ctx["located"][req]
+        if isinstance(cidx, Exception):
+            why.append("request %d could not be located (%s)" % (req, cidx))
+            continue
+        pc = ctx["byidx"].get(cidx)
+        if pc is None:
+            why.append("request %d's record is unknown" % req)
+            continue
+        clen = int(pc.get("length", 0) or 0)
+        if not s.get("music") and want > clen:
+            why.append("request %d's record is %.2f s" % (req, clen / 44100.0))
+            continue
+        host = cidx if (cidx not in mine and cidx not in audio_edits) else \
+            _mode_host_record(pc, clen, ctx["params"], mine, audio_edits)
+        if host is None:
+            why.append("no record is left to hold it beside request %d's" % req)
+            continue
+        if s.get("music"):
+            picked = (req, cidx, clen, host)            # the music: the title's order
+            break
+        fits.append((clen, len(fits), (req, cidx, clen, host)))
+    if picked is None and fits:
+        picked = min(fits)[2]
+    if picked is None:
+        log("Modes: %s is not put on this card: no carrier takes it (%s)." % (
+            what, "; ".join(why[:3]) or "every carrier of its kind is taken by the mode's other sounds"),
+            "warning")
+        return None
+    req, cidx, clen, host = picked
+    hlen = int(ctx["byidx"][host].get("length", 0) or 0)
+    if s.get("music"):
+        # as a bed: a seamless loop, repeated past the carrier's record (its descriptor loops there)
+        os.makedirs(_lp(work_dir), exist_ok=True)
+        tiled = os.path.join(work_dir, "music_%d_loop.wav" % host)
+        try:
+            reps, loop = _MS.loop_wav(_lp(wav), _lp(tiled), _MS.bed_min_frames(s.get("seconds"), clen),
+                                      edge_ms=_MS.BED_EDGE_MS)
+        except _MS.ModeSoundError as e:
+            log("Modes: %s is not put on this card: %s." % (what, e), "warning")
+            return None
+        log("Modes: %s (%s, %.2f s) is made a seamless %.3f s loop and repeated %d time(s) "
+            "to fill its record." % (what, os.path.basename(wav), want / 44100.0, loop / 44100.0, reps), "info")
+        wav, want = tiled, _wav_frames_44k(tiled)
+    audio_edits[host] = wav
+    grows[host] = (emitted_length(hlen), max(int(want), clen, hlen))
+    mine.add(host)
+    taken.add(req)
+    log("Modes: %s (%s, %.2f s) goes on the card as a new record (a copy of sound idx %d%s) that "
+        "request %d plays for the mode alone; the game still plays its own on that request%s." % (
+            what, os.path.basename(s["wav"]), _wav_frames_44k(s["wav"]) / 44100.0, host,
+            ", the carrier's own" if host == cidx else "", req,
+            "" if host == cidx else ", which other modes' sounds share"), "info")
+    return dict(s, request=req, idx=host, carrier_idx=cidx,
+                ms=None if s.get("music") else _MS.sound_ms(_lp(s["wav"])))
+
+
 def _mode_own_sounds_grow(gr_path, img_path, params, sites, audio_edits, grows,
                           own, work_dir, log):
     """Item 149 with item 150: put the modes' START SOUNDS, SHOT SOUNDS and MUSIC into
@@ -14423,8 +14530,21 @@ def _mode_own_sounds_grow(gr_path, img_path, params, sites, audio_edits, grows,
     byidx = {q["idx"]: q for q in params}
     audio_edits, grows = dict(audio_edits), dict(grows)
     mine, used = set(), []
+    # hud-layers: the sounds on a carrier of their own first, then the SHARED ones (a shared sound's
+    # host record is picked from what the others left); *used* comes back in the modes' own order
+    order = {(s.get("slug"), s.get("key")): i for i, s in enumerate(own)}
+    shared = sorted((s for s in own if s.get("candidates")),       # a mode's longest call chooses first
+                    key=lambda s: (bool(not s.get("music")), -(_wav_frames_44k(s["wav"]) or 0)))
+    own = [s for s in own if not s.get("candidates")] + shared
+    ctx = {"elf": elf, "head": head, "params": params, "sites": sites, "mask": mask,
+           "byidx": byidx, "located": {}, "by_mode": {}}
     for s in own:
         what = "%s's own %s" % (s["name"], _MW.sound_words(s["key"]))
+        if s.get("candidates"):
+            got = _mode_shared_sound(s, what, ctx, audio_edits, grows, mine, work_dir, log)
+            if got is not None:
+                used.append(got)
+            continue
         try:
             if s.get("sid"):
                 # item 150 follow-up: a music BED is its own sid's record (no request names
@@ -14495,6 +14615,7 @@ def _mode_own_sounds_grow(gr_path, img_path, params, sites, audio_edits, grows,
             "and the mode's file names that request." % (
                 what, os.path.basename(s["wav"]), _wav_frames_44k(s["wav"]) / 44100.0,
                 s["request"], idx, length / 44100.0), "info")
+    used.sort(key=lambda u: order.get((u.get("slug"), u.get("key")), len(order)))
     return audio_edits, grows, used
 
 

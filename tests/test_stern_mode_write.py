@@ -430,18 +430,25 @@ def test_own_sounds_ride_on_distinct_carriers_and_the_end_sound_keeps_its_reques
     own = MW.choose_own_sounds(project, modes, (True, ""), end_sound=end, log=log)
     calls = MS_calls("godzilla_pro", "1.15")
     beds = MS_beds("godzilla_pro", "1.15")
-    assert [(o["name"], o["key"], o["request"], o.get("sid")) for o in own] == [
+    got = sorted((o["name"], o["key"], o["request"], o.get("sid")) for o in own)
+    assert got == sorted([
         ("ATOMIC BREATH", "sound_start", calls[0], None), ("ATOMIC BREATH", "music", 125, beds[0]),
-        ("KAIJU RUSH", "sound_shot", calls[1], None), ("KAIJU RUSH", "music", 125, beds[1])]
-    assert own[0]["wav"].endswith("go.wav") and own[1]["music"] and not own[0]["music"]
-    # no call carrier twice; the music carrier holds no sound itself, each music has its own bed
-    calls_used = [o["request"] for o in own if not o["music"]]
-    assert len(set(calls_used) | {1295}) == len(calls_used) + 1
+        ("KAIJU RUSH", "sound_shot", calls[0], None), ("KAIJU RUSH", "music", 125, beds[1])])
+    start = next(o for o in own if o["key"] == "sound_start")
+    assert start["wav"].endswith("go.wav") and not start["music"]
+    # hud-layers: the calls are SWAPPED in, so two modes' calls share a carrier (each its own record,
+    # the engine keeps a mode's own calls apart); the time-up request (1295) is never one; the music
+    # keeps its beds, each mode its own
+    for o in own:
+        assert bool(o.get("swap")) == (not o["music"])
+        if not o["music"]:
+            assert 1295 not in o["candidates"] and sorted(o["candidates"]) == sorted(calls)
     assert len({o["sid"] for o in own if o["music"]}) == 2
     assert not any("music is not put on this card" in m for m in said), said
     # a carrier already chosen (here as if the end sound rode on the first call) is skipped
     moved = MW.choose_own_sounds(project, modes, (True, ""), end_sound={"request": calls[0]})
-    assert moved[0]["request"] == calls[1]
+    assert all(calls[0] not in o["candidates"] for o in moved if not o["music"])
+    assert next(o for o in moved if o["key"] == "sound_start")["request"] == calls[1]
     # the sound gate closes them all, and says so
     said.clear()
     assert MW.choose_own_sounds(project, modes, (False, "PAD_STERN_MODE_SOUND=0"), log=log) == []
