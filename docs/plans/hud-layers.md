@@ -143,6 +143,10 @@ included. Neither is how Stern presents a mode.
   modes' own sounds (request 1076: GHIDORAH, MASER, MELTDOWN). Pro 1.16: 26 swaps, 25 records; request 86 played
   all six modes' own music and request 1848 five modes' calls. Pro 1.15: 20 swaps, the same five shared
   carriers as Premium. segv 0, fatal 0, the same 6 throws as the runs before the change, no render gap.
+- 2026-09-27, the Premium hardware card: Write (`engine.write_image`, this branch, `C:\tmp\pad_hud\build_card.py`)
+  built projSL on the stock godzilla_le 1.16 image in 13 min (the six modes' mode.so + game_monitor hook, 37
+  clips in the video bank, the HUD scene, 31 sounds, the validation bypass) and it was flashed, verified, onto
+  David's Premium card (its old contents, stock 1.16, are in `D:\Pinball\card_backups\`).
 - **Owed:** a hardware run (Premium and Pro). Four other titles' ports miss the same display values Pro 1.16 did (Foo Fighters, John Wick, King
   Kong, Metallica): not this branch's; a separate task.
 
