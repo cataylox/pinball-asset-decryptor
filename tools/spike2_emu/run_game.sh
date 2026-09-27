@@ -908,6 +908,14 @@ if [ -n "$SEL_DIRS" ]; then
                 fi
             fi
             mkdir -p "$R/data/nv/$_title"
+            # ROOT IS ELEVATION, NOT OWNERSHIP (PAD-182): what a root run makes
+            # here goes to whoever owns the rig's data, or a later run as that
+            # user could not make a store of its own beside it
+            if [ "$(id -u)" = 0 ]; then
+                _o=$(stat -c %u:%g "$R/data" 2>/dev/null)
+                [ -n "$_o" ] && chown "$_o" "$R/data/nv.own" "$R/data/nv.own/$SEL_SCORES" 2>/dev/null
+                [ -n "$_o" ] && [ -z "$(ls -A "$_store" 2>/dev/null)" ] && chown "$_o" "$_store" 2>/dev/null
+            fi
             if [ -d "$_store" ] && mount --bind "$_store" "$R/data/nv/$_title"; then
                 echo "[select] image $SEL_CARDIDX keeps its own high scores: data/nv.own/$SEL_SCORES/$_title bound over data/nv/$_title"
             else
