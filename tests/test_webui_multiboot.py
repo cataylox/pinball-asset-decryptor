@@ -1128,7 +1128,7 @@ def test_a_restored_form_naming_the_pick_is_not_asked_about(tmp_path, monkeypatc
         w.call("ui.set", "extract", "input", card)
         w.run(w.window.service("multiboot")._follow_select_card, panel)
         assert loads == []
-        assert w.app._settings["multiboot_followed_card"] == os.path.normcase(os.path.normpath(card))
+        assert w.window.service("multiboot")._followed_card() == os.path.normcase(os.path.normpath(card))
         panel._rows = []
 
 
@@ -1136,8 +1136,34 @@ def test_a_pick_followed_before_a_restart_is_not_followed_again(tmp_path, monkey
     card = _raw(tmp_path, "three.multi.raw")
     with web_app(tmp_path, mfr="stern") as w:
         loads = _follow_setup(w, monkeypatch)
-        w.app._settings["multiboot_followed_card"] = os.path.normcase(os.path.normpath(card))
+        w.window.service("multiboot")._remember_followed(os.path.normcase(os.path.normpath(card)))
         w.call("ui.set", "extract", "input", card)
         w.call("ui.select_tab", "multiboot")
         w.drain()
         assert loads == []
+
+
+def test_a_new_project_starts_with_an_empty_form_and_follows_without_asking(tmp_path, monkeypatch):
+    """The form is the project's: New project does not copy the last one's
+    images, and its tab then reads the picked card with no question."""
+    from pinball_decryptor.core import project_file
+    card = _raw(tmp_path, "beatles.multi.raw")
+    old = _raw(tmp_path, "gz.multi.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        loads = _follow_setup(w, monkeypatch)
+        panel = _panel(w)
+        real = panel._confirm_discard
+        # it would only ask with something on the form to lose
+        monkeypatch.setattr(panel, "_confirm_discard",
+                            lambda p: real(p) if not (panel._rows or panel._loaded_card) else pytest.fail("asked"))
+        w.run(panel._out_var.set, old)
+        _add(w, _raw(tmp_path, "a.raw"))
+        _add(w, _raw(tmp_path, "b.raw"))
+        assert len(panel._rows) == 2
+        r = w.call("shellx.project_new_create", str(tmp_path), "beatles multi", "stern", card)
+        assert r["ok"], r
+        assert panel._rows == [] and panel._out_var.get() == ""
+        assert not (project_file.load_anchor(r["folder"]).get("multiboot") or {}).get("images")
+        w.call("ui.select_tab", "multiboot")
+        w.drain()
+        assert loads == [os.path.normpath(card)]

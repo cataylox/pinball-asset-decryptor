@@ -113,8 +113,6 @@ class MultibootTab(TabService):
         super().__init__(window)
         self._dlg = None
         self._broken = None
-        # the Select card pick last read here (see _follow_select_card)
-        self._followed = None
         self.set(dlg=None, broken=None)
         try:
             self._multiboot_panel = self._build_panel()
@@ -233,8 +231,9 @@ class MultibootTab(TabService):
         ONCE PER PICK: a pick that has been followed (or declined) is not
         read again, so a card browsed to in this tab's own box stays put
         until another card is picked on Select card.  The pick is kept in
-        the settings (``multiboot_followed_card``), so a restart is not a
-        new pick: the restored form comes back as it was, and when it names
+        the settings per project (``multiboot_followed_card``), so a
+        restart is not a new pick, and a new project (whose form starts
+        empty) follows the pick without a question: the restored form comes back as it was, and when it names
         the picked card the tab's own restore read (``on_shown``) reads it
         without asking - David, 2026-09-26: "it should know that my
         selection hasn't changed".  Only an image FILE
@@ -275,17 +274,28 @@ class MultibootTab(TabService):
         self._done()
         return started
 
+    def _project_key(self):
+        try:
+            folder = self.app._project_folder() or ""
+        except Exception:                               # noqa: BLE001
+            folder = ""
+        return os.path.normcase(os.path.normpath(folder)) if folder else ""
+
     def _followed_card(self):
-        if self._followed is None:
-            settings = getattr(self.app, "_settings", None) or {}
-            self._followed = settings.get("multiboot_followed_card") or ""
-        return self._followed
+        """The Select card pick this project's Multi-boot tab last followed
+        (``''`` for none): per PROJECT, as the form it went into is."""
+        settings = getattr(self.app, "_settings", None) or {}
+        seen = settings.get("multiboot_followed_card")
+        return (seen.get(self._project_key()) or "")             if isinstance(seen, dict) else ""
 
     def _remember_followed(self, key):
-        self._followed = key
         settings = getattr(self.app, "_settings", None)
-        if isinstance(settings, dict):
-            settings["multiboot_followed_card"] = key
+        if not isinstance(settings, dict):
+            return
+        seen = settings.get("multiboot_followed_card")
+        if not isinstance(seen, dict):
+            seen = settings["multiboot_followed_card"] = {}
+        seen[self._project_key()] = key
 
     def on_close(self):
         if self._broken:

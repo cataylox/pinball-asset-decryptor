@@ -214,6 +214,20 @@ class ProjectsMixin:
         except OSError as e:
             return {"error": "Couldn't create the folder:\n%s" % e}
         app, win = self.app, self.window
+        # The Multi-boot form is the project's too: the one on screen is
+        # saved to the project it belongs to, and the new project starts with
+        # an empty one rather than a copy (David, 2026-09-26: a new project
+        # came up holding the last one's three images).
+        try:
+            app.save_multiboot_state(app._project_folder() or "")
+        except Exception:                               # noqa: BLE001
+            pass
+        panel = getattr(win, "_multiboot_panel", None)
+        if panel is not None:
+            try:
+                panel.restore_state({})
+            except Exception:                           # noqa: BLE001
+                pass
         if app._current_mfr is not mfr:
             app._on_manufacturer_change(mfr)
             win.show_mfr_view()
