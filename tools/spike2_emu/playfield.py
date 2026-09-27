@@ -155,6 +155,11 @@ HERE = padpath.RIG
 #: the script, because the script's directory is version controlled and this is
 #: per-machine state, not part of the rig.
 STATE = os.path.join(os.path.expanduser("~"), ".pad_playfield.json")
+#: A rig slot >= 1 (padpath.sh, "RIG SLOTS") remembers its own window: two
+#: rigs' playfields are two windows, and one record would stack them.
+if padpath.slot():
+    STATE = os.path.join(os.path.expanduser("~"),
+                         ".pad_playfield.rig%d.json" % padpath.slot())
 
 #: The title, and everything derived from it. watch.sh passes the name on the
 #: command line; gameinfo works it out otherwise.
@@ -198,7 +203,12 @@ if TDIR and not os.path.exists(os.path.join(TDIR, "device_xy.txt")):
         pass
 
 PF_PNG = gameinfo.playfield_png(GAME)
-WINDOW_TITLE = "%s - virtual playfield" % GAME
+#: "[rig 2: item/48] godzilla_pro - virtual playfield": which rig, and whose
+#: run, at the FRONT (a taskbar button cuts the end off). It is also what
+#: raise_existing() matches, so a second rig's window is a new window and not
+#: the first rig's raised - which is what two sessions on one title used to get.
+WINDOW_TITLE = ((padpath.title_tag() + " ") if padpath.title_tag() else "") \
+    + "%s - virtual playfield" % GAME
 
 #: The live LED block, published by the shim inside the guest and read from
 #: HERE, which is Windows. Asked of padpath rather than written out as
@@ -743,7 +753,13 @@ def wsl_rig_env():
     trip. Absent - an older watch.sh, or a run started by hand - this returns
     nothing and the helper resolves the rig the way it always did."""
     root = os.environ.get("PAD_ROOT_WSL")
-    return ["PAD_ROOT=%s" % root] if root else []
+    env = ["PAD_ROOT=%s" % root] if root else []
+    # AND WHICH RIG SLOT: the helper finds the guest among its slot's
+    # processes (padslot.sh), so a save, a load or a switch hold from this
+    # window reaches THIS rig's game and not whichever `game` pgrep saw first.
+    if padpath.slot():
+        env.append("PAD_SLOT=%d" % padpath.slot())
+    return env
 
 
 def wsl_run(script, *args):
@@ -2505,7 +2521,8 @@ class LcdPanel:
                 "cw": self.CW, "ch": self.CH,
                 "pad": [self.PAD_L, self.PAD_T, self.PAD_R, self.PAD_B],
                 "tw": self.TW, "th": self.TH, "strip_n": self.STRIP_N,
-                "title": "%s [villain vision] - Stern Spike 2 emulator"
+                "title": ((padpath.title_tag() + " ") if padpath.title_tag() else "")
+                         + "%s [villain vision] - Stern Spike 2 emulator"
                          % self.game}
 
     def dyn(self):
@@ -3987,6 +4004,7 @@ class Playfield:
             if page == "lcd":
                 return {"lcd": self.lcd.spec(), "dyn": self.lcd.dyn()}
             st = {"title": WINDOW_TITLE, "game": GAME, "kind": self.kind,
+                  "rig": {"slot": padpath.slot(), "label": padpath.label()},
                   "savestates": SAVESTATES, "slots": self.slot_values(),
                   "state_busy": self._state_busy,
                   "run": self.run.dyn(),

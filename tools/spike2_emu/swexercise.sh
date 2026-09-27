@@ -73,7 +73,7 @@ SETTLE=${PAD_SW_EXERCISE_SETTLE:-5}
 MIN_AGE=${PAD_SW_EXERCISE_MIN:-60}
 started=$(date +%s 2>/dev/null || echo 0)
 
-up()     { pgrep -x game >/dev/null 2>&1; }
+up()     { [ -n "$(pad_pids -x game)" ]; }
 # The shim prints these when it reads (or finds) the game's switch table, which
 # is what swtable.py is built on. The audit is per-switch, so the table being
 # known is the honest "the game has switches now" signal - and it arrives about
@@ -102,7 +102,7 @@ if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
     waited=0
     while [ "$waited" -lt "$WAIT_MAX" ]; do
         up || { echo "[swx] the game is not running; nothing to do"; exit 0; }
-        pgrep -f 'autoattract\.sh' >/dev/null 2>&1 || break
+        [ -n "$(pad_pids -f 'autoattract\.sh')" ] || break
         sleep 1
         waited=$((waited + 1))
     done

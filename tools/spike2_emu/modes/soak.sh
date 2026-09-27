@@ -42,7 +42,7 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
   sleep 2
   for sw in 78 79 80 73 81; do poke "$sw"; done
   cycles=$((cycles + 1))
-  if ! pgrep -x game > /dev/null; then echo "GUEST GONE after $cycles cycles"; break; fi
+  if ! [ -n "$(pad_pids -x game)" ]; then echo "GUEST GONE after $cycles cycles"; break; fi
   left=$(( 45 - ($(date +%s) - t_cycle) ))
   [ "$left" -gt 0 ] && sleep "$left"
   echo "cycle $cycles  mask=$mask  games started=$games  $(tail -n +$((m0 + 1)) "$D/mode.log" | grep -c 'KAIJU RUSH START') starts / $(tail -n +$((m0 + 1)) "$D/mode.log" | grep -c 'KAIJU RUSH END') ends"
@@ -50,4 +50,4 @@ done
 echo "=== soak: $MIN min, $cycles cycles, $games games started"
 tail -n +$((m0 + 1)) "$D/mode.log" | grep -E 'START|END' | awk '{ $1=""; print }' | sort | uniq -c | sort -rn | head -12
 echo "new [segv] lines: $(( $(grep -ac '\[segv\] pc' "$D/game.out") - segv0 )), new fatal signals: $(( $(grep -ac 'uncaught target signal' "$D/game.out") - sig0 ))"
-pgrep -x game > /dev/null && echo "guest still up" || echo "GUEST NOT RUNNING"
+[ -n "$(pad_pids -x game)" ] && echo "guest still up" || echo "GUEST NOT RUNNING"

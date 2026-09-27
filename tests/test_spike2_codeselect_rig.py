@@ -1007,7 +1007,7 @@ def test_the_start_wait_and_the_poll_loop_ride_the_flag_under_a_guard():
     # gives up when run_game.sh is gone - not by waiting out the clock.
     wait = code[code.index("boot selector: waiting for the choice"):]
     wait = wait[:wait.index("waiting for the game to start")]
-    assert "pgrep -x game" in wait and 'kill -0 "$GAMEPG"' in wait
+    assert "pad_pids -x game" in wait and 'kill -0 "$GAMEPG"' in wait
     assert "SEL_WAIT" in wait
     # The poll loop: the same shape as the reloading flag, checked BEFORE the
     # guest-exit test.
@@ -1032,7 +1032,7 @@ def test_autoattract_is_held_back_until_the_menu_has_chosen():
     Alerts. The plain launch line stays verbatim in the other branch."""
     code = _code(_read("watch.sh"))
     plain = ('setsid_as_user bash "$S/autoattract.sh" "$LOG" > '
-             '"$PAD_HOME/padauto.log" 2>&1 &')
+             '"$PAD_LOGDIR/padauto.log" 2>&1 &')
     assert plain in code
     block = code[code.index('if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then'):]
     block = block[:block.index("PAD_SW_EXERCISE")]

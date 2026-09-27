@@ -989,9 +989,9 @@ def test_overrides_sh_refuses_anything_that_is_not_a_set():
     assert "not an override set" in body
     # The stamp must live BESIDE the stage: run_game.sh binds every file it
     # finds inside it, and one with no card path to land on fails the run.
-    assert "STAMP=$PAD_HOME/override.src" in body
-    assert "STAGE=$PAD_HOME/override" in body
-    assert "GENF=$PAD_HOME/override.gen" in body
+    assert "STAMP=${PAD_SLOTDIR:-$PAD_HOME}/override.src" in body
+    assert "STAGE=${PAD_SLOTDIR:-$PAD_HOME}/override" in body
+    assert "GENF=${PAD_SLOTDIR:-$PAD_HOME}/override.gen" in body
 
 
 def test_overrides_sh_stages_a_delta_rather_than_the_set():

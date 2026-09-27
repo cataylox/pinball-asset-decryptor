@@ -1529,7 +1529,7 @@ SETTINGS_ONLY_FIELDS = frozenset((
     "start_shot", "start_count", "seconds", "scoring_shots", "countdown", "lights",
     "light_color", "light_on_raw", "light_off_raw", "stack", "award_ladder", "shot_award",
     "end_shot", "callout_at", "restore_after", "starts_on", "ends_on", "starts", "cooldown",
-    "priority", "light_shots", "light_shots_pattern"))
+    "priority", "light_shots", "light_shots_pattern", "start_also", "after", "after_when"))
 #: ...except these, for a mode with music of its own: its bed is cut to the mode's length.
 _SETTINGS_ONLY_UNLESS_MUSIC = frozenset(("seconds",))
 

@@ -1447,6 +1447,10 @@ class ModeSpec:
     ball_save: int = 10                  # seconds a drained ball comes back for, 0-60
     add_ball_shot: str = ""              # a shot that puts one more ball in play; "" = none
     add_ball_max: int = 1                # ... up to this many times a run, 1-6
+    # PAD-227: more than one thing to meet before it starts (MODE_PARAMETERS.md `trigger_also`, `after`)
+    start_also: list = field(default_factory=list)   # [[shot name, count]]: hit these too, in one ball
+    after: str = ""                      # another mode's NAME: starts only once that one has run; "" = none
+    after_when: str = "game"             # ball | game: ... this ball, or this game
 
     # ---- JSON ----------------------------------------------------------------
     def to_json(self):
@@ -1684,6 +1688,15 @@ def retarget(spec, p):
         out.start_shot = p.example_start_shot if p.example_start_shot in names else names[0]
     dropped += [s for s in out.scoring_shots if s not in names]
     out.scoring_shots = [s for s in out.scoring_shots if s in names]
+    if isinstance(out.start_also, list):             # PAD-227: matched by name, as the start shot
+        kept = []
+        for row in out.start_also:
+            shot = row[0] if isinstance(row, (list, tuple)) and len(row) == 2 else None
+            if isinstance(shot, str) and shot not in names:
+                dropped.append(shot)
+                continue
+            kept.append(row)
+        out.start_also = kept
     _retarget_advanced(out, spec.title, p, names, dropped)
     out.title = p.key
     return out, dropped
@@ -2058,6 +2071,7 @@ def validate(spec, folder=None):
     out += _validate_starts_ends(spec, p)
     out += validate_display_lights(spec)
     out += validate_multiball(spec, p)
+    out += validate_more_to_start(spec, p)
     return out
 
 
@@ -2255,8 +2269,74 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
         lines.append("stack          no")
     lines += parameter_lines(spec, slug, p)
     lines += display_light_lines(spec)
+    lines += more_to_start_lines(spec, p)    # PAD-227: nothing unless the mode has them
     lines = _starts_ends_lines(spec, lines)
     return "\n".join(lines) + "\n"
+
+
+# ---- PAD-227: more than one thing to meet before it starts ---------------------------------
+#: ``start_also`` rows mode_file.c takes (its ALSO_MAX)
+START_ALSO_MAX = 3
+AFTER_WHEN = ("ball", "game")
+
+
+def _also_rows(spec):
+    """``spec.start_also`` as ``[(shot, count)]``; None when it is not a list of pairs."""
+    rows = spec.start_also
+    if not isinstance(rows, list):
+        return None
+    out = []
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or len(row) != 2:
+            return None
+        out.append((row[0], row[1]))
+    return out
+
+
+def validate_more_to_start(spec, p):
+    """The reasons ``start_also`` / ``after`` cannot be built, as sentences."""
+    out = []
+    names = dict(p.shots)
+    rows = _also_rows(spec)
+    if rows is None or len(rows) > START_ALSO_MAX:
+        out.append("A mode can also wait for up to %d other shots." % START_ALSO_MAX)
+        rows = []
+    for shot, count in rows:
+        if shot not in names:
+            out.append("%s has no shot called %r." % (p.label, shot))
+        if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 20:
+            out.append("Each other shot it waits for is hit 1 to 20 times.")
+    after = spec.after if isinstance(spec.after, str) else None
+    if after is None:
+        out.append("The mode it starts after is a mode's name.")
+    elif after.strip():
+        if after.strip() == spec.name.strip():
+            out.append("A mode cannot wait for itself to run first.")
+        if spec.after_when not in AFTER_WHEN:
+            out.append("The mode it starts after has run this ball or this game.")
+    return out
+
+
+def more_to_start_lines(spec, p):
+    """The ``trigger_also`` and ``after`` lines (nothing at the defaults, so every file made
+    before PAD-227 stays byte-identical)."""
+    lines = ["%-14s 0x%08x %d" % ("trigger_also", p.mask([shot]), int(count))
+             for shot, count in _also_rows(spec) or ()]
+    if isinstance(spec.after, str) and spec.after.strip():
+        lines.append("%-14s %s %s" % ("after", spec.after_when, spec.after.strip()))
+    return lines
+
+
+def after_problems(modes):
+    """``{slug: [sentence]}`` for each of ``modes`` (``[(slug, ModeSpec)]``, one project's)
+    whose ``after`` names no mode of the project: on the card it would never start."""
+    have = {spec.name.strip() for _slug, spec in modes}
+    out = {}
+    for slug, spec in modes:
+        after = spec.after.strip() if isinstance(spec.after, str) else ""
+        if after and after not in have:
+            out[slug] = ["%s starts only after %s, and no mode is called that." % (spec.name.strip(), after)]
+    return out
 
 
 # ---- item 157: the display priority and the lit shots ------------------------------------

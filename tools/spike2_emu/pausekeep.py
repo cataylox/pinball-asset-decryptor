@@ -28,6 +28,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import padpath
 import padsw
 
 POLL_S = 0.01            # a press is served within ~10 ms
@@ -41,7 +42,9 @@ def game_pids():
             continue
         try:
             with open("/proc/%s/comm" % d) as f:
-                if f.read().strip() == "game":
+                # Only THIS rig slot's guest: a Pause in one rig must not
+                # freeze another session's run in the next.
+                if f.read().strip() == "game" and padpath.in_my_slot(int(d)):
                     out.append(int(d))
         except OSError:
             pass
@@ -64,7 +67,8 @@ def renderer_up():
         if d.isdigit():
             try:
                 with open("/proc/%s/comm" % d) as f:
-                    if f.read().strip() == "padglhost":
+                    if (f.read().strip() == "padglhost"
+                            and padpath.in_my_slot(int(d))):
                         return True
             except OSError:
                 pass

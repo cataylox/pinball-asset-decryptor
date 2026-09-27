@@ -172,6 +172,21 @@ function startMain() {
     const main = el("div", "pf-main");
     body.append(main);
     const status = el("div", "pf-status");
+    // Which rig this window belongs to, and whose run it is: the coloured band
+    // across the top and a chip at the front of the status bar. Absent for an
+    // unlabelled run in the ordinary rig - David's own, from main.
+    const rig = S.rig || {};
+    if (rig.slot || rig.label) {
+      app.dataset.rig = String(Math.min(rig.slot || 0, 4));
+      const chip = el("span", "pf-rig",
+        rig.slot ? ("rig " + rig.slot + (rig.label ? " \u00b7 " + rig.label : "")) : rig.label);
+      chip.title = rig.slot
+        ? "This window belongs to rig " + rig.slot + (rig.label ? ", started for " + rig.label : "")
+        : "Started for " + rig.label;
+      status.append(chip);
+    } else {
+      delete app.dataset.rig;
+    }
     const stxt = el("div", "txt", S.status || "");
     status.append(stxt);
     const run = runCluster(S.run);

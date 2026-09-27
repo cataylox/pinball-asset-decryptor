@@ -77,35 +77,35 @@ echo "rig processes running: $before"
 # PID has already exec'd the game, its command line is the game's and not a
 # shell's, and the next line is what ends it - the same process, the same
 # signal, in the same order as before.
-pkill -9 -f "^(setsid )?bash -s $ROOT "
-pkill -9 -x game
-pkill -9 -f 'arm-binfmt|qemu-arm'
+pad_pkill -9 -f "^(setsid )?bash -s $ROOT "
+pad_pkill -9 -x game
+pad_pkill -9 -f 'arm-binfmt|qemu-arm'
 # The boot selector (item 90): the ARM menu run_game.sh runs BEFORE the game
 # on a PAD_SELECT run. Under WSL the binfmt pattern above already reaches it;
 # in the macOS container only its comm does. alive.sh counts it.
-pkill -9 -x codeselect
-pkill -9 -x padglhost
-pkill -9 -f nodebus.py
-pkill -9 -f 'autoattract.sh'
+pad_pkill -9 -x codeselect
+pad_pkill -9 -x padglhost
+pad_pkill -9 -f nodebus.py
+pad_pkill -9 -f 'autoattract.sh'
 # The ball feeder (item 21b). It exits on its own when dump/padled goes away,
 # but that file is removed further down this script, so leaving it to notice
 # would mean a few seconds of a helper still driving trough switches after a
 # stop was asked for. alive.sh counts it.
-pkill -9 -f 'ballfeed[.]py'
+pad_pkill -9 -f 'ballfeed[.]py'
 # PAD-204's root pause keeper. alive.sh counts it.
-pkill -9 -f 'pausekeep[.]py'
+pad_pkill -9 -f 'pausekeep[.]py'
 # The background table builder watch.sh starts on a title that already
 # has artwork. It waits in a poll loop for the guest's switch table, so
 # it outlives a run that ends first. alive.sh counts it.
-pkill -9 -f 'mktables[.]py'
+pad_pkill -9 -f 'mktables[.]py'
 # The switch exerciser (item 59), both halves. The shell half sleeps in a poll
 # loop for the guest's switch table and would outlive a run that ends first;
 # the python half drives ~44 switch ids over ~10 s, so a stop asked for mid
 # exercise must not leave it pressing switches into whatever runs next. Killed
 # BEFORE the shell half's own `up()` check could notice, deliberately - the
 # same argument as the ball feeder above. alive.sh counts both.
-pkill -9 -f 'swexercise[.]sh'
-pkill -9 -f 'swexercise[.]py'
+pad_pkill -9 -f 'swexercise[.]sh'
+pad_pkill -9 -f 'swexercise[.]py'
 # The event feed. An orphaned `tail -F` never exits by itself.
 #
 # $PAD_HOME AND NOT $HOME, and padpath.sh's own header carries the full story:
@@ -113,7 +113,7 @@ pkill -9 -f 'swexercise[.]py'
 # root`), so $HOME is /root and this pattern used to match nothing at all. The
 # feed survived every stop, alive.sh went on counting it, and the run never
 # read as clean.
-pkill -9 -f "^tail -q -n 0 -F $PAD_HOME/padvid\.log"
+pad_pkill -9 -f "^tail -q -n 0 -F $PAD_LOGDIR/padvid\.log"
 # The awk on the other end of that pipe is NOT killed here on purpose: it reads
 # the tail's stdout, so it takes EOF and leaves by itself the moment the tail
 # above dies. It only ever survived because the tail did.
@@ -122,18 +122,18 @@ pkill -9 -f "^tail -q -n 0 -F $PAD_HOME/padvid\.log"
 # script never killed - so a pivot run (every run the app starts) could not
 # reach zero by stopping it. Same shape as the feed above: an orphaned `tail -F`
 # holds the file forever and never exits on its own.
-pkill -9 -f '^tail -F .*dump/game\.out'
-pkill -9 -f 'padvidhost\.py'
-pkill -9 -f 'playaudio.sh'
+pad_pkill -9 -f '^tail -F .*dump/game\.out'
+pad_pkill -9 -f 'padvidhost\.py'
+pad_pkill -9 -f 'playaudio.sh'
 # ^-anchored, and matched on the fifo not on '-f pulse': a severed player
 # command line (see playaudio.sh) had no pulse output yet still held the fifo.
-pkill -9 -f '^ffmpeg .*audio\.fifo'
+pad_pkill -9 -f '^ffmpeg .*audio\.fifo'
 # The Windows-sink relay, and the native player when there is no bridge.
 # Killing the relay also ends the run's audio for the Windows player, which sees
 # EOF on the socket and leaves on its own - the kernel closes the socket even
 # when this is a SIGKILL.
-pkill -9 -f 'padrelay\.py'
-pkill -9 -f 'padplay\.py'
+pad_pkill -9 -f 'padrelay\.py'
+pad_pkill -9 -f 'padplay\.py'
 # The virtual playfield is a WINDOWS process reached through interop; its
 # WSL-side stub is what is visible here. Removing the LED block below is the
 # POLITE close (playfield.py notices and leaves, which is also how it saves its
@@ -162,8 +162,8 @@ pkill -9 -f 'padplay\.py'
 # its full 20 s wait timeout on every mid-copy Stop. The DETACHED copier is
 # deliberately not matched: it survives a Stop on purpose, so the copy is not
 # lost, and its output goes to the cardcache log, not the pipe.
-pkill -9 -f '^bash .*(watch|runbridge|nbrun|run_game|cardmount)\.sh'
-pkill -9 -f '^unshare (-r )?-m -p -f'
+pad_pkill -9 -f '^bash .*(watch|runbridge|nbrun|run_game|cardmount)\.sh'
+pad_pkill -9 -f '^unshare (-r )?-m -p -f'
 # longplay.sh is started BESIDE a run rather than by one, so it is not in the
 # group above - and watch.sh's own teardown was the only thing that ever killed
 # it. Anything that stops a run through THIS script (abrun.ps1 does) would
@@ -172,7 +172,7 @@ pkill -9 -f '^unshare (-r )?-m -p -f'
 # Anchored exactly as watch.sh and alive.sh anchor it: an unanchored
 # 'longplay.sh' matches any shell with the name on its command line, and this
 # one KILLS.
-pkill -9 -f '^bash [^ ]*longplay\.sh'
+pad_pkill -9 -f '^bash [^ ]*longplay\.sh'
 # The LED block doubles as the virtual playfield's liveness signal; removing
 # it lets that window close itself instead of surviving the kill.
 rm -f "$ROOT/dump/padled"
@@ -189,10 +189,10 @@ rm -f "$ROOT/dump/padled"
     && cp -f "$ROOT/dump/padlcd" "$ROOT/dump/padlcd.last" 2>/dev/null
 rm -f "$ROOT/dump/padlcd"
 for _ in 1 2 3 4 5 6; do
-    pgrep -f '^(/init|python3?) .*playfield\.py' >/dev/null || break
+    [ -n "$(pad_pids -f '^(/init|python3?) .*playfield\.py')" ] || break
     sleep 0.5
 done
-pkill -9 -f '^(/init|python3?) .*playfield\.py'
+pad_pkill -9 -f '^(/init|python3?) .*playfield\.py'
 # BACKSTOPS for Windows children that did not take the hint. Matched on the
 # SCRIPT (and, for the player, the PORT), never on the image name alone: killing
 # every python.exe would take out whatever else the user is running, and the
@@ -204,12 +204,24 @@ pkill -9 -f '^(/init|python3?) .*playfield\.py'
 # CONTAINS the string '*spike2_emu\playfield.py*', so a CommandLine-only filter
 # matches the powershell.exe running the query and Stop-Process shoots itself
 # mid-pipeline. Requiring a python interpreter excludes it by construction.
+#
+# RIG SLOTS: a Windows process has no PAD_SLOT anyone here can read, so the
+# slot is on its COMMAND LINE. The player's is its port (45997 + slot); the
+# playfield of a slot >= 1 carries `--pad-slot=N` (watch.sh adds it), and slot
+# 0's is the one WITHOUT that marker - so neither Stop reaches the other's.
+_port=${PAD_AUDIO_PORT:-45997}
+if [ "$PAD_SLOT" = 0 ]; then
+    _pfslot="-notlike '*--pad-slot=*'"
+else
+    _pfslot="-like '*--pad-slot=$PAD_SLOT*'"
+fi
 /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -Command \
   "Get-CimInstance Win32_Process |
    Where-Object { \$_.Name -like 'python*' -and
                   ((\$_.CommandLine -like '*padplay.py*' -and
-                    \$_.CommandLine -like '* 45997 *') -or
-                   \$_.CommandLine -like '*spike2_emu\playfield.py*') } |
+                    \$_.CommandLine -like '* $_port *') -or
+                   (\$_.CommandLine -like '*spike2_emu\playfield.py*' -and
+                    \$_.CommandLine $_pfslot)) } |
    ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" >/dev/null 2>&1
 
 # ZOMBIE HOLDERS the patterns above did not know. A rig zombie cannot be
@@ -233,6 +245,10 @@ ps -eo pid=,ppid=,stat=,comm= 2>/dev/null \
     case "$hcomm" in ''|init|Relay*) continue ;; esac
     case "$hargs" in /init*) continue ;; esac
     [ "$htty" = "?" ] || continue
+    # Only a holder in THIS slot: another slot's wedged wrapper is its own
+    # Stop's business, and killing it would end that slot's run.
+    _hs=$(pad_slot_of "$hp")
+    [ "$_hs" = "$PAD_SLOT" ] || { [ "$_hs" = '?' ] && [ "$PAD_SLOT" = 0 ]; } || continue
     echo "killing $hp ($hcomm): it is holding a dead rig process instead of reaping it"
     kill -9 "$hp" 2>/dev/null
 done
@@ -261,7 +277,7 @@ sleep 1
 # next run cannot start at all, and the error names a transport nobody in this
 # rig has ever configured. If a mount here will not go, report it; do not reach
 # for kill.
-for m in "$PAD_HOME/card/"*/; do
+for m in "$PAD_CARDS/"*/; do
     mountpoint -q "$m" 2>/dev/null || continue
     if fusermount -u "$m" 2>/dev/null || fusermount3 -u "$m" 2>/dev/null \
        || umount "$m" 2>/dev/null; then
@@ -273,6 +289,11 @@ for m in "$PAD_HOME/card/"*/; do
     fi
 done
 sleep 1
+
+# The board's run record (riglock.sh list, the app, the triage dashboard) says
+# a run is up in this slot; watch.sh's own teardown removes it, but the kills
+# above take watch.sh down first.
+rm -f "$(pad_board_dir)/slot-$PAD_SLOT.run" 2>/dev/null
 
 after=$(total)
 echo "killed $((before - after)); still running: $after"

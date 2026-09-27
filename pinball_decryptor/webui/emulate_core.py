@@ -80,7 +80,7 @@ import tempfile
 import threading
 import time
 
-from ..core import config, pkgnames, prereqs, rigdata, runtime
+from ..core import config, pkgnames, prereqs, rigdata, rigslot, runtime
 # PAD-161's "which card is the set prepared FROM" moved to the plugin so Try
 # it (mode_write.build_tryit_set) can share it without importing Tk; both
 # names stay importable from here for the tests and callers that read them
@@ -908,7 +908,12 @@ def _wsl_head(root=False):
 #: strand work the user already has, for no benefit they asked for.
 def _rig_env():
     d = runtime.distro_for("spike2")
-    return rigdata.rig_env("spike2", bool(d) and rigdata.exists())
+    # ...plus WHICH RIG (core/rigslot.py): PAD_SLOT and PAD_LABEL on every
+    # command, so a Start, a Stop, a status poll and a save-state load all
+    # reach the same rig, and every window that rig opens is titled with it.
+    # Empty on an ordinary install.
+    return rigdata.rig_env("spike2", bool(d) and rigdata.exists()) \
+        + rigslot.rig_env()
 
 
 def rig_cmd(script, *args, env=()):

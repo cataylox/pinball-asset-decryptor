@@ -55,8 +55,20 @@
 #: list.  An unreadable /proc makes alive.sh refuse rather than reassure, and an
 #: unparseable answer is read as "something is running", which is the safe
 #: direction for every caller here.
+#:
+#: RIG SLOTS: a slot >= 1 builds into its OWN upper layer, so only its own run
+#: can be underneath it. Slot 0 builds into ~/spike2root, which is every slot's
+#: LOWER layer - a slot that has not rebuilt hwshim.so itself is running slot
+#: 0's copy - so a slot 0 build waits for every slot's run, not just its own.
 _pad_run_live() {
-    [ "$(bash "$RIG/alive.sh" --total 2>/dev/null)" != 0 ]
+    local n
+    [ "$(bash "$RIG/alive.sh" --total 2>/dev/null)" != 0 ] && return 0
+    [ "${PAD_SLOT:-0}" = 0 ] || return 1
+    for n in $(seq 1 "${PAD_SLOTS_MAX:-4}"); do
+        mountpoint -q "$PAD_HOME/padslots/$n/root" 2>/dev/null || continue
+        [ "$(PAD_SLOT=$n bash "$RIG/alive.sh" --procs 2>/dev/null)" != 0 ] && return 0
+    done
+    return 1
 }
 
 #: Is <binary> the build this machine needs?  0 = no, rebuild it.

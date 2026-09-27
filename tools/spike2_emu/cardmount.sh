@@ -35,7 +35,7 @@ SELF=$(cd "$(dirname "$0")" && pwd)
 # header describes. Sourced from padpath.sh, which resolves it once.
 . "$SELF/padpath.sh"
 PREFIX=$PAD_HOME/local
-CARDS=$PAD_HOME/card
+CARDS=$PAD_CARDS          # per rig slot (padpath.sh): a slot unmounts only its own
 CACHE=$PAD_HOME/cardcache
 FUSE2FS="$PREFIX/usr/bin/fuse2fs"
 export LD_LIBRARY_PATH="$PREFIX/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
@@ -557,7 +557,7 @@ if [ "$MODE" = "--precache" ]; then
     # HERE rather than only in the GUI, because the GUI's run-is-up flag is
     # blind at startup (the first status poll has not answered when a
     # restored card path fires this) and blind to terminal-started runs.
-    if pgrep -x game >/dev/null 2>&1 || pgrep -x padglhost >/dev/null 2>&1; then
+    if [ -n "$(pad_pids -x game)" ] || [ -n "$(pad_pids -x padglhost)" ]; then
         echo "[card] a run is up - not pre-caching" >&2
         exit 0
     fi

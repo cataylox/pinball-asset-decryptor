@@ -85,8 +85,13 @@ case "${1:-}" in --total|--procs) ONLY=$1 ;; esac
 # `pgrep -c` PRINTS 0 and ALSO exits non-zero when nothing matches, so the
 # obvious `pgrep -c ... || echo 0` emits "0\n0" and every arithmetic use of it
 # then dies with a syntax error. Take the printed value and only default it if
-# pgrep produced nothing at all.
-n() { local c; c=$(pgrep -c "$@" 2>/dev/null); echo "${c:-0}"; }
+# pgrep produced nothing at all. (pad_count always prints exactly one number.)
+#
+# SLOT-SCOPED (rig slots, padpath.sh): every count below is THIS slot's
+# processes only - the ones whose environment carries this PAD_SLOT (none at
+# all, for slot 0). Two sessions on two slots each see their own run, and a
+# teardown asking "is my slot clean" is not answered with another slot's run.
+n() { pad_count "$@"; }
 
 GAME=$(n -x game)
 # arm-binfmt is WSL's interpreter name; qemu-arm covers a container whose
@@ -175,7 +180,7 @@ VID=$(n -f 'padvidhost\.py')
 # pausekeep.py (PAD-204) is the root half of the Pause key, counted from the day
 # it was written. It exits when the renderer goes; a leaked one would still
 # SIGSTOP whatever `game` the next run starts if a stale request reached it.
-HELP=$(( $(n -f 'autoattract\.sh') + $(n -f "^tail -q -n 0 -F $PAD_HOME/padvid\.log") \
+HELP=$(( $(n -f 'autoattract\.sh') + $(n -f "^tail -q -n 0 -F $PAD_LOGDIR/padvid\.log") \
          + $(n -f '^tail -F .*dump/game\.out') + $(n -f 'ballfeed[.]py') \
          + $(n -f '^bash [^ ]*longplay\.sh') + $(n -f 'mktables[.]py') \
          + $(n -f 'swexercise\.sh') + $(n -f 'swexercise[.]py') \
@@ -230,7 +235,7 @@ while :; do
     ANC="$ANC
 $_p"
 done
-SCRIPT=$(pgrep -f '^bash .*(watch|runbridge|nbrun|run_game|cardmount)\.sh' 2>/dev/null \
+SCRIPT=$(pad_pids -f '^bash .*(watch|runbridge|nbrun|run_game|cardmount)\.sh' \
          | grep -cvxF "$ANC")
 SCRIPT=${SCRIPT:-0}
 
@@ -294,6 +299,7 @@ case "$ONLY" in
     --procs) echo "$PROCS"; exit 0 ;;
 esac
 
+[ "$PAD_SLOT" != 0 ] && printf 'rig slot               : %s  (%s)\n' "$PAD_SLOT" "$PAD_ROOT"
 printf 'guest (comm=game)      : %s\n' "$GAME"
 printf 'qemu  (arm-binfmt)     : %s\n' "$QEMU"
 printf 'selector (codeselect)  : %s\n' "$SEL"
@@ -318,10 +324,16 @@ if [ "$TOTAL" -ne 0 ]; then
   # under this heading at all, which is a row that says something is up and a
   # list that cannot say what.
   ps -eo pid,pcpu,etime,comm,args --sort=-pcpu \
+    | while read -r _pid _rest; do
+          case "$_pid" in PID) echo "$_pid $_rest"; continue ;; esac
+          _s=$(pad_slot_of "$_pid")
+          if [ "$_s" = "$PAD_SLOT" ] || { [ "$_s" = '?' ] && [ "$PAD_SLOT" = 0 ]; }; then
+              echo "$_pid $_rest"
+          fi
+      done \
     | grep -E 'arm-binfmt|qemu-arm-static|/\.padqemu/|bash -s /|codeselect|padglhost|nodebus\.py|audio\.fifo|padrelay\.py|padplay\.py|padvidhost\.py|autoattract\.sh|longplay\.sh|playfield\.py|mktables\.py|watch\.sh|run_game\.sh|unshare -|fuse2fs|game\.out' \
     | grep -v grep | head -12
-  mountpoint -q "$PAD_HOME/card" 2>/dev/null
-  mount 2>/dev/null | grep 'fuse.ext4' | sed 's/^/  mount: /'
+  mount 2>/dev/null | grep 'fuse.ext4' | grep -F " $PAD_CARDS/" | sed 's/^/  mount: /'
 fi
 
 # A zombie cannot be killed - only reaped - and when its parent is a WSL
