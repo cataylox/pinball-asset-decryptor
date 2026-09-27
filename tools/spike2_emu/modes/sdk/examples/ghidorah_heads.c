@@ -283,7 +283,7 @@ static void end(const char *why, int won)
     if (!run.on) return;
     run.on = 0;
     kit_lamps_off(&lamps);                         /* every insert back to the game, at once */
-    kit_end();
+    kit_end_after(TOTAL_SHOWN_MS);      /* the ending clip and the total keep the screen */
     kit_ledger_note(KIT_GHIDORAH, run.player, won);
     sound(CUE_END);
     pa_clip_full(&own, won ? "won" : "lost");      /* the ending, full screen */
@@ -529,12 +529,16 @@ static void on_ball_end(void)
 {
     unsigned p;
     end("ball ended", 0);
+    kit_end_now();
     for (p = 0; p < 5; p++) qual[p] = ran_ball[p] = 0;
 }
 
 static void on_event(unsigned id)
 {
-    if (kit_is_tilt(id)) end("tilted", 0);        /* its lights go dark with the game's */
+    if (kit_is_tilt(id)) {
+        end("tilted", 0);                          /* its lights go dark with the game's */
+        kit_end_now();
+    }
 }
 
 static const struct pm_mode ghidorah_heads = {

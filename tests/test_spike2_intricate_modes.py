@@ -930,6 +930,16 @@ def _all_back(out):
     return "END lamps held 0, display priority 0" in out
 
 
+ENDING_MS = 10000     # a natural end keeps the display hold this long: the ending clip, then the total
+
+
+def _ending_back(out, mode, end):
+    """a natural end: the hold stays for the mode's ending (pm_end_holding), then goes back to the game"""
+    back = _at(out, "DISPLAY released %s (its ending is over)" % mode)
+    return (_at(out, "DISPLAY lingers %s %d ms" % (mode, ENDING_MS)) == end and back is not None
+            and end + ENDING_MS <= back <= end + ENDING_MS + 20)
+
+
 def test_ghidorah_lights_the_lit_heads_inserts_gold_with_its_health_and_the_regrowing_head_green(harness):
     out = play(harness, *POWERLINES, "secs", 1, "shot", "Left ramp", "secs", 8, "lamps", "secs", 5)
     g = "KING GHIDORAH"
@@ -950,7 +960,7 @@ def test_ghidorah_lights_the_lit_heads_inserts_gold_with_its_health_and_the_regr
 def test_ghidorah_final_blow_flashes_the_maser_and_every_insert_goes_back_when_it_ends(harness):
     out = play(harness, *POWERLINES, "secs", 1,
                "shot", "Left ramp", "shot", "Powerline left", "secs", 1, "shot", "Building", "shot", "Powerline center",
-               "secs", 1, "shot", "Right ramp", "shot", "Powerline right", "secs", 11, "shot", "Maser target", "secs", 2)
+               "secs", 1, "shot", "Right ramp", "shot", "Powerline right", "secs", 11, "shot", "Maser target", "secs", 11)
     final = _at(out, "[KING GHIDORAH] FINAL BLOW")
     for name in ("MASER", "MASER READY"):
         assert (final, "ffffff", "blink", 150) in _lamp(out, name)
@@ -959,11 +969,27 @@ def test_ghidorah_final_blow_flashes_the_maser_and_every_insert_goes_back_when_i
         assert final in _released(out, name)                                     # the heads are gone
     end = _at(out, "[KING GHIDORAH] END (super jackpot)")
     assert end in _released(out, "MASER") and end in _released(out, "MASER READY")
-    assert _at(out, "DISPLAY 0 KING GHIDORAH") == end and _all_back(out)
+    assert _ending_back(out, "KING GHIDORAH", end) and _all_back(out)
+
+
+def test_a_mode_started_during_anothers_ending_takes_the_display_at_once(harness):
+    out = play(harness, *POWERLINES, "secs", 1, "trigger", "ghidorah_heads.stop", "secs", 2, *SPINS, "secs", 1)
+    end = _at(out, "[KING GHIDORAH] END")
+    assert _at(out, "DISPLAY lingers KING GHIDORAH %d ms" % ENDING_MS) == end
+    start = _at(out, "[OXYGEN DESTROYER] START")
+    assert start is not None and end < start < end + ENDING_MS                 # not refused by the ending
+    assert _at(out, "DISPLAY released KING GHIDORAH (another mode began)") == start
+    assert _at(out, "DISPLAY 180 OXYGEN DESTROYER") == start
+
+
+def test_a_drain_right_after_a_natural_end_gives_the_ending_hold_up(harness):
+    out = play(harness, *POWERLINES, "secs", 1, "trigger", "ghidorah_heads.stop", "secs", 2, "ball_end", "ms", 20)
+    assert _at(out, "DISPLAY lingers KING GHIDORAH %d ms" % ENDING_MS) is not None
+    assert _at(out, "DISPLAY 0 KING GHIDORAH") == _at(out, ">> ball_end")
 
 
 def test_oxygen_destroyer_collect_insert_blinks_faster_as_the_value_falls_then_the_super_flashes(harness):
-    out = play(harness, *SPINS, "secs", 23, "shot", "Left ramp", "secs", 10, "shot", "Right ramp", "secs", 1)
+    out = play(harness, *SPINS, "secs", 23, "shot", "Left ramp", "secs", 10, "shot", "Right ramp", "secs", 11)
     o = "OXYGEN DESTROYER"
     start = _at(out, "[OXYGEN DESTROYER] START")
     assert _at(out, "DISPLAY 180 OXYGEN DESTROYER") <= start
@@ -1260,13 +1286,13 @@ def test_meltdown_missed_the_core_blows_back_to_50_percent(harness):
 
 def test_meltdown_ends_when_one_ball_is_left_after_the_ball_save_and_its_grace(harness):
     s = "meltdown"
-    out = play(harness, *MELTDOWN_START, "secs", 1, "balls", 1, "secs", 22)
+    out = play(harness, *MELTDOWN_START, "secs", 1, "balls", 1, "secs", 31)
     start = _at(out, "[MELTDOWN] START")
     end = _at(out, "[MELTDOWN] END (one ball left)")
     assert end is not None
     assert 15000 + 3000 + 2000 <= end - start <= 15000 + 3000 + 2000 + 50       # the ball save, 3 s, then 2 s
     assert has(out, "MELTDOWN", "END (one ball left): 0 jackpot(s), 0 meltdown(s) survived")
-    assert _at(out, "DISPLAY 0 MELTDOWN") == end and _all_back(out)
+    assert _ending_back(out, "MELTDOWN", end) and _all_back(out)
     assert hud_next(out, s, "Title", end) == "MELTDOWN TOTAL"
     assert hud_said(out, s, "Line", "0 JACKPOTS  -  0 MELTDOWNS SURVIVED") and hud_said(out, s, "Award", "0")
     # one ball left during the ball save does not end it

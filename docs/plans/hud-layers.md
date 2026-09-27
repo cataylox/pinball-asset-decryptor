@@ -110,6 +110,13 @@ included. Neither is how Stern presents a mode.
   dark while any other mode, a stock battle/multiball or a light show runs); the captive ball left alone
   while another of our modes runs (it is OXYGEN's hold-off); four HUD texts shortened to fit; OXYGEN's
   "1 SPIN TO GO"; the desk harness holds six modes' HUD nodes and has the Left spinner.
+- 2026-09-27, run t7 (GHIDORAH, FINAL WARS, MELTDOWN; the play script fixed): GHIDORAH WON (three severs,
+  the final blow at the Maser, 33M), FINAL WARS WON through all three phases (the wizard jackpot 45M),
+  MELTDOWN's ready insert pulsed red and was handed back at its start; segv 0, fatal 0, no render gap. It
+  showed the game's POWERLINE ATTACK award, waiting through FINAL WARS, take the one video surface 22 ms
+  after the end: the ending clip stopped and the total was covered. Fixed with `pm_end_holding(ms)` in the
+  runtime (the mode ends, its display hold stays 10 s for the ending, handed to the next mode at once, back
+  at a drain or a tilt at once); the kit's `kit_end_after` / `kit_end_now`; the pinned object rebuilt.
 - The six examples keep 20 calls: Premium 1.16 measures 21 call carriers (`mode_sounds.Carriers.calls`).
 - **Owed:** a hardware run; the Pro 1.15/1.16 backdrop port lines are derived from the programs by the shape
   of Premium's measured ones, never run in the emulator; cues past the carrier limit (GHIDORAH's regrow and

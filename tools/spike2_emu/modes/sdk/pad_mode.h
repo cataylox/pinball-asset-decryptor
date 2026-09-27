@@ -348,6 +348,12 @@ int pm_display_priority(unsigned priority);
 /* 1 while a display of the game's that beat your priority has the screen (your screen is
  * under it); 0 otherwise, and with no priority held. */
 int pm_display_covered(void);
+/* Your mode is over (as pm_end: another may begin at once) but its ENDING - a full-screen clip, its
+ * total - should keep the screen: the display priority it holds stays for `ms` more, so an award of
+ * the game's that waited through the mode does not take the one video surface from the ending clip.
+ * The hold goes when the time is up, another mode begins, the ball or the game ends, or you call
+ * pm_display_priority(0). 1 = ended (the hold kept if one was held); 0 = your mode was not running. */
+int pm_end_holding(unsigned ms);
 
 /* ---- the game's own rules: their shot handlers (item 160; MODE_SDK.md "Counts as") ----------
  * A rule the game shipped with (Godzilla's battle vs Ebirah, its tank attack multiball) is a

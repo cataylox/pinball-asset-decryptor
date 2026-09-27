@@ -369,7 +369,7 @@ static void end(const char *why)
     if (!run.on) return;
     run.on = 0;
     kit_lamps_off(&lamps);
-    kit_end();
+    kit_end_after(TOTAL_SHOWN_MS);      /* the ending clip and the total keep the screen */
     sound(CUE_END);
     pa_clip_full(&own, run.meltdowns ? "won" : "lost");
     kit_show_start(&show_fx, "meltdown end", SHOW_END, N_SHOW(SHOW_END));
@@ -564,11 +564,15 @@ static void on_tick(void)
 static void on_ball_end(void)
 {
     end("ball ended");
+    kit_end_now();
 }
 
 static void on_event(unsigned id)
 {
-    if (kit_is_tilt(id)) end("tilted");
+    if (kit_is_tilt(id)) {
+        end("tilted");
+        kit_end_now();
+    }
 }
 
 static const struct pm_mode meltdown = {

@@ -211,13 +211,13 @@ Capability flags, for `pm_can()`: `PM_CAN_CALLOUT`, `PM_CAN_LIGHTS`, `PM_CAN_SCR
 `PM_CAN_CLIPS`, `PM_CAN_OWN_SOUND`, `PM_CAN_MESSAGES`, `PM_CAN_AWARD_SCREEN`, and
 `PM_CAN_EVENTS` (item 147: set when at least one named event is armed), `PM_CAN_ROSTER`
 (item 146: the port names the battle roster and its start is hooked), `PM_CAN_LAMPS` (item mode-leds:
-the port has `lamp` lines and the game's lamp layer, and their light ids fit the game's), `PM_CAN_DISPLAY_PRIORITY` (item 154 display: the port names the display arbitration and it is hooked), `PM_CAN_SWITCH_SHOTS` (the port's `switch` lines and a `switch_hit` or `switch_edge` site that matched and is hooked: a switch's hit comes to `shot` from the tick; emulator-proven on The Beatles 1.29), `PM_CAN_STOCK_RULES` (item 160: the port names the game's own rules, the manager's get and the shot slot, so a rule's shot handler can be wrapped), `PM_CAN_MULTIBALL` (item 167: the port names the framework's serve call `multiball_serve` and its count `balls_in_play`, so a mode can be a multiball of its own). A port that
+the port has `lamp` lines and the game's lamp layer, and their light ids fit the game's), `PM_CAN_DISPLAY_PRIORITY` (item 154 display: the port names the display arbitration and it is hooked), `PM_CAN_BACKDROP` (hud-layers: the port names the background element's draw, `scene_show` and the city's vtable, both sites matched and hooked, so a mode's clip can loop behind the HUD), `PM_CAN_SWITCH_SHOTS` (the port's `switch` lines and a `switch_hit` or `switch_edge` site that matched and is hooked: a switch's hit comes to `shot` from the tick; emulator-proven on The Beatles 1.29), `PM_CAN_STOCK_RULES` (item 160: the port names the game's own rules, the manager's get and the shot slot, so a rule's shot handler can be wrapped), `PM_CAN_MULTIBALL` (item 167: the port names the framework's serve call `multiball_serve` and its count `balls_in_play`, so a mode can be a multiball of its own). A port that
 lacks a function switches off only its own flag (the boot log's `armed: ... can ...` line).
 
 Kinds, for `pm_stock_mode_running()` (item 140): `PM_STOCK_ANY`, `PM_STOCK_MULTIBALL`,
 `PM_STOCK_BATTLE`.
 
-The 81 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
+The 87 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
 F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 
 | Call | What | Used by | Measured |
@@ -288,6 +288,8 @@ F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 | `pm_lamp_set(names, rgb, pattern, ms)` | holds one insert or a comma-separated list in a colour (`PM_RGB(r, g, b)`) and a pattern (`PM_LAMP_SOLID`, `PM_LAMP_BLINK`, `PM_LAMP_PULSE`, `PM_LAMP_CHASE` across the list); returns how many it holds. Held inserts show that over the game's shows; everything else stays the game's | F `lamp_probe.c` | item mode-leds RUN 5 on Premium 1.16: the decoded node bus (MODE_SDK.md) |
 | `pm_lamp_shot(shots, rgb, pattern, ms)` | the same for every insert the port ties to these shot bits | F `lamp_probe.c` | item mode-leds RUN 5 |
 | `pm_lamp_all(rgb, pattern, ms)` | the same for every insert the port names (a mode's Lights on a title without the light language) | F `mode_file.c` (`light_all`) | item 164 (19 builds, the shim's LED view) |
+| `pm_lamp_xy(i, &x, &y)` | the i-th insert's place on the playfield picture, from the port's lamp comment (`at X,Y`); 0 when the port does not say | `examples/intricate_kit.h` (light shows) | hud-layers run t1/t6: 83 of Premium 1.16's inserts placed, the shows swept across them |
+| `pm_lamp_paint(i, rgb)` | holds ONE insert solid in a colour, quietly (no log line): a light show's frame | `examples/intricate_kit.h` (light shows) | hud-layers run t1/t6 (the shim's LED view: the start and end shows over 83 inserts and 4 GI strings) |
 | `pm_lamp_release(names)` | hands inserts the calling mode holds back to the game at once; how many | `lamp_probe.c` | item mode-leds RUN 5 |
 | `pm_lamp_release_shot(shots)` | the same for a shot's inserts | none | desk |
 | `pm_lamp_release_all()` | every insert the calling mode holds | F `lamp_probe.c` | item mode-leds RUN 5 |
@@ -295,6 +297,10 @@ F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 | `pm_lamp_layers(prio, max)` | the game's lamp layers now, bottom to top, 0x100 added for ours; -1 without the port's layer list | `lamp_probe.c` | item mode-leds RUN 5 (the layer lists in MODE_SDK.md) |
 | `pm_display_priority(priority)` | the running mode becomes, to the game's display arbitration, a display of `priority` (1-255); 0 gives it up. 1 = held; 0 without the port's display lines or when the caller is not the running mode | F | item 154 display: Premium 1.16 r2-r6, Pro 1.15 r5 (MODE_SDK.md "Display priority") |
 | `pm_display_covered()` | 1 while a display of the game's that beat the held priority has the screen | none (`display_test_mode.c`) | item 154 display r4: 1 when the tilt warning (241) beat 230 (`covered by a game display that beat the priority`) |
+| `pm_end_holding(ms)` | the running mode ends (as `pm_end`: another may begin at once) but the display priority it holds stays `ms` more, for its ending clip and total; the hold goes when the time is up, another mode begins, the ball or game ends, or `pm_display_priority(0)`. 1 = ended; 0 when the caller is not the running mode | `examples/intricate_kit.h` (`kit_end_after`) | hud-layers run t8 (Premium 1.16: FINAL WARS's ending clip and total kept the screen from the POWERLINE ATTACK award that waited through it); desk (`tests/test_spike2_intricate_modes.py`) |
+| `pm_backdrop(name)` | loops the named clip BEHIND the HUD, in the main-play background's place (the game's own background route); `0` or "" takes it away. 1 = asked for; 0 without `PM_CAN_BACKDROP` | `pad_mode_assets.h` (a mode's `loop` clip) | hud-layers h12 and b1 (Premium 1.16: the clip full screen under the score panel and top bar, no render gap) |
+| `pm_backdrop_once(name)` | plays a clip once in the loop's place, then the loop again | `pad_mode_assets.h` (`pa_clip_event`) | hud-layers b1, t6 (the sever, barrage, jackpot clips behind the HUD) |
+| `pm_backdrop_showing()` | 1 while the backdrop is on the glass | `backdrop_test_mode.c` | hud-layers b1 |
 | `pm_stock_rule_count()` | how many of the game's own rules the port names (`rule` lines); 0 without `PM_CAN_STOCK_RULES` | none | item 160: desk (the port readers in `tests/test_spike2_stock_remap.py`); 2 on both Godzilla ports |
 | `pm_stock_rule_at(i, &id, &label)` | the i-th rule's id and label | none | item 160: desk |
 | `pm_stock_rule_object(rule)` | the rule's object through the manager's get, checked against the port's vtable word; 0 until the manager is built | R | item 160: Premium 1.16 (the wrap line `rule 12 Battle vs Ebirah obj 0x7b53f0 vtable 0x636d78: shot v[42] 0x816e8 wrapped`); see MODE_SDK.md "Counts as" for the run |

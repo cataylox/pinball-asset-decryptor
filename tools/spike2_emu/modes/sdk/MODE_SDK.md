@@ -2395,6 +2395,13 @@ While your mode holds priority P (`pm_display_priority(P)`, or `priority P` in a
   released: the layered display's own priority back, its effect queue run. A display still waiting then
   plays (held off, then shown): run 3's raid award waited out a 45 s mode and started the millisecond
   the mode ended.
+- **An ending that keeps the screen** (`pm_end_holding(ms)` in place of `pm_display_priority(0)` +
+  `pm_end()`): the mode ends (another may begin at once) but its hold stays `ms` more, for its ending
+  clip and total. Run t7 (hud-layers): FINAL WARS released at its end and the POWERLINE ATTACK award
+  that waited through it took the one video surface 22 ms later, stopping the ending clip and covering
+  the total. The kept hold goes when the time is up, another mode begins (`pm_begin`: the new mode takes
+  over at once), the ball or the game ends, or the mode calls `pm_display_priority(0)` (a drain or a
+  tilt: the display back at the same tick). The examples' `kit_end_after(ms)` and `kit_end_now()`.
 - A display of the game's that is ALREADY on the screen when the mode starts plays to its end; the
   hold applies to everything asked for after.
 

@@ -330,7 +330,7 @@ static void end(const char *why, int won)
     if (!run.on) return;
     run.on = 0;
     kit_lamps_off(&lamps);                         /* every insert back to the game, at once */
-    kit_end();
+    kit_end_after(TOTAL_SHOWN_MS);      /* the ending clip and the total keep the screen */
     sound(CUE_END);
     pa_clip_full(&own, won ? "won" : "lost");      /* the ending, full screen */
     kit_show_start(&show_fx, won ? "final wars won" : "final wars lost", won ? SHOW_WON : SHOW_LOST,
@@ -529,6 +529,7 @@ static void on_tick(void)
 static void on_ball_end(void)
 {
     end("ball ended", 0);
+    kit_end_now();
     between_balls = 1;
     idle_lamps();                          /* the lit Building goes dark with the ball */
 }
@@ -537,6 +538,7 @@ static void on_event(unsigned id)
 {
     if (kit_is_tilt(id)) {
         end("tilted", 0);                  /* its lights go dark with the game's */
+        kit_end_now();
         between_balls = 1;
         idle_lamps();
     }

@@ -620,6 +620,27 @@ static KIT_UNUSED void kit_end(void)
     kit_running = 0;
 }
 
+/* The mode is over but its ENDING is still to play: the full-screen clip, then the total (hud-layers,
+ * run t7). Giving the display priority up at the end let the game's award that waited through the mode
+ * (FINAL WARS: POWERLINE ATTACK) take the one video surface 22 ms later, stopping the ending clip and
+ * covering the total. pm_end_holding ends the mode (another of ours may start at once, and the hold
+ * goes to it) and keeps the hold for `ms`. A drain or a tilt calls kit_end_now() after its end(), so
+ * those hand the display back at the same tick. */
+static KIT_UNUSED void kit_end_after(unsigned long ms)
+{
+    if (!ms || !pm_end_holding((unsigned)ms)) {
+        kit_end();
+        return;
+    }
+    kit_running = 0;
+    pm_log("the ending keeps the screen for %lu s", ms / 1000);
+}
+
+static KIT_UNUSED void kit_end_now(void)
+{
+    pm_display_priority(0);                /* an ending's hold, given up at once */
+}
+
 /* ---- the stacking question -------------------------------------------------------------------
  * 1 = one of the game's own modes of `kinds` is active (the mode should wait); the port cannot
  * tell (-1) counts as none, once logged. */

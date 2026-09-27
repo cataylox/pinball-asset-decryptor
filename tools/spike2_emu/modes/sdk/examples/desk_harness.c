@@ -150,6 +150,10 @@ const char *pm_shot_at(int i, uint64_t *mask)
     if (mask) *mask = SHOTS[i].mask;
     return SHOTS[i].name;
 }
+static const struct pm_mode *disp_owner;   /* the display arbitration's state (pm_display_priority) */
+static unsigned disp_prio;
+static unsigned long disp_linger_until;   /* pm_end_holding: the hold kept for an ending, until then */
+static void disp_linger_release(const char *why);
 int pm_begin(void)
 {
     if (running && running != current) {
@@ -157,6 +161,7 @@ int pm_begin(void)
         return 0;
     }
     running = current;
+    if (disp_linger_until && disp_owner != current) disp_linger_release("another mode began");
     return 1;
 }
 void pm_end(void) { if (running == current) running = 0; }
@@ -371,8 +376,6 @@ static const struct { const char *name; uint64_t shot; } LAMPS[] = {    /* godzi
 #define N_LAMPS (int)(sizeof LAMPS / sizeof LAMPS[0])
 static const char *const PATTERN[] = { "solid", "blink", "pulse", "chase" };
 static struct { const struct pm_mode *owner; unsigned rgb, ms; int pattern; } held[N_LAMPS];
-static const struct pm_mode *disp_owner;
-static unsigned disp_prio;
 static int covered;
 
 static const char *mode_name(const struct pm_mode *m) { return m && m->name ? m->name : "?"; }
@@ -476,6 +479,14 @@ static int lamps_held(void)
 }
 
 /* the display arbitration, as the runtime keeps it: only the RUNNING mode may hold a priority */
+static void disp_linger_release(const char *why)
+{
+    printf("%6lu DISPLAY released %s (%s)\n", now_ms, mode_name(disp_owner), why);
+    disp_prio = 0;
+    disp_owner = 0;
+    disp_linger_until = 0;
+}
+
 int pm_display_priority(unsigned p)
 {
     if (!p) {
@@ -483,6 +494,7 @@ int pm_display_priority(unsigned p)
             printf("%6lu DISPLAY 0 %s\n", now_ms, mode_name(current));
             disp_prio = 0;
             disp_owner = 0;
+            disp_linger_until = 0;
         }
         return 1;
     }
@@ -493,6 +505,16 @@ int pm_display_priority(unsigned p)
     return 1;
 }
 int pm_display_covered(void) { return disp_prio && covered; }
+int pm_end_holding(unsigned ms)
+{
+    if (!running || running != current) return 0;
+    if (disp_prio && disp_owner == current && ms) {
+        disp_linger_until = now_ms + ms;
+        printf("%6lu DISPLAY lingers %s %u ms\n", now_ms, mode_name(current), ms);
+    }
+    pm_end();
+    return 1;
+}
 
 /* ---- the runtime's part: call every mode ----------------------------------------------------- */
 #define EACH_MODE(m) for (const struct pm_mode *const *pp = __start_pm_modes; pp < __stop_pm_modes && ((m) = *pp, 1); pp++)
@@ -504,7 +526,11 @@ static void tick(void)
     now_ms = ticks * 1000 / 60;
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
-    if (disp_prio && running != disp_owner) {           /* the runtime's display_tick does the same */
+    if (disp_prio && running != disp_owner && disp_linger_until && !running && now_ms < disp_linger_until) {
+        /* an ending: the hold stays (pm_end_holding) */
+    } else if (disp_prio && running != disp_owner && disp_linger_until) {
+        disp_linger_release(running ? "another mode began" : "its ending is over");
+    } else if (disp_prio && running != disp_owner) {    /* the runtime's display_tick does the same */
         printf("%6lu DISPLAY released %s (the mode that held it ended)\n", now_ms, mode_name(disp_owner));
         disp_prio = 0;
         disp_owner = 0;

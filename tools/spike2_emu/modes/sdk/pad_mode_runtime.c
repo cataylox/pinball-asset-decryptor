@@ -652,6 +652,7 @@ const char *pm_shot_at(int i, uint64_t *mask)
 
 /* ---- one mode at a time ---------------------------------------------------------------- */
 static const struct pm_mode *running;
+static void disp_linger_other_began(void);
 
 int pm_begin(void)
 {
@@ -660,6 +661,7 @@ int pm_begin(void)
         return 0;
     }
     running = current;
+    disp_linger_other_began();
     return 1;
 }
 
@@ -2111,6 +2113,7 @@ static void backdrop_arm(void)
  * returns. Released at the mode's end: the layered display's own priority back, its queue run. */
 static const struct pm_mode *disp_owner;
 static unsigned disp_prio;                /* 0: no hold */
+static unsigned long disp_linger_until;   /* pm_end_holding: the hold outlives its mode until then */
 static int disp_covered_now, disp_said_wait;
 static unsigned disp_said_layered[8];     /* the layered displays a hold has said wait, one bit each */
 static unsigned disp_said_dropped[8];     /* item 157: the layered displays a hold has dropped, one bit each */
@@ -2159,6 +2162,7 @@ static void disp_release(const char *why)
     if (!p) return;
     disp_prio = 0;
     disp_owner = 0;
+    disp_linger_until = 0;
     disp_covered_now = 0;
     if (m && disp_now(m) == disp_host() && *disp_level(m) == p) {
         *disp_level(m) = (unsigned char)disp_effect(disp_host(), 0);
@@ -2194,6 +2198,25 @@ int pm_display_priority(unsigned priority)
 
 int pm_display_covered(void) { return disp_prio && disp_covered_now; }
 
+/* a hold kept for an ending (pm_end_holding) is not the new mode's */
+static void disp_linger_other_began(void)
+{
+    if (disp_linger_until && disp_owner != current) disp_release("another mode began");
+}
+
+int pm_end_holding(unsigned ms)
+{
+    if (!running || running != current) return 0;
+    if (disp_prio && disp_owner == current && ms) {
+        disp_linger_until = pm_ms() + ms;
+        if (!disp_linger_until) disp_linger_until = 1;
+        say("display: %s ended - its hold at %u stays %u ms for its ending",
+            current->name ? current->name : "a mode", disp_prio, ms);
+    }
+    pm_end();
+    return 1;
+}
+
 /* every tick, from clip_tick: the hold follows its mode, is raised again when the layered display
  * comes back, and says when a display that beat it covers the screen and when it is gone */
 static void display_tick(void)
@@ -2202,7 +2225,11 @@ static void display_tick(void)
     unsigned now;
     int covered;
     if (!disp_prio) return;
-    if (!disp_owner || running != disp_owner) { disp_release("the mode that held it ended"); return; }
+    if (!disp_owner || running != disp_owner) {
+        if (!disp_linger_until) { disp_release("the mode that held it ended"); return; }
+        if (running) { disp_release("another mode began"); return; }
+        if (pm_ms() >= disp_linger_until) { disp_release("its ending is over"); return; }
+    }
     if (!pm_in_game()) { disp_release("left the game"); return; }
     m = disp_manager();
     if (!m) return;
@@ -4140,6 +4167,7 @@ static void on_ball_end(unsigned *r)
     stock_ball_ends++;
     EACH_MODE(m) if (m->ball_end) { current = m; m->ball_end(); }
     current = 0;
+    if (disp_linger_until) disp_release("the ball ended");
     bd_reset("the ball ended");
     roster_owed_ball_end();
 }
