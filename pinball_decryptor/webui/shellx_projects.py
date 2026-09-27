@@ -222,15 +222,17 @@ class ProjectsMixin:
             app.save_multiboot_state(app._project_folder() or "")
         except Exception:                               # noqa: BLE001
             pass
+        if app._current_mfr is not mfr:
+            app._on_manufacturer_change(mfr)
+            win.show_mfr_view()
+        # AFTER the manufacturer switch, which restores that manufacturer's
+        # last folder's form and would put it back
         panel = getattr(win, "_multiboot_panel", None)
         if panel is not None:
             try:
                 panel.restore_state({})
             except Exception:                           # noqa: BLE001
                 pass
-        if app._current_mfr is not mfr:
-            app._on_manufacturer_change(mfr)
-            win.show_mfr_view()
         win.set_extract_options({})
         win.extract_input_var.set(stock)
         win.extract_output_var.set(folder)
