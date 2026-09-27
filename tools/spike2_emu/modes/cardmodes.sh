@@ -37,11 +37,14 @@
 #   * A CARD WITHOUT /usr/local/padmode IS TODAY'S RUN: no output, no files, no line.
 #   * A card whose game_monitor does not load the object would not run its modes on a
 #     machine either, so it does not here: emulating a card means what booting it means.
-#   * A MULTI-BOOT CARD HAS ONE ROOTFS. mkmulticard.py carries the primary image's p2 and
-#     only the GAMES partitions of the others, and the machine's hook preloads the same
-#     object whichever image the menu boots; the runtime then checks its port against the
-#     game it finds itself in and stays out of the way when they differ. So the same files
-#     go in here whichever image is chosen, and the same check decides.
+#   * A MULTI-BOOT CARD HAS ONE ROOTFS, the primary's, so its /usr/local/padmode is image 0's
+#     set. Since PAD-226 the build carries every OTHER image's set to
+#     /usr/local/codeselect/modes/img<N>/ and the machine's select.sh binds the booted image's
+#     set (or modes/none) over /usr/local/padmode. PAD_CARD_IMAGE=<N> asks for that image the
+#     same way: run_game.sh asks again once its menu has chosen image N. On a card with a
+#     modes/ directory an image with no img<N> runs NO modes (not the primary's); a card
+#     built before per-image modes has no such directory and every image gets the primary's
+#     set, exactly as that card behaves on a machine.
 #   * NOTHING LEAKS INTO A LATER RUN. An install of ours leaves a marker beside the files
 #     ($ROOT/dump/cardmodes.from). A later run that installs nothing - a stock card, an
 #     extracted title, the opt-out - finds the marker and takes those files out again.
@@ -54,6 +57,9 @@ set -u
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$HERE/../padpath.sh"
 CARD=${1:-}
+IMAGE=${PAD_CARD_IMAGE:-0}
+case "$IMAGE" in ''|*[!0-9]*) IMAGE=0 ;; esac
+MODES_DIR=/usr/local/codeselect/modes     # PAD-226: images 1..N's own sets on a multi-boot card
 DUMP=$ROOT/dump
 MARK=$DUMP/cardmodes.from
 CARD_DIR=/usr/local/padmode
@@ -106,8 +112,25 @@ STAGE=$(mktemp -d "${TMPDIR:-/tmp}/padcardmodes.XXXXXX" 2>/dev/null) || {
 trap 'rm -rf "$STAGE"' EXIT
 
 # Absent is not an error and says nothing: parts.py prints the folder it made, or nothing.
-python3 "$RIG/parts.py" --rootfs-dir "$CARD_DIR" "$STAGE" "$CARD" >/dev/null 2>&1
-S=$STAGE/padmode
+WHO="this card"
+S=""
+if [ "$IMAGE" != 0 ]; then
+    # IMAGE N OF A MULTI-BOOT CARD (PAD-226): its own set, when the card keeps per-image sets
+    python3 "$RIG/parts.py" --rootfs-dir "$MODES_DIR" "$STAGE" "$CARD" >/dev/null 2>&1
+    if [ -d "$STAGE/modes" ]; then
+        if [ ! -f "$STAGE/modes/img$IMAGE/mode.so" ]; then
+            [ -n "${PAD_MODE_SO:-}" ] || forget
+            say "image $IMAGE of this card runs no custom modes of its own (the primary's stay with the primary)"
+            exit 0
+        fi
+        S=$STAGE/modes/img$IMAGE
+        WHO="image $IMAGE of this card"
+    fi
+fi
+if [ -z "$S" ]; then
+    python3 "$RIG/parts.py" --rootfs-dir "$CARD_DIR" "$STAGE" "$CARD" >/dev/null 2>&1
+    S=$STAGE/padmode
+fi
 if [ ! -f "$S/mode.so" ]; then
     [ -n "${PAD_MODE_SO:-}" ] || forget
     exit 0
@@ -119,18 +142,18 @@ WHAT="$N mode(s) of its own${NAMES:+ ($NAMES)}"
 if ! python3 "$RIG/parts.py" --rootfs-file /etc/init.d/game_monitor "$CARD" 2>/dev/null \
         | grep -qF "$HOOK"; then
     [ -n "${PAD_MODE_SO:-}" ] || forget
-    say "this card holds $WHAT in $CARD_DIR, but its game_monitor does not load them:"
+    say "$WHO holds $WHAT, but the card's game_monitor does not load them:"
     say "  a machine would not run them either, so this run does not"
     exit 0
 fi
 if [ -n "${PAD_MODE_SO:-}" ]; then
-    say "this card carries $WHAT, and this run brings a mode runtime of its own" \
+    say "$WHO carries $WHAT, and this run brings a mode runtime of its own" \
         "(PAD_MODE_SO=$PAD_MODE_SO): that one runs, the card's own modes are left out"
     exit 0
 fi
 if [ ! -f "$S/game.port" ] || [ "$N" = 0 ]; then
     forget
-    say "this card carries a mode object but no $([ "$N" = 0 ] && echo "mode file" || echo "port file") beside it:"
+    say "$WHO carries a mode object but no $([ "$N" = 0 ] && echo "mode file" || echo "port file") beside it:"
     say "  nothing the emulator can run. This run boots without it"
     exit 0
 fi
@@ -138,12 +161,12 @@ fi
 mv "$S/mode.so" "$S/pad_mode.so"
 if ! said=$(bash "$HERE/tryit.sh" install "$S" 2>&1); then
     forget
-    say "this card carries $WHAT, and they could NOT be put in the emulator:"
+    say "$WHO carries $WHAT, and they could NOT be put in the emulator:"
     printf '%s\n' "$said" | sed 's/^/[modes]   /' >&2
     say "  this run boots WITHOUT them (their screens may sit over the game's own)"
     exit 0
 fi
-{ echo "card=$CARD"; echo "modes=$N"; } > "$MARK" 2>/dev/null
+{ echo "card=$CARD"; echo "image=$IMAGE"; echo "modes=$N"; } > "$MARK" 2>/dev/null
 # ROOT IS ELEVATION, NOT OWNERSHIP (padpath.sh): the app's Start is a root launch carrying the
 # desktop user's rig, and what it installs goes back to that user so a later Try it of theirs
 # can replace it. A failure here costs nothing: tryit.sh removes by directory, not by owner.
@@ -152,5 +175,5 @@ if [ "$(id -u)" = 0 ]; then
     [ -n "$_o" ] && [ "$_o" != root ] && chown "$_o" "$ROOT$OBJECT" "$DUMP/game.port" \
         "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$MARK" 2>/dev/null
 fi
-say "this card carries $WHAT: their runtime runs in this game, as on the machine"
+say "$WHO carries $WHAT: their runtime runs in this game, as on the machine"
 echo "$OBJECT"

@@ -991,13 +991,13 @@ def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
     assert man["images"] == [
         {"device": "/dev/mmcblk0p3", "source": os.path.abspath("/img/a.raw"), "title": "STERN 1.59.0",
          "subtitle": "Original Stern code", "art": "art0.png", "anim": None, "music": None,
-         "confirm": None,
+         "confirm": None, "own_scores": None,
          "title_dir": "turtles_pro", "version": "1.59.0", "node_fw_version": "1.33.0",
          # item 106: null = this image is a card of its own
          "group": None},
         {"device": "/dev/mmcblk0p7", "source": os.path.abspath("/img/b.raw"), "title": "TMNT 1987",
          "subtitle": "1987 cartoon upscale", "art": "art1.png", "anim": "anim1.gif", "music": "music1.wav",
-         "confirm": None,
+         "confirm": None, "own_scores": None,
          "title_dir": "turtles_pro", "version": "1.58.0", "node_fw_version": "1.19.0",
          "group": None}]
     # it is JSON, and exactly the keys contract A names
@@ -1399,6 +1399,94 @@ def test_conf_for_plan_takes_the_text_size_from_the_flag_else_the_card(mk):
     # a card that never said still gets no key (and still draws uniform)
     plainex = mk.parse_images_conf(_menu_conf(mk, plan))
     assert "text_size" not in mk.conf_for_plan(plan, argparse.Namespace(), existing=plainex)
+
+
+def test_an_image_can_keep_high_scores_of_its_own(mk):
+    """PAD-226: `scores=<N>|<name>` gives image N a machine store of its own (select.sh binds it
+    over /data/nv/<title>); an image without one shares, and a card with none is byte for byte
+    what it always was."""
+    plan = _two_image_plan(mk)
+    plain = _menu_conf(mk, plan)
+    assert "scores=" not in plain
+    assert mk.parse_images_conf(plain)["scores"] == {}
+    text = _menu_conf(mk, plan, scores={1: "tmnt-1987"})
+    assert "scores=1|tmnt-1987\n" in text
+    conf = mk.parse_images_conf(text)
+    assert conf["scores"] == {1: "tmnt-1987"}
+    # the round trip the update path compares against
+    assert mk.render_images_conf_text(conf) == text
+    # build.json says which image keeps its own
+    man = mk.build_manifest(plan, conf, None)
+    assert [im["own_scores"] for im in man["images"]] == [None, "tmnt-1987"]
+    # names select.sh would refuse are refused here, and dropped on a read
+    for bad in ("../x", ".hidden", "a b", "a/b"):
+        with pytest.raises(mk.Refused):
+            _menu_conf(mk, plan, scores={1: bad})
+    assert mk.parse_images_conf(plain + "scores=1|../x\n")["scores"] == {}
+    with pytest.raises(mk.Refused):
+        _menu_conf(mk, plan, scores={2: "past-the-card"})
+    assert mk.scores_name_for("TMNT 1987!") == "tmnt-1987"
+    assert mk.scores_name_for("***") == "own"
+
+
+def test_each_images_modes_are_staged_under_their_own_index(mk, tmp_path):
+    """PAD-226: an extra image's modes go to MODES_DIR/img<N>; image 0's stay where its own
+    card put them, and an image with none gets nothing staged."""
+    so = (b"\x7fELF", 0o755)
+    sets = [{"mode.so": so}, {}, {"mode.so": so, "mode.cfg": (b"t=1\n", 0o644)}, {"mode.cfg": (b"x", 0o644)}]
+    items = mk.stage_mode_sets(sets, str(tmp_path))
+    assert [(c, m) for (_s, c, m) in items] == [
+        (mk.MODES_DIR + "/img2/mode.cfg", 0o644), (mk.MODES_DIR + "/img2/mode.so", 0o755)]
+    assert all(open(s, "rb").read() == sets[2][c.split("/")[-1]][0] for (s, c, _m) in items)
+    # a set without the object is no modes at all (nothing to preload)
+    assert not mk.carries_modes(sets[3]) and mk.carries_modes(sets[2])
+
+
+def test_mode_set_commands_replace_every_set_and_hook_the_monitor(mk):
+    items = [("/st/img2/mode.so", mk.MODES_DIR + "/img2/mode.so", 0o755)]
+    cmds = mk.mode_set_commands(items, {"img1": ["mode.so"], "none": []}, need_padmode_dir=True,
+                                monitor=("/st/game_monitor", {"mtime": 5, "atime": 6}))
+    # what was there goes first, children before their directory
+    assert cmds[:3] == ['rm "%s/img1/mode.so"' % mk.MODES_DIR, 'rmdir "%s/img1"' % mk.MODES_DIR,
+                        'rmdir "%s/none"' % mk.MODES_DIR]
+    assert 'mkdir "%s/none"' % mk.MODES_DIR in cmds and 'mkdir "%s/img2"' % mk.MODES_DIR in cmds
+    assert 'mkdir "%s"' % mk.MODES_DIR not in cmds            # it exists: it is kept
+    assert 'mkdir "%s"' % mk.PADMODE_DIR in cmds
+    assert 'set_inode_field "%s/img2/mode.so" mode 0100755' % mk.MODES_DIR in cmds
+    assert cmds.index('rm "%s"' % mk.GAME_MONITOR) < cmds.index(
+        'write "/st/game_monitor" "%s"' % mk.GAME_MONITOR)
+    assert 'set_inode_field "%s" mtime @5' % mk.GAME_MONITOR in cmds
+    # a fresh card: the directory is made, no mountpoint asked for, the monitor left alone
+    fresh = mk.mode_set_commands([], None, need_padmode_dir=False)
+    assert fresh[:2] == ['mkdir "%s"' % mk.MODES_DIR, 'mkdir "%s/none"' % mk.MODES_DIR]
+    assert not any(mk.GAME_MONITOR in c or mk.PADMODE_DIR in c for c in fresh)
+    assert mk.mode_set_removal({"none": []})[-1] == 'rmdir "%s"' % mk.MODES_DIR
+
+
+def test_the_modes_report_names_each_image_that_carries_some(mk, capsys):
+    mk.report_modes([{}, {}])
+    assert capsys.readouterr().out == ""                      # a card with none says nothing
+    so = (b"x", 0o755)
+    mk.report_modes([{"mode.so": so, "mode.cfg": (b"", 0o644), "mode1.cfg": (b"", 0o644),
+                      "stock.cfg": (b"", 0o644)}, {}, {"mode.so": so, "boss.assets": (b"", 0o644)}])
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "== custom modes"
+    assert out[1] == "modes image 0: 2 mode files, 0 code modes (the primary's own rootfs)"
+    assert out[2].startswith("modes image 2: 0 mode files, 1 code mode (carried to %s/img2" % mk.MODES_DIR)
+
+
+def test_conf_for_plan_takes_own_scores_from_the_flag_else_the_card(mk):
+    plan = _two_image_plan(mk)
+    ex = mk.parse_images_conf(_menu_conf(mk, plan, scores={1: "heisei"}))
+    # no flag: the card's own ride through
+    assert "scores=1|heisei\n" in mk.conf_for_plan(plan, argparse.Namespace(), existing=ex)
+    # the flag is the whole answer: one name per image, '' = shares
+    out = mk.conf_for_plan(plan, argparse.Namespace(own_scores="stock;orchestra"), existing=ex)
+    assert "scores=0|stock\n" in out and "scores=1|orchestra\n" in out and "heisei" not in out
+    # --own-scores '' makes every image share again
+    assert "scores=" not in mk.conf_for_plan(plan, argparse.Namespace(own_scores=""), existing=ex)
+    with pytest.raises(mk.Refused):
+        mk.conf_for_plan(plan, argparse.Namespace(own_scores=";../x"), existing=ex)
 
 
 def test_conf_for_plan_takes_the_heading_from_the_flag_else_the_card(mk):

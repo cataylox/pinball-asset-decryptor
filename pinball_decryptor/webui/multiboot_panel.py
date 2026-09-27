@@ -838,6 +838,10 @@ class WebMultibootPanel(_Base):
                 "music": str(v.get("music", "") or ""),
                 "sound": str(v.get("sound", "") or ""),
                 "code": str(v.get("code", "") or ""),
+                "scores": str(v.get("scores", "") or ""),
+                "scores_tip": str(v.get("scores_tip", "") or ""),
+                "scores_warn": bool(v.get("scores_warn")),
+                "modes": str(v.get("modes", "") or ""),
                 "up": i > 0, "down": i < n - 1,
             })
         i = self._selected()
@@ -1094,6 +1098,15 @@ class WebMultibootPanel(_Base):
                 (self._ed_roll.get() or "").strip()),
             "roll_repeat_label": mt.ROLL_REPEAT_LABEL,
             "roll_note": mt.ImageEditorDialog.ROLL_NOTE,
+            # PAD-226: whose high-score table this image plays into
+            "scores": self._scores_cell(
+                self._rows[d._index] if d._index is not None
+                and 0 <= d._index < len(self._rows) else mt.ImageRow("")) != "",
+            "scores_label": mt.SCORES_LABEL,
+            "scores_note": mt.SCORES_NOTE,
+            "scores_modes": mt.modes_line(
+                self._rows[d._index] if d._index is not None
+                and 0 <= d._index < len(self._rows) else None),
             "music_words": list(mt.MUSIC_CHOICES),
             "confirm_words": list(mt.IMAGE_CONFIRM_CHOICES),
             "used": self._used(),
