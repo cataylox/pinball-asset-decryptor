@@ -423,6 +423,45 @@ def test_edit_dialog_writes_through_and_cancel_restores(tmp_path):
         assert s["rows"][0]["media"] == "none"
 
 
+def test_edit_dialog_gives_an_image_its_own_high_scores(tmp_path):
+    """PAD-226: the tick names a store after the title the first time, keeps
+    that name when the title changes later, shows in the table, and Cancel
+    and an untick both put the image back on the shared table."""
+    a = _raw(tmp_path, "a_pro-1_59_0.Release.8G.sdcard.raw")
+    b = _raw(tmp_path, "b_pro-1_59_0.Other.8G.sdcard.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _add(w, a)
+        _add(w, b)
+        s = _st(w)
+        assert [r["scores"] for r in s["rows"]] == ["shared", "shared"]
+        w.call("multiboot.edit", 1)
+        s = _st(w)
+        assert s["ed"]["scores"] is True and s["ed_own_scores"] is False
+        assert s["ed"]["scores_label"] == "Keep its own high scores on the machine"
+        w.call("ui.set", "multiboot", "ed_title", "HEISEI")
+        w.call("ui.set", "multiboot", "ed_own_scores", True)
+        s = _st(w)
+        assert s["rows"][1]["scores"] == "own"
+        assert "store 'heisei'" in s["rows"][1]["scores_tip"]
+        assert _panel(w)._rows[1].own_scores == "heisei"
+        # a later title edit keeps the store it already has
+        w.call("ui.set", "multiboot", "ed_title", "HEISEI V2")
+        assert _panel(w)._rows[1].own_scores == "heisei"
+        w.call("multiboot.edit_cancel")
+        s = _st(w)
+        assert s["rows"][1]["scores"] == "shared" and _panel(w)._rows[1].own_scores == ""
+        w.call("multiboot.edit", 1)
+        w.call("ui.set", "multiboot", "ed_own_scores", True)
+        w.call("multiboot.edit_ok")
+        assert _panel(w)._rows[1].own_scores != ""
+        w.call("multiboot.edit", 1)
+        assert _st(w)["ed_own_scores"] is True
+        w.call("ui.set", "multiboot", "ed_own_scores", False)
+        w.call("multiboot.edit_ok")
+        s = _st(w)
+        assert s["rows"][1]["scores"] == "shared" and _panel(w)._rows[1].own_scores == ""
+
+
 def test_a_late_edit_after_cancel_is_dropped(tmp_path):
     """The field's debounce (or its blur) can land after Cancel / Escape put
     the row back: in Tk nothing reaches a dialog that has gone."""

@@ -6885,6 +6885,8 @@ def inspect_card(card, media_out=None):
             # the media directory.
             ("music_source", m.get("music_source")),
             ("source", src), ("source_exists", exists),
+            # PAD-226: the store name when this image keeps its own high scores
+            ("own_scores", (conf.get("scores") or {}).get(i)),
             ("title_dir", title_dir), ("bypass", state),
             # what game code this image actually is, read off the card (item 90's version gate);
             # 'built_version' is what build.json recorded when the card was written
