@@ -181,11 +181,15 @@ project open and nothing ticked. The log says what was found:
 - A card whose `game_monitor` does not load the object is left as a machine leaves it, with a
   line saying so. A card that cannot be read, or a guest the account cannot write to, is a
   line in the log and an ordinary boot, never a refused run.
-- A multi-boot card has ONE rootfs, the primary image's (`mkmulticard.py` carries only the
-  games partitions of the other images), and the machine's hook preloads the same object
-  whichever image the menu boots. The same files go in here; the runtime checks its port
-  against the game it finds itself in and stays out of the way when they differ. This case is
-  reasoned from the card layout, not yet run.
+- A multi-boot card has ONE rootfs, the primary image's, so `/usr/local/padmode` is image 0's
+  set. Since PAD-226 `mkmulticard.py` carries every other image's set to
+  `/usr/local/codeselect/modes/img<N>/` (plus an empty `modes/none`), hooks `game_monitor` when
+  it has to, and the card's `select.sh` binds the booted image's set - or none - over
+  `/usr/local/padmode`: each image runs its own modes and no one else's. The emulator does the
+  same: once its menu has chosen image N, `run_game.sh` asks `cardmodes.sh` again with
+  `PAD_CARD_IMAGE=N`. A card built before this has no `modes/` directory, and every image
+  still gets the primary's set, as on a machine. Proven on synthetic cards (mkmulticard
+  selftest part 9, select_sh_test.sh, tests/test_spike2_card_modes.py); not yet run on a machine.
 
 ## The rules (break one and the game can crash or hang)
 

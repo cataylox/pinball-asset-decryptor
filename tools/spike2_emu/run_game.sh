@@ -394,6 +394,9 @@ fi
 # it has always been: no line, no file, no variable. And it never stops a run - see the
 # script's header for every rule. Called with an empty card too (an extracted title, a
 # folder): it then only takes out what an earlier card's install of ours left behind.
+# PAD-226: whether the modes are the CARD's to decide (nothing the launch brought) - the
+# menu below asks the card again for the image it chose, which has a set of its own
+[ -z "${PAD_MODE_SO:-}" ] && [ "${PAD_CARD_MODES:-1}" != 0 ] && export PAD_CARDMODES_OWN=1
 _cardmode_so=$(bash "$S/modes/cardmodes.sh" "${PAD_CARD:-}" | tail -1)
 [ -n "$_cardmode_so" ] && export PAD_MODE_SO="$_cardmode_so"
 unset _cardmode_so
@@ -829,6 +832,13 @@ if [ -n "$SEL_DIRS" ]; then
         echo "[select] chose $SEL_CHOICE $SEL_IDX $(basename "$SEL_DIR") - the primary, already in place"
     elif mount --bind "$SEL_DIR" "$R/games/$GAME"; then
         echo "[select] chose $SEL_CHOICE $SEL_IDX $(basename "$SEL_DIR") - bound over /games/$GAME"
+        # PAD-226: THE CHOSEN IMAGE'S OWN MODES, as select.sh binds them on the machine -
+        # asked again for image N (its set, or none; a card built before per-image sets
+        # keeps the primary's). Only when the modes were the card's to decide.
+        if [ "${PAD_CARDMODES_OWN:-}" = 1 ] && [ -n "${PAD_CARD:-}" ]; then
+            PAD_MODE_SO=$(PAD_MODE_SO= PAD_CARD_IMAGE="$SEL_CHOICE" bash "$S/modes/cardmodes.sh" "$PAD_CARD" | tail -1)
+            export PAD_MODE_SO
+        fi
         # The video host runs OUTSIDE this namespace and resolves the game's
         # relative clip paths against PAD_VID_ROOT = the primary's directory;
         # it cannot see this bind. dump/vidroot tells it where the chosen

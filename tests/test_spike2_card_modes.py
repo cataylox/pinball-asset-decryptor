@@ -389,3 +389,84 @@ def test_a_card_of_code_modes_puts_their_assets_in_the_guest_and_names_them(tmp_
     stock = _mkcard(tmp_path, "stock")
     r = _run(tmp_path, root, stock)
     assert r.returncode == 0 and _dump(root) == []
+
+
+# ---- PAD-226: image N of a multi-boot card runs ITS OWN modes ----------------------------------
+
+def test_run_game_asks_again_for_the_image_its_menu_chose():
+    src = _text("run_game.sh")
+    # decided before the first ask: the modes are the card's only when the launch brought none
+    own = src.index('export PAD_CARDMODES_OWN=1')
+    assert own < src.index('bash "$S/modes/cardmodes.sh" "${PAD_CARD:-}" | tail -1')
+    # ...and asked again right after a non-primary image is bound, before the game's preload
+    bound = src.index('- bound over /games/$GAME"')
+    again = src.index('PAD_CARD_IMAGE="$SEL_CHOICE" bash "$S/modes/cardmodes.sh" "$PAD_CARD"')
+    assert bound < again < src.index("${PAD_MODE_SO:+$PAD_MODE_SO:}/lib/hwshim.so")
+    assert '[ "${PAD_CARDMODES_OWN:-}" = 1 ]' in src[bound:again]
+
+
+OTHER = b"\x7fELF" + b"\x02" * 2048
+OTHER_CFG = "name GODZILLA RISING\nseconds 30\n"
+
+
+def _add_image_sets(tmp_path, card, sets):
+    """What mkmulticard puts on a multi-boot card's p2: /usr/local/codeselect/modes/none and
+    img<N>/ for each image with a set of its own."""
+    import mkmulticard as mk
+    import mode_install as mi
+
+    ref, _off = mi._ref(card)
+    base = "/usr/local/codeselect/modes"
+    cmds = ["mkdir /usr/local/codeselect", "mkdir " + base, "mkdir %s/none" % base]
+    for n, files in sets.items():
+        cmds.append("mkdir %s/img%d" % (base, n))
+        for name, data in files.items():
+            f = tmp_path / ("img%d_%s" % (n, name))
+            f.write_bytes(data)
+            cmds.append("write %s %s/img%d/%s" % (f, base, n, name))
+    mk.debugfs_write_script(ref, cmds)
+
+
+@needs_rig_tools
+def test_image_n_of_a_multi_boot_card_runs_its_own_set(tmp_path):
+    card = _mkcard(tmp_path)
+    _install_modes(tmp_path, card)                 # the primary's set, and the hook
+    _add_image_sets(tmp_path, card, {2: {"mode.so": OTHER, "game.port": PORT.encode(),
+                                         "mode.cfg": OTHER_CFG.encode()}})
+    root = _guest(tmp_path)
+    r = _run(tmp_path, root, card, PAD_CARD_IMAGE="2")
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines()[-1] == "/lib/pad_mode.so"
+    assert (root / "lib" / "pad_mode.so").read_bytes() == OTHER
+    assert _dump(root) == ["cardmodes.from", "game.port", "mode.cfg"]
+    assert "image=2" in (root / "dump" / "cardmodes.from").read_text()
+    said = [ln for ln in r.stderr.splitlines() if ln.startswith("[modes] ")]
+    assert said == ["[modes] image 2 of this card carries 1 mode(s) of its own (GODZILLA RISING): "
+                    "their runtime runs in this game, as on the machine"]
+
+
+@needs_rig_tools
+def test_an_image_without_a_set_runs_none_not_the_primarys(tmp_path):
+    card = _mkcard(tmp_path)
+    _install_modes(tmp_path, card)
+    _add_image_sets(tmp_path, card, {2: {"mode.so": OTHER, "game.port": PORT.encode(),
+                                         "mode.cfg": OTHER_CFG.encode()}})
+    root = _guest(tmp_path)
+    # the outer ask (image 0) installed the primary's set; the menu then chose image 1
+    first = _run(tmp_path, root, card)
+    assert first.stdout.splitlines()[-1] == "/lib/pad_mode.so"
+    r = _run(tmp_path, root, card, PAD_CARD_IMAGE="1")
+    assert r.returncode == 0 and r.stdout.strip() == ""
+    assert _dump(root) == []                       # what the first ask put there is taken out
+    assert "image 1 of this card runs no custom modes of its own" in r.stderr
+
+
+@needs_rig_tools
+def test_a_card_from_before_per_image_sets_gives_every_image_the_primarys(tmp_path):
+    card = _mkcard(tmp_path)
+    _install_modes(tmp_path, card)
+    root = _guest(tmp_path)
+    r = _run(tmp_path, root, card, PAD_CARD_IMAGE="1")
+    assert r.returncode == 0 and r.stdout.splitlines()[-1] == "/lib/pad_mode.so"
+    assert (root / "lib" / "pad_mode.so").read_bytes() == OBJECT
+    assert "[modes] this card carries 3 mode(s)" in r.stderr
