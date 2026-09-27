@@ -22,6 +22,8 @@ const T = {
   name: "What the mode is called. It is the title on its screen and clip unless you give those their own.",
   startShot: "The shot that starts the mode.",
   itsShot: "The mode starts when its shot is made that many times in one ball.",
+  alsoShot: "Another shot the player has to make as well, that many times in the same ball, before the mode starts. The shots can be made in any order.",
+  afterMode: "The mode can only start once this other mode has run for the same player. Until then its shots do not count toward starting it. Only one of your modes runs at a time, so if this one is ready while the other still runs, the next start shot after it ends starts it.",
   startEvent: "Something the game itself does: a ball starting, a multiball starting, the skill shot being made. The mode starts the moment the game does it.",
   drain: "The mode ends when its time runs out, or sooner if the ball drains.",
   clock: "The mode keeps running into the next ball until its time runs out.",
@@ -294,6 +296,12 @@ function ModePage({ s, f, off, dis, rs }) {
     ? [{ value: f.start_shot, label: f.start_shot }, ...shots.map((x) => ({ value: x, label: x }))]
     : shots.map((x) => ({ value: x, label: x }));
   const evOff = off || dis.events;
+  // PAD-227: the "and also" shots and the mode it waits for
+  const ALSO_NONE = "(nothing else)", AFTER_NONE = "(any time)";
+  const withValue = (list, v) => (v && !list.some((o) => o.value === v) ? [{ value: v, label: v }, ...list] : list);
+  const alsoOpts = (v) => withValue([{ value: ALSO_NONE, label: ALSO_NONE }, ...shots.map((x) => ({ value: x, label: x }))], v);
+  const afterOpts = withValue([{ value: AFTER_NONE, label: AFTER_NONE }, ...(s.other_modes || []).map((x) => ({ value: x, label: x }))], f.after_mode);
+  const afterOff = off || !f.after_mode || f.after_mode === AFTER_NONE;
   const mbOff = off || dis.multiball;
   const mbIn = mbOff || !f.multiball;
   const balls = (prof.ball_shots || ["(none)"]).map((x) => ({ value: x, label: x }));
@@ -317,6 +325,18 @@ function ModePage({ s, f, off, dis, rs }) {
         <div class="row wrap">
           <${Radio} name="m-starts" value="event" label="an event" checked=${f.starts_kind === "event"} disabled=${evOff} onChange=${(v) => setF("starts_kind", v, true)} />
           <${Select} value=${f.start_event} options=${withBlank(events, f.start_event)} ns="modes" k="f:start_event" disabled=${evOff} width=${230} title=${T.startEvent} />
+        </div>
+        ${[0, 1].map((i) => html`<div class="row wrap">
+          <span class="dim nw">and also</span>
+          <${Select} value=${f["also_shot_" + i]} options=${alsoOpts(f["also_shot_" + i])} ns="modes" k=${"f:also_shot_" + i} disabled=${off || !shots.length} width=${180} title=${T.alsoShot} />
+          <span class="row nw" style="gap:8px"><${Num} k=${"also_count_" + i} value=${f["also_count_" + i]} disabled=${off || f["also_shot_" + i] === ALSO_NONE} width=${64} title=${T.alsoShot} />
+          <span class="dim nw">times</span></span>
+        </div>`)}
+        <div class="row wrap">
+          <span class="dim nw">Only after</span>
+          <${Select} value=${f.after_mode || AFTER_NONE} options=${afterOpts} ns="modes" k="f:after_mode" disabled=${off} width=${160} title=${T.afterMode} />
+          <span class="dim nw">has run this</span>
+          <${Select} value=${f.after_when} options=${[{ value: "ball", label: "ball" }, { value: "game", label: "game" }]} ns="modes" k="f:after_when" disabled=${afterOff} width=${80} title=${T.afterMode} />
         </div>
       <//>
       <${Sec} title="Ends on">

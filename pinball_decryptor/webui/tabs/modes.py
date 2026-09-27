@@ -55,7 +55,8 @@ _STR_FIELDS = (
     "clip_both_title", "clip_both_seconds", "restore_after",
     "callout_secs_0", "callout_id_0", "callout_secs_1", "callout_id_1",
     "callout_secs_2", "callout_id_2", "callout_secs_3", "callout_id_3",
-    "balls", "ball_save", "add_ball_shot", "add_ball_max")                     # item 167
+    "balls", "ball_save", "add_ball_shot", "add_ball_max",                     # item 167
+    "also_shot_0", "also_count_0", "also_shot_1", "also_count_1", "after_mode", "after_when")  # PAD-227
 _DEFAULTS = {
     "screen": True, "countdown": True, "lights": False, "advanced": False, "stack": True,
     "light_shots_on": False, "panel_color": "#000000", "title_color": "#000000",
@@ -67,6 +68,8 @@ _DEFAULTS = {
     "ends_kind": "drain", "award_ladder": "rising", "end_shot": "(only when time runs out)",
     "clip_both": "none", "clip_both_seconds": "4", "restore_after": "6",
     "multiball": False, "balls": "3", "ball_save": "10", "add_ball_shot": "(none)", "add_ball_max": "1",
+    "also_shot_0": "(nothing else)", "also_count_0": "1", "also_shot_1": "(nothing else)",
+    "also_count_1": "1", "after_mode": "(any time)", "after_when": "game",
 }
 
 
@@ -109,6 +112,7 @@ _PROBLEM_PAGES = tuple((re.compile(rx), page) for rx, page in (
     (r"^Pick at least one shot that scores|has no shot called", "mode"),
     (r"^How often it can start|^The wait after it ends", "mode"),
     (r"^A mode (starts|ends) on|^Pick the event that|has no event ", "mode"),
+    (r"other shots?\b|^A mode cannot wait for itself|starts only after|^The mode it starts after", "mode"),
 ))
 
 
@@ -226,6 +230,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     PARAM_NEVER = "(only when time runs out)"
     #: item 167: the add-a-ball list's first entry
     BALL_NONE = "(none)"
+    #: PAD-227: the "and also" shot lists' first entry, the "only after" list's, and the rows shown
+    ALSO_NONE = "(nothing else)"
+    AFTER_NONE = "(any time)"
+    ALSO_ROWS = 2
     PARAM_SECOND_CLIP = (("none", "None"), ("same", "The same clip"), ("title", "A title card"),
                          ("file", "My video…"))
     CODE_EXAMPLE_SUFFIX = " (code mode)"
@@ -241,6 +249,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         "restore_after": [1, MP.RESTORE_AFTER_MAX],
         "balls": list(MP.MULTIBALL_BALLS), "ball_save": [0, MP.BALL_SAVE_MAX],   # item 167
         "add_ball_max": [1, MP.ADD_BALL_MAX],
+        "also_count": [1, 20],                                                  # PAD-227
     }
 
     def __init__(self, window):
@@ -251,6 +260,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._shot_awards = {n: "" for n in self._shot_names}
         self._slugs = []
         self._found = {}
+        self._also_beyond = []         # PAD-227: start_also rows past the ones the form shows
         self._code_list = []           # [(slug, name)] of the project's code modes
         self._slug = None              # the form mode open in the editor
         self._spec = None
@@ -720,6 +730,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             self._open_advanced(spec)
             self._open_trigger(spec)
             self._open_display_lights(spec)
+            self._open_more_to_start(slug, spec)
         finally:
             self._loading = False
         self._publish_form()
@@ -761,6 +772,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._collect_advanced(spec)
         self._collect_trigger(spec)
         self._collect_display_lights(spec)
+        self._collect_more_to_start(spec)
         return spec
 
     # -- one edit from the page (a Tk variable's trace) ---------------------------------
@@ -858,6 +870,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         folder = (MP.mode_folder(self._open_project, self._slug)
                   if self._open_project and self._slug else None)
         problems = MP.validate(spec, folder) if spec else []
+        if spec is not None:                      # PAD-227: a mode it waits for that is not here
+            problems += MP.after_problems([(self._slug, spec)] + self._other_modes()).get(self._slug, [])
         status = ("Ready to build." if not problems
                   else "To fix before it can be built: " + " ".join(problems))
         self._problems = list(problems)
@@ -1033,6 +1047,38 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         spec.light_shots_pattern = keys.get(shown, shown)
         text = str(self.f["priority"]).strip()
         spec.priority = int(text) if text.isdigit() else (text or 0)
+
+    # PAD-227: more than one thing to meet before it starts
+    def _other_modes(self):
+        """``[(slug, ModeSpec)]`` of the project's other form modes."""
+        return [(slug, spec) for slug, spec in (self._found or {}).items() if slug != self._slug]
+
+    def _open_more_to_start(self, slug, spec):
+        f = self.f
+        rows = spec.start_also if isinstance(spec.start_also, list) else []
+        for i in range(self.ALSO_ROWS):
+            row = rows[i] if i < len(rows) and isinstance(rows[i], (list, tuple)) and len(rows[i]) == 2 else None
+            f["also_shot_%d" % i] = str(row[0]) if row else self.ALSO_NONE
+            f["also_count_%d" % i] = str(row[1]) if row else "1"
+        self._also_beyond = list(rows[self.ALSO_ROWS:])   # a hand-edited 3rd row is kept
+        after = spec.after.strip() if isinstance(spec.after, str) else ""
+        f["after_mode"] = after or self.AFTER_NONE
+        f["after_when"] = spec.after_when if spec.after_when in MP.AFTER_WHEN else "game"
+        self.set(other_modes=sorted({s.name.strip() for sl, s in self._found.items()
+                                     if sl != slug and s.name.strip()}))
+
+    def _collect_more_to_start(self, spec):
+        rows = []
+        for i in range(self.ALSO_ROWS):
+            shot = str(self.f["also_shot_%d" % i]).strip()
+            if not shot or shot == self.ALSO_NONE:
+                continue
+            text = str(self.f["also_count_%d" % i]).replace(",", "").strip()
+            rows.append([shot, int(text) if text.isdigit() else text])
+        spec.start_also = rows + list(self._also_beyond)
+        after = str(self.f["after_mode"]).strip()
+        spec.after = "" if after == self.AFTER_NONE else after
+        spec.after_when = self.f["after_when"]
 
     # item 147: what starts it and what ends it
     def _event_choices(self):
