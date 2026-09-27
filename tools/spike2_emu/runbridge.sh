@@ -77,25 +77,25 @@ teardown() {
     kill -9 -"$GAMEPG" 2>/dev/null
     # comm-based, which matches exactly one process and does not depend on how
     # the guest's path happened to be spelled on the exec. See alive.sh.
-    pkill -9 -x game 2>/dev/null
-    pkill -9 -f arm-binfmt 2>/dev/null
+    pad_pkill -9 -x game
+    pad_pkill -9 -f arm-binfmt
     kill -9 -"$HOSTPG" 2>/dev/null
-    pkill -9 -x padglhost 2>/dev/null
+    pad_pkill -9 -x padglhost
 }
 
 sleep "$SECS"
 kill -9 -"$GAMEPG" 2>/dev/null
-pkill -9 -x game 2>/dev/null
-pkill -9 -f arm-binfmt 2>/dev/null
+pad_pkill -9 -x game
+pad_pkill -9 -f arm-binfmt
 sleep 1
 # SIGINT first so it prints its totals, then make sure. Killing the process
 # GROUP alone proved unreliable here, so sweep by name too - the same lesson as
 # runlim.sh: verify what is left, never assume the kill landed.
 kill -INT -"$HOSTPG" 2>/dev/null
-pkill -INT -x padglhost 2>/dev/null
+pad_pkill -INT -x padglhost
 sleep 1
 kill -9 -"$HOSTPG" 2>/dev/null
-pkill -9 -x padglhost 2>/dev/null
+pad_pkill -9 -x padglhost
 sleep 1
 
 echo "--- host ---"
@@ -114,7 +114,7 @@ grep -a '\[bridge\]' "$LOG" | head -4
 # line contains the string, so it can cry wolf; `-x game` cannot. See alive.sh.
 # `pgrep -c` prints 0 AND exits non-zero on no match, so `|| echo 0` would emit
 # "0\n0" and break every arithmetic use downstream.
-live() { local c; c=$(pgrep -c "$@" 2>/dev/null); echo "${c:-0}"; }
+live() { local c; c=$(pad_count "$@"); echo "${c:-0}"; }
 for i in 1 2 3 4 5; do
     G=$(live -x game); Q=$(live -f arm-binfmt); H=$(live -x padglhost)
     [ "$G" = 0 ] && [ "$Q" = 0 ] && [ "$H" = 0 ] && break

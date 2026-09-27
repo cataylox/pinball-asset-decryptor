@@ -162,12 +162,12 @@ fi
 # through its own root, because padpath's $ROOT is wrong under root's $HOME.
 # Compared against the slot's copy at the end for the cross-session note.
 LIVE_BOOT=""
-LIVEPID=$(pgrep -x game | head -1)
+LIVEPID=$(pad_pids -x game | head -1)
 [ -n "$LIVEPID" ] && LIVE_BOOT=$(cat "/proc/$LIVEPID/root/dump/boot.id" 2>/dev/null)
 
 # A guest already running would collide on the restored pids; refuse unless
 # told to clear it (killgame is the rig's own teardown).
-if pgrep -x game >/dev/null; then
+if [ -n "$(pad_pids -x game)" ]; then
     if [ "${PAD_RESTORE_KILL:-0}" = 1 ]; then
         # ONLY THE GUEST, never killgame.sh. killgame.sh is the rig's GLOBAL
         # teardown - it takes padglhost, the playfield, audio and video with it,
@@ -175,9 +175,9 @@ if pgrep -x game >/dev/null; then
         # a save. Those helpers talk to the guest through the file-backed rings
         # and reattach to the restored one, so they must stay up.
         echo "[restore] a guest is up - killing just the guest (PAD_RESTORE_KILL=1)"
-        pkill -9 -x game 2>/dev/null
-        pkill -9 -f '\.padqemu/game' 2>/dev/null
-        pkill -9 -f arm-binfmt 2>/dev/null
+        pad_pkill -9 -x game
+        pad_pkill -9 -f '\.padqemu/game'
+        pad_pkill -9 -f arm-binfmt
         sleep 1
     else
         echo "[restore] a guest (comm=game) is already running; set PAD_RESTORE_KILL=1 to replace it"
@@ -231,7 +231,7 @@ NEWPTY=""
 if grep -q '@PTY@' "$DDIR/restore.env"; then
     export PAD_NODEBUS_DIR="$R/dump"
     RUNNING_PTY=$(cat "$R/dump/nodebus.path" 2>/dev/null)
-    if pgrep -f 'nodebus\.py' >/dev/null && [ -n "$RUNNING_PTY" ] && [ -e "$RUNNING_PTY" ]; then
+    if [ -n "$(pad_pids -f 'nodebus\.py')" ] && [ -n "$RUNNING_PTY" ] && [ -e "$RUNNING_PTY" ]; then
         NEWPTY=$RUNNING_PTY
         echo "[restore] reusing the running node bus pty: $NEWPTY"
     else
@@ -255,7 +255,7 @@ python3 '$RIG/nodebus.py' >/dev/null 2>&1 </dev/null &"
         for _ in $(seq 1 50); do [ -s "$R/dump/nodebus.path" ] && break; sleep 0.1; done
         NEWPTY=$(cat "$R/dump/nodebus.path" 2>/dev/null)
         [ -e "$NEWPTY" ] || { echo "[restore] node bus did not come up"; exit 1; }
-        echo "[restore] node bus pty: $NEWPTY (pid $(pgrep -nf 'nodebus\.py'))"
+        echo "[restore] node bus pty: $NEWPTY (pid $(pad_pids -f 'nodebus\.py' | tail -1))"
     fi
 fi
 
@@ -279,7 +279,7 @@ VID_RESTART=0; VID_USER=""; VID_RING="$R/dump/padvid"
 # on the host alone would leave that session frozen forever. Measured
 # 2026-08-08: exactly that state, padglhost at 59.5 fps with vid 0.0 NEW/s.
 if [ "${PAD_VID_RESTART:-1}" = 1 ] \
-        && { pgrep -f 'padvidhost\.py' >/dev/null || pgrep -x padglhost >/dev/null; }; then
+        && { [ -n "$(pad_pids -f 'padvidhost\.py')" ] || [ -n "$(pad_pids -x padglhost)" ]; }; then
     # WHOSE host is it? Match the PYTHON process, not whatever else carries
     # the script name on its command line: watch.sh launches helpers through
     # `runuser -u david -- setsid python3 padvidhost.py`, and the resident
@@ -290,10 +290,10 @@ if [ "${PAD_VID_RESTART:-1}" = 1 ] \
     # No host at all -> the renderer's user is the helper user by definition
     # (watch.sh starts every helper as the same PAD_USER).
     VID_PID=""
-    for p in $(pgrep -f 'padvidhost\.py'); do
+    for p in $(pad_pids -f 'padvidhost\.py'); do
         case "$(ps -o comm= -p "$p" 2>/dev/null)" in python*) VID_PID=$p; break ;; esac
     done
-    [ -z "$VID_PID" ] && VID_PID=$(pgrep -x padglhost | head -1)
+    [ -z "$VID_PID" ] && VID_PID=$(pad_pids -x padglhost | head -1)
     if [ -n "$VID_PID" ]; then
         VID_UID=$(ps -o uid= -p "$VID_PID" 2>/dev/null | tr -d ' ')
         [ -n "$VID_UID" ] && VID_USER=$(getent passwd "$VID_UID" | cut -d: -f1)
@@ -308,7 +308,7 @@ if [ "${PAD_VID_RESTART:-1}" = 1 ] \
     fi
     VID_RESTART=1
     echo "[restore] stopping the video host (user ${VID_USER:-root}) to rewind its ring"
-    pkill -9 -f 'padvidhost\.py' 2>/dev/null
+    pad_pkill -9 -f 'padvidhost\.py'
     sleep 0.3
 fi
 
@@ -475,7 +475,7 @@ done < "$DDIR/restore.env"
 # reset race the restored guest. A finished replay always removes
 # glreplay.bin, so bin-gone-without-ok means it refused the file.
 GLREPLAY=0
-if [ -s "$DDIR/glstate.bin" ] && pgrep -x padglhost >/dev/null; then
+if [ -s "$DDIR/glstate.bin" ] && [ -n "$(pad_pids -x padglhost)" ]; then
     rm -f "$R/dump/glreplay.ok"
     cp -f "$DDIR/glstate.bin" "$R/dump/glreplay.bin"
     : > "$R/dump/glreplay.req"

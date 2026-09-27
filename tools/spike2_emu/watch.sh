@@ -26,6 +26,23 @@
 set -u
 . "$(dirname "$0")/padpath.sh"
 
+# ★ RIG SLOTS (padpath.sh). A slot run boots from and builds into its own
+# overlay rootfs, so that has to be up before the first build below - and when
+# it is not, say how, rather than letting ensurebuild write into an empty
+# mountpoint directory that the next `slot.sh up` would then hide.
+pad_slot_ready || exit 1
+mkdir -p "$PAD_LOGDIR" 2>/dev/null && pad_give_back "$PAD_LOGDIR"
+# WHO this run is for, fixed once for the whole run and every child: every
+# window it opens puts it in the title bar (pad_title_tag), and the board's
+# run record carries it to the app and the triage dashboard.
+: "${PAD_LABEL=$(pad_label)}"
+export PAD_LABEL
+PAD_TITLE_TAG=$(pad_title_tag)
+export PAD_TITLE_TAG
+if [ "$PAD_SLOT" != 0 ] || [ -n "$PAD_LABEL" ]; then
+    echo "[watch] rig slot $PAD_SLOT${PAD_LABEL:+ for $PAD_LABEL}: $ROOT"
+fi
+
 # ★ RIG-LOCAL EXTRA ENVIRONMENT (item 67). The app assembles the run's
 # environment and has no field for "one more PAD_* knob", so an instrument
 # that is armed by one (PAD_REG_HOOK, PAD_PEEK, PAD_PASS_HOOK, PAD_GL2_W...)
@@ -33,7 +50,9 @@ set -u
 # point elsewhere) is sourced here with every assignment exported, and named
 # in the log so a run carrying one can never pass as a plain run. Delete the
 # file to go back to a plain run.
-PAD_ENV_FILE=${PAD_ENV_FILE:-$PAD_HOME/.pad_env}
+# Per slot: an instrument armed for one session's slot must not ride along
+# into another session's run.
+PAD_ENV_FILE=${PAD_ENV_FILE:-${PAD_SLOTDIR:-$PAD_HOME}/.pad_env}
 if [ -f "$PAD_ENV_FILE" ]; then
     set -a; . "$PAD_ENV_FILE"; set +a
     echo "[watch] EXTRA ENVIRONMENT from $PAD_ENV_FILE:" \
@@ -153,7 +172,7 @@ if [ "${PAD_SELECT:-}" = 1 ] && ! pad_ensure_select; then
 fi
 
 MINS=${1:-30}
-LOG=${LOG:-$PAD_HOME/gzwatch.log}
+LOG=${LOG:-$PAD_LOGDIR/gzwatch.log}
 # FAIL NOW if it cannot be written, not at the game start 400 lines down. A bad
 # LOG used to surface as one bash "No such file or directory" over a run that
 # then looked normal forever: the start's `> "$LOG"` redirect failed, so the
@@ -161,13 +180,13 @@ LOG=${LOG:-$PAD_HOME/gzwatch.log}
 # into the container. `>>` on purpose - this is a writability probe, and the
 # truncation stays where it always was, at the game start itself.
 : >> "$LOG" || { echo "[watch] LOG=$LOG is not writable here - nothing would start. Fix or unset LOG." >&2; exit 1; }
-HOSTLOG=$PAD_HOME/padglhost.log
+HOSTLOG=$PAD_LOGDIR/padglhost.log
 # The virtual playfield's own log, on the same rule as autoattract's and the
 # ball feeder's: a helper that is started in the background writes somewhere a
 # human can read afterwards. This one was the exception - both its streams went
 # to /dev/null - and that is why "the playfield window never appeared" has never
 # had an answer in any log on any machine (2026-08-11, james_bond_pro).
-PFLOG=$PAD_HOME/padplayfield.log
+PFLOG=$PAD_LOGDIR/padplayfield.log
 RING_HOST=$ROOT/dump/padgl
 RING_GUEST=/dump/padgl
 # The keyboard channel. Same host-path/guest-path split as the GL ring: the
@@ -338,6 +357,23 @@ fi
 [ -z "$GAME" ] && { GAME=$(readlink "$ROOT/games/game" 2>/dev/null); GAME=${GAME%/game}; }
 GAME=${GAME:-godzilla_pro}
 export PAD_GAME="$GAME"
+
+# ★ THE BOARD'S RUN RECORD: "a run is up in slot N" for everyone who is not
+# this process - riglock.sh list, the app's Emulate tab, the triage dashboard,
+# the next session deciding whether a slot is free. The main loop touches it
+# while the run lives; teardown (and killgame.sh) removes it. A record whose
+# mtime stops moving is a run that died without either.
+BOARD_RUN="$(pad_board_dir)/slot-$PAD_SLOT.run"
+pad_board_run() {
+    mkdir -p "$(dirname "$BOARD_RUN")" 2>/dev/null || return 0
+    printf '{"slot":%s,"game":"%s","label":"%s","distro":"%s","root":"%s","pid":%s,"started":%s}\n' \
+        "$PAD_SLOT" "$GAME" "$PAD_LABEL" "${WSL_DISTRO_NAME:-$(uname -n)}" "$ROOT" "$$" \
+        "$(date +%s)" > "$BOARD_RUN.tmp" 2>/dev/null \
+        && mv -f "$BOARD_RUN.tmp" "$BOARD_RUN" 2>/dev/null
+    return 0
+}
+pad_board_run
+BOARD_BEAT=0
 
 # THE GAME MUST OWN ITS NVRAM (item 111). The guest runs as this user (root
 # only inside its own namespace), and an elevated rig step - a root selftest,
@@ -1003,7 +1039,17 @@ setsid_as_user() {
 # standing rule is that two copies of one fact eventually disagree. `/init` is
 # the WSL side of a Windows pythonw.exe reached through interop; `python3` is
 # the same window on a Linux desktop, where it is an ordinary local process.
-pf_up() { pgrep -f '^(/init|python3?) .*playfield\.py' >/dev/null; }
+pf_up() { [ -n "$(pad_pids -f '^(/init|python3?) .*playfield\.py')" ]; }
+# A Windows playfield process has no environment this side can read, so a slot
+# >= 1 puts its slot on the window's COMMAND LINE (playfield.py ignores it; the
+# Stop-Process filters here and in killgame.sh match on it). Slot 0's windows
+# are the ones WITHOUT the marker, which is every window from before slots.
+PF_SLOTARG=
+PF_SLOTMATCH="-notlike '*--pad-slot=*'"
+if [ "$PAD_SLOT" != 0 ]; then
+    PF_SLOTARG="--pad-slot=$PAD_SLOT"
+    PF_SLOTMATCH="-like '*--pad-slot=$PAD_SLOT*'"
+fi
 if [ "$(id -u)" = 0 ] && [ "$DROP" = 0 ]; then
     # ★ THE BLACK WINDOW, AND THE ONE CONFIGURATION THAT CAUSES IT.
     #
@@ -1072,9 +1118,9 @@ if [ "$DROP" = 1 ]; then
     # `>` needs write permission on the FILE, and a root-owned 644 log in the
     # user's own home refuses it. That would break plain watch.sh runs after a
     # single PAD_PIVOT one, which is a nasty thing to leave behind.
-    for f in "$LOG" "$HOSTLOG" "$PAD_HOME/padvid.log" "$PAD_HOME/padauto.log" \
-             "$PAD_HOME/padball.log" "$PAD_HOME/padaudio.log" "$PAD_HOME/padtables.log" \
-             "$PAD_HOME/padswx.log" "$PFLOG"; do
+    for f in "$LOG" "$HOSTLOG" "$PAD_LOGDIR/padvid.log" "$PAD_LOGDIR/padauto.log" \
+             "$PAD_LOGDIR/padball.log" "$PAD_LOGDIR/padaudio.log" "$PAD_LOGDIR/padtables.log" \
+             "$PAD_LOGDIR/padswx.log" "$PFLOG"; do
         [ -e "$f" ] || : > "$f" 2>/dev/null
         chown "$PAD_USER" "$f" 2>/dev/null
     done
@@ -1147,14 +1193,15 @@ teardown() {
     trap - INT TERM EXIT
     echo
     echo "[watch] stopping..."
+    rm -f "$BOARD_RUN" 2>/dev/null
     [ -n "$GAMEPG" ] && kill -9 -"$GAMEPG" 2>/dev/null
     # The only two patterns that actually match the guest; see alive.sh for why
     # the rig's historic 'godzilla_pro/game' pattern never could.
-    pkill -9 -x game 2>/dev/null
-    pkill -9 -f arm-binfmt 2>/dev/null
+    pad_pkill -9 -x game
+    pad_pkill -9 -f arm-binfmt
     # The boot selector (item 90), in case the run ends while the menu is up:
     # arm-binfmt reaches it on WSL, its comm is the only handle elsewhere.
-    pkill -9 -x codeselect 2>/dev/null
+    pad_pkill -9 -x codeselect
     # PAD_PIVOT runs exec qemu explicitly (no binfmt) and fold the guest log in
     # through a tail; kill it too. -F holds the file open forever otherwise.
     [ -n "$GAMEOUTTAIL" ] && kill -9 "$GAMEOUTTAIL" 2>/dev/null
@@ -1167,48 +1214,48 @@ teardown() {
     # longer premature - and it SAYS SO when it has to, because a renderer that
     # needs SIGKILL is a fact worth seeing rather than a silent 1 s wait.
     [ -n "$HOSTPG" ] && kill -INT -"$HOSTPG" 2>/dev/null
-    pkill -INT -x padglhost 2>/dev/null
+    pad_pkill -INT -x padglhost
     for _ in 1 2 3 4 5 6; do
-        pgrep -x padglhost >/dev/null || break
+        [ -n "$(pad_pids -x padglhost)" ] || break
         sleep 0.5
     done
-    if pgrep -x padglhost >/dev/null; then
+    if [ -n "$(pad_pids -x padglhost)" ]; then
         echo "[watch] the renderer did not stop on SIGINT; killing it"
         [ -n "$HOSTPG" ] && kill -9 -"$HOSTPG" 2>/dev/null
-        pkill -9 -x padglhost 2>/dev/null
+        pad_pkill -9 -x padglhost
     fi
-    pkill -9 -f nodebus.py 2>/dev/null
+    pad_pkill -9 -f nodebus.py
     [ -n "$VIDPG" ] && kill -9 -"$VIDPG" 2>/dev/null
-    pkill -9 -f 'padvidhost.py' 2>/dev/null
+    pad_pkill -9 -f 'padvidhost.py'
     [ -n "$AUTOPG" ] && kill -9 -"$AUTOPG" 2>/dev/null
-    pkill -9 -f 'autoattract.sh' 2>/dev/null
+    pad_pkill -9 -f 'autoattract.sh'
     [ -n "$BALLPG" ] && kill -9 -"$BALLPG" 2>/dev/null
-    pkill -9 -f 'ballfeed[.]py' 2>/dev/null
+    pad_pkill -9 -f 'ballfeed[.]py'
     # PAD-204's root pause keeper. The guest is already SIGKILLed above, and
     # SIGKILL ends a stopped process too, so nothing is left frozen by this.
     [ -n "$KEEPPG" ] && kill -9 -"$KEEPPG" 2>/dev/null
-    pkill -9 -f 'pausekeep[.]py' 2>/dev/null
+    pad_pkill -9 -f 'pausekeep[.]py'
     # longplay.sh is started BESIDE a run rather than by it, so it has no pgid
     # here - but a leaked one keeps poking ramp optos, and it would do that
     # into the NEXT run. It watches the guest and exits on its own; this is the
     # backstop for when that check is the thing that broke.
     # Anchored the same way alive.sh counts it: an unanchored 'longplay.sh'
     # matches any shell with the name on its command line, and this one KILLS.
-    pkill -9 -f '^bash [^ ]*longplay\.sh' 2>/dev/null
+    pad_pkill -9 -f '^bash [^ ]*longplay\.sh'
     # $EVTPG is the awk at the END of the event pipeline (that is what $! means
     # for a pipeline); the tail at its head is caught by name. Both matter: an
     # orphaned tail -F never exits by itself.
     [ -n "$EVTPG" ] && kill -9 "$EVTPG" 2>/dev/null
-    pkill -9 -f "tail -q -n 0 -F "$PAD_HOME/padvid"[.]log" 2>/dev/null
+    pad_pkill -9 -f "tail -q -n 0 -F "$PAD_LOGDIR/padvid"[.]log"
     # The background table builder, if this run started one. It sits in a poll
     # loop waiting for the guest to publish its switch table, so a run that
     # ends first leaves it with nothing to wait for. Added to alive.sh and
     # killgame.sh the same day, per this rig's own rule about anything a run
     # starts.
     [ -n "$TBLPG" ] && kill -9 -"$TBLPG" 2>/dev/null
-    pkill -9 -f 'mktables[.]py' 2>/dev/null
+    pad_pkill -9 -f 'mktables[.]py'
     [ -n "$AUDPG" ] && kill -9 -"$AUDPG" 2>/dev/null
-    pkill -9 -f 'playaudio.sh' 2>/dev/null
+    pad_pkill -9 -f 'playaudio.sh'
     # padrelay.py had NO pattern here and leaked twice on 2026-08-08, both
     # times in PAD_PIVOT sessions - runuser in setsid_as_user changes the
     # process-group topology, so the AUDPG group kill that catches it in an
@@ -1216,8 +1263,8 @@ teardown() {
     # padplay.py connected forever; killing the relay closes the socket and
     # takes the player with it (measured - that is the relay's own teardown
     # design). alive.sh already counted both, which is how the leak was seen.
-    pkill -9 -f 'padrelay\.py' 2>/dev/null
-    pkill -9 -f '^ffmpeg .*audio\.fifo' 2>/dev/null
+    pad_pkill -9 -f 'padrelay\.py'
+    pad_pkill -9 -f '^ffmpeg .*audio\.fifo'
     rm -f "$AUD_HOST" "$AUD_FMT_HOST"
     # The LED block is the virtual playfield's liveness signal: it polls the
     # file and closes itself once a run it has seen is gone (playfield.py,
@@ -1284,10 +1331,11 @@ teardown() {
             /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile \
               -Command "Get-CimInstance Win32_Process |
                         Where-Object { \$_.Name -like 'python*' -and
-                                       \$_.CommandLine -like '*spike2_emu\playfield.py*' } |
+                                       \$_.CommandLine -like '*spike2_emu\playfield.py*' -and
+                                       \$_.CommandLine $PF_SLOTMATCH } |
                         ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" \
               >/dev/null 2>&1
-            pkill -9 -f '^(/init|python3?) .*playfield\.py'
+            pad_pkill -9 -f '^(/init|python3?) .*playfield\.py'
         fi
     fi
 
@@ -1429,7 +1477,7 @@ esac
 FREE_G=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
 if [ "${FREE_G:-999}" -lt 10 ]; then
     echo "[watch] WARNING: only ${FREE_G}G free on /. Run logs grow fast." >&2
-    echo "[watch]   du -sh "$PAD_HOME/gz"*.log   to see the worst offenders." >&2
+    echo "[watch]   du -sh "$PAD_LOGDIR/gz"*.log   to see the worst offenders." >&2
 fi
 
 rm -f "$RING_HOST" "$SW_HOST"
@@ -1551,7 +1599,7 @@ fi
 # started with its own session and killed in teardown like everything else.
 if [ "${PAD_AUDIO:-1}" != 0 ]; then
     setsid_as_user bash "$S/playaudio.sh" "$AUD_HOST" "$AUD_RATE" 2 "$AUD_FMT_HOST" \
-        > "$PAD_HOME/padaudio.log" 2>&1 &
+        > "$PAD_LOGDIR/padaudio.log" 2>&1 &
     AUDPG=$!
     for i in $(seq 1 40); do [ -p "$AUD_HOST" ] && break; sleep 0.05; done
     if [ -p "$AUD_HOST" ]; then
@@ -1560,13 +1608,13 @@ if [ "${PAD_AUDIO:-1}" != 0 ]; then
         export PAD_AUDIO_FMT="$AUD_FMT_GUEST"
     else
         echo "[watch] audio: player did not come up, continuing silent" >&2
-        tail -3 "$PAD_HOME/padaudio.log" >&2
+        tail -3 "$PAD_LOGDIR/padaudio.log" >&2
     fi
 fi
 
 if [ "${PAD_VID:-1}" != 0 ]; then
     rm -f "$VID_HOST"
-    setsid_as_user python3 "$S/padvidhost.py" "$VID_HOST" > "$PAD_HOME/padvid.log" 2>&1 &
+    setsid_as_user python3 "$S/padvidhost.py" "$VID_HOST" > "$PAD_LOGDIR/padvid.log" 2>&1 &
     VIDPG=$!
     for i in $(seq 1 40); do [ -s "$VID_HOST" ] && break; sleep 0.05; done
     if [ -s "$VID_HOST" ]; then
@@ -1577,7 +1625,7 @@ if [ "${PAD_VID:-1}" != 0 ]; then
         VID_FOR_GL="$VID_HOST"
     else
         echo "[watch] video: host decoder did not come up, continuing without" >&2
-        tail -3 "$PAD_HOME/padvid.log" >&2
+        tail -3 "$PAD_LOGDIR/padvid.log" >&2
         export PAD_VID=0
     fi
 fi
@@ -1663,15 +1711,15 @@ pad_gl_gpu() {
 # this process is stopped.
 pad_gl_stop() {
     [ -n "$HOSTPG" ] && kill -INT -"$HOSTPG" 2>/dev/null
-    pkill -INT -x padglhost 2>/dev/null
+    pad_pkill -INT -x padglhost
     for _ in 1 2 3 4 5 6; do
-        pgrep -x padglhost >/dev/null || break
+        [ -n "$(pad_pids -x padglhost)" ] || break
         sleep 0.5
     done
-    if pgrep -x padglhost >/dev/null; then
+    if [ -n "$(pad_pids -x padglhost)" ]; then
         echo "[watch] the renderer did not stop on SIGINT; killing it" >&2
         [ -n "$HOSTPG" ] && kill -9 -"$HOSTPG" 2>/dev/null
-        pkill -9 -x padglhost 2>/dev/null
+        pad_pkill -9 -x padglhost
     fi
     HOSTPG=""
 }
@@ -1697,7 +1745,7 @@ pad_gl_try() {
 
     for i in $(seq 1 100); do [ -s "$RING_HOST" ] && break; sleep 0.1; done
     sleep 0.3
-    pgrep -x padglhost >/dev/null
+    [ -n "$(pad_pids -x padglhost)" ]
 }
 
 # PAD_GL_SOFTWARE=1 skips the GPU attempt altogether: for a machine known to
@@ -1958,7 +2006,7 @@ rm -f "$ROOT/dump/vidoverride"
 # called under PAD_SELECT.
 sel_flag_stale() {
     local age bound
-    if pgrep -x codeselect >/dev/null 2>&1; then
+    if [ -n "$(pad_pids -x codeselect)" ]; then
         touch "$ROOT/dump/selecting" 2>/dev/null
         SEL_SEEN=1
         return 1
@@ -2089,12 +2137,12 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
                 sleep 1
             done
             exec python3 "$@"' _ "$ROOT/dump/selecting" "$SEL_WAIT" \
-            "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" > "$PAD_HOME/padtables.log" 2>&1 &
+            "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" > "$PAD_LOGDIR/padtables.log" 2>&1 &
         TBLPG=$!
     elif grep -q '^drawable=yes' "$TBL_OUT"; then
         echo "[watch]   opening now; the switch table follows in the background"
         setsid_as_user python3 "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" \
-            > "$PAD_HOME/padtables.log" 2>&1 &
+            > "$PAD_LOGDIR/padtables.log" 2>&1 &
         TBLPG=$!
     else
         echo "[watch]   nothing to draw yet - waiting for the game's own switch list"
@@ -2148,7 +2196,7 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
         # So the only thing to check here is that python3 runs at all.
         if "$PF_PY" -c 'import json' >/dev/null 2>&1; then
             : > "$PFLOG" 2>/dev/null
-            setsid_as_user "$PF_PY" "$RIG/playfield.py" "$GAME" $PF_STATES </dev/null >>"$PFLOG" 2>&1 &
+            setsid_as_user "$PF_PY" "$RIG/playfield.py" "$GAME" $PF_STATES $PF_SLOTARG </dev/null >>"$PFLOG" 2>&1 &
             PF_LAUNCHED=1
             echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"
         else
@@ -2228,7 +2276,7 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
             # is a Windows process here and its traceback would otherwise go
             # nowhere at all - pythonw.exe has no console to print one to.
             : > "$PFLOG" 2>/dev/null
-            setsid_as_user "$PF_PY" "$PF_WIN" "$GAME" $PF_STATES </dev/null >>"$PFLOG" 2>&1 &
+            setsid_as_user "$PF_PY" "$PF_WIN" "$GAME" $PF_STATES $PF_SLOTARG </dev/null >>"$PFLOG" 2>&1 &
             PF_LAUNCHED=1
             # NAMED, not just announced (PAD-99). Which interpreter opened the
             # window is the fact that settles "I have no playfield" in one
@@ -2266,7 +2314,8 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
             echo "PAD_PLAYFIELD_WINDOWS_LAUNCH game=$GAME" \
                  "savestates=$([ -n "$PF_STATES" ] && echo 1 || echo 0)" \
                  "root=$(pad_win "$ROOT" 2>/dev/null)" \
-                 "tables=$(pad_win "$TABLES" 2>/dev/null)"
+                 "tables=$(pad_win "$TABLES" 2>/dev/null)" \
+                 "slot=$PAD_SLOT"
             echo "[watch] this WSL cannot start a Windows program (interop is"
             echo "[watch]   off, or there is no Windows Python it can reach),"
             echo "[watch]   so PAD has been asked to open the playfield"
@@ -2315,7 +2364,7 @@ if [ "${PAD_SELECT:-}" = 1 ]; then
     echo "[watch] boot selector: waiting for the choice (LEFT/RIGHT flipper" \
          "= arrows move, START = 1 or ACTION = Space boots)"
     while [ -f "$ROOT/dump/selecting" ]; do
-        if pgrep -x game >/dev/null 2>&1; then
+        if [ -n "$(pad_pids -x game)" ]; then
             rm -f "$ROOT/dump/selecting"
             echo "[watch] boot selector: done; the game is starting"
             break
@@ -2325,7 +2374,7 @@ if [ "${PAD_SELECT:-}" = 1 ]; then
             echo "[watch] boot selector: run_game.sh ended before the game started" >&2
             break
         fi
-        if ! pgrep -x padglhost >/dev/null; then
+        if ! [ -n "$(pad_pids -x padglhost)" ]; then
             echo "[watch] the renderer died while the boot selector was up:" >&2
             tail -20 "$HOSTLOG" >&2
             exit 1
@@ -2344,7 +2393,7 @@ fi
 echo "[watch] waiting for the game to start..."
 for i in $(seq 1 240); do
     pad_guest_up && break
-    if ! pgrep -x padglhost >/dev/null; then
+    if ! [ -n "$(pad_pids -x padglhost)" ]; then
         echo "[watch] the renderer died while the game was starting:" >&2
         tail -20 "$HOSTLOG" >&2
         exit 1
@@ -2419,12 +2468,12 @@ if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
                 sleep 1
             done
             exec bash "$@"' _ "$ROOT/dump/selecting" "$SEL_WAIT" \
-            "$S/autoattract.sh" "$LOG" > "$PAD_HOME/padauto.log" 2>&1 &
+            "$S/autoattract.sh" "$LOG" > "$PAD_LOGDIR/padauto.log" 2>&1 &
         AUTOPG=$!
         echo "[watch] auto-advance on, held back until the boot selector has"
         echo "[watch] chosen; then it presses Service Back past Tech Alerts."
     else
-        setsid_as_user bash "$S/autoattract.sh" "$LOG" > "$PAD_HOME/padauto.log" 2>&1 &
+        setsid_as_user bash "$S/autoattract.sh" "$LOG" > "$PAD_LOGDIR/padauto.log" 2>&1 &
         AUTOPG=$!
         echo "[watch] auto-advance on: it will press Service Back until the game"
         echo "[watch] leaves Tech Alerts (PAD_AUTO_ATTRACT=0 to do it yourself)."
@@ -2441,7 +2490,7 @@ else
     # No helper this run, so no verdict from one: status.sh reads this file
     # for auto_result, and the LAST run's "mains lock" (PAD-173) or "past
     # Tech Alerts" would otherwise be reported about this one.
-    : > "$PAD_HOME/padauto.log" 2>/dev/null
+    : > "$PAD_LOGDIR/padauto.log" 2>/dev/null
 fi
 
 # THE SWITCH EXERCISER (item 59). The `CHECK SWITCH #n` rows on Tech Alerts are
@@ -2468,7 +2517,7 @@ fi
 # brings the per-boot pass back; its edges carry source letter `x`, so
 # `grep -v 'ms [+-][0-9]*x'` removes them from a measurement.
 if [ "${PAD_SW_EXERCISE:-0}" = 1 ]; then
-    setsid_as_user bash "$S/swexercise.sh" "$LOG" > "$PAD_HOME/padswx.log" 2>&1 &
+    setsid_as_user bash "$S/swexercise.sh" "$LOG" > "$PAD_LOGDIR/padswx.log" 2>&1 &
     echo "[watch] switch exerciser on: it clears the CHECK SWITCH tech alerts"
     echo "[watch] once the game's switch table is up (PAD_SW_EXERCISE=0 off)."
 fi
@@ -2487,7 +2536,7 @@ fi
 # alive.sh's output and eating a label off its first line, which is the same
 # class of thing. `[ball]` lines go to ~/padball.log and stay legible.
 if [ "${PAD_BALL_FEED:-1}" != 0 ]; then
-    setsid_as_user python3 "$S/ballfeed.py" > "$PAD_HOME/padball.log" 2>&1 &
+    setsid_as_user python3 "$S/ballfeed.py" > "$PAD_LOGDIR/padball.log" 2>&1 &
     BALLPG=$!
     echo "[watch] ball feed on: the game's own trough eject will be answered"
     echo "[watch] (PAD_BALL_FEED=0 to move balls by hand with plunge.py)."
@@ -2577,8 +2626,8 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
     # stdbuf -oL because tr into a pipe is block-buffered, and a "live" event
     # feed that arrives four kilobytes at a time is not live (same reasoning
     # as the fflush after every print below).
-    tail -q -n 0 -F "$PAD_HOME/padvid.log" "$PAD_HOME/padaudio.log" \
-                    "$PAD_HOME/padglhost.log" "$LOG" 2>/dev/null \
+    tail -q -n 0 -F "$PAD_LOGDIR/padvid.log" "$PAD_LOGDIR/padaudio.log" \
+                    "$PAD_LOGDIR/padglhost.log" "$LOG" 2>/dev/null \
         | stdbuf -oL tr -d '\000' | $AWK '
         /Radium Error/ {
             if (++n[$0] == 1 || n[$0] % 500 == 0)
@@ -2682,7 +2731,14 @@ echo "[watch] Enter/-/= = service. The playfield window lists every key."
 END=0
 [ "$MINS" != 0 ] && END=$(( $(date +%s) + MINS * 60 ))
 while :; do
-    if ! pgrep -x padglhost >/dev/null; then
+    # The board's heartbeat, every ~10 s (40 polls): cheap, and fresh enough
+    # that a record 2 minutes stale can only be a run that died hard.
+    BOARD_BEAT=$((BOARD_BEAT + 1))
+    if [ "$BOARD_BEAT" -ge 40 ]; then
+        BOARD_BEAT=0
+        [ -f "$BOARD_RUN" ] && touch "$BOARD_RUN" 2>/dev/null || pad_board_run
+    fi
+    if ! [ -n "$(pad_pids -x padglhost)" ]; then
         # NOT "(window closed)" FOR EVERY WAY THE RENDERER CAN GO. This line
         # used to assert that, unconditionally, on nothing but "the process is
         # not there anymore" - so a renderer that DIED read in the log as a
@@ -2736,8 +2792,8 @@ while :; do
              "of its pid namespace, where its own kill() is dropped. Stopping it."
         grep -a 'qemu: uncaught target signal' "$ROOT/dump/game.out" | tail -1 \
             | sed 's/^/[watch]   /'
-        pkill -9 -x game 2>/dev/null
-        pkill -9 -f 'arm-binfmt|qemu-arm' 2>/dev/null
+        pad_pkill -9 -x game
+        pad_pkill -9 -f 'arm-binfmt|qemu-arm'
         sleep 0.5
     fi
     WEDGE_TICK=$(( WEDGE_TICK + 1 ))
@@ -2752,7 +2808,7 @@ while :; do
     # long as the selector lives and SEL_GAP s past it (sel_flag_stale(),
     # which refreshes the flag while `pgrep -x codeselect` finds it).
     if [ "${PAD_SELECT:-}" = 1 ] && [ -f "$ROOT/dump/selecting" ]; then
-        if pgrep -x game >/dev/null 2>&1; then
+        if [ -n "$(pad_pids -x game)" ]; then
             rm -f "$ROOT/dump/selecting"
             echo "[watch] boot selector: done; the game is up"
         elif kill -0 "$GAMEPG" 2>/dev/null && ! sel_flag_stale; then

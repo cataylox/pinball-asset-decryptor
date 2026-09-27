@@ -153,7 +153,7 @@ count()   { gs_count "$1" "$LOG"; }
 booted()  { gs_booted "$LOG"; }
 past()    { gs_past_alerts "$LOG"; }
 probes()  { count 'ExchangeData: read failed'; }
-up()      { pgrep -x game >/dev/null 2>&1; }
+up()      { [ -n "$(pad_pids -x game)" ]; }
 # AN OPERATOR IS DRIVING - STAND DOWN (2026-08-18). stranger_things now boots
 # past Tech Alerts into its GUIDED SETUP wizard, a screen this script cannot
 # read (`past` keys on the attract light show and the wizard runs none), so it

@@ -26,9 +26,13 @@ sleep 1
 # stubs and the card mounts, and a fixed tail silently cut the top off it.
 bash "$S/alive.sh"
 
+# MACHINE-WIDE, deliberately - the one count in this rig that is not per slot.
+# killgame.sh above stopped THIS rig slot's run; a WSL shutdown ends every
+# slot's, so another session's guest still up is a reason to stop here too.
 LEFT=$(pgrep -c -x game 2>/dev/null || echo 0)
 if [ "${LEFT:-0}" != 0 ]; then
-    echo "[reset] the guest is STILL up - not shutting down WSL. Fix that first." >&2
+    echo "[reset] a guest is STILL up (this rig's, or another rig slot's -" \
+         "riglock.sh list) - not shutting down WSL. Fix that first." >&2
     exit 1
 fi
 

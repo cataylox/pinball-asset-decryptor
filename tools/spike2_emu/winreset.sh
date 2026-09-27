@@ -65,6 +65,12 @@ done
 HERE=$(cd "$(dirname "$0")" && pwd)
 WINF="$HOME/.pad_windows"
 PFF="$HOME/.pad_playfield.json"
+# A rig slot >= 1 keeps its own window records (padglhost.c winpos_file,
+# playfield.py STATE) - reset THOSE, never another rig's.
+if [ "${PAD_SLOT:-0}" != 0 ]; then
+    WINF="$HOME/.pad_windows.rig$PAD_SLOT"
+    PFF="$HOME/.pad_playfield.rig$PAD_SLOT.json"
+fi
 
 # THE GATE. A reset under a live run is not merely useless, it is a lie: the
 # button reports success and the next start comes up in the same wrong place.

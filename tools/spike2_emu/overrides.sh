@@ -43,16 +43,16 @@ SELF=$(cd "$(dirname "$0")" && pwd)
 # $PAD_HOME for the same reason cardmount.sh uses it: the GUI starts a run as
 # root (PAD_PIVOT) and $HOME is then /root, where this rig has never lived.
 . "$SELF/padpath.sh"
-STAGE=$PAD_HOME/override
+STAGE=${PAD_SLOTDIR:-$PAD_HOME}/override
 # The stamp lives BESIDE the stage, never in it: run_game.sh binds every file it
 # finds under the staged tree over the card, and a stamp inside would be one
 # more file with no card path to land on - i.e. a failed run.
-STAMP=$PAD_HOME/override.src
+STAMP=${PAD_SLOTDIR:-$PAD_HOME}/override.src
 MANIFEST=overrides.json
 DELTA=overrides.delta
 # Which generation of the set the stage holds. Beside the stage like the stamp
 # and for the same reason: run_game.sh binds every file it finds inside it.
-GENF=$PAD_HOME/override.gen
+GENF=${PAD_SLOTDIR:-$PAD_HOME}/override.gen
 
 die() { echo "[ovr] $*" >&2; exit 1; }
 

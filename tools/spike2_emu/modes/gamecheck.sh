@@ -28,7 +28,7 @@ AUTO=$PAD_HOME/padauto.log
 
 say() { echo "[check] $*"; }
 die() { say "$*"; exit 1; }
-game_up() { pgrep -x game > /dev/null; }
+game_up() { [ -n "$(pad_pids -x game)" ]; }
 count() { grep -ac -- "$1" "$LOG" 2>/dev/null || true; }
 # wait_for <seconds> <extended regex> <file>: 0 when a line matches, 1 at the time limit or
 # when the game is gone

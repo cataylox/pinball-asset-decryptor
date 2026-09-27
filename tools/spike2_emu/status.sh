@@ -20,13 +20,13 @@
 # it is computed here once rather than re-derived by every caller.
 . "$(dirname "$0")/padpath.sh"
 set -u
-LOG=${1:-$HOME/gzwatch.log}
+LOG=${1:-$PAD_LOGDIR/gzwatch.log}
 S=$RIG
 # shellcheck source=gamestate.sh
 . "$S/gamestate.sh"
 
-pid=$(pgrep -x game 2>/dev/null | head -1)
-hpid=$(pgrep -x padglhost 2>/dev/null | head -1)
+pid=$(pad_pids -x game | head -1)
+hpid=$(pad_pids -x padglhost | head -1)
 
 # ASK alive.sh, do not keep a second list here. This used to count four things
 # plus a pattern ('Godzilla Pro emulator') that had not matched anything for
@@ -38,10 +38,11 @@ hpid=$(pgrep -x padglhost 2>/dev/null | head -1)
 procs=$(bash "$S/alive.sh" --procs)
 # `pgrep -c` PRINTS 0 and ALSO exits non-zero on no match, so `|| echo 0` emits
 # "0\n0" and breaks every arithmetic use downstream. Take the value, default it.
-n() { local c; c=$(pgrep -c "$@" 2>/dev/null); echo "${c:-0}"; }
+n() { pad_count "$@"; }
 
 echo "procs=$procs"
 echo "log=$LOG"
+echo "rig_slot=$PAD_SLOT"
 
 # When the saves last changed. The app's slot list refreshes itself the
 # moment this token moves - a playfield save, a CLI pack or delete - instead
@@ -97,7 +98,7 @@ echo "auto=$(n -f autoattract.sh)"
 #   none    - it was never started (Skip to attract mode unticked)
 #   mainslock - it stood down on purpose: a US machine on 50 Hz mains, whose
 #             refusal screen the run was set to show (PAD-173)
-AUTOLOG=$HOME/padauto.log
+AUTOLOG=$PAD_LOGDIR/padauto.log
 if [ "$(n -f autoattract.sh)" != 0 ]; then
     echo "auto_result=working"
 elif [ ! -r "$AUTOLOG" ]; then
@@ -113,7 +114,7 @@ else
 fi
 
 # The renderer prints its rate every 2 s; take the most recent.
-f=$(grep -ao '[0-9.]* fps' "$HOME/padglhost.log" 2>/dev/null | tail -1)
+f=$(grep -ao '[0-9.]* fps' "$PAD_LOGDIR/padglhost.log" 2>/dev/null | tail -1)
 [ -n "$f" ] && echo "fps=${f% fps}"
 
 # Audio comes from the PAD_AUDIO_DUMP line, which watch.sh only emits when

@@ -265,7 +265,7 @@ def test_the_build_staging_directory_has_one_definition():
     with open(os.path.join(RIG, "padpath.sh"), encoding="utf8") as fh:
         pad = fh.read()
     assert "pad_stage()" in pad
-    assert "PAD_STAGE:=$PAD_HOME/emusrc" in pad
+    assert "PAD_STAGE:=${PAD_SLOTDIR:-$PAD_HOME}/emusrc" in pad
     # ROOT IS ELEVATION, NOT OWNERSHIP: a root step hands the directory back
     # to the human whose home it is, and is the only thing that can repair
     # one an earlier root step left behind.
