@@ -311,6 +311,30 @@ CONF_KEYS = ("default", "timeout", "heading", "text_size", "counter", "countdown
              "sound_move", "sound_confirm", "volume",
              "mixer_volume", "media", "theme", "machine_volume")
 
+#: AN IMAGE WITH ITS OWN HIGH SCORES (PAD-226; images.conf `scores=<N>|<name>`).  The game keeps
+#: its settings, audits and high-score table under /data/nv/<title>, and /data is one partition
+#: every image shares, so two images of one title share one table - wrong when one of them runs
+#: custom modes that change the scoring.  select.sh binds /data/nv.own/<name>/<title> over the
+#: shared store for an image with a name (seeded once from a copy of the shared one); images
+#: given the SAME name share that store with each other.  The name is a directory, so it is
+#: the characters select.sh accepts and never starts with a dot.
+SCORES_NAME_RE = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}$")
+
+
+def check_scores_name(name, where="scores"):
+    """A `scores=` name, or Refused - the same rule select.sh applies on the machine."""
+    name = (name or "").strip()
+    if not SCORES_NAME_RE.match(name):
+        raise Refused("%s: %r is not a store name (letters, digits, '.', '_' and '-', at most 64, "
+                      "not starting with '.')" % (where, name))
+    return name
+
+
+def scores_name_for(title):
+    """A store name made from an image's menu title ('TMNT 1987' -> 'tmnt-1987')."""
+    slug = re.sub(r"[^a-z0-9]+", "-", (title or "").lower()).strip("-")[:48]
+    return slug or "own"
+
 #: HOW BIG A CARD'S TITLE AND SUBTITLE ARE DRAWN (images.conf text_size=; PAD-183).
 #: `uniform` measures the two sizes over EVERY card and draws them all at the smallest
 #: any of them needs, so a long name does not come up smaller than a short one;
@@ -1789,7 +1813,7 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
                        media=None, sound_move=None, sound_confirm=None, volume=None, mixer_volume=None,
                        media_dir=None, theme=None, colors=None, machine_volume=None, debug_log=False,
                        groups=None, default_card=None, heading=None, text_size=None,
-                       counter=None, countdown_word=None, footer=None):
+                       counter=None, countdown_word=None, footer=None, scores=None):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
@@ -1918,6 +1942,13 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         out.append("countdown_word=%s" % conf_countdown_word(countdown_word))
     if footer is not None:
         out.append("footer=%s" % conf_footer(footer))
+    # IMAGES WITH THEIR OWN HIGH SCORES (PAD-226): {index: name}, one line each, in index
+    # order; none at all on a card whose images all share (byte for byte what it was)
+    for i, name in sorted((scores or {}).items()):
+        if not 0 <= int(i) < len(devices):
+            raise Refused("scores: image %d is not on the card (%d images)" % (int(i), len(devices)))
+        if name:
+            out.append("scores=%d|%s" % (int(i), check_scores_name(name)))
     if font:
         out.append("font=%s" % font)
     if sound_move:
@@ -1965,7 +1996,8 @@ def parse_images_conf(text):
     drawn, '' = the card asked for no word in front of the title),
     'footer': str|None (None = the key was absent and the selector's own instructions line is drawn,
     '' = the card asked for no instructions line at all),
-    'theme': str|None, 'colors': {role: rrggbb}, 'debug_log': str|None (the log= path)}.
+    'theme': str|None, 'colors': {role: rrggbb}, 'debug_log': str|None (the log= path),
+    'scores': {image index: store name} (PAD-226; the images with high scores of their own)}.
     3-field and 6-field image lines are valid; more than 7 fields, a bad device, a media name with
     '|' ':' or '/', more than MAX_IMAGES images, more than MAX_CARDS cards or more than MAX_GROUPS
     groups is refused.  A `group=` line names several images as ONE card (item 106); its members
@@ -1979,7 +2011,7 @@ def parse_images_conf(text):
             "timeout": 15, "heading": None, "text_size": None,
             "counter": None, "countdown_word": None, "footer": None, "font": None,
             "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None,
-            "theme": None, "colors": {}, "machine_volume": None, "debug_log": None}
+            "theme": None, "colors": {}, "machine_volume": None, "debug_log": None, "scores": {}}
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -2050,6 +2082,13 @@ def parse_images_conf(text):
             # "the selector's own wording", and only the absent one can follow the
             # buttons the machine has
             conf["footer"] = val.strip()
+        elif key == "scores":
+            # PAD-226: dropped (the image shares) when select.sh would refuse it too
+            idx, _sep, name = val.partition("|")
+            try:
+                conf["scores"][int(idx.strip())] = check_scores_name(name)
+            except (ValueError, Refused):
+                pass
         elif key == "font":
             conf["font"] = val.strip() or None
         elif key in ("sound_move", "sound_confirm"):
@@ -3081,6 +3120,13 @@ def conf_for_plan(plan, args, existing=None, media=None):
                  [tree_source_title(plan, p, s) for (p, s) in plan.trees]
     if not subtitles:
         subtitles = [s for (_d, _t, s) in ex["images"]][:n] if same_n else []
+    # PAD-226: --own-scores is the whole answer when given ('' for an image = it shares, all
+    # empty = every image shares again); without it a card of the same shape keeps its own
+    own = getattr(args, "own_scores", None)
+    if own is not None:
+        scores = {i: check_scores_name(x, "--own-scores") for i, x in enumerate(own.split(";")) if x.strip()}
+    else:
+        scores = dict(ex.get("scores") or {}) if same_n else {}
     default = args.default if getattr(args, "default", None) is not None else (ex["default"] if ex["default"] is not None else 0)
     timeout = args.timeout if getattr(args, "timeout", None) is not None else (ex["timeout"] if ex["timeout"] is not None else 15)
     font = SELECT_DIR + "/font.ttf"
@@ -3185,7 +3231,7 @@ def conf_for_plan(plan, args, existing=None, media=None):
                               machine_volume=mv, debug_log=bool(getattr(args, "debug_log", False)),
                               groups=groups, default_card=default_card, heading=heading,
                               text_size=text_size, counter=counter,
-                              countdown_word=countdown_word, footer=footer)
+                              countdown_word=countdown_word, footer=footer, scores=scores)
 
 
 # ============================================================================= the JSON sidecars
@@ -3228,6 +3274,8 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
             ("device", dev), ("source", src or None), ("title", title), ("subtitle", sub),
             ("art", art or None), ("anim", anim or None), ("music", music or None),
             ("confirm", confirm or None),
+            # PAD-226: the store name when this image keeps high scores of its own
+            ("own_scores", (conf.get("scores") or {}).get(i)),
             ("title_dir", v.get("title") or old.get("title_dir")),
             ("version", v.get("version") or old.get("version")),
             ("node_fw_version", v.get("node_fw_version") or old.get("node_fw_version")),
@@ -5239,7 +5287,7 @@ def render_images_conf_text(conf):
         # changed and every update re-injects its menu for nothing
         heading=conf.get("heading"), text_size=conf.get("text_size"),
         counter=conf.get("counter"), countdown_word=conf.get("countdown_word"),
-        footer=conf.get("footer"))
+        footer=conf.get("footer"), scores=conf.get("scores"))
 
 
 # ============================================================================= reading a card back
@@ -8413,6 +8461,11 @@ def _add_conf_flags(s):
     s.add_argument("--media-dir", help="directory holding media.json (selectmedia.py prepare) and the art/anim/sound files it names")
     s.add_argument("--titles", help="';'-separated titles, one per image (index order)")
     s.add_argument("--subtitles", help="';'-separated subtitles, one per image")
+    s.add_argument("--own-scores", metavar="NAMES",
+                   help="';'-separated, one per image: a store name gives that image high scores (and "
+                        "settings and audits) of its own on the machine, '' leaves it sharing the title's "
+                        "store (images.conf scores=; PAD-226). Images given the same name share that store. "
+                        "An existing card's are kept when absent; --own-scores '' makes every image share")
     s.add_argument("--timeout", type=int, help="images.conf timeout in seconds (default 15; 0 = wait for ever)")
     s.add_argument("--heading", metavar="TEXT",
                    help="images.conf heading=TEXT - the line across the top of the menu (the selector's "

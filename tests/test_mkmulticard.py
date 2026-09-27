@@ -991,13 +991,13 @@ def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
     assert man["images"] == [
         {"device": "/dev/mmcblk0p3", "source": os.path.abspath("/img/a.raw"), "title": "STERN 1.59.0",
          "subtitle": "Original Stern code", "art": "art0.png", "anim": None, "music": None,
-         "confirm": None,
+         "confirm": None, "own_scores": None,
          "title_dir": "turtles_pro", "version": "1.59.0", "node_fw_version": "1.33.0",
          # item 106: null = this image is a card of its own
          "group": None},
         {"device": "/dev/mmcblk0p7", "source": os.path.abspath("/img/b.raw"), "title": "TMNT 1987",
          "subtitle": "1987 cartoon upscale", "art": "art1.png", "anim": "anim1.gif", "music": "music1.wav",
-         "confirm": None,
+         "confirm": None, "own_scores": None,
          "title_dir": "turtles_pro", "version": "1.58.0", "node_fw_version": "1.19.0",
          "group": None}]
     # it is JSON, and exactly the keys contract A names
@@ -1399,6 +1399,48 @@ def test_conf_for_plan_takes_the_text_size_from_the_flag_else_the_card(mk):
     # a card that never said still gets no key (and still draws uniform)
     plainex = mk.parse_images_conf(_menu_conf(mk, plan))
     assert "text_size" not in mk.conf_for_plan(plan, argparse.Namespace(), existing=plainex)
+
+
+def test_an_image_can_keep_high_scores_of_its_own(mk):
+    """PAD-226: `scores=<N>|<name>` gives image N a machine store of its own (select.sh binds it
+    over /data/nv/<title>); an image without one shares, and a card with none is byte for byte
+    what it always was."""
+    plan = _two_image_plan(mk)
+    plain = _menu_conf(mk, plan)
+    assert "scores=" not in plain
+    assert mk.parse_images_conf(plain)["scores"] == {}
+    text = _menu_conf(mk, plan, scores={1: "tmnt-1987"})
+    assert "scores=1|tmnt-1987\n" in text
+    conf = mk.parse_images_conf(text)
+    assert conf["scores"] == {1: "tmnt-1987"}
+    # the round trip the update path compares against
+    assert mk.render_images_conf_text(conf) == text
+    # build.json says which image keeps its own
+    man = mk.build_manifest(plan, conf, None)
+    assert [im["own_scores"] for im in man["images"]] == [None, "tmnt-1987"]
+    # names select.sh would refuse are refused here, and dropped on a read
+    for bad in ("../x", ".hidden", "a b", "a/b"):
+        with pytest.raises(mk.Refused):
+            _menu_conf(mk, plan, scores={1: bad})
+    assert mk.parse_images_conf(plain + "scores=1|../x\n")["scores"] == {}
+    with pytest.raises(mk.Refused):
+        _menu_conf(mk, plan, scores={2: "past-the-card"})
+    assert mk.scores_name_for("TMNT 1987!") == "tmnt-1987"
+    assert mk.scores_name_for("***") == "own"
+
+
+def test_conf_for_plan_takes_own_scores_from_the_flag_else_the_card(mk):
+    plan = _two_image_plan(mk)
+    ex = mk.parse_images_conf(_menu_conf(mk, plan, scores={1: "heisei"}))
+    # no flag: the card's own ride through
+    assert "scores=1|heisei\n" in mk.conf_for_plan(plan, argparse.Namespace(), existing=ex)
+    # the flag is the whole answer: one name per image, '' = shares
+    out = mk.conf_for_plan(plan, argparse.Namespace(own_scores="stock;orchestra"), existing=ex)
+    assert "scores=0|stock\n" in out and "scores=1|orchestra\n" in out and "heisei" not in out
+    # --own-scores '' makes every image share again
+    assert "scores=" not in mk.conf_for_plan(plan, argparse.Namespace(own_scores=""), existing=ex)
+    with pytest.raises(mk.Refused):
+        mk.conf_for_plan(plan, argparse.Namespace(own_scores=";../x"), existing=ex)
 
 
 def test_conf_for_plan_takes_the_heading_from_the_flag_else_the_card(mk):

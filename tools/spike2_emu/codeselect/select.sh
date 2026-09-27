@@ -26,9 +26,21 @@
 # as <path>.1) and writes at most 1 MiB, and this script's own lines go there
 # too. CODESELECT_LOG=<path> forces a log, CODESELECT_LOG= (empty) none.
 #
+# AN IMAGE WITH ITS OWN HIGH SCORES (PAD-226): a `scores=<N>|<name>` line gives
+# image N a machine store of its own. The game keeps its settings, audits and
+# high-score table under /data/nv/<title>, and /data is one partition every
+# image on the card shares, so two images of the same title share one table -
+# wrong when one of them carries custom modes that change the scoring. After
+# image N is mounted, /data/nv.own/<name>/<title> is bound over
+# /data/nv/<title>; the first boot seeds it with a copy of the shared store
+# (settings carry over; the owner resets its high scores once on the machine).
+# Each image without a line keeps sharing. Every failure here leaves the image
+# on the shared store and the boot goes on.
+#
 #   select.sh                     the hook (what /etc/init.d/game calls)
 #   select.sh --lookup N [conf]   print image N's device (without :<sub>)
 #   select.sh --lookup-sub N [conf]   print image N's subdirectory ("" when none)
+#   select.sh --scores N [conf]   print image N's own-scores name ("" when it shares)
 #
 # POSIX sh; needs only busybox sed/awk/grep/head/tr/mkdir/mount/umount + pidof.
 # The CODESELECT_* variables exist for the tests (a fake selector, fake
@@ -44,6 +56,8 @@ MULTI=${CODESELECT_MULTI:-/mnt/multi}
 MULTI_FALLBACK=${CODESELECT_MULTI_FALLBACK:-/var/volatile/multi}
 MOUNT=${CODESELECT_MOUNT:-mount}
 UMOUNT=${CODESELECT_UMOUNT:-umount}
+NV=${CODESELECT_NV:-/data/nv}
+NV_OWN=${CODESELECT_NV_OWN:-/data/nv.own}
 
 log() {
     [ -n "$LOG" ] && echo "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null) select.sh: $*" >> "$LOG" 2>/dev/null
@@ -111,7 +125,63 @@ materialize() {   # materialize STORE-MOUNT SUB
         ${WORKDEV:+--mount-dev "$WORKDEV"} ${LOG:+--log "$LOG"} </dev/null
 }
 
+# image N's `scores=<N>|<name>` name ("" when the image shares the store)
+scores_name() {
+    $AWK -F'|' -v want="$1" '
+        /^[ \t]*scores[ \t]*=/ {
+            sub(/^[ \t]*scores[ \t]*=[ \t]*/, "", $1)
+            gsub(/[ \t]+$/, "", $1); gsub(/^[ \t]+|[ \t]+$/, "", $2)
+            if ($1 == want "") { print $2; exit }
+        }' "$2"
+}
+
+# the title directory the mounted games tree runs: game -> <title>/game
+game_title() {
+    t=$(readlink "$GAMES/game" 2>/dev/null)
+    t=${t%/game}
+    t=${t##*/}
+    case "$t" in ""|.*|*/*|game) return 1 ;; esac
+    echo "$t"
+}
+
+# PAD-226: bind image $idx's own machine store over the shared one (see the header)
+own_scores() {
+    name=$(scores_name "$idx" "$CONF")
+    [ -n "$name" ] || return 0
+    case "$name" in
+        .*|*/*|*[!A-Za-z0-9._-]*) log "image $idx: bad scores name '$name': it shares the machine store"; return 0 ;;
+    esac
+    title=$(game_title) || { log "image $idx: cannot tell its title from $GAMES/game: it shares the machine store"; return 0; }
+    store=$NV_OWN/$name/$title
+    if [ ! -d "$store" ]; then
+        rm -rf "$store.part"
+        if ! mkdir -p "$NV_OWN/$name"; then
+            log "image $idx: cannot create $NV_OWN/$name: it shares the machine store"; return 0
+        fi
+        if [ -d "$NV/$title" ]; then
+            cp -a "$NV/$title" "$store.part" && mv "$store.part" "$store" || {
+                rm -rf "$store.part"
+                log "image $idx: copying $NV/$title failed: it shares the machine store"; return 0; }
+            log "image $idx: its own machine store $store, started from a copy of the shared one"
+        else
+            mkdir -p "$store" || { log "image $idx: cannot create $store: it shares the machine store"; return 0; }
+            log "image $idx: its own machine store $store, started empty (no shared store yet)"
+        fi
+    fi
+    mkdir -p "$NV/$title" 2>/dev/null
+    if $MOUNT --bind "$store" "$NV/$title"; then
+        log "image $idx: $store bound over $NV/$title (its own settings, audits and high scores)"
+    else
+        log "image $idx: binding $store failed: it shares the machine store"
+    fi
+}
+
 case "$1" in
+    --scores)
+        [ -n "$2" ] || { echo "usage: select.sh --scores N [conf]" >&2; exit 1; }
+        scores_name "$2" "${3:-$CONF}"
+        exit 0
+        ;;
     --lookup)
         [ -n "$2" ] || { echo "usage: select.sh --lookup N [conf]" >&2; exit 1; }
         set -- $(lookup "$2" "${3:-$CONF}")
@@ -141,36 +211,45 @@ while [ "$i" -lt 30 ] && pidof boot_display >/dev/null 2>&1; do
     i=$((i + 1))
 done
 
+# the primary boots after all: image 0's own store, when it has one
+primary() {
+    idx=0
+    own_scores
+    exit 0
+}
+
 rm -f "$OUT"
 "$BIN" --conf "$CONF" --out "$OUT" ${LOG:+--log "$LOG"}
 rc=$?
-[ "$rc" -eq 0 ] || { log "selector exit $rc: booting primary"; exit 0; }
+[ "$rc" -eq 0 ] || { log "selector exit $rc: booting primary"; primary; }
 
 idx=$(head -n 1 "$OUT" 2>/dev/null | tr -cd '0-9')
-[ -n "$idx" ] || { log "no choice in $OUT: booting primary"; exit 0; }
+[ -n "$idx" ] || { log "no choice in $OUT: booting primary"; primary; }
 
 if [ "$idx" -eq 0 ]; then
     log "image 0 is the primary, already mounted at $GAMES"
+    own_scores
     exit 0
 fi
 
 set -- $(lookup "$idx" "$CONF")
 dev=$1
 sub=$2
-[ -n "$dev" ] || { log "image $idx has no device in $CONF: booting primary"; exit 0; }
-is_blockdev "$dev" || { log "$dev is not a block device: booting primary"; exit 0; }
+[ -n "$dev" ] || { log "image $idx has no device in $CONF: booting primary"; primary; }
+is_blockdev "$dev" || { log "$dev is not a block device: booting primary"; primary; }
 case "$sub" in
-    */*|.*) log "image $idx: bad subdirectory '$sub': booting primary"; exit 0 ;;
+    */*|.*) log "image $idx: bad subdirectory '$sub': booting primary"; primary ;;
 esac
 
 if ! $UMOUNT "$GAMES"; then
     log "umount $GAMES failed: booting primary (still mounted)"
-    exit 0
+    primary
 fi
 
 if [ -z "$sub" ]; then
     if $MOUNT -t ext4 -o ro,relatime,exec "$dev" "$GAMES" && has_game "$GAMES"; then
         log "image $idx: mounted $dev at $GAMES"
+        own_scores
         exit 0
     fi
     log "mount $dev failed or it has no $GAMES/game: remounting the primary $PRIMARY"
@@ -186,6 +265,7 @@ else
         if [ -d "$mp/$sub" ] && $MOUNT --bind "$mp/$sub" "$GAMES" && has_game "$GAMES"; then
             log "image $idx: mounted $dev at $mp, $sub bound over $GAMES"
             materialize "$mp" "$sub"
+            own_scores
             exit 0
         fi
         log "no $mp/$sub/game or the bind failed: remounting the primary $PRIMARY"
@@ -198,6 +278,7 @@ fi
 
 if $MOUNT -t ext4 -o ro,relatime,exec "$PRIMARY" "$GAMES"; then
     log "primary remounted"
+    primary
 else
     log "PRIMARY REMOUNT FAILED: $GAMES is empty"
 fi
