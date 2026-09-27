@@ -203,8 +203,6 @@ def test_a_finished_extract_greys_the_button_until_something_changes(
         assert w.call("extract.use_recent", "output", str(proj)) is True
         assert w.state("extract")["block_reason"] == ""
         assert done().startswith("Already")
-        assert w.call("extract.drop_paths", [str(card)]) is True
-        assert w.state("extract")["block_reason"] == ""
 
         # the card replaced on disk: seen when the tab is shown again
         assert done().startswith("Already")
@@ -432,19 +430,14 @@ def test_browse_output_offers_the_parent(tmp_path):
         assert p["exists"] is True and p["details"]["baseline"] is True
 
 
-def test_drop_paths(tmp_path):
+def test_use_recent_and_unmap(tmp_path):
     f = tmp_path / "game.pkg"
     f.write_bytes(b"x")
     folder = tmp_path / "out"
     folder.mkdir()
     with web_app(tmp_path, mfr="spooky") as w:
-        assert w.call("extract.drop_paths", [str(f)]) is True
-        assert w.window.extract_input_var.get() == str(f)
-        assert w.call("extract.drop_paths", [str(folder)]) is True
-        assert w.window.extract_output_var.get() == str(folder)
-        assert w.call("extract.drop_paths", [str(tmp_path / "nope")]) \
-            is False
         assert w.call("extract.use_recent", "input", str(f)) is True
+        assert w.window.extract_input_var.get() == str(f)
         assert w.call("extract.unmap", "output", str(folder)) is True
         _settle(w)
 

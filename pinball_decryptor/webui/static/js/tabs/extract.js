@@ -67,36 +67,6 @@ export function FdaPanel({ s }) {
   </div>`;
 }
 
-// The Select card tab's zero state: Browse… or a card dropped on it.  Once a
-// card is picked the tab shows the card instead (that picture takes drops
-// too, see cardDrop).
-export function DropZone({ s }) {
-  const [over, setOver] = useState(false);
-  const [msg, setMsg] = useState("");
-  const onDrop = cardDrop(setOver, setMsg);
-  return html`<div class=${cx("drop x-drop", over && "over")}
-      onDragOver=${(e) => { e.preventDefault(); setOver(true); }} onDragLeave=${() => setOver(false)} onDrop=${onDrop}>
-    <${Icon} name="upload" />
-    <span><button type="button" class="x-browse" onClick=${() => call("extract.browse_input")}>Browse</button>, or drop a card here</span>
-    ${(s.extensions || []).length ? html`<span class="small muted mono">${s.extensions.join("  ")}</span>` : null}
-    ${msg ? html`<span class="small warn-ink">${msg}</span>` : null}
-  </div>`;
-}
-
-// A drop of card files: the path of the first goes to the picker.
-export function cardDrop(setOver, setMsg) {
-  return (e) => {
-    e.preventDefault();
-    setOver(false);
-    const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
-    const paths = files.map((f) => f.pywebviewFullPath || f.path || "").filter(Boolean);
-    if (!files.length) return;
-    if (!paths.length) { setMsg("This window can't see where a dropped file lives — use Browse… instead."); return; }
-    setMsg("");
-    call("extract.drop_paths", paths);
-  };
-}
-
 // The picked drive's whole name, under the list whenever the list is too
 // narrow to show all of it: its size, drive letter and \\.\PHYSICALDRIVEn
 // are what tell one card from another.

@@ -16,8 +16,8 @@ grow ``HELP_CONTENT`` into a hook on ``Manufacturer`` like ``write_intro``.
 HELP_CONTENT = {
     "Select Card": [
         ("Pick the card",
-         "Browse to a dumped card image / update file, or drop one on the "
-         "page. Plugins with direct-media support also offer a \"From SD "
+         "Browse… to a dumped card image / update file. Plugins with "
+         "direct-media support also offer a \"From SD "
          "card / SSD\" mode that reads the physical media in a reader "
          "(needs Administrator on Windows). The Extract tab reads the card "
          "picked here."),

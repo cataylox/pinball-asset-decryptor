@@ -202,13 +202,14 @@ def test_boot_screen_prefers_the_stern_logo(monkeypatch):
     assert CP.boot_screen_bytes("x.raw") is None
 
 
-def test_page_zero_state_and_buttons():
-    """The drop zone is the zero state only, and it reads "Browse, or drop a
-    card here"; the button goes to the Extract tab and says so."""
+def test_page_buttons_and_no_drop_zone():
+    """No drop zone (the window never gets a dropped file's path, David
+    2026-09-26: "it doesn't even work"); the button goes to the Extract tab
+    and says so."""
     card = (_JS / "card.js").read_text(encoding="utf-8")
     ext = (_JS / "extract.js").read_text(encoding="utf-8")
-    assert ">Browse</button>, or drop a card here" in ext
-    assert "!have && !s.ssd ? html`<${DropZone}" in card
+    assert "DropZone" not in card and "DropZone" not in ext
+    assert "drop_paths" not in card and "drop_paths" not in ext
     assert ">Go to Extract<//>" in card and "Extract…<//>" not in card
     # the picker has no Image Info badge: the details are under the card
     start = ext.index("export function SourceBody(")

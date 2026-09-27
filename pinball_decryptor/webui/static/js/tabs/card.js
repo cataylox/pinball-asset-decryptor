@@ -10,7 +10,7 @@ import { html, useEffect, useState, Button, Card, Chip, Icon, PageHead, Seg, cal
 import { useNs } from "../core/store.js";
 import { WHAT, needOf, tabLock } from "../core/locks.js";
 import { Booting } from "../core/booting.js";
-import { SourceBody, ExtractOverlays, DropZone, cardDrop, inputPhrase, useNoStrayDrops } from "./extract.js";
+import { SourceBody, ExtractOverlays, inputPhrase, useNoStrayDrops } from "./extract.js";
 
 export const css = true;
 
@@ -57,37 +57,27 @@ function WhatCard({ shell }) {
 }
 
 // ------------------------------------------------------------ the glass
-// The machine's own picture of the card, in the space the drop zone had.
-// It still takes a dropped card, which replaces this one.
-function Glass({ p, droppable }) {
-  const [over, setOver] = useState(false);
-  const [msg, setMsg] = useState("");
+// The machine's own picture of the card, under the picker.
+function Glass({ p }) {
   const [lit, setLit] = useState("");
   const ready = p.state === "ready" && p.src;
   const src = ready ? mediaUrl(p.src) : "";
   const on = !!src && lit === src;
   const ratio = ready && p.w && p.h ? `${p.w} / ${p.h}` : "16 / 9";
-  const drop = droppable ? {
-    onDragOver: (e) => { e.preventDefault(); setOver(true); },
-    onDragLeave: () => setOver(false),
-    onDrop: cardDrop(setOver, setMsg),
-  } : {};
   const [what, about] = {
     menu: ["Boot menu", "what the machine shows at power-up, the default game highlighted"],
     splash: ["Loading screen", "what the game shows while it starts up"],
     boot: ["Boot screen", "the Stern logo the machine shows while it starts; this game has no splash of its own"],
   }[p.kind] || ["", ""];
   return html`<figure class="c-figure">
-    <div class=${cx("c-glass", on && "on", over && "over")} style=${`aspect-ratio: ${ratio}`} ...${drop}>
+    <div class=${cx("c-glass", on && "on")} style=${`aspect-ratio: ${ratio}`}>
       ${src ? html`<img key=${src} src=${src} alt=${"The card's " + what.toLowerCase()} onLoad=${() => setLit(src)} />` : null}
       ${on ? null : html`<${Booting} stage=${p.stage} sub=${p.games ? `Multi-boot card · ${p.games} games` : ""} />`}
-      ${over ? html`<div class="c-glass-drop"><${Icon} name="upload" /><span>Drop to use this card instead</span></div>` : null}
     </div>
     ${on ? html`<figcaption class="small">
         <span class="c-cap-t">${what}</span><span class="dim"> · ${about}</span>
         ${p.note ? html`<div class="warn-ink c-cap-note">${p.note}</div>` : null}
       </figcaption>` : null}
-    ${msg ? html`<span class="small warn-ink">${msg}</span>` : null}
   </figure>`;
 }
 
@@ -148,8 +138,7 @@ export default function CardTab() {
                 onClick=${() => call("ui.select_tab", "extract")}>Go to Extract<//>
               <span class="dim small grow">Only the tabs that need an extract wait for this step.</span>`}>
           <${SourceBody} s=${s} hist=${hist} />
-          ${showGlass ? html`<${Glass} p=${p} droppable=${!s.ssd} />`
-            : !have && !s.ssd ? html`<${DropZone} s=${s} />` : null}
+          ${showGlass ? html`<${Glass} p=${p} />` : null}
           ${have && p && p.state === "none" && p.note ? html`<div class="small warn-ink">${p.note}</div>` : null}
         <//>
         ${have && c.info ? html`<${Details} info=${c.info} />` : null}

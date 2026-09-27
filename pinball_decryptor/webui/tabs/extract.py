@@ -910,27 +910,6 @@ class ExtractTab(TabService):
         var.set(resolve_mapped_drive(path))
         return True
 
-    @rpc
-    def drop_paths(self, paths):
-        """Files dropped on the tab (the desktop window reports their full
-        paths): a file is the input, a folder the project folder."""
-        for p in paths or ():
-            p = os.path.normpath(str(p or ""))
-            if not p or p == ".":
-                continue
-            if os.path.isdir(p):
-                if self.window._is_running():
-                    return False
-                self._pick_output(p)
-                return True
-            if os.path.isfile(p):
-                if self._ssd_mode():
-                    self.extract_input_source_var.set("iso")
-                self._forget_done()
-                self.extract_input_var.set(p)
-                return True
-        return False
-
     # -- deltas (Dutch Pinball) ----------------------------------------
     @rpc
     def add_deltas(self):

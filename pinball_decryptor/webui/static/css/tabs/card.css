@@ -16,11 +16,6 @@
 .c-page .c-row.locked .c-name, .c-page .c-row.locked > .i:first-child { color: var(--ink-3); }
 .c-page .c-row.locked .c-state { color: var(--ink-3); }
 
-/* the zero state's Browse link */
-.c-page .x-browse { border: 0; background: transparent; padding: 0; font: inherit; color: var(--accent); cursor: pointer;
-  text-decoration: underline; text-underline-offset: 3px; }
-.c-page .x-browse:hover { text-decoration-thickness: 2px; }
-
 /* the glass: the machine's own screen, so it is dark in either theme */
 .c-page .c-figure { margin: 0; display: flex; flex-direction: column; gap: 6px; }
 .c-page .c-glass { position: relative; width: 100%; overflow: hidden; border-radius: 8px; background: #050608;
@@ -28,10 +23,6 @@
 .c-page .c-glass > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block;
   opacity: 0; transform-origin: 50% 50%; }
 .c-page .c-glass.on > img { animation: crt-on .6s cubic-bezier(.2,.75,.25,1) both; }
-.c-page .c-glass.over { border-color: var(--accent); }
-.c-page .c-glass-drop { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 6px; background: rgba(5,6,8,.72); color: #f3f1ea; font-size: 14px; border: 2px dashed var(--accent); border-radius: 8px; }
-.c-page .c-glass-drop .i { width: 22px; height: 22px; color: var(--accent); }
 .c-page .c-figure figcaption { line-height: 1.45; }
 .c-page .c-cap-t { font-family: var(--cond); font-weight: 600; }
 .c-page .c-cap-note { margin-top: 2px; }

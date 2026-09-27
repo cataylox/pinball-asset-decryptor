@@ -30,8 +30,6 @@ button.x-badge { border: 0; background: transparent; padding: 0; font: inherit; 
 button.x-badge span { text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
 button.x-badge:hover span { text-decoration-style: solid; }
 
-.x-page .x-drop { padding: 16px; gap: 4px; }
-.x-page .x-drop .i { width: 20px; height: 20px; color: var(--ink-3); }
 
 /* card mode: the drive list keeps the width its text needs; the buttons
    wrap under it when both don't fit */
