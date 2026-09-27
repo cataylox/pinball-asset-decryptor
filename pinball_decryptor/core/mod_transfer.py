@@ -1135,28 +1135,68 @@ def _plan_video(source_dir, target_dir, saved_map, to_target=None):
     :func:`_model_remap`'s rewrite (identity by default).
 
     Matched entries carry the TARGET's rel (the slot the assignment lands
-    on), which the card-path remap may have renamed."""
+    on), which the card-path remap may have renamed.
+
+    A clip whose stock bytes are still in the new version pairs by CONTENT
+    first, whatever its card path: a clip's path is its scene's hash folder
+    plus its POSITION in that scene's asset list, so a scene that gained or
+    lost a clip shifts every later clip's path onto a different clip.  That
+    put a Star Wars 1.27 Game Over mod on 1.31's Extra Ball (PAD-231).  The
+    card path (then the filename) is only the fallback for a clip the new
+    version re-encoded.  ``src_rel`` / ``how`` ("content", "card", "name")
+    record the pairing so :func:`plan_detail_lines` can name the risky ones."""
     to_target = to_target or (lambda s: s)
     src_cards = _video_card_paths(source_dir)   # card -> rel
     tgt_cards = _video_card_paths(target_dir)
     rel_to_card = {rel: card for card, rel in src_cards.items()}
 
     matched, dropped = [], []
-    for rel, repl in (saved_map or {}).items():
+    if not saved_map:
+        return matched, dropped
+    # Target clips by byte size; signatures are read lazily, and only for
+    # clips the same size as a source clip.
+    tgt_by_size = {}
+    for t in _walk_rels(target_dir, "video"):
+        try:
+            size = os.path.getsize(_stock_path(target_dir, t))
+        except OSError:
+            continue
+        tgt_by_size.setdefault(size, []).append(t)
+    tgt_sigs = {}
+
+    def _tgt_sig(t):
+        if t not in tgt_sigs:
+            tgt_sigs[t] = content_signature(_stock_path(target_dir, t))
+        return tgt_sigs[t]
+
+    for rel, repl in saved_map.items():
         card = rel_to_card.get(rel)
         if card and tgt_cards:
-            # Both manifests know this clip: the card path is authoritative —
+            # Both manifests know this clip: the card path beats the name —
             # even a same-named target file could be a DIFFERENT clip (the
-            # title-derived name was reused).  Missing card ⇒ really gone.
-            tgt_rel = tgt_cards.get(to_target(card))
+            # title-derived name was reused).
+            by_pos = tgt_cards.get(to_target(card))
+            how = "card"
         else:
-            cand = to_target(rel)
-            tgt_rel = cand if _stock_exists(target_dir, cand) else None
-        if tgt_rel and _stock_exists(target_dir, tgt_rel):
-            changed = (content_signature(_abs(source_dir, rel))
-                       != content_signature(_abs(target_dir, tgt_rel)))
-            matched.append({"rel": tgt_rel, "repl": repl,
-                            "content_changed": changed})
+            by_pos = to_target(rel)
+            how = "name"
+        src_sig = content_signature(_stock_path(source_dir, rel))
+        same = []
+        if src_sig is not None:
+            same = [t for t in tgt_by_size.get(src_sig[0], ())
+                    if _tgt_sig(t) == src_sig]
+        if same:
+            # Identical bytes: the same clip.  Several (a clip shared by two
+            # scenes) -> the positional pick if it is one of them, then the
+            # same filename, then a deterministic first.
+            base = to_target(rel)
+            tgt_rel = (by_pos if by_pos in same
+                       else base if base in same else sorted(same)[0])
+            matched.append({"rel": tgt_rel, "repl": repl, "src_rel": rel,
+                            "how": "content", "content_changed": False})
+        elif by_pos and _stock_exists(target_dir, by_pos):
+            matched.append({"rel": by_pos, "repl": repl, "src_rel": rel,
+                            "how": how, "content_changed": True})
         else:
             dropped.append({"rel": rel, "repl": repl,
                             "reason": "no %s in the new version" % rel})
@@ -1526,6 +1566,21 @@ def _slot_name(rel):
     return rel.rpartition("/")[2] or rel
 
 
+_VIDEO_DUP_RE = re.compile(r"_\d+$")
+_VIDEO_UNNAMED_RE = re.compile(r"^video_\d+$", re.IGNORECASE)
+
+
+def _video_title(rel):
+    """The scene title a video's filename was made from (extension and the
+    extractor's ``_N`` duplicate suffix dropped, case folded), or ``None``
+    for a positional ``video_NNNN`` name, which says nothing about the
+    clip."""
+    stem = os.path.splitext(_slot_name(rel))[0]
+    if _VIDEO_UNNAMED_RE.match(stem):
+        return None
+    return _VIDEO_DUP_RE.sub("", stem).lower() or None
+
+
 def _same_length_note(a):
     """The one line worth drawing from a whole block of failures: how many of
     them the new version *does* have at exactly the same length.
@@ -1580,6 +1635,25 @@ def plan_detail_lines(plan, cap=_DETAIL_CAP):
         "DIFFERENT sound, so applying them would replace the wrong sound:",
         a.get("flagged"), _audio_fail_line, cap)
     out.extend(_same_length_note(a))
+    v_matched = (plan.get("video") or {}).get("matched") or ()
+    _detail_block(
+        out, "info",
+        "Transfer: %d video(s) are the same clip under a different name in "
+        "the new version — their replacements follow:",
+        [e for e in v_matched
+         if e.get("how") == "content" and e.get("src_rel")
+         and _slot_name(e["src_rel"]) != _slot_name(e["rel"])],
+        lambda e: "%s  ->  %s" % (e["src_rel"], e["rel"]), cap)
+    _detail_block(
+        out, "warning",
+        "Transfer: %d video replacement(s) went to the clip in the same "
+        "place, but the new version changed that clip and calls it something "
+        "else.  Play these in Emulate before flashing:",
+        [e for e in v_matched
+         if e.get("how") in ("card", "name") and e.get("src_rel")
+         and _video_title(e["src_rel"]) and _video_title(e["rel"])
+         and _video_title(e["src_rel"]) != _video_title(e["rel"])],
+        lambda e: "%s  ->  %s" % (e["src_rel"], e["rel"]), cap)
     _detail_block(
         out, "error",
         "Transfer: %d video replacement(s) can NOT be carried — the new "

@@ -540,6 +540,100 @@ def test_plan_transfer_video_remaps_by_card_path(tmp_path):
         r"C:\r\b.mp4"
 
 
+_SCENE = "/sw_le/assets/lcd/auto_loaded/abc123/scene.assets/2.asset/"
+
+
+def test_plan_transfer_video_follows_content_past_a_shifted_index(tmp_path):
+    # PAD-231: a clip's card path is its POSITION in its scene's asset list.
+    # 1.31 inserted a clip ahead of Game Over, so 1.27's Game Over path is
+    # 1.31's Extra Ball.  The unchanged clip bytes must win over the path.
+    src, tgt = str(tmp_path / "sw127"), str(tmp_path / "sw131")
+    _mk_extract(src, {}, images={"video/gameover.mov": b"GAME-OVER",
+                                 "video/extraball.mov": b"EXTRA-BALL"})
+    _mk_extract(tgt, {}, images={"video/newclip.mov": b"NEW-IN-131",
+                                 "video/gameover.mov": b"GAME-OVER",
+                                 "video/extraball.mov": b"EXTRA-BALL"})
+    _write_manifest(src, [("gameover.mov", _SCENE + "1.asset"),
+                          ("extraball.mov", _SCENE + "2.asset")])
+    _write_manifest(tgt, [("newclip.mov", _SCENE + "1.asset"),
+                          ("gameover.mov", _SCENE + "2.asset"),
+                          ("extraball.mov", _SCENE + "3.asset")])
+    staged_changes.save(src, {"video": {"video/gameover.mov": r"C:\m\go.mov",
+                                        "video/extraball.mov": r"C:\m\eb.mov"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    got = {e["repl"]: e["rel"] for e in plan["video"]["matched"]}
+    assert got == {r"C:\m\go.mov": "video/gameover.mov",
+                   r"C:\m\eb.mov": "video/extraball.mov"}
+    assert all(e["how"] == "content" and not e["content_changed"]
+               for e in plan["video"]["matched"])
+    # Same names on both sides: nothing to call out.
+    assert not [t for _l, t in mod_transfer.plan_detail_lines(plan)
+                if "video" in t]
+
+
+def test_plan_transfer_video_content_match_names_a_rename(tmp_path):
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _mk_extract(src, {}, images={"video/Hoth_BG.mov": b"HOTH"})
+    _mk_extract(tgt, {}, images={"video/Hoth_BG_2.mov": b"HOTH",
+                                 "video/Holocron_BG.mov": b"HOLOCRON"})
+    _write_manifest(src, [("Hoth_BG.mov", _SCENE + "4.asset")])
+    _write_manifest(tgt, [("Holocron_BG.mov", _SCENE + "4.asset"),
+                          ("Hoth_BG_2.mov", _SCENE + "5.asset")])
+    staged_changes.save(src, {"video": {"video/Hoth_BG.mov": r"C:\m\h.mov"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert [e["rel"] for e in plan["video"]["matched"]] == [
+        "video/Hoth_BG_2.mov"]
+    lines = [t for _l, t in mod_transfer.plan_detail_lines(plan)]
+    assert any("same clip under a different name" in t for t in lines)
+    assert any("video/Hoth_BG.mov  ->  video/Hoth_BG_2.mov" in t
+               for t in lines)
+
+
+def test_plan_transfer_video_warns_when_only_the_position_pairs(tmp_path):
+    # No identical clip in the new version: the path is all there is, but a
+    # different scene title on the other end is worth a warning.
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _mk_extract(src, {}, images={"video/gameover.mov": b"GAME-OVER-127",
+                                 "video/video_0005.mov": b"UNNAMED-127"})
+    _mk_extract(tgt, {}, images={"video/extraball.mov": b"EXTRA-BALL-131",
+                                 "video/video_0006.mov": b"UNNAMED-131"})
+    _write_manifest(src, [("gameover.mov", _SCENE + "1.asset"),
+                          ("video_0005.mov", _SCENE + "7.asset")])
+    _write_manifest(tgt, [("extraball.mov", _SCENE + "1.asset"),
+                          ("video_0006.mov", _SCENE + "7.asset")])
+    staged_changes.save(src, {"video": {"video/gameover.mov": r"C:\m\go.mov",
+                                        "video/video_0005.mov": r"C:\m\u.mov"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert sorted(e["rel"] for e in plan["video"]["matched"]) == [
+        "video/extraball.mov", "video/video_0006.mov"]
+    warn = [t for lvl, t in mod_transfer.plan_detail_lines(plan)
+            if lvl == "warning"]
+    assert any("1 video replacement(s) went to the clip in the same place"
+               in t for t in warn)
+    assert any("video/gameover.mov  ->  video/extraball.mov" in t
+               for t in warn)
+    # A positional video_NNNN name says nothing, so it is not flagged.
+    assert not any("video_0005" in t for t in warn)
+
+
+def test_plan_transfer_video_shared_clip_prefers_its_position(tmp_path):
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _mk_extract(src, {}, images={"video/loop.mov": b"LOOP"})
+    _mk_extract(tgt, {}, images={"video/loop.mov": b"LOOP",
+                                 "video/loop_2.mov": b"LOOP"})
+    _write_manifest(src, [("loop.mov", _SCENE + "3.asset")])
+    _write_manifest(tgt, [("loop.mov", _SCENE + "9.asset"),
+                          ("loop_2.mov", _SCENE + "3.asset")])
+    staged_changes.save(src, {"video": {"video/loop.mov": r"C:\m\l.mov"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert [e["rel"] for e in plan["video"]["matched"]] == [
+        "video/loop_2.mov"]
+
+
 def _write_texture_manifest(root, rows):
     """rows: list of (out_rel under images/, asset card path)."""
     d = os.path.join(root, "images", "scene_textures")
