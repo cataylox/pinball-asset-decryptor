@@ -172,7 +172,7 @@ static void show(void)
         return;
     }
     v = value_now();
-    kit_hud_title(&hud, "OXYGEN DESTROYER", run.hold_offs < HOLD_OFFS ? "LEFT RAMP COLLECTS  -  GODZILLA TARGET HOLDS IT"
+    kit_hud_title(&hud, "OXYGEN DESTROYER", run.hold_offs < HOLD_OFFS ? "LEFT RAMP COLLECTS  -  CAPTIVE BALL HOLDS"
                                                                       : "SHOOT THE LEFT RAMP");
     pm_snprintf(sub, sizeof sub, "%u HOLD-OFF%s LEFT", HOLD_OFFS - run.hold_offs, HOLD_OFFS - run.hold_offs == 1 ? "" : "S");
     kit_hud_counter(&hud, 0, 0, 0, 0);
@@ -279,7 +279,8 @@ static void qualify_shot(uint64_t shot, unsigned p)
     if (hits[p] >= HITS_TO_START) {
         start("the left spinner", 1);
     } else if (!kit_running) {
-        pm_snprintf(line, sizeof line, "%u SPINS FOR THE DESTROYER", HITS_TO_START - hits[p]);
+        pm_snprintf(line, sizeof line, "%u SPIN%s TO GO", HITS_TO_START - hits[p],
+                    HITS_TO_START - hits[p] == 1 ? "" : "S");
         kit_hud_note(&hud, 1500, line, "OXYGEN DESTROYER");
     }
 }

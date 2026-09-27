@@ -56,7 +56,7 @@ static const struct { const char *name; uint64_t mask; } SHOTS[] = {    /* godzi
     { "Shield target center", 0x100000000ull }, { "Shield target right", 0x200000000ull },
     { "Skill shot", 0x400000000ull }, { "Big loop", 0x1000000000ull }, { "Slingshot", 0x2ull },
     { "Left return lane", 0x4ull }, { "Right return lane", 0x10ull }, { "Pop bumper", 0x40ull },
-    { "Mecha exit bottom", 0x10000000000ull },
+    { "Mecha exit bottom", 0x10000000000ull }, { "Left spinner", 0x200ull },
 };
 #define N_SHOTS (int)(sizeof SHOTS / sizeof SHOTS[0])
 static const struct { const char *name; int id; } EVENTS[] = {
@@ -74,7 +74,7 @@ static const struct pm_mode *current, *running;
 static char trigger_file[64], trigger_text[128];
 
 struct fake_node { char name[160]; };
-static struct fake_node nodes[64];
+static struct fake_node nodes[1024];   /* six modes' HUDs: ~42 nodes each */
 static int n_nodes;
 
 static void *fake(const char *path)
@@ -82,7 +82,7 @@ static void *fake(const char *path)
     int i;
     for (i = 0; i < n_nodes; i++)
         if (!strcmp(nodes[i].name, path)) return &nodes[i];
-    if (n_nodes == 64) return 0;
+    if (n_nodes == 1024) return 0;
     snprintf(nodes[n_nodes].name, sizeof nodes[n_nodes].name, "%s", path);
     return &nodes[n_nodes++];
 }

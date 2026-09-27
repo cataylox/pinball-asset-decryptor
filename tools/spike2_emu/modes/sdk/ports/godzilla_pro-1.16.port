@@ -259,6 +259,16 @@ value layered_priority_at    12
 value layered_wait_for_at    0xa0
 value layered_fg_at          0x58
 value layered_fg_flags_at    0x60
+
+# ---- the backdrop (hud-layers): a mode's clip BEHIND the HUD, in the main-play background's place --------
+# BDLBackground::v[8] (slot 8 of BDLMainplayBG's vtable) and the scene_show it calls, read off this program by
+# the shape of Premium 1.16's measured lines (docs/plans/hud-layers.md); not run in the emulator on this build.
+site backdrop_draw       0x0003fd74 0xe5903054 0xe92d4010
+site scene_show          0x0035e1ec 0xe92d4070 0xe30d415c
+data backdrop_city_vtable    0x00628cb0
+value backdrop_video_at      0x54
+value backdrop_scene_at      0x18
+text backdrop_crop           ScoreFrame
 value lamp_slot_size        40
 value lamp_slot_level       2
 value lamp_slot_alpha       3

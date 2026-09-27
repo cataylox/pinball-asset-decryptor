@@ -83,6 +83,7 @@ static struct kit_game game;
 static struct kit_lamps lamps;
 static struct kit_hud hud = { .slug = FOLDER };
 static struct kit_show show_fx;
+static struct kit_lamps ready_lamps;   /* the MAGNA GRAB insert pulsing red while MELTDOWN is ready */
 static unsigned poll, rnd = 777;
 
 enum { PHASE_BURN, PHASE_MELTDOWN };
@@ -166,7 +167,7 @@ static int heat_level(unsigned core)
 {
     return core >= 90 ? 3 : core >= 70 ? 2 : core >= 40 ? 1 : 0;
 }
-static const char *const HEAT_NAME[4] = { "STABLE", "HOT", "CRITICAL", "MELTDOWN IMMINENT" };
+static const char *const HEAT_NAME[4] = { "STABLE", "HOT", "CRITICAL", "IMMINENT" };
 static const unsigned HEAT_MULT[4] = { 1, 2, 3, 5 };
 static const unsigned HEAT_RGB[4] = { PM_RGB(255, 210, 0), PM_RGB(255, 110, 0), PM_RGB(255, 20, 0), PM_RGB(255, 255, 255) };
 
@@ -204,8 +205,8 @@ static void core_set(int core)
     }
     if (run.heat_level > was) {
         pm_log("the core is %s (%u%%): jackpots x%u", HEAT_NAME[run.heat_level], run.core, HEAT_MULT[run.heat_level]);
-        kit_hud_award(&hud, 1800, HEAT_NAME[run.heat_level], run.heat_level == 3 ? "SHOOT THE SHIELDS TO COOL HIM"
-                                                                                  : "JACKPOTS ARE WORTH MORE");
+        kit_hud_award(&hud, 1800, run.heat_level == 3 ? "MELTDOWN IMMINENT" : HEAT_NAME[run.heat_level],
+                      run.heat_level == 3 ? "SHOOT THE SHIELDS TO COOL HIM" : "JACKPOTS ARE WORTH MORE");
         sound(run.heat_level == 2 ? CUE_CRITICAL : CUE_HEAT);
     }
 }
@@ -248,7 +249,7 @@ static void show(void)
         return;
     }
     kit_hud_title(&hud, "BURNING GODZILLA", run.heat_level >= 2 ? "SHIELDS COOL THE CORE  -  OR RIDE THE HEAT"
-                                                                : "SHOOT THE RED SHOTS  -  THE HEART PAYS DOUBLE");
+                                                                : "SHOOT RED SHOTS  -  THE HEART PAYS DOUBLE");
     kit_hud_counter(&hud, 0, "CORE", core, HEAT_NAME[run.heat_level]);
     pm_snprintf(sub, sizeof sub, "X%u HEAT", HEAT_MULT[run.heat_level]);
     kit_hud_counter(&hud, 1, "JACKPOT", kit_short(v, sizeof v, jackpot_value(0)), sub);
@@ -256,6 +257,19 @@ static void show(void)
     kit_hud_counter(&hud, 2, "JACKPOTS", n, run.paid ? sub : " ");
     kit_hud_timer(&hud, -1);
     kit_hud_gauge(&hud, (int)((run.core + 9) / 10), "CORE");
+}
+
+/* The MAGNA GRAB insert pulses red while the player's MELTDOWN is ready and nothing else owns the
+ * playfield: not while we run, another of our modes runs, the game's own battle or multiball runs, or a
+ * light show plays (a show hands every insert back when it ends). */
+static void ready_light(void)
+{
+    unsigned p = pm_player();
+    int want = !run.on && !show_fx.on && !kit_running && light_mask && pm_in_game() && p >= 1 && p <= 4 &&
+               ready[p] && !kit_stock_busy(PM_STOCK_BATTLE | PM_STOCK_MULTIBALL, MODE_NAME, 0);
+    kit_lamps_begin(&ready_lamps);
+    if (want) kit_lamps_shot(&ready_lamps, light_mask, MD_RED, PM_LAMP_PULSE, 700);
+    kit_lamps_commit(&ready_lamps);
 }
 
 /* ---- start, MELTDOWN, end --------------------------------------------------------------------------- */
@@ -297,6 +311,7 @@ static int start(const char *why)
     run.one_ball_since = 0;
     ready[p] = 0;
     hits[p] = 0;
+    ready_light();                               /* the ready insert handed back */
     kit_hud_begin(&hud, "BURNING GODZILLA", "");
     show();
     kit_hud_award(&hud, 3000, "MELTDOWN MULTIBALL", "HIS HEART IS A NUCLEAR REACTOR");
@@ -423,6 +438,7 @@ static void on_shot(uint64_t shot)
     if (!pm_in_game() || p < 1 || p > 4) return;
     if (!run.on) {
         if (!light_mask || !(shot & light_mask) || !kit_fresh(&db, light_mask)) return;
+        if (kit_running) return;                 /* another of our modes owns the shot and the glass */
         if (ready[p]) {
             start("the captive ball, MELTDOWN ready");
             return;
@@ -518,7 +534,10 @@ static void on_tick(void)
     kit_hud_tick(&hud);
     kit_show_tick(&show_fx, &lamps);
     pa_tick(&own);
-    if (++poll % KIT_POLL == 0) check_triggers();
+    if (++poll % KIT_POLL == 0) {
+        check_triggers();
+        ready_light();
+    }
     if (kit_new_game(&game)) {
         for (p = 0; p < 5; p++) hits[p] = 0, ready[p] = 0;
         pm_log("new game: the captive ball counts cleared");

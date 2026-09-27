@@ -99,7 +99,21 @@ included. Neither is how Stern presents a mode.
   screen and the total; both light shows over 83 placed inserts and 4 GI strings; no render stall. Fixed
   from it: the badge moved to the BATTLE slot (it covered the left counter), the gauge moved under the
   right counter, the game's framed awards dropped while a backdrop is up (their words sat on the title).
+- 2026-09-27, run t6 (all six modes in one game, Try it's set on a stock Premium 1.16 copy, `C:\tmp\pad_hud\t6`,
+  sheets `sheet_<mode>.jpg`): segv 0, fatal 0, the baseline 6 throws, no render gap. MASER (two barrages,
+  the chain broken), OXYGEN (won), MELTDOWN (the whole flow to the super jackpot) and ANGUIRUS (the entrance,
+  spikes, two rolls, the gauge) played as designed: intros full screen, loops behind the HUD, event clips,
+  full-screen endings, totals. GHIDORAH timed out and FINAL WARS started late: the play script lost the lit
+  head after a sever (it read the log's "lit X HEAD", a sever says "the lit head: X").
+- 2026-09-27, the desk tests (`test_spike2_intricate_modes.py`, 108 under WSL) rewritten for the HUD, clips
+  and MELTDOWN. From their review: MELTDOWN's ready insert (MAGNA GRAB pulsing red, its own lamp group,
+  dark while any other mode, a stock battle/multiball or a light show runs); the captive ball left alone
+  while another of our modes runs (it is OXYGEN's hold-off); four HUD texts shortened to fit; OXYGEN's
+  "1 SPIN TO GO"; the desk harness holds six modes' HUD nodes and has the Left spinner.
 - The six examples keep 20 calls: Premium 1.16 measures 21 call carriers (`mode_sounds.Carriers.calls`).
+- **Owed:** a hardware run; the Pro 1.15/1.16 backdrop port lines are derived from the programs by the shape
+  of Premium's measured ones, never run in the emulator; cues past the carrier limit (GHIDORAH's regrow and
+  others) are not carried.
 
 ## How to test it
 
