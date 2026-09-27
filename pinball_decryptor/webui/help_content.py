@@ -2522,8 +2522,11 @@ PREVIEW_HELP = {
              "keep it to letters, digits and _. An assets.json beside the code "
              "names a clip, a picture, music and calls of the mode's own, and Try "
              "it and Write compile the mode in with them. The Code modes line "
-             "lists each one. On a Godzilla title, New > Mode in C adds five "
-             "examples written in C. Their clips, music and calls are cut from "
+             "lists each one. On a Godzilla title, New > Mode in C adds six "
+             "examples written in C, among them the MELTDOWN multiball, lit by "
+             "ten Magna captive-ball hits. Each plays its clips full-screen behind "
+             "a HUD of its own, with a clip and a light show at its start and "
+             "end. Their clips, music and calls are cut from "
              "your own copy of the films: until they are, the example's page says "
              "which films it needs, with Choose your films folder…. A code mode "
              "has no form, so Start mode now cannot reach it."),
