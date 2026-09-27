@@ -233,8 +233,13 @@ def test_the_playfield_title_tag_is_at_the_front():
 _BOARD = r'''
 t=$(mktemp -d) || exit 1
 export PAD_BOARD="$t/board" PAD_HOME="$t/home" PAD_SLOTS_MAX=3
-mkdir -p "$PAD_HOME"
-L() { bash "$R/riglock.sh" "$@"; }
+mkdir -p "$PAD_HOME" "$t/rig"
+# riglock's own copy with an alive.sh that sees no processes: the real one
+# reads /proc, and on a dev box with other sessions' rigs up "a run is still
+# up" is the right answer there, not what these tests are about.
+cp "$R/riglock.sh" "$R/padpath.sh" "$R/padslot.sh" "$t/rig/"
+printf 'echo 0\n' > "$t/rig/alive.sh"
+L() { bash "$t/rig/riglock.sh" "$@"; }
 '''
 
 

@@ -41,7 +41,7 @@ clean() { printf '%s' "$*" | tr -d '"\\\r\n' | tr -cd '[:print:]' | cut -c1-80; 
 now() { date +%s; }
 lockf() { echo "$BOARD/slot-$1.lock"; }
 runf() { echo "$BOARD/slot-$1.run"; }
-mtime() { stat -c %Y "$1" 2>/dev/null || echo 0; }
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }   # GNU, then BSD/macOS
 
 valid_slot() {
     case "$1" in ''|*[!0-9]*) die "not a slot number: '$1'" ;; esac

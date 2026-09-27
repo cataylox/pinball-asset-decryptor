@@ -84,6 +84,20 @@ def _isolate_rig_dirs(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_rig_slot(monkeypatch):
+    """Every test starts on rig 0 with no ticket label and no board of its own
+    (docs/plans/rig_slots.md), whatever the developer's shell or an earlier test
+    in the same worker left behind.  Set-then-delete so teardown restores the
+    ORIGINAL state: a bare delenv of a variable the app itself set mid-test
+    (rigslot.claim_for_ticket) records the app's value and puts it BACK, which
+    sent every later rig test in that worker to a rig 1 or 2 with no rootfs
+    (the v1.23.0 tests run, 2026-09-27)."""
+    for k in ("PAD_SLOT", "PAD_PATHS_SLOT", "PAD_LABEL", "PAD_TICKET", "PAD_BOARD"):
+        monkeypatch.setenv(k, "")
+        monkeypatch.delenv(k)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_title_cache(tmp_path_factory, monkeypatch):
     """Every test gets its own empty per-build cache (title_reader.cache_dir: ports and
     tables worked out on this machine), so no test reads or writes the developer's own,
