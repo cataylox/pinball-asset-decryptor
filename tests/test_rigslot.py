@@ -18,9 +18,11 @@ def board(tmp_path, monkeypatch):
     monkeypatch.setenv("PAD_BOARD_WIN", str(tmp_path))
     for k in ("PAD_SLOT", "PAD_LABEL", "PAD_TICKET"):
         monkeypatch.delenv(k, raising=False)
-    rigslot._claimed.clear()
+    for v in (rigslot._claimed, rigslot._home):
+        v.clear()
     yield tmp_path
-    rigslot._claimed.clear()
+    for v in (rigslot._claimed, rigslot._home):
+        v.clear()
 
 
 def _put(d, name, rec, age=0):
@@ -69,43 +71,97 @@ def test_the_board_reads_holders_runs_and_stale_runs(board):
     assert rows[1]["colour"] == rigslot.COLOURS[1]
 
 
-def test_a_ticket_app_claims_a_free_rig_and_gives_it_back(board, monkeypatch):
+def _lock(d, n):
+    p = os.path.join(str(d), "slot-%d.lock" % n)
+    return json.loads(open(p).read()) if os.path.exists(p) else None
+
+
+def test_a_ticket_app_holds_no_rig_until_it_runs(board, monkeypatch):
+    """David 2026-09-27: a rig is locked only while it is actively used. The
+    window opening takes nothing; the title names the ticket."""
+    monkeypatch.setenv("PAD_TICKET", "PAD-7")
+    assert not os.listdir(str(board))
+    assert rigslot.title_tag() == "PAD-7"
+    assert rigslot.slot() == 0
+
+
+def test_start_takes_a_free_rig_and_stop_gives_it_back(board, monkeypatch):
     monkeypatch.setenv("PAD_TICKET", "PAD-7")
     _put(board, "slot-1.lock", {"slot": 1, "who": "item/48"})
-    assert rigslot.claim_for_ticket() == 2
+    assert rigslot.claim_for_run() == 2
     assert os.environ["PAD_SLOT"] == "2"
-    rec = json.loads(open(os.path.join(str(board), "slot-2.lock")).read())
-    assert rec["who"] == "PAD-7" and rec["what"] == "app"
+    assert _lock(board, 2)["who"] == "PAD-7"
     rigslot.release_claimed()
-    assert not os.path.exists(os.path.join(str(board), "slot-2.lock"))
-    assert os.path.exists(os.path.join(str(board), "slot-1.lock"))   # not ours
-    monkeypatch.delenv("PAD_SLOT")
+    assert _lock(board, 2) is None
+    assert _lock(board, 1)["who"] == "item/48"                    # not ours
+
+
+def test_the_next_start_asks_for_the_same_rig_first(board, monkeypatch):
+    """Its NVRAM and save states are in that rig."""
+    monkeypatch.setenv("PAD_TICKET", "PAD-7")
+    _put(board, "slot-1.lock", {"slot": 1, "who": "item/48"})
+    assert rigslot.claim_for_run() == 2
+    rigslot.release_claimed()
+    os.remove(os.path.join(str(board), "slot-1.lock"))            # rig 1 is free now
+    assert rigslot.claim_for_run() == 2
+
+
+def test_a_run_up_keeps_the_rig_through_a_release(board, monkeypatch):
+    monkeypatch.setenv("PAD_TICKET", "PAD-7")
+    assert rigslot.claim_for_run() == 1
+    _put(board, "slot-1.run", {"slot": 1, "game": "godzilla_pro", "started": 1})
+    rigslot.release_claimed()
+    assert _lock(board, 1)["who"] == "PAD-7"
 
 
 def test_release_never_removes_a_lock_someone_else_took_over(board, monkeypatch):
     monkeypatch.setenv("PAD_TICKET", "PAD-7")
-    assert rigslot.claim_for_ticket() == 1
+    assert rigslot.claim_for_run() == 1
     _put(board, "slot-1.lock", {"slot": 1, "who": "item/48"})     # replaced
     rigslot.release_claimed()
-    assert os.path.exists(os.path.join(str(board), "slot-1.lock"))
-    monkeypatch.delenv("PAD_SLOT")
+    assert _lock(board, 1)["who"] == "item/48"
 
 
-def test_no_ticket_or_a_chosen_rig_claims_nothing(board, monkeypatch):
-    assert rigslot.claim_for_ticket() == 0
-    assert not os.listdir(str(board))
+def test_a_lapsed_hold_is_taken_only_when_no_rig_is_free(board, monkeypatch):
     monkeypatch.setenv("PAD_TICKET", "PAD-7")
-    monkeypatch.setenv("PAD_SLOT", "3")
-    assert rigslot.claim_for_ticket() == 3
-    assert not os.listdir(str(board))
+    old = rigslot.IDLE_S + 60
+    _put(board, "slot-1.lock", {"slot": 1, "who": "PAD-3"}, age=old)     # lapsed
+    assert rigslot.claim_for_run() == 2                           # free first
+    rigslot.release_claimed()
+    for n in (2, 3, 4):
+        _put(board, "slot-%d.lock" % n, {"slot": n, "who": "x%d" % n})  # active
+    assert rigslot.claim_for_run() == 1                           # then the lapsed one
+    assert _lock(board, 1)["who"] == "PAD-7"
+    assert not [f for f in os.listdir(str(board)) if ".seize." in f]
 
 
-def test_every_rig_held_leaves_the_app_on_the_main_rig(board, monkeypatch):
+def test_every_rig_in_use_refuses_the_start(board, monkeypatch):
     monkeypatch.setenv("PAD_TICKET", "PAD-7")
     for n in range(1, rigslot.SLOTS_MAX + 1):
         _put(board, "slot-%d.lock" % n, {"slot": n, "who": "x"})
-    assert rigslot.claim_for_ticket() == 0
+    assert rigslot.claim_for_run() is None
     assert "PAD_SLOT" not in os.environ
+
+
+def test_no_ticket_or_a_chosen_rig_claims_nothing(board, monkeypatch):
+    assert rigslot.claim_for_run() == 0
+    assert not os.listdir(str(board))
+    monkeypatch.setenv("PAD_TICKET", "PAD-7")
+    monkeypatch.setenv("PAD_SLOT", "3")
+    assert rigslot.claim_for_run() == 3
+    assert not os.listdir(str(board))
+
+
+def test_the_board_says_running_active_and_lapsed(board):
+    now = time.time()
+    _put(board, "slot-1.lock", {"slot": 1, "who": "a"})
+    _put(board, "slot-1.run", {"slot": 1, "game": "g", "started": 1})
+    _put(board, "slot-2.lock", {"slot": 2, "who": "b"}, age=60)
+    _put(board, "slot-3.lock", {"slot": 3, "who": "c"}, age=rigslot.IDLE_S + 60)
+    rows = {r["slot"]: r for r in rigslot.board(now=now)}
+    assert [rows[n]["state"] for n in range(5)] == ["free", "running", "active",
+                                                   "lapsed", "free"]
+    assert 55 <= rows[2]["idle_s"] <= 65
 
 
 def test_the_colours_match_the_playfield_band():

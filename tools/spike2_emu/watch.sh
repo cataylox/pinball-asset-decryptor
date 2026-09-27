@@ -31,6 +31,9 @@ set -u
 # it is not, say how, rather than letting ensurebuild write into an empty
 # mountpoint directory that the next `slot.sh up` would then hide.
 pad_slot_ready || exit 1
+# THE LEASE (riglock.sh): this slot is ours for the run, or the run does not
+# start - another session's run in it is not ours to boot on top of.
+pad_slot_use run || exit 1
 mkdir -p "$PAD_LOGDIR" 2>/dev/null && pad_give_back "$PAD_LOGDIR"
 # WHO this run is for, fixed once for the whole run and every child: every
 # window it opens puts it in the title bar (pad_title_tag), and the board's
@@ -1194,6 +1197,8 @@ teardown() {
     echo
     echo "[watch] stopping..."
     rm -f "$BOARD_RUN" 2>/dev/null
+    # the lease's idle clock starts now, not when the slot was taken
+    touch -c "$(pad_board_dir)/slot-$PAD_SLOT.lock" 2>/dev/null
     [ -n "$GAMEPG" ] && kill -9 -"$GAMEPG" 2>/dev/null
     # The only two patterns that actually match the guest; see alive.sh for why
     # the rig's historic 'godzilla_pro/game' pattern never could.

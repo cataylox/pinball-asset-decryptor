@@ -348,6 +348,110 @@ rm -rf "$t"
     assert "turtles_pro STALE" in out
 
 
+# --------------------------------------------------------------------------
+# A LOCK IS A LEASE (PAD-229): held only while the rig is in use
+# --------------------------------------------------------------------------
+
+_OLD = r'''old() { touch -d '10 minutes ago' "$1" 2>/dev/null || touch -t 200001010000 "$1"; }
+'''
+
+
+def test_an_unused_lock_lapses_and_list_says_so():
+    rc, out, err = _sh(_BOARD + _OLD + r'''
+L take --slot 1 PAD-228 app >/dev/null 2>&1
+L take --slot 2 PAD-226 build >/dev/null 2>&1
+old "$PAD_BOARD/slot-1.lock"
+L list | sed -n 3,4p
+rm -rf "$t"
+''')
+    one, two = out.splitlines()
+    assert "(PAD-228)" in one and "LAPSED" in one
+    assert "PAD-226" in two and re.search(r"idle [0-9]s", two)
+
+
+def test_take_any_prefers_a_free_slot_then_seizes_a_lapsed_one():
+    rc, out, err = _sh(_BOARD + _OLD + r'''
+L take --slot 1 PAD-228 app >/dev/null 2>&1
+old "$PAD_BOARD/slot-1.lock"
+L take --any PAD-231 first 2>/dev/null
+L take --any PAD-232 second 2>/dev/null
+L take --any PAD-233 third
+L take --any PAD-234 none left 2>/dev/null || echo "full"
+sed -n 's/.*"who":"\([^"]*\)".*/\1/p' "$PAD_BOARD/slot-1.lock"
+ls "$PAD_BOARD" | grep -c seize
+rm -rf "$t"
+''')
+    assert out.splitlines() == ["slot=2", "slot=3", "slot=1", "full", "PAD-233", "0"]
+    assert "was PAD-228's" in err
+
+
+def test_a_lapsed_lock_with_a_run_up_is_not_lapsed():
+    rc, out, err = _sh(_BOARD + _OLD + r'''
+L take --slot 1 PAD-228 run >/dev/null 2>&1
+old "$PAD_BOARD/slot-1.lock"
+printf '{"slot":1,"game":"godzilla_pro","started":1}\n' > "$PAD_BOARD/slot-1.run"
+L take --slot 1 PAD-231 mine 2>/dev/null || echo "held"
+rm -rf "$t"
+''')
+    assert out.strip() == "held"
+
+
+def test_use_renews_mine_takes_a_free_or_lapsed_one_and_refuses_one_in_use():
+    rc, out, err = _sh(_BOARD + _OLD + r'''
+L use 1 PAD-231 run 2>/dev/null && echo "free: taken"
+old "$PAD_BOARD/slot-1.lock"
+L use 1 PAD-231 run 2>/dev/null && echo "mine: renewed"
+L list | sed -n 3p | grep -Eq "idle [0-9]s" && echo "fresh again"
+L use 1 PAD-232 stop 2>/dev/null || echo "in use: refused"
+old "$PAD_BOARD/slot-1.lock"
+L use 1 PAD-232 stop 2>/dev/null && echo "lapsed: taken"
+rm -rf "$t"
+''')
+    assert out.splitlines() == ["free: taken", "mine: renewed", "fresh again",
+                                "in use: refused", "lapsed: taken"]
+
+
+def test_a_rig_command_on_someone_elses_slot_is_refused():
+    """pad_slot_use - what watch.sh, killgame.sh and restorestate.sh say first.
+    A session whose lease lapsed, and whose slot was taken meanwhile, must not
+    Stop the new holder's run."""
+    rc, out, err = _sh(_BOARD + r'''
+L take --slot 2 PAD-226 godzilla run >/dev/null 2>&1
+u() { PAD_SLOT=2 PAD_LABEL=$1 bash -c '. "$0/padpath.sh"; pad_slot_use stop' "$t/rig"; }
+u PAD-231 2>/dev/null || echo "refused"
+u PAD-226 && echo "mine"
+PAD_SLOT=2 bash -c '. "$0/padpath.sh"; pad_slot_use stop && echo "nobody to name: as before"' "$t/rig"
+PAD_NO_CLAIM=1 PAD_SLOT=2 PAD_LABEL=PAD-231 bash -c '. "$0/padpath.sh"; pad_slot_use && echo "opted out"' "$t/rig"
+rm -rf "$t"
+''')
+    assert out.splitlines() == ["refused", "mine", "nobody to name: as before",
+                                "opted out"]
+
+
+def test_a_test_never_writes_the_real_board():
+    """Under pytest with no board of its own, pad_slot_use does nothing - a
+    ticket worktree's tests would otherwise take rigs on the developer's board."""
+    rc, out, err = _sh(r'''
+t=$(mktemp -d); mkdir -p "$t/rig"
+cp "$R/riglock.sh" "$R/padpath.sh" "$R/padslot.sh" "$t/rig/"
+printf 'echo "riglock ran"\n' > "$t/rig/riglock.sh"
+PAD_HOME=$t PAD_SLOT=1 PAD_LABEL=PAD-231 PYTEST_CURRENT_TEST=x \
+    bash -c '. "$0/padpath.sh"; pad_slot_use' "$t/rig"
+echo "rc=$?"
+rm -rf "$t"
+''')
+    assert out.splitlines() == ["rc=0"]
+
+
+def test_the_scripts_that_act_on_a_slot_say_so_first():
+    for name, what in (("watch.sh", "run"), ("killgame.sh", "stop"),
+                       ("restorestate.sh", "restore")):
+        s = open(os.path.join(RIG, name), encoding="utf-8").read()
+        assert "pad_slot_use %s || exit 1" % what in s, name
+    b = open(os.path.join(RIG, "rigbatch.sh"), encoding="utf-8").read()
+    assert b.count('PAD_LABEL="$WHO" bash "$RIG/killgame.sh"') == 2
+
+
 def test_the_board_lives_on_the_windows_side_of_a_windows_checkout():
     rc, out, err = _sh(r'''
 RIG=/mnt/c/Users/pat/Documents/pad/tools/spike2_emu

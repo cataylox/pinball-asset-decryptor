@@ -53,13 +53,17 @@ function ago(s) {
 function RigStrip({ s }) {
   const rigs = s.rigs || [];
   const mine = rigs.find((r) => r.mine) || { slot: 0 };
-  const busy = rigs.filter((r) => r.holder || r.run);
+  // A LAPSED hold is a free rig (riglock.sh: a lock is a lease, held only
+  // while the rig is used), so it is neither shown as held nor counted busy.
+  const held = (r) => (r.holder && r.state !== "lapsed") || r.run;
+  const busy = rigs.filter(held);
   if (!mine.slot && !busy.some((r) => !r.mine)) return null;
-  const chips = rigs.filter((r) => r.mine || r.holder || r.run).map((r) => {
+  const chips = rigs.filter((r) => r.mine || held(r)).map((r) => {
     const run = r.run;
     const what = run ? (run.stale ? run.game + " (no heartbeat " + ago(run.up_s) + ")"
                                   : run.game + " running " + ago(run.up_s))
-                     : (r.doing || "held");
+                     : (r.doing || "held") + (r.state === "active" && r.idle_s != null
+                                              ? ", idle " + ago(r.idle_s) : "");
     const who = r.holder || (run && run.label) || "";
     const tipText = "Rig " + r.slot + (who ? ", held by " + who : "")
       + (r.held_s != null ? " for " + ago(r.held_s) : "")
@@ -72,7 +76,7 @@ function RigStrip({ s }) {
       <span class="emu-rig-what">${r.mine && !r.holder && !run ? "this window" : what}</span>
     </span>`;
   });
-  const free = rigs.filter((r) => r.slot && !r.holder && !r.run && !r.mine).length;
+  const free = rigs.filter((r) => r.slot && !held(r) && !r.mine).length;
   return html`<div class="row emu-rigs">
     <span class="eyebrow">Emulator rigs</span>
     ${chips}

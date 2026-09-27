@@ -4,10 +4,24 @@
 #
 #   riglock.sh take --any <who> [what...]       first free slot >= 1; prints slot=N
 #   riglock.sh take --slot N <who> [what...]    that slot or nothing
+#   riglock.sh use N <who> [what...]            "I am using N now": keep mine, take it
+#                                               if free or lapsed, refuse if it is
+#                                               someone else's and in use
 #   riglock.sh note N <what...>                 say what you are doing now
 #   riglock.sh release N [<who>]                give it back (refused while a run is up)
 #   riglock.sh list [--json]                    every slot: holder, doing, age, run
 #   riglock.sh free                             the first free slot >= 1, or exit 1
+#
+# A LOCK IS A LEASE, HELD ONLY WHILE THE RIG IS IN USE (David, 2026-09-27: "it
+# only locks when it is ACTIVELY using it"). A held slot is RUNNING while a run
+# is up in it, ACTIVE for PAD_LOCK_IDLE seconds (default 300) after its holder
+# last used it - a run ending, a rig command, a note - and LAPSED after that.
+# A lapsed slot is free to anyone: `take` seizes it (free slots first), and
+# the holder's own next rig command takes it straight back if nobody did
+# (watch.sh, killgame.sh and restorestate.sh call `use` before they act - see
+# pad_slot_use in padpath.sh). So a session never has to remember to release,
+# and a ticket that was merged, or a window that was killed, holds nothing
+# five minutes later.
 #
 # <who> names the holder the way every window of its run will: the item branch
 # (item/48), the triage ticket (PAD-231) or the feature branch. <what> is a few
@@ -35,6 +49,8 @@ BOARD=$(pad_board_dir)
 LEGACY=$PAD_HOME/.pad_rig_lock
 # A run record older than this without a heartbeat is a run that died hard.
 RUN_FRESH=${PAD_RUN_FRESH:-120}
+# A held slot nobody has used for this long has LAPSED (see the top).
+IDLE=${PAD_LOCK_IDLE:-300}
 
 die() { echo "riglock: $*" >&2; exit 1; }
 clean() { printf '%s' "$*" | tr -d '"\\\r\n' | tr -cd '[:print:]' | cut -c1-80; }
@@ -73,11 +89,70 @@ held() {                          # <slot> -> 0 if held (any form)
     return 1
 }
 
+last_use() {                      # <slot> -> epoch: the newest of lock, legacy file, run record
+    local m=0 x p
+    for p in "$(lockf "$1")" "$(runf "$1")"; do
+        [ -f "$p" ] || continue
+        x=$(mtime "$p"); [ "$x" -gt "$m" ] && m=$x
+    done
+    if [ "$1" = 0 ] && [ -f "$LEGACY" ]; then
+        x=$(mtime "$LEGACY"); [ "$x" -gt "$m" ] && m=$x
+    fi
+    echo "$m"
+}
+
+# Is slot N being USED - by what it is running, not by what the machine is?
+# The run record is the witness everywhere. alive.sh's process count is asked
+# only for slots >= 1: on slot 0 it also counts every process whose
+# environment this account cannot read (another account's run in ANY slot -
+# padslot.sh), so it would keep slot 0's lease alive for somebody else's run.
+running() {                       # <slot>
+    local f
+    f=$(runf "$1")
+    if [ -f "$f" ] && [ $(( $(now) - $(mtime "$f") )) -lt "$RUN_FRESH" ]; then
+        return 0
+    fi
+    [ "$1" != 0 ] || return 1
+    [ "$(PAD_SLOT=$1 bash "$RIG/alive.sh" --total 2>/dev/null || echo 0)" != 0 ]
+}
+
+state() {                         # <slot> -> free | running | active | lapsed
+    held "$1" || { echo free; return 0; }
+    if running "$1"; then echo running
+    elif [ $(( $(now) - $(last_use "$1") )) -lt "$IDLE" ]; then echo active
+    else echo lapsed; fi
+}
+
+# Take a LAPSED slot's lock away from its old holder. The rename is the atomic
+# step: of two sessions seizing one slot, one moves the file and the other finds
+# nothing to move. The moved file is judged again, because its holder may have
+# used the slot between our look and our move: then it goes back.
+seize() {                         # <slot> -> 0 if the slot is now unheld
+    local f tmp prev
+    f=$(lockf "$1"); tmp="$f.seize.$$"
+    if [ -f "$f" ]; then
+        mv "$f" "$tmp" 2>/dev/null || return 1
+        if [ $(( $(now) - $(mtime "$tmp") )) -lt "$IDLE" ] || running "$1"; then
+            ( set -C; cat "$tmp" > "$f" ) 2>/dev/null
+            rm -f "$tmp"
+            return 1
+        fi
+        prev=$(pad_board_field "$tmp" who)
+        rm -f "$tmp"
+        echo "riglock: slot $1 was ${prev:-somebody}'s, unused for $(age "$IDLE")+ - lapsed, taken over" >&2
+    fi
+    [ "$1" = 0 ] && rm -f "$LEGACY"
+    return 0
+}
+
 take_one() {                      # <slot> <who> <what>
     local f t
     f=$(lockf "$1")
     t=$(now)
-    held "$1" && return 1
+    if held "$1"; then
+        [ "$(state "$1")" = lapsed ] || return 1
+        seize "$1" || return 1
+    fi
     # shellcheck disable=SC2094
     if ! ( set -C; write_lock "$1" "$2" "$3" "$t" > "$f" ) 2>/dev/null; then
         return 1
@@ -124,15 +199,44 @@ cmd_take() {
         mount_hint "$slot"
         return
     fi
+    # Free slots first; a lapsed one only when none is free, so a holder who
+    # stepped away for a while usually finds its slot (and what it built and
+    # saved in it) still there when it comes back.
     for n in $(seq 1 "$PAD_SLOTS_MAX"); do
-        if take_one "$n" "$who" "$what"; then
-            echo "slot=$n"
-            mount_hint "$n"
-            return
-        fi
+        held "$n" && continue
+        take_one "$n" "$who" "$what" && { echo "slot=$n"; mount_hint "$n"; return; }
+    done
+    for n in $(seq 1 "$PAD_SLOTS_MAX"); do
+        take_one "$n" "$who" "$what" && { echo "slot=$n"; mount_hint "$n"; return; }
     done
     cmd_list >&2
-    die "every slot 1..$PAD_SLOTS_MAX is held"
+    die "every slot 1..$PAD_SLOTS_MAX is in use"
+}
+
+# "I am using slot N now" - what watch.sh, killgame.sh and restorestate.sh say
+# (pad_slot_use in padpath.sh) before they touch a slot. Mine: the lease is
+# renewed. Free or lapsed: it is mine now. Someone else's and in use: refused,
+# because a Stop or a restore there would land on their run.
+cmd_use() {
+    local n=${1:-} who cur what
+    valid_slot "$n"
+    who=$(clean "${2:-}")
+    [ -n "$who" ] || die "use needs <who>: the item, ticket or branch this is for"
+    shift 2
+    what=$(clean "${*:-in use}")
+    cur=$(pad_board_field "$(lockf "$n")" who)
+    if [ -n "$cur" ] && [ "$cur" = "$who" ]; then
+        touch -c "$(lockf "$n")" 2>/dev/null
+        [ "$n" = 0 ] && touch -c "$LEGACY" 2>/dev/null
+        return 0
+    fi
+    mkdir -p "$BOARD" || die "cannot create the board at $BOARD"
+    if take_one "$n" "$who" "$what"; then
+        echo "riglock: slot $n is $who's now (it was free)" >&2
+        return 0
+    fi
+    cmd_show "$n" >&2
+    die "slot $n is ${cur:-held}'s and in use - take one of your own: riglock.sh take --any $who"
 }
 
 cmd_note() {
@@ -187,8 +291,14 @@ cmd_show() {                      # one human line for slot N
         if [ "$rt" -lt "$RUN_FRESH" ]; then run="$game up $(age $(( t - ${st:-$t} )))"
         else run="$game STALE (no heartbeat for $(age "$rt"))"; fi
     fi
-    if [ -n "$who" ]; then lage=$(age $(( t - $(mtime "$f") ))); else lage=""; who="(free)"; fi
-    printf '%-4s %-22s %-24s %-6s %s\n' "$n" "$who" "${what:-}" "$lage" "$run"
+    if [ -n "$who" ]; then
+        case "$(state "$n")" in
+            running) lage="running" ;;
+            active) lage="idle $(age $(( t - $(last_use "$n") )))" ;;
+            *) lage="LAPSED"; who="($who)" ;;
+        esac
+    else lage=""; who="(free)"; fi
+    printf '%-4s %-22s %-24s %-9s %s\n' "$n" "$who" "${what:-}" "$lage" "$run"
 }
 
 cmd_list() {
@@ -197,33 +307,37 @@ cmd_list() {
         printf '{"board":"%s","max":%s,"now":%s,"slots":[' "$BOARD" "$PAD_SLOTS_MAX" "$(now)"
         for n in $(seq 0 "$PAD_SLOTS_MAX"); do
             [ "$n" = 0 ] || printf ','
-            printf '{"slot":%s,"lock":%s,"lock_mtime":%s,"run":%s,"run_mtime":%s}' "$n" \
+            printf '{"slot":%s,"lock":%s,"lock_mtime":%s,"run":%s,"run_mtime":%s,"state":"%s","last_use":%s,"idle_limit":%s}' "$n" \
                 "$( [ -f "$(lockf "$n")" ] && tr -d '\n' < "$(lockf "$n")" || echo null)" \
                 "$(mtime "$(lockf "$n")")" \
                 "$( [ -f "$(runf "$n")" ] && tr -d '\n' < "$(runf "$n")" || echo null)" \
-                "$(mtime "$(runf "$n")")"
+                "$(mtime "$(runf "$n")")" "$(state "$n")" "$(last_use "$n")" "$IDLE"
         done
         echo ']}'
         return
     fi
-    printf '%-4s %-22s %-24s %-6s %s\n' SLOT HOLDER DOING HELD RUN
+    printf '%-4s %-22s %-24s %-9s %s\n' SLOT HOLDER DOING STATE RUN
     for n in $(seq 0 "$PAD_SLOTS_MAX"); do cmd_show "$n"; done
 }
 
-cmd_free() {
+cmd_free() {                      # a free slot, else a lapsed one
     local n
     for n in $(seq 1 "$PAD_SLOTS_MAX"); do
         held "$n" || { echo "$n"; return 0; }
+    done
+    for n in $(seq 1 "$PAD_SLOTS_MAX"); do
+        [ "$(state "$n")" = lapsed ] && { echo "$n"; return 0; }
     done
     return 1
 }
 
 case "${1:-}" in
     take) shift; cmd_take "$@" ;;
+    use) shift; cmd_use "$@" ;;
     note) shift; cmd_note "$@" ;;
     release) shift; cmd_release "$@" ;;
     list|"") shift || true; cmd_list "$@" ;;
     show) valid_slot "${2:-}"; cmd_show "$2" ;;
     free) cmd_free ;;
-    *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
