@@ -87,10 +87,26 @@ included. Neither is how Stern presents a mode.
 ## Status
 
 - 2026-09-26: branch created from main 7d4e6a36 (local only, neutral name, like feature/ball-manager).
-  Runs h1-h3 (emulator, Premium 1.16 showcase card copy, `C:\tmp\pad_hud`): the draw order measured;
-  the city replaced by our hook with the HUD drawn over it (h3), video black - being chased (h4).
+  Runs h1-h12 (emulator, Premium 1.16, `C:\tmp\pad_hud`): the draw order measured, the game's own
+  background route found (h12). b1: `pm_backdrop` in the runtime, emulator-proven with
+  `backdrop_test_mode.c` (intro, loop behind the HUD, one-shot, the Maser's award and back, LOOPS, no
+  render stall).
+- 2026-09-27: `mode_hud.py` (the HUD at the edges, the game font carried from the Ebirah scene, the stock
+  badge relabelled), clips by cue and `hud` in a code mode's assets through Write and Try it, light shows
+  (`pm_lamp_xy`, `pm_lamp_paint`, `kit_show`), all six examples reworked, MELTDOWN added. Run t1 (KING
+  GHIDORAH alone, Try it's set on a stock Premium 1.16 copy): the HUD loads and every piece is found; the
+  intro, the loop behind the HUD, the head counters, the badge, the award line, the lost ending full
+  screen and the total; both light shows over 83 placed inserts and 4 GI strings; no render stall. Fixed
+  from it: the badge moved to the BATTLE slot (it covered the left counter), the gauge moved under the
+  right counter, the game's framed awards dropped while a backdrop is up (their words sat on the title).
+- The six examples keep 20 calls: Premium 1.16 measures 21 call carriers (`mode_sounds.Carriers.calls`).
 
 ## How to test it
 
-- Desk: `tests/test_spike2_intricate_modes.py` (the harness plays every flow).
-- Emulator: a copy of the showcase card with the new build, runs under `C:\tmp\pad_hud\`.
+- Desk: `tests/test_spike2_intricate_modes.py` under WSL (the harness needs an ELF toolchain:
+  `python3 -m pytest -o addopts='' tests/test_spike2_intricate_modes.py`); `test_stern_code_modes.py`,
+  `test_stern_scene_write.py`, `test_stern_mode_assets.py`, `test_stern_mode_runtime.py` on Windows.
+- Emulator: `C:\tmp\pad_hud\make_proj.py <proj> <example names...>` (a project on the stock Premium 1.16
+  image, the examples cut from the films), `build_set.py <proj> stock_run.raw <base>` (Try it's set, Write's
+  own code), then `t1.sh` with `TRY=<base> RUN=<out> SCRIPT=<play script>` under the rig lock.
+- The real check is the app: Modes tab > Examples adds each mode from the films, Try it plays them.
