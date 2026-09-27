@@ -257,6 +257,18 @@ value effect_waiter_call     0x00052d58
 value layered_fg_at          0x58
 value layered_fg_flags_at    0x60
 
+# ---- the backdrop (hud-layers): a mode's clip BEHIND the HUD, in the main-play background's place --------
+# BDLBackground::v[8] draws the layered display's background element each frame: the video bank's player when
+# the object's video field (+0x54) is set, then its scene (+0x18) - the city, for the five main-play objects
+# (vtable BDLMainplayBG). scene_show(scene, 3) puts a scene in the frame's list on the current effect's layer.
+# Measured with display_probe.c (docs/plans/hud-layers.md, runs h1-h12).
+site backdrop_draw       0x0003fec4 0xe5903054 0xe92d4010
+site scene_show          0x00405d2c 0xe92d4070 0xe306427c
+data backdrop_city_vtable    0x00632ff0
+value backdrop_video_at      0x54
+value backdrop_scene_at      0x18
+text backdrop_crop           ScoreFrame
+
 # ---- named inserts (item mode-leds): MODE_SDK.md "Lights: named inserts" ----------------------------
 # The game's lamp LAYERS (lamp groups): the active list's head is the word after the free list's at
 # lamp_layers; each group holds a pointer to one 40-byte slot per light (+0), its priority (+4), its

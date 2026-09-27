@@ -233,6 +233,18 @@ int pm_clip(const char *name);        /* 1 if the game started it */
 int pm_clip_playing(void);
 void pm_clip_stop(void);
 
+/* ---- the backdrop: a clip BEHIND the HUD (hud-layers) ---------------------------------
+ * The game's own battles play their clip in the main-play background's place, with the score
+ * panel, the top bar and the timers drawn over it. pm_backdrop does the same for a mode: the clip
+ * (a stock one, or one the build added) loops in the city's place until the mode ends it (0 or
+ * ""), pm_end, or the ball ends. The game's own framed awards (the Maser) still play in that
+ * place and the loop comes back after them. A full-screen clip of yours (pm_clip, over
+ * everything, the HUD too) is played first when both are asked for: the loop waits for it. */
+#define PM_CAN_BACKDROP     0x20000u  /* pm_backdrop / pm_backdrop_once */
+int pm_backdrop(const char *name);         /* 1 = asked for; 0 = this port cannot */
+int pm_backdrop_once(const char *name);    /* play this once in the loop's place, then the loop again */
+int pm_backdrop_showing(void);             /* 1 while the backdrop is on the glass */
+
 /* ---- the game's own message screens (optional, title specific) --------------------- */
 int pm_message_set(unsigned id, const char *words);   /* show `words` wherever id is shown */
 void pm_message_restore(unsigned id);

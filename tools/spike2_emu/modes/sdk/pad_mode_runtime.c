@@ -663,7 +663,12 @@ int pm_begin(void)
     return 1;
 }
 
-void pm_end(void) { if (running == current) running = 0; }
+static void bd_reset(const char *why);
+void pm_end(void)
+{
+    if (running == current) running = 0;
+    if (!running) bd_reset("the mode ended");
+}
 int pm_running(void) { return running && running == current; }
 
 /* ---- sound ---------------------------------------------------------------------------------- */
@@ -1849,6 +1854,184 @@ static void clip_tick(void)
     clip.last = now;
 }
 
+/* ---- the backdrop: a clip BEHIND the HUD (hud-layers) --------------------------------------------
+ * How the game shows its own backgrounds (Godzilla Premium 1.16, docs/plans/hud-layers.md, runs h1-h12):
+ * every frame the layered display draws its BACKGROUND element first (site backdrop_draw,
+ * BDLBackground::v[8]): the video bank's player when the background has a clip (the object's video field,
+ * +backdrop_video_at), then the element's own scene (+backdrop_scene_at). The HUD scenes are drawn after
+ * it, so a battle's clip sits under the score panel, the top bar and the timers. In main play the
+ * background is one of the city objects (data backdrop_city_vtable), whose scene is the city.
+ *
+ * A player WE put in the frame's list, however placed, stopped the game's display processes (h3-h11).
+ * What works is the game's own route, taken from inside the background element's draw (the layered
+ * display's process): clip_play there, and the city object's video field set to the surface, as
+ * BDLBackground::v[13] does for a background with a clip. The game's update then advances the player, its
+ * draw shows it, and the city's own scene show is handed the player instead - already in the frame's
+ * list, so display_draw refuses it and the city is not drawn (h12, variant 6).
+ *
+ * The one surface is shared: a framed award of the game's (the Maser) plays in its place and the loop is
+ * played again once the surface is idle; while one of our full-screen clips plays (pm_clip, layer 0) the
+ * video field is 0, so the tick's draw of it is not refused. Everything here runs on the display
+ * processes' thread (the hooks) or the tick's, which is the same thread (the runtime logs both). */
+static struct {
+    char loop[96], once[96];          /* the loop, and a clip to play once in its place first */
+    int on, pending, playing_once, lost;
+    unsigned elem, obj;               /* the background element drawing now; the city whose field we set */
+    unsigned long since;              /* pm_ms() of the last play */
+    unsigned plays, frames;
+} bd;
+static unsigned char *disp_layered_mgr;   /* the layered display's manager (display priority, below) */
+
+static unsigned bd_surface_state(void)
+{
+    void *s = ((void *(*)(void))(unsigned long)fn("video_surface"))();
+    return s ? (unsigned)((int (*)(void *))(unsigned long)fn("surface_state"))(s) : 0;
+}
+
+static void bd_field(unsigned obj, unsigned v)
+{
+    if (obj) *(unsigned *)(unsigned long)(obj + (unsigned)pm_port_value("backdrop_video_at", 0x54)) = v;
+}
+
+static void bd_release(const char *why)
+{
+    if (bd.obj) {
+        bd_field(bd.obj, 0);
+        say("backdrop: taken away (%s) after %u play(s), %u frame(s)", why, bd.plays, bd.frames);
+    }
+    bd.obj = 0;
+}
+
+static void on_backdrop_draw(unsigned *r)
+{
+    bd.elem = r[0];
+}
+
+static void bd_play(unsigned e)
+{
+    const char *name = bd.once[0] ? bd.once : bd.loop;
+    const char *crop = pm_port_text("backdrop_crop");
+    int once = name == bd.once;
+    char was[96];
+    unsigned i;
+    if (!name[0]) return;
+    for (i = 0; name[i] && i + 1 < sizeof was; i++) was[i] = name[i];
+    was[i] = 0;
+    disp_clip_ours = 1;
+    ((void (*)(const char *, int, const char *))(unsigned long)fn("clip_play"))(was, once ? 0 : 1, crop ? crop : "ScoreFrame");
+    disp_clip_ours = 0;
+    bd.playing_once = once;
+    if (once) bd.once[0] = 0;
+    bd_field(e, (unsigned)(unsigned long)((void *(*)(void))(unsigned long)fn("video_surface"))());
+    bd.obj = e;
+    bd.pending = bd.lost = 0;
+    bd.since = pm_ms();
+    if (bd.plays++ < 60)
+        say("backdrop: \"%s\" %s behind the HUD, in the city 0x%08x's place", was, once ? "once" : "looped", e);
+}
+
+/* scene_show(scene, layer): the city's own scene is where the backdrop goes */
+static void on_scene_show(unsigned *r)
+{
+    unsigned e = bd.elem, playing = (unsigned)pm_port_value("surface_playing", 2);
+    if (!e || r[0] != *(unsigned *)(unsigned long)(e + (unsigned)pm_port_value("backdrop_scene_at", 0x18))) return;
+    if (!bd.on || *(unsigned *)(unsigned long)e != data("backdrop_city_vtable")) {
+        if (bd.obj) bd_release(!bd.on ? "the mode ended it" : "another background");
+        return;
+    }
+    if (bd.obj && bd.obj != e) bd_release("the city changed");
+    if (clip.on) {                     /* our full-screen clip (layer 0) plays: the tick draws it over all */
+        if (bd.obj) bd_release("a full-screen clip of ours plays");
+        bd.pending = 1;
+        return;
+    }
+    if (!bd.pending && bd.obj && !bd.lost) {
+        if (bd_surface_state() == playing) {
+            void *player = ((void *(*)(void))(unsigned long)fn("video_player"))();
+            if (player) {
+                r[0] = (unsigned)(unsigned long)player;   /* refused: it is in the list already */
+                bd.frames++;
+            }
+            return;
+        }
+        if (pm_ms() - bd.since < 1500) return;          /* still starting */
+    }
+    if (bd.lost && bd_surface_state() == playing) {      /* the game's clip on the surface: the city */
+        if (bd.obj) { bd_field(bd.obj, 0); bd.obj = 0; }
+        return;
+    }
+    bd_play(e);                        /* asked, a one-shot or the game's clip over: play (again) */
+}
+
+int pm_backdrop(const char *name)
+{
+    unsigned i;
+    if (!(can & PM_CAN_BACKDROP)) return 0;
+    if (!name || !*name) {
+        if (bd.on && !clip.on && bd.obj && bd_surface_state() == (unsigned)pm_port_value("surface_playing", 2))
+            ((void (*)(void))(unsigned long)fn("clip_stop"))();
+        bd.on = 0;
+        bd.loop[0] = bd.once[0] = 0;
+        bd.playing_once = 0;
+        bd_release("the mode ended it");
+        return 1;
+    }
+    if (bd.on && str_eq(bd.loop, name)) return 1;
+    for (i = 0; name[i] && i + 1 < sizeof bd.loop; i++) bd.loop[i] = name[i];
+    bd.loop[i] = 0;
+    bd.on = bd.pending = 1;
+    return 1;
+}
+
+int pm_backdrop_once(const char *name)
+{
+    unsigned i;
+    if (!(can & PM_CAN_BACKDROP) || !name || !*name || !bd.on) return 0;
+    for (i = 0; name[i] && i + 1 < sizeof bd.once; i++) bd.once[i] = name[i];
+    bd.once[i] = 0;
+    bd.pending = 1;
+    return 1;
+}
+
+int pm_backdrop_showing(void)
+{
+    return bd.on && bd.obj && !bd.pending && !clip.on;
+}
+
+/* the game played a clip of its own on the one surface while the backdrop is up (the clip_play hook
+ * tells us): ours is played again once the surface is idle */
+static void bd_clip_lost(void)
+{
+    if (bd.on && bd.obj) bd.lost = 1;
+}
+
+/* a ball end or leaving the game: no backdrop outlives the mode that asked for it */
+static void bd_reset(const char *why)
+{
+    if (!bd.on && !bd.obj) return;
+    bd.on = 0;
+    bd.loop[0] = bd.once[0] = 0;
+    bd_release(why);
+}
+
+static int have_sites(const char *const *names);
+static void backdrop_arm(void)
+{
+    static const char *const s[] = { "backdrop_draw", "scene_show", "clip_play", "clip_stop", "video_player",
+                                     "video_surface", "surface_state", 0 };
+    static const char *const d[] = { "backdrop_city_vtable", 0 };
+    if (!site("backdrop_draw")) return;                  /* a port without it: silent */
+    if (!(can & PM_CAN_CLIPS) || clip_v2 || clip_layer || !have_sites(s) || !have_data(d)) {
+        say("backdrop: off - the port's backdrop lines are incomplete or do not match this build");
+        return;
+    }
+    if (hook(fn("backdrop_draw"), on_backdrop_draw) && hook(fn("scene_show"), on_scene_show)) {
+        can |= PM_CAN_BACKDROP;
+        say("backdrop: on - a mode's clip plays behind the HUD in the main-play background's place "
+            "(draw 0x%08x, scene show 0x%08x)", fn("backdrop_draw"), fn("scene_show"));
+    }
+}
+
 /* ---- display priority (item 154 display) --------------------------------------------------------
  * HOW THE GAME LAYERS ITS DISPLAY (read off Godzilla Pro 1.15 and Premium 1.16, measured in the
  * emulator with display_probe.c; MODE_SDK.md "Display priority"):
@@ -2130,6 +2313,7 @@ static void on_clip_play(unsigned *r)
     unsigned char *m;
     const char *name = (const char *)(unsigned long)r[0];
     unsigned i;
+    if (!disp_clip_ours) bd_clip_lost();      /* hud-layers: the backdrop is played again after it */
     if (disp_clip_ours || !clip.on) return;
     m = disp_manager();
     if (disp_prio && m && disp_now(m) == disp_host() && disp_layered_mgr &&
@@ -3906,6 +4090,7 @@ static void on_ball_end(unsigned *r)
     stock_ball_ends++;
     EACH_MODE(m) if (m->ball_end) { current = m; m->ball_end(); }
     current = 0;
+    bd_reset("the ball ended");
     roster_owed_ball_end();
 }
 
@@ -4760,6 +4945,7 @@ static void pad_mode_start(void)
             (unsigned)ball_end_event);
     }
     display_arm();                            /* item 154 display: the clip_play hook, display priority */
+    backdrop_arm();                           /* hud-layers: a clip behind the HUD */
     if (can & PM_CAN_OWN_SOUND) hook(fn("sound_lookup"), on_sound_lookup);
     /* item 163: with /dump/soundlog.on there at the start, every request the game's sound worker
      * takes is logged ("[pad] sound <request> <n>"), so a check game is also the sound census that
@@ -4788,11 +4974,12 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
-        can & PM_CAN_AWARD_SCREEN ? " award-screen" : "", can & PM_CAN_MULTIBALL ? " multiball" : "");
+        can & PM_CAN_AWARD_SCREEN ? " award-screen" : "", can & PM_CAN_MULTIBALL ? " multiball" : "",
+        can & PM_CAN_BACKDROP ? " backdrop" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }
