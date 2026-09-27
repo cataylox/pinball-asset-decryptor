@@ -310,7 +310,7 @@ def _load_or_derive_params(emu, game_real_path, image_path, log, progress):
             params = pickle.load(open(cache, "rb"))
             # Re-derive a pre-SFX-naming cache (no ``key0``) so the container-key
             # snapshot the name mapping needs is present; harmless for decode.
-            if params and "key0" in params[0]:
+            if _params_cache_current(params):
                 log("Loaded cached codec parameters (%d sounds)."
                     % len(params), "info")
                 return params
@@ -11405,6 +11405,15 @@ def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None,
 _FORCE_SERIAL_ENCODE = os.environ.get("PAD_STERN_SERIAL_ENCODE") == "1"
 
 
+def _params_cache_current(params):
+    """A cached params list written by today's derive: every row carries ``key0`` (the
+    SFX naming) and ``findkey`` (the whole container key, None where the find faulted).
+    An older cache lacks them and is derived again, once: without ``findkey`` a mode's
+    music bed names no record and its music is silently left off the card (a Godzilla
+    Pro 1.15 cache from before the key was recorded, hud-layers 2026-09-27)."""
+    return bool(params) and "key0" in params[0] and "findkey" in params[0]
+
+
 def _params_for(gr_path, img_path, log, progress):
     """Codec params for the card — from the Extract-time cache, or derived on a
     throwaway emulator if the cache is cold (rare for Write, which follows an
@@ -11416,9 +11425,10 @@ def _params_for(gr_path, img_path, log, progress):
     if os.path.exists(cache):
         try:
             params = pickle.load(open(cache, "rb"))
-            log("Loaded cached codec parameters (%d sounds)." % len(params),
-                "info")
-            return params
+            if _params_cache_current(params):
+                log("Loaded cached codec parameters (%d sounds)." % len(params),
+                    "info")
+                return params
         except Exception:
             pass
     _note_cold_consumed(log)

@@ -268,7 +268,8 @@ value layered_fg_flags_at    0x60
 
 # ---- the backdrop (hud-layers): a mode's clip BEHIND the HUD, in the main-play background's place --------
 # BDLBackground::v[8] (slot 8 of BDLMainplayBG's vtable) and the scene_show it calls, read off this program by
-# the shape of Premium 1.16's measured lines (docs/plans/hud-layers.md); not run in the emulator on this build.
+# the shape of Premium 1.16's measured lines (docs/plans/hud-layers.md); emulator-proven on this build (hud-layers
+# run tp116b, 2026-09-27: all six Godzilla examples' loops and event clips behind the HUD, no render gap).
 site backdrop_draw       0x0003fd74 0xe5903054 0xe92d4010
 site scene_show          0x0035e1ec 0xe92d4070 0xe30d415c
 data backdrop_city_vtable    0x00628cb0

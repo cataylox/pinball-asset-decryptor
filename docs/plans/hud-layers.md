@@ -117,10 +117,20 @@ included. Neither is how Stern presents a mode.
   after the end: the ending clip stopped and the total was covered. Fixed with `pm_end_holding(ms)` in the
   runtime (the mode ends, its display hold stays 10 s for the ending, handed to the next mode at once, back
   at a drain or a tilt at once); the kit's `kit_end_after` / `kit_end_now`; the pinned object rebuilt.
+- 2026-09-27, GODZILLA PRO in the emulator (stock Pro 1.16 and Pro 1.15 copies, Try it's set from each card, the
+  play script with Pro's switch ids `C:\tmp\pad_hud\tp_play.sh`): runs tp116b and tp115, all six modes, both
+  derived backdrop lines work (the loops, event clips and the city back), segv 0, no render gap. Found and fixed:
+  Pro 1.16's shots were copied from Premium (a census, run c116: two shield targets, right = 0x100000000, and the
+  right spinner); Pro 1.16's display priority was OFF (two port values missing, derived and checked in the
+  program); a params cache written before `findkey` left every mode's music off Pro 1.15 (both cache loaders now
+  re-derive it; the derive is seconds on Godzilla); ANGUIRUS's gauge shows the two pips Pro can fill. Pro 1.16
+  carries no music for OXYGEN (no free music slot) or ANGUIRUS (its slot request 123 plays one of 16 sounds at
+  random). The game's own MASER CANNON AWARD (effect 192) comes through over GHIDORAH's ending on Premium and Pro:
+  the final blow is the Maser, and 192 beats a mode's hold; left as the game's.
 - The six examples keep 20 calls: Premium 1.16 measures 21 call carriers (`mode_sounds.Carriers.calls`).
-- **Owed:** a hardware run; the Pro 1.15/1.16 backdrop port lines are derived from the programs by the shape
-  of Premium's measured ones, never run in the emulator; cues past the carrier limit (GHIDORAH's regrow and
-  others) are not carried.
+- **Owed:** a hardware run (Premium and Pro). Cues past the carrier limit (GHIDORAH's regrow and others) are not
+  carried. Four other titles' ports miss the same display values Pro 1.16 did (Foo Fighters, John Wick, King
+  Kong, Metallica): not this branch's; a separate task.
 
 ## How to test it
 
