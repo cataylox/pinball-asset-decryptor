@@ -21,8 +21,8 @@ Pick a manufacturer on launch — each card lists every supported game:
 
 ![The manufacturer picker: one card per manufacturer with its supported games and input formats](docs/screenshots/picker.png)
 
-Point the Extract tab at a card image (or the SD card itself) and pull
-the assets out — here a Stern Godzilla LE card:
+Pick a card image (or the SD card itself) on the Select card tab, then
+pull the assets out on the Extract tab — here a Stern Godzilla LE card:
 
 ![The Extract tab with a Stern Godzilla LE SD-card image detected and per-type extract checkboxes](docs/screenshots/stern-extract.png)
 
@@ -830,8 +830,14 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    actions, along with the light/dark theme switch, update check,
    disk-space manager and voice-recognition quality (including a
    one-click reset of the downloaded voice models).
-3. **Extract tab** — pick an input file and an output folder; click
-   *Extract*. The output folder gets the decrypted assets plus a
+3. **Select card tab** — pick the card image (or the SD card itself).
+   Its *What you can do with it* panel sorts the other tabs into what
+   works straight from the card, what needs a project folder and what
+   needs an extract. Tabs that need an extract (Replace Audio / Video /
+   Images / Text, Write, Mod Pack) are greyed out with a lock until
+   there is one; they still open, under a banner that says why.
+4. **Extract tab** — shows the picked card; choose an output folder and
+   click *Extract*. The output folder gets the decrypted assets plus a
    `.checksums.md5` baseline used by the Write tab.
    In **From SD card** mode (Stern Spike 2) the game on the card you
    picked is named right under the dropdown — read off the card in
@@ -860,14 +866,14 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    accept it: the dismissal is pinned to that exact image and is stored
    in the project folder, so it holds after a restart and lifts by
    itself the next time the image changes.
-4. Modify any files in the output folder you want to change.
+5. Modify any files in the output folder you want to change.
    *(BOF specifically:* edit the human-friendly files under
    `pck/_EDITABLE ASSETS/audio|images|video|fonts/` — drop in a new
    `.wav`, `.webp`, `.ogv`, or `.ttf` with the same filename and the
    Write pipeline re-encodes it back into the matching Godot binary
    for you.  You don't need to touch the raw `.sample` / `.ctex` /
    `.fontdata` files.)*
-5. **Replace Audio tab** *(file-based plugins)* — swap a game's music /
+6. **Replace Audio tab** *(file-based plugins)* — swap a game's music /
    sound effects without copy-pasting and renaming. Scan the assets
    folder, pick a slot, and assign a replacement in almost any format
    (mp3, wav, ogg, flac, m4a, …) — it's auto-converted to the original
@@ -896,7 +902,7 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    the replacement instead of the original — the list sounds the way
    the built card will, so anything that still sounds stock is a clip
    you haven't replaced yet.
-6. **Replace Video tab** *(file-based plugins)* — the same idea
+7. **Replace Video tab** *(file-based plugins)* — the same idea
    for video: assign a replacement clip and it's re-encoded to the
    original's container / codec / resolution (transparency preserved
    where the original has it). Original and replacement preview
@@ -954,7 +960,7 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    don't matter, a colour clip is told from its black-and-white twin,
    and where the folder holds the same video more than once the best
    copy wins. Tick what you want and *Use these files at best quality*.
-7. **Write tab** — the original image and project folder carry over
+8. **Write tab** — the original image and project folder carry over
    from the Extract tab (shown read-only), and a single **Build
    Image** line shows the exact file the build will produce; click
    *Build update*. The default name ends in `…-modified` with the
