@@ -239,17 +239,42 @@ take several; what was missing was something to spread a list across them.
 - Tests: `test_rigbatch_spreads_a_list_across_rigs_and_frees_them` (stub rigs,
   Linux only - rigbatch needs setsid and flock like the rig itself).
 
+**2026-09-27, pass 4: merged, 10 cores, and cards staged off the hard disk.**
+
+- Merged to main (`a0ecce09`); the `/next` skill's rig section is the
+  riglock.sh protocol; `wsl --shutdown` made the 10 cores live (`nproc` 10)
+  and brought WSLg back.
+- **The 3-rig library sweep FAILED 5 of 12 builds** (avengers_infinity_le,
+  mando_le, deadpool_pro, dungeons_and_dragons_le, sword_of_rage_le), every
+  one on the game's own watchdog ("GAME EXIT DISPATCH TIMEOUT"), two of them
+  13 s apart on different rigs. vmstat: 3-4 processes in disk wait at every
+  sample, 16-21 % iowait. D: is a SPINNING disk (ST4000DM005): three rigs
+  reading three images made it seek until a read stalled past ten seconds.
+  The morning's one-rig stranger_things crash was the same thing on a cold
+  read. Not the rig slots: the load was I/O, not CPU (load 8 on 10 cores).
+- **`cardstage.sh`**, run by rigbatch whenever it uses more than one rig and
+  a card is on a Windows drive other than C:: ONE copier moves each card to
+  `/mnt/c/tmp/pad_cardstage` (the NVMe) a few builds ahead of the rigs - a
+  long sequential read, the one thing a hard disk does well - and each rig
+  boots its copy. robocopy (91 s for 8 GB against 111 s for cp). Copies are
+  kept for the next sweep up to `--stage-keep` GB (default 100), least
+  recently used out first, never one in use; 30 GB of the disk is always left
+  free (`PAD_STAGE_SPARE_GB`). `--stage DIR` / `--no-stage`.
+- **Proof: the five failed builds plus iron_maiden_le, 3 rigs, staged: 6/6
+  pass**, renderer at ~60 fps, 36-91 s to attract. The copies (7.5 GB in
+  46-90 s, ~100-160 MB/s) are now the floor: a cold full-library sweep reads
+  327 GB, about an hour, against ~2 h one build at a time; a re-run of
+  anything staged in the last 100 GB starts at once.
+
 **Owed**
 
-- The 3-rig proof on 10 cores, after David's next `wsl --shutdown`: the full
-  multiball list (`C:/tmp/pad_generic/mb`) through rigbatch with mb_e2e.sh as
-  the job, verdicts compared with the serial proof of 2026-09-26.
-- **At merge, the session protocol moves to `riglock.sh`** (text below):
-  `~/.claude/skills/next/SKILL.md` "The rig lock" and "Starting the app",
-  `plans/TODO.md`'s non-negotiable, and the `reference_pad_rig_lock` memory.
-  Not before: the skill is live for every session, and main's scripts do not
-  know slots, so a session following it before the merge would be told to use
-  commands main does not have.
+- The full 33-card sweep on 3 rigs, staged (about an hour, copy-bound), when
+  the machine is quiet.
+- If sweeps get re-run a lot: a bigger `--stage-keep` (the NVMe has ~300 GB
+  free; the whole library is 327 GB).
+- `plans/TODO.md`'s rig-lock non-negotiable still describes the single lock
+  (the `/next` skill and the memory were moved to riglock.sh at merge; the
+  queue itself is being retired into tickets - docs/plans/ticket_intake.md).
 - An app-driven run in a claimed rig in PAD-Runtime (the app's own distro).
   Not run in this pass: another session was running the app in PAD-Runtime on
   main's code, whose Stop is still machine-wide within that distro and on the
