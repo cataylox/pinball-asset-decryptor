@@ -1433,7 +1433,8 @@ def test_modes_tab_premium_1_16_project_offers_godzillas_names(tmp_path):
         _project(w, project)
         st = _st(w)
         names = st["profile"]["shots"]
-        assert len(names) == 21 and "Shield target center" in names and "Maser target" in names
+        assert len(names) == 24 and "Shield target center" in names and "Maser target" in names
+        assert {"Action button", "Left flipper button", "Right flipper button"} <= set(names)   # PAD-228
         assert "Left spinner" in names and "Top spinner" in names and "Shield ramp spinner" in names
         assert "Godzilla Premium/LE 1.16" in st["title_text"]
         assert st["examples"][0]["name"] == "KAIJU RUSH"

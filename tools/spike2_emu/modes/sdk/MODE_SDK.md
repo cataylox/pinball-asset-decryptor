@@ -1164,6 +1164,22 @@ seconds        0             # no clock: it ends when one ball is left
 The Modes tab's Mode page has it under Multiball: the balls, the ball save and the add-a-ball
 shot; `Runs for` 0 is no clock.
 
+**The balls on a shot (PAD-228).** `multiball_on <mask>` holds the balls back at the start: the
+first hit of that shot while the mode runs serves them. The mode's clock is then the time the
+player has to hit it (a clip or callout at the start says what to press), and time up ends the
+mode with no multiball. Once the balls come the clock stops and one ball left ends it. With the
+Action button as the shot (a `switch` line of the port, "Buttons" below) and `light_shots`, the
+button lights while the mode waits:
+
+```
+seconds        10                    # ten seconds to press it
+multiball      3 15
+multiball_on   0x1000000000000000    # Godzilla's Action button
+light_shots    ff0000 blink          # the button blinks red
+```
+
+The tab's Multiball section has it as "Balls come": (when it starts), or a shot.
+
 **What the runtime does.** At the start it asks the game for the balls; the mode does not start
 when the game refuses (no game in play, a tilt, a port without the call) and keeps its trigger
 count. It then watches the framework's count of the balls in play (`site balls_in_play`, the
@@ -1394,6 +1410,40 @@ of the line, so put a comment on a line of its own above it, never after the nam
 - The Modes tab offers the switch shots beside the port's own, and says they are not proven
   until `mode_project.SWITCH_SHOTS_PROVEN` names the port. Emulator-proven on The Beatles 1.29:
   each of 73-76 and 48-51 gave exactly one shot in play and none in attract, and 60/61 gave none.
+
+#### Buttons (PAD-228)
+
+The Action button (the game's LOCKDOWN BUTTON, switch 34 on Godzilla) and the flipper buttons (60
+left, 59 right) are switches like any other, but their descriptors carry flags 0 and no
+handler (read off all three Godzilla builds), so the rules' shot dispatch never sends them and no
+`switch_hit` broadcasts them. The switch drain's per-switch call
+(`site switch_edge`) sees every edge, so a port that hooks it hands the buttons to the modes
+through `switch` lines of their own, on bits the dispatch never sends:
+
+```
+site switch_edge      0x001e6860 0xe30433d8 0xe340307e
+site switch_drain     0x001e7540 0xe92d4ff0 0xe30b9584
+switch 34   0x1000000000000000 Action button
+switch 60   0x2000000000000000 Left flipper button
+switch 59   0x4000000000000000 Right flipper button
+lamp 282,283,284  0x1000000000000000 ACTION BUTTON  # lamp 97, I/O group 5 index 5, the cabinet front
+```
+
+A button is then a shot like the others: a mode starts on it, scores it, ends on it (`end_shot`),
+adds a ball on it or serves its multiball on it (`multiball_on`). The `lamp` line is the Action
+button's RGB light (LOCKDOWN BUTTON-R/G/B in the light table), tied to the button's shot, so
+`light_shots` (the tab's Light the shots that score) and `light <mask>` light the button. Every
+flip is a hit, so a flipper button as a scoring shot pays on every flip. The three Godzilla ports
+carry these lines (`portswitch.switch_source` read their drains).
+
+Emulator-proven 2026-09-27 on Godzilla Pro 1.15, Pro 1.16 and Premium/LE 1.16, one boot each in a
+rig slot (`value switch_edge_log` on): in play the game's mode mask is 0, so every press is ONE hit,
+on its press edge (level 0; the release is level 1 and no hit); a mode scored the left and right
+flipper buttons (+1M, +2M on the ladder) and served its multiball on the Action button; the shim's
+LED view (node 1, channels 5/4/7 = R/G/B) showed the Action button held solid red for the whole run
+of the mode and the game's own animation before and after. In ATTRACT the mask is 0x0010 and
+`pm_in_game()` is 0, so nothing counts - and the Action button or a flipper there opens the game's DJ
+Mixer, which then ignores Start: a rig script must not press them before its game.
 
 #### A ball end from the bus
 
