@@ -2110,6 +2110,18 @@ HELP_CONTENT = {
          "title and subtitle under it, so a picture is a picture there "
          "and not a path to one. A random card's list offers the ways it "
          "can draw the games behind it instead."),
+        ("Custom modes and high scores, per image",
+         "Each image runs its OWN custom modes: an image built with modes "
+         "brings them with it, and an image without them runs none, whatever "
+         "the first image carries. A star in the Scores column marks the "
+         "images that run modes. Because modes change the scoring, an image "
+         "can keep its own high scores too: Edit image… → High scores "
+         "→ Keep its own high scores on the machine gives it a score "
+         "table, settings and audits of its own, and the Scores column says "
+         "which images keep their own. An image first seen running modes is "
+         "ticked for you once; a star in the warning colour is a modded image "
+         "still sharing the stock game’s table. Run in emulator boots the "
+         "chosen image with its own modes and scores."),
         ("Menu settings",
          "The button on the action bar opens everything that belongs to "
          "the MENU rather than to one image, and the line beside it "
