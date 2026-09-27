@@ -830,12 +830,23 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    actions, along with the light/dark theme switch, update check,
    disk-space manager and voice-recognition quality (including a
    one-click reset of the downloaded voice models).
-3. **Select card tab** — pick the card image (or the SD card itself).
-   Its *What you can do with it* panel sorts the other tabs into what
-   works straight from the card, what needs a project folder and what
-   needs an extract. Tabs that need an extract (Replace Audio / Video /
-   Images / Text, Write, Mod Pack) are greyed out with a lock until
-   there is one; they still open, under a banner that says why.
+3. **Select card tab** — Browse… to the card image (or pick the SD card
+   itself). As confirmation it shows what the machine puts on the screen
+   while it starts: the game's own loading screen, or on a multi-boot
+   card its boot menu with the default game highlighted (drawn by the
+   Multi-boot tab's own tools, a few seconds the first time). Under it,
+   **Card details** lists everything the app can read off the card —
+   firmware version, edition, games on it, asset counts, partitions —
+   with Copy for a bug report. Its *What you can do with it* panel sorts
+   the other tabs into what works straight from the card, what needs a
+   project folder and what needs an extract. Tabs that need an extract
+   (Replace Audio / Video / Images / Text, Mod Pack, and Write on
+   machines that only build updates) are greyed out with a lock until
+   there is one; they still open, under a banner that says why. Write
+   stays open on Stern, JJP and CGC, whose Build / flash dialog can
+   write an existing card image onto an SD card with no project at all.
+   A multi-boot card picked here is read into the Multi-boot tab when
+   you open it.
 4. **Extract tab** — shows the picked card; choose an output folder and
    click *Extract*. The output folder gets the decrypted assets plus a
    `.checksums.md5` baseline used by the Write tab.
@@ -844,9 +855,9 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    place, with nothing copied anywhere — so a stack of cards on the
    bench can be sorted out by plugging each one in and reading the
    line; a card carrying a boot menu says so and how many games are
-   on it. The ⓘ beside the dropdown opens the same details window
-   the image picker's does, on the card itself: firmware version,
-   edition, asset counts and partitions. Reading a card in place
+   on it. Card details on the Select card tab reads the rest off the
+   card itself: firmware version, edition, asset counts and
+   partitions. Reading a card in place
    needs Administrator on Windows, and the line says so when it
    hasn't got it.
    **Save card as image…**
@@ -2047,9 +2058,16 @@ page for whichever tab you're on.
 
 Working several game versions at once? Every extraction folder is a
 **project**: the folder you extract into carries a hidden project file
-recording the manufacturer, the stock image it came from, and your
-Extract options, so picking that folder again later restores the whole
-setup in one go (the active project's name shows in the title bar).
+recording the manufacturer, the stock image it came from, and every form
+on every tab — the Extract options, the Write file name and build
+location, the Emulate card and its ticks, the Multi-boot form, Compare's
+two images, the Partition Explorer's image and the Mod Pack transfer —
+so picking that folder again later restores the whole setup in one go
+(the active project's name shows in the title bar). Opening or creating
+a project never leaves the last project's entries on screen: a field
+the project never set starts empty. What stays app-wide describes you
+or your cabinet, not a card: theme, window, volumes, the Emulate
+country and power, and the Default Settings presets.
 There's nothing to manage — the project file appears automatically the
 first time you extract into a folder or stage a change.  The blue
 **folder button** next to Home holds the project actions: **New

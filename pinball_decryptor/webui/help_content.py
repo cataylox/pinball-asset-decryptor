@@ -34,12 +34,14 @@ HELP_CONTENT = {
          "changed."),
         ("What works without an extract",
          "The list on the right says what each tab can do. Partitions, "
-         "Compare, Emulate and Multi-boot work straight from a card. The "
-         "Replace tabs, Write and Mod Pack work on the files an extract "
-         "pulls off the card, so until the project folder holds an extract "
-         "they are greyed out in the list on the left, with a lock. They "
-         "still open, under a banner saying what is missing and where to "
-         "go next."),
+         "Compare, Emulate and Multi-boot work straight from a card, and so "
+         "does Write on machines whose Build / flash dialog can write an "
+         "existing card image onto an SD card (Stern, JJP, CGC). The "
+         "Replace tabs and Mod Pack (and Write on the other machines) work "
+         "on the files an extract pulls off the card, so until the project "
+         "folder holds an extract they are greyed out in the list on the "
+         "left, with a lock. They still open, under a banner saying what is "
+         "missing and where to go next."),
     ],
     "Extract": [
         ("Pick a source",
