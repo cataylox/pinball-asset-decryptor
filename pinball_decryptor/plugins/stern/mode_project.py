@@ -342,7 +342,17 @@ def _multiball_cannot(key, label, sites=None):
 #: game took the save, a drain inside it was served back with no end of ball, the mode scored on the
 #: saved ball, and a drain after it ended the ball. Until a build is here the tab greys Ball save.
 BALL_SAVE_PROVEN = frozenset({
-    "godzilla_pro-1.15",               # 2026-09-27 bs_e2e.sh: saved drain served back (still ball 1), 2 shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "aerosmith_le-1.15",                # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "avengers_infinity_le-1.09",        # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "batman-1.13",                      # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "godzilla_pro-1.15",                # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "godzilla_pro-1.16",                # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "guardians_le-1.14",                # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "jaws_le-1.02",                     # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "king_kong_le-0.97",                # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "metallica_spike-1.03",             # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "munsters_le-1.28",                 # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "star_wars_le-1.30",                # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
 })
 
 
