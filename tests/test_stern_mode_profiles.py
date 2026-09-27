@@ -36,7 +36,7 @@ PORTS = {
     "deadpool_pro-1.16": (25, 64, True, set(), ("callout", "screens", "clips", "own-sound", "messages")),
     "deadpool_le-1.14": (28, 64, True, set(), ("callout", "screens", "clips", "own-sound", "messages")),
     # item 162 (2026-09-24): every latest build, proven by a full build check in the emulator
-    "godzilla_pro-1.16": (21, 64, True, set(), EVERY_CAPABILITY),
+    "godzilla_pro-1.16": (20, 64, True, set(), EVERY_CAPABILITY),   # its census: two shield targets, as Pro 1.15
     "aerosmith_le-1.15": (43, 64, True, {"countdown"}, ("callout", "screens", "clips", "own-sound")),
     "avengers_infinity_le-1.09": (36, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
     "batman-1.13": (43, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
