@@ -24,9 +24,11 @@ LOG=$PAD_LOGDIR/bootcheck.$KEY.watch.out
 mkdir -p "$PAD_LOGDIR"
 
 # A card image is opened read-only in place: no multi-GB cache copy per build
-# (a sweep of 36 would fill the disk), no audio, no playfield window.
+# (a sweep of 36 would fill the disk), no audio, no playfield window - and no
+# game window either (PAD_HIDDEN, PAD-230): a sweep across several rigs used to
+# put one on David's desktop per build. PAD_HIDDEN=0 to watch one boot.
 export PAD_CARD=$CARD PAD_CARD_CACHE=${PAD_CARD_CACHE:-0} PAD_AUDIO=${PAD_AUDIO:-0}
-export PAD_PLAYFIELD=${PAD_PLAYFIELD:-0}
+export PAD_PLAYFIELD=${PAD_PLAYFIELD:-0} PAD_HIDDEN=${PAD_HIDDEN:-1}
 
 stop() { bash "$RIG/killgame.sh" > /dev/null 2>&1 < /dev/null; }
 field() { sed -n "s/^$1=//p" <<<"$2" | head -1; }

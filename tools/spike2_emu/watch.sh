@@ -46,6 +46,55 @@ if [ "$PAD_SLOT" != 0 ] || [ -n "$PAD_LABEL" ]; then
     echo "[watch] rig slot $PAD_SLOT${PAD_LABEL:+ for $PAD_LABEL}: $ROOT"
 fi
 
+# ★ A HIDDEN RUN (PAD-230): PAD_HIDDEN=1 puts NOTHING on the desktop. David,
+# 2026-09-27: agent sessions' rigs popping game windows is "very disruptive";
+# the triage dashboard's rig pill names the game instead.
+#
+# NOT the renderer's own no-window mode. padglhost without a window skips
+# win_open(), and win_open() is where the coin door is shut and the trough is
+# filled (the latching switches) - a windowless run would boot a DIFFERENT
+# machine, 48V disabled and no balls. So the renderer gets a real window, on a
+# private Xvfb nobody looks at, and the run is byte-for-byte the visible one.
+# The Windows-side playfield window is simply not opened (PAD_PLAYFIELD=0).
+# Pictures come from glshot.sh (the FBO, not a window grab); switches from
+# padsw.py / swpoke.py - neither ever needed a window.
+#
+# ONE DISPLAY PER RIG, :70+N, started once and reused by later runs of the same
+# rig (an idle Xvfb costs nothing). WSLg mounts /tmp/.X11-unix READ-ONLY, so
+# Xvfb cannot make its socket file there and listens on the ABSTRACT socket
+# only (libX11 tries that first, so clients never notice). That is also why the
+# DISPLAY gate below passes a hidden run (pad_display_state says `hidden`): it
+# looks for the socket FILE.
+# Readiness is Xvfb's own -displayfd, not a probe tool the distro may lack.
+PAD_HIDDEN=${PAD_HIDDEN:-0}
+export PAD_HIDDEN
+if [ "$PAD_HIDDEN" = 1 ]; then
+    HID_N=$((70 + PAD_SLOT))
+    if ! grep -qa "@/tmp/.X11-unix/X$HID_N\$" /proc/net/unix 2>/dev/null; then
+        if ! command -v Xvfb >/dev/null 2>&1; then
+            echo "[watch] PAD_HIDDEN=1 needs Xvfb, which is not installed:" >&2
+            echo "[watch]   sudo apt-get install -y xvfb" >&2
+            exit 1
+        fi
+        rm -f "/tmp/.X$HID_N-lock" 2>/dev/null
+        HID_READY=$(mktemp)
+        setsid Xvfb ":$HID_N" -screen 0 1920x1080x24 -nolisten tcp -ac \
+            -displayfd 3 3>"$HID_READY" </dev/null >/dev/null 2>&1 &
+        for i in $(seq 1 50); do [ -s "$HID_READY" ] && break; sleep 0.1; done
+        if [ ! -s "$HID_READY" ]; then
+            rm -f "$HID_READY"
+            echo "[watch] PAD_HIDDEN=1: the private X display :$HID_N did not" \
+                 "come up in 5 s" >&2
+            exit 1
+        fi
+        rm -f "$HID_READY"
+    fi
+    export DISPLAY=":$HID_N"
+    export PAD_PLAYFIELD=0
+    echo "[watch] hidden run: no windows on the desktop (private display" \
+         "$DISPLAY, no playfield window; pictures with glshot.sh)"
+fi
+
 # ★ RIG-LOCAL EXTRA ENVIRONMENT (item 67). The app assembles the run's
 # environment and has no field for "one more PAD_* knob", so an instrument
 # that is armed by one (PAD_REG_HOOK, PAD_PEEK, PAD_PASS_HOOK, PAD_GL2_W...)
@@ -369,9 +418,9 @@ export PAD_GAME="$GAME"
 BOARD_RUN="$(pad_board_dir)/slot-$PAD_SLOT.run"
 pad_board_run() {
     mkdir -p "$(dirname "$BOARD_RUN")" 2>/dev/null || return 0
-    printf '{"slot":%s,"game":"%s","label":"%s","distro":"%s","root":"%s","pid":%s,"started":%s}\n' \
+    printf '{"slot":%s,"game":"%s","label":"%s","distro":"%s","root":"%s","pid":%s,"started":%s,"hidden":%s}\n' \
         "$PAD_SLOT" "$GAME" "$PAD_LABEL" "${WSL_DISTRO_NAME:-$(uname -n)}" "$ROOT" "$$" \
-        "$(date +%s)" > "$BOARD_RUN.tmp" 2>/dev/null \
+        "$(date +%s)" "$([ "$PAD_HIDDEN" = 1 ] && echo true || echo false)" > "$BOARD_RUN.tmp" 2>/dev/null \
         && mv -f "$BOARD_RUN.tmp" "$BOARD_RUN" 2>/dev/null
     return 0
 }
@@ -1401,7 +1450,7 @@ trap 'teardown' EXIT
 # there is no window then, from a Mesa message inside another log, is what this
 # is here to stop.
 case $(pad_display_state) in
-    ok|remote) ;;
+    ok|remote|hidden) ;;
     none)
         # AN UNSET DISPLAY IS NOT ONE FAULT, and this used to name only the
         # rarest of them, in a sentence that invited the user to CREATE the
@@ -1906,6 +1955,10 @@ GLLATE=$(pad_window_line "$HOSTLOG") && GLWIN=$GLLATE
 case "$GLWIN" in
     *"window opened"*)
         echo "[watch] game window ${GLWIN#*window }"
+        if [ "$PAD_HIDDEN" = 1 ]; then
+            echo "[watch]   (hidden run: that window is on the private display" \
+                 "and never reaches the desktop - by design)"
+        else
         # TWO CURES, AND THE ORDER MATTERS. This used to name the WSL restart
         # alone, which is right only when the window is where a user could see
         # it. The other way a window that "opened" is nowhere on the desktop is
@@ -1930,7 +1983,8 @@ case "$GLWIN" in
         echo "[watch]   '[padglhost] picture:' line below says which half it"
         echo "[watch]   is - a picture here and none on the desktop is the"
         echo "[watch]   mirror again; no picture here is the game or the"
-        echo "[watch]   renderer, and no restart touches that.)" ;;
+        echo "[watch]   renderer, and no restart touches that.)"
+        fi ;;
     *headless*)
         echo "[watch] THE RENDERER HAS NO WINDOW, so this run will show no" \
              "picture at all." >&2
@@ -2725,9 +2779,14 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
     EVTPG=$!
 fi
 
-echo "[watch] running. CLOSE THE WINDOW to stop (or press Ctrl-C here)."
-echo "[watch] CLICK the game window for keyboard play: arrows = flippers,"
-echo "[watch] Enter/-/= = service. The playfield window lists every key."
+if [ "$PAD_HIDDEN" = 1 ]; then
+    echo "[watch] running HIDDEN. Stop with killgame.sh (PAD_SLOT=$PAD_SLOT)."
+    echo "[watch] Pictures: glshot.sh. Switches: swpoke.py / padsw.py."
+else
+    echo "[watch] running. CLOSE THE WINDOW to stop (or press Ctrl-C here)."
+    echo "[watch] CLICK the game window for keyboard play: arrows = flippers,"
+    echo "[watch] Enter/-/= = service. The playfield window lists every key."
+fi
 [ "$MINS" != 0 ] && echo "[watch] backstop: will stop by itself after $MINS min."
 
 # Poll instead of `wait`: we must react to EITHER end dying, and to the wall

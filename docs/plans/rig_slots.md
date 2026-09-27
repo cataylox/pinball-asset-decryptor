@@ -174,6 +174,31 @@ worktree pointer; `ticket/PAD-n` shows as `PAD-n`, main shows nothing).
 "rig", not "slot", in everything a human reads: the app already calls save
 states "slots".
 
+### A hidden run: nothing on the desktop (PAD-230)
+
+David, 2026-09-27: agent rigs popping game windows onto his desktop is "very
+disruptive"; the triage dashboard's rig pill names the game instead.
+
+- `PAD_HIDDEN=1 watch.sh` starts (or reuses) a private Xvfb for the rig,
+  display `:70+N`, and points the renderer at it; `PAD_PLAYFIELD=0` for the
+  Windows-side playfield. `bootcheck.sh` (so every `rigbatch.sh` sweep) is
+  hidden by default; `PAD_HIDDEN=0` to watch one.
+- The renderer still opens a REAL window, just on a display nobody looks at.
+  Its own no-window mode would skip `win_open()`, which is where the coin door
+  is shut and the trough filled - a different machine (48V disabled, no
+  balls). Same GPU path too: d3d12 renders on Xvfb (presented by XPutImage).
+- WSLg mounts `/tmp/.X11-unix` READ-ONLY, so Xvfb listens on the abstract
+  socket only; `pad_display_state` answers `hidden` rather than looking for a
+  socket file. Readiness is Xvfb's `-displayfd`. An idle Xvfb costs nothing
+  and is left up for the rig's next hidden run.
+- Pictures: `glshot.sh` (the FBO, no window involved). Switches: `swpoke.py`
+  / `padsw.py`. Stop: `killgame.sh`.
+- The run record carries `"hidden":true`; the dashboard pill reads
+  `rig N · Godzilla Pro` while a run is up (pad-triage `rigboard.game_title`).
+- Proven 2026-09-27, rig 4, godzilla_pro: attract at 59.7 fps on d3d12, no
+  48V banner in the glshot frame, no PAD-230 window among the desktop's
+  top-level windows (three PAD-225 sweep windows were).
+
 ### What it deliberately does not do
 
 - Per-slot CPU limits. Each guest is ~1.5 cores; `PAD_SLOTS_MAX` is the only

@@ -1237,12 +1237,17 @@ pad_x_socket() {
 #   ok        the local socket is there.
 #   masked    it is not there, and WSLg's copy of it IS - repairable.
 #   nosocket  it is not there and there is nothing to put back.
+#   hidden    a PAD_HIDDEN=1 run (watch.sh, PAD-230): DISPLAY is the rig's own
+#             Xvfb, which listens on the ABSTRACT socket only (WSLg mounts the
+#             socket directory read-only), so there is no file to look for and
+#             watch.sh has already seen it come up.
 #
 # `-e` rather than `-S` deliberately: what matters is whether libX11 finds
 # something at that path, a non-socket sitting there is a broken machine by any
 # reading, and a test can create a file where it cannot create a socket.
 pad_display_state() {
     local sock
+    [ "${PAD_HIDDEN:-0}" = 1 ] && { echo hidden; return 0; }
     [ -n "${DISPLAY:-}" ] || { echo none; return 0; }
     sock=$(pad_x_socket) || { echo remote; return 0; }
     [ -e "$sock" ] && { echo ok; return 0; }
