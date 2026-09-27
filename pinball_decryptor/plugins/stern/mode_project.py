@@ -243,7 +243,7 @@ PORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 
 #: The parts of a mode a title may be unable to do. The tab greys each one it cannot,
 #: with :meth:`TitleProfile.why_not`, and :func:`runtime_cfg` leaves its lines out.
-PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball")
+PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball", "ball_save")
 
 #: What ``stack no`` (item 140) needs from a port before pad_mode_runtime.c's
 #: pm_stock_mode_running can tell a battle or a multiball is on: (sites, data). Without
@@ -335,9 +335,32 @@ def _multiball_cannot(key, label, sites=None):
                           "multiball here yet." % label),)
 
 
+#: PAD-225: a ball save when a mode starts, with no multiball. The game's own one-ball saves (Godzilla's
+#: Planet X hurry-up, its adjustment-timed mode-start save) go through the same framework call as its
+#: multiballs, asking for no more balls than are in play (pad_mode_runtime.c pm_ball_save), so it needs
+#: what a multiball needs. The builds where a mode file's `ball_save` line was seen in the emulator: the
+#: game took the save, a drain inside it was served back with no end of ball, the mode scored on the
+#: saved ball, and a drain after it ended the ball. Until a build is here the tab greys Ball save.
+BALL_SAVE_PROVEN = frozenset({
+    "godzilla_pro-1.15",               # 2026-09-27 bs_e2e.sh: saved drain served back (still ball 1), 2 shots scored on it, next drain ended the ball; control without it ended on the first drain
+})
+
+
+def _ball_save_cannot(key, label, sites=None):
+    """The ``cannot`` entry for a mode's own ball save on build ``key``, or () when it can."""
+    if sites is not None and not _multiball_route(sites):
+        return (("ball_save", "The app has not found how %s saves a ball, so a mode of yours "
+                              "cannot give a ball save on it yet." % label),)
+    if key in BALL_SAVE_PROVEN:
+        return ()
+    return (("ball_save", "The app has found how %s saves a ball but has not yet seen a mode of "
+                          "yours give a ball save in the emulator, so it cannot here yet." % label),)
+
+
 #: item 167: the hand-written profile carries the same verdict as its port (its port names the
 #: framework's serve call; the tab offers Multiball once the build is in MULTIBALL_PROVEN)
-GODZILLA_PRO_1_15 = replace(GODZILLA_PRO_1_15, cannot=_multiball_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15"))
+GODZILLA_PRO_1_15 = replace(GODZILLA_PRO_1_15, cannot=_multiball_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
+                            + _ball_save_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15"))
 PROFILES = {p.key: p for p in (GODZILLA_PRO_1_15,)}
 
 #: item 164: the builds where a ``stack no`` mode was seen held back by a multiball that count showed, and
@@ -914,6 +937,7 @@ def profile_from_port(path):
                     "running, so a mode of yours cannot wait for them and always runs beside "
                     "them.")
     cannot += list(_multiball_cannot(key, label, sites))     # item 167
+    cannot += list(_ball_save_cannot(key, label, sites))     # PAD-225
     events = tuple(name for name, _kind, needs in port["event"] if needs in sites)
     if not events:
         no("events", "The app does not know any of %(label)s's events yet (a ball starting, a "
@@ -1447,6 +1471,9 @@ class ModeSpec:
     ball_save: int = 10                  # seconds a drained ball comes back for, 0-60
     add_ball_shot: str = ""              # a shot that puts one more ball in play; "" = none
     add_ball_max: int = 1                # ... up to this many times a run, 1-6
+    # PAD-225: a ball save when it starts, with no multiball: a drained ball is served back for this many
+    # seconds (1-60), through the game's own ball saver; 0 = none. A multiball uses its own ball_save.
+    start_ball_save: int = 0
 
     # ---- JSON ----------------------------------------------------------------
     def to_json(self):
@@ -1602,6 +1629,8 @@ def _switch_off_what_it_cannot(spec, p):
         spec.countdown = False
     if not p.can("multiball"):
         spec.multiball = False
+    if not p.can("ball_save"):
+        spec.start_ball_save = 0
     return spec
 
 
@@ -2058,6 +2087,7 @@ def validate(spec, folder=None):
     out += _validate_starts_ends(spec, p)
     out += validate_display_lights(spec)
     out += validate_multiball(spec, p)
+    out += validate_ball_save(spec, p)
     return out
 
 
@@ -2097,6 +2127,28 @@ def multiball_lines(spec, p):
     if spec.add_ball_shot:
         lines.append("add_ball       0x%08x %d" % (p.mask([spec.add_ball_shot]), int(spec.add_ball_max)))
     return lines
+
+
+# ---- PAD-225: a ball save when the mode starts -----------------------------------------
+def validate_ball_save(spec, p):
+    """Every reason the ball save cannot be built; nothing when the mode has none (or is a multiball,
+    which has its own)."""
+    save = _int_or_none(spec.start_ball_save)
+    if spec.multiball or save == 0:
+        return []
+    out = []
+    if save is None or not 1 <= save <= BALL_SAVE_MAX:
+        out.append("The ball save when the mode starts is 1 to %d seconds." % BALL_SAVE_MAX)
+    if not p.can("ball_save"):
+        out.append("A ball save of the mode's own is not on %s yet (Mode says why)." % p.label)
+    return out
+
+
+def ball_save_lines(spec, p):
+    """The runtime line of the ball save: nothing without one, for a multiball, or where the title cannot."""
+    if spec.multiball or not p.can("ball_save") or not _int_or_none(spec.start_ball_save):
+        return []
+    return ["ball_save      %d" % int(spec.start_ball_save)]
 
 
 # ---- item 142: cuts from a film ------------------------------------------------------
@@ -2223,6 +2275,7 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
         "award          %d" % int(spec.award),
     ]
     lines += multiball_lines(spec, p)       # item 167: nothing unless the mode is a multiball
+    lines += ball_save_lines(spec, p)       # PAD-225: nothing unless it has a ball save (and no multiball)
     if spec.screen and p.can("screen"):
         lines += [
             "screen_scene   %s" % p.hud_scene,

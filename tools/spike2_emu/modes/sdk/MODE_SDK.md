@@ -1209,6 +1209,46 @@ derived a port for until it is proven the same way. Not measured: a machine; a m
 mode's clock still runs (the balls stay in play, the game's ball code goes on); two players; a mode of yours
 with `stack no` refused while your own multiball runs; a player shooting TMNT LE's van.
 
+## A ball save of your own
+
+A mode with no multiball can still give the player a ball save when it starts: for that many
+seconds a ball that drains is served back and the ball does not end. The game's own one-ball saves
+go through the same framework call as its multiballs (above), asking for no more balls than are in
+play: Godzilla Pro 1.15's Planet X hurry-up asks for "0 more balls, 10 s ball save" (`0xf49d0`:
+r2 620 ticks), and a mode-start save of its own asks the same with the seconds of an adjustment
+(`0xd6a90`). So a mode of yours does exactly that, and the trough, the auto-launcher, the ball saver
+and its insert do what they do for the game's own.
+
+In C:
+
+```c
+if (!pm_ball_save(10)) pm_log("no ball save: the game refused");
+```
+
+In a mode file:
+
+```
+ball_save      10            # seconds a drained ball comes back for, when the mode starts
+```
+
+The Modes tab's Mode page has it under Ball save. A mode that is a multiball uses its multiball's
+own ball save instead (a `multiball` line wins, and the tab greys Ball save while Multiball is on).
+A refusal (no game in play, a tilt, a port without the call) never stops the mode starting: the log
+says `BALL SAVE: 10 s - the game refused, so none`. During one of the game's own multiballs the call
+only lengthens that multiball's save (the framework keeps the longer of the two).
+
+**What is measured (emulator-proven 2026-09-27, the app's rig, muted: `C:\tmp\pad_generic\bs\bs_e2e.sh`,
+one scripted game a build, driven by `bs_batch.sh`).** A mode file with `ball_save 10` and a 40 s clock,
+started by its trigger file once the game's own start-of-ball save had run out (a playfield switch pressed
+every 10 s for 30 s): `ball save: 10 s with 1 ball(s) in play: the game is saving`; a drain 3 s later was
+served back with no end of ball (still BALL 1 on the display, the mode still running), two shots scored on
+the saved ball, and a drain after the save ended the ball (`END (ball ended)`). The control, the same run
+with the `ball_save` line taken out, ended the ball on the first drain. Not measured: a machine; a mode's
+ball save beside the game's own multiball; two players.
+
+`mode_project.BALL_SAVE_PROVEN` lists the builds where it was seen in the emulator, and the tab greys
+Ball save on any other build.
+
 ## Ports: why your mode runs on any game
 
 A mode calls the game's own compiled functions, and they sit at different addresses in

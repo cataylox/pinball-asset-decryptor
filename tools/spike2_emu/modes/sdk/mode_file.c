@@ -69,6 +69,7 @@ struct mode_cfg {
      * clock (it ends when one ball is left). `add_ball <mask> [times]`: a shot that adds a ball */
     unsigned mball_balls, mball_save_s, add_ball_max;
     uint64_t add_ball_bits;
+    unsigned ball_save_s;             /* `ball_save <s>`: a ball save when it starts, no multiball; 0 = none */
 };
 
 struct slot {
@@ -97,6 +98,7 @@ static struct {
     /* item 167: a multiball of the mode's own */
     int no_clock;                     /* `seconds 0`: the clock never runs it out */
     int mball_on, mball_seen2;        /* the game is serving; two or more balls were seen in play */
+    int saving;                       /* `ball_save`: the game took the ball save at the start */
     int mball_last;                   /* the count last logged */
     unsigned mball_grace_ticks;       /* the ball save and the serving: one ball in play does not end it yet */
     unsigned mball_one_ticks;         /* ticks with one ball (or none) in play since */
@@ -184,6 +186,19 @@ static int multiball_line(struct slot *M, const char *line)
         return 1;
     }
     return 0;
+}
+
+/* PAD-225: a ball save of the mode's own (MODE_SDK.md "A ball save of your own")
+ *   ball_save <s>    no multiball: when it starts, a drained ball is served back for <s> seconds (1-120),
+ *                    the game's own one-ball save (pm_ball_save); a `multiball` line's own ball save is
+ *                    used instead when both are there. 0 = none. */
+static int ball_save_line(struct slot *M, const char *line)
+{
+    const char *a = key_is(line, "ball_save");
+    if (!a) return 0;
+    cfg.ball_save_s = (unsigned)num(&a);
+    if (cfg.ball_save_s > 120) cfg.ball_save_s = 120;
+    return 1;
 }
 
 static int stack_line(struct slot *M, const char *line)
@@ -1273,6 +1288,7 @@ static void cfg_line(struct slot *M, const char *line)
     if (starts_line(M, line)) return;
     if (stack_line(M, line)) return;
     if (multiball_line(M, line)) return;     /* item 167 */
+    if (ball_save_line(M, line)) return;     /* PAD-225 */
     if (params_line(M, line)) return;
     if (trigger_on_line(M, line)) return;
     if (roster_line(M, line)) return;
@@ -1314,6 +1330,9 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
         pm_log("\"%s\": a multiball of its own - %u balls, ball save %u s, %s%s", cfg.name, cfg.mball_balls,
                cfg.mball_save_s, cfg.seconds ? "its clock or one ball left ends it" : "one ball left ends it (no clock)",
                pm_can(PM_CAN_MULTIBALL) ? "" : "  - this game's port cannot serve balls: it will not start");
+    if (cfg.ball_save_s && !cfg.mball_balls)
+        pm_log("\"%s\": a ball save of %u s when it starts%s", cfg.name, cfg.ball_save_s,
+               pm_can(PM_CAN_MULTIBALL) ? "" : "  - this game's port cannot save a ball: it starts without one");
     if (cfg.add_ball_bits)
         pm_log("\"%s\": add a ball on %08x_%08x, up to %u time(s)", cfg.name, (unsigned)(cfg.add_ball_bits >> 32),
                (unsigned)cfg.add_ball_bits, cfg.add_ball_max);
@@ -1431,6 +1450,7 @@ static void mode_start(struct slot *M, const char *why)
         run.mball_grace_ticks = (cfg.mball_save_s + MBALL_GRACE_S) * TICKS_PER_S;
         run.add_balls_left = cfg.add_ball_bits ? cfg.add_ball_max : 0;
     }
+    run.saving = !cfg.mball_balls && cfg.ball_save_s && pm_ball_save(cfg.ball_save_s);   /* no refusal stops the mode */
     run.no_clock = cfg.seconds == 0;
     run.active = 1;
     run.slot = M;
@@ -1463,6 +1483,8 @@ static void mode_start(struct slot *M, const char *why)
     starts_count(M, why);
     pm_log("%s START (%s): slot %u, player %u, %u s, score %llu", cfg.name, why, M->index,
            run.player, cfg.seconds, (unsigned long long)run.score_at_start);
+    if (!cfg.mball_balls && cfg.ball_save_s)
+        pm_log("%s BALL SAVE: %u s%s", cfg.name, cfg.ball_save_s, run.saving ? "" : " - the game refused, so none");
     if (run.mball_on)
         pm_log("%s MULTIBALL: %u balls asked for, ball save %u s, %d in play now%s", cfg.name, cfg.mball_balls,
                cfg.mball_save_s, pm_balls_in_play(), run.add_balls_left ? ", add a ball armed" : "");

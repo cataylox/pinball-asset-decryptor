@@ -44,7 +44,8 @@ from .base import TabService, rpc
 SAVE_DELAY_MS = 500
 
 #: the form's fields (the Tk tab's ``self.v`` keys) and their kind
-_BOOL_FIELDS = ("screen", "countdown", "lights", "advanced", "stack", "light_shots_on", "multiball")
+_BOOL_FIELDS = ("screen", "countdown", "lights", "advanced", "stack", "light_shots_on", "multiball",
+                "start_save")                                                      # PAD-225
 _STR_FIELDS = (
     "name", "start_shot", "start_count", "seconds", "award", "screen_title", "panel_color",
     "title_color", "clip", "clip_title", "clip_when", "light_color", "light_on_raw",
@@ -55,7 +56,8 @@ _STR_FIELDS = (
     "clip_both_title", "clip_both_seconds", "restore_after",
     "callout_secs_0", "callout_id_0", "callout_secs_1", "callout_id_1",
     "callout_secs_2", "callout_id_2", "callout_secs_3", "callout_id_3",
-    "balls", "ball_save", "add_ball_shot", "add_ball_max")                     # item 167
+    "balls", "ball_save", "add_ball_shot", "add_ball_max",                     # item 167
+    "start_save_s")                                                            # PAD-225
 _DEFAULTS = {
     "screen": True, "countdown": True, "lights": False, "advanced": False, "stack": True,
     "light_shots_on": False, "panel_color": "#000000", "title_color": "#000000",
@@ -67,6 +69,7 @@ _DEFAULTS = {
     "ends_kind": "drain", "award_ladder": "rising", "end_shot": "(only when time runs out)",
     "clip_both": "none", "clip_both_seconds": "4", "restore_after": "6",
     "multiball": False, "balls": "3", "ball_save": "10", "add_ball_shot": "(none)", "add_ball_max": "1",
+    "start_save": False, "start_save_s": "10",
 }
 
 
@@ -87,6 +90,7 @@ PAGES = (("mode", "Mode"), ("show", "Show"), ("lights", "Lights"), ("sounds", "S
 _PROBLEM_PAGES = tuple((re.compile(rx), page) for rx, page in (
     # Mode: the multiball part (item 167), before the scoring shot sentences it shares words with
     (r"(?i)multiball|to add a ball\.$|adds a ball", "mode"),
+    (r"(?i)ball save", "mode"),                                                # PAD-225
     # Scoring: the first shot's points, the ladder, a shot's own points, the early end
     (r"^The first shot has to be worth something", "scoring"),
     (r"^The award ladder", "scoring"),
@@ -217,7 +221,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                    ("music", "music_mode", "Music underneath", "music"))
     _LIGHT_PATTERN_WORDS = (("solid", "Solid"), ("blink", "Blink"), ("pulse", "Pulse"),
                             ("chase", "Chase"))
-    _PART_SECTIONS = ("lights", "screen", "clip", "multiball")
+    _PART_SECTIONS = ("lights", "screen", "clip", "multiball", "ball_save")
     _TWO_COLUMN_SHOTS = 18
     _PROBE_TRIES = 240
     _FILM_PARTS = (("clip", "clip", "a clip"), ("still", "screen", "a picture for the screen"),
@@ -241,6 +245,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         "restore_after": [1, MP.RESTORE_AFTER_MAX],
         "balls": list(MP.MULTIBALL_BALLS), "ball_save": [0, MP.BALL_SAVE_MAX],   # item 167
         "add_ball_max": [1, MP.ADD_BALL_MAX],
+        "start_save_s": [1, MP.BALL_SAVE_MAX],                                  # PAD-225
     }
 
     def __init__(self, window):
@@ -1002,6 +1007,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 f[key] = str(getattr(spec, key))
         shot = getattr(spec, "add_ball_shot", "") or ""
         f["add_ball_shot"] = shot if shot else self.BALL_NONE
+        # PAD-225: a ball save when it starts; the seconds stay shown (10) while it is off
+        save = MP._int_or_none(getattr(spec, "start_ball_save", 0))
+        f["start_save"] = bool(save)
+        f["start_save_s"] = str(save) if save else str(getattr(spec, "start_ball_save", "") or "10")
 
     def _collect_multiball(self, spec):
         def number(text):
@@ -1017,6 +1026,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         spec.add_ball_max = number(self.f["add_ball_max"])
         shot = str(self.f["add_ball_shot"]).strip()
         spec.add_ball_shot = "" if shot == self.BALL_NONE else shot
+        spec.start_ball_save = number(self.f["start_save_s"]) if self.f["start_save"] else 0   # PAD-225
 
     def _open_display_lights(self, spec):
         colour = spec.light_shots if isinstance(spec.light_shots, str) else ""
@@ -1153,7 +1163,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         """No mode open: the greyed form shows no values of the mode that was open before."""
         for key in ("name", "start_shot", "start_count", "seconds", "award", "screen_title",
                     "clip_title", "clip_seconds", "light_on_raw", "light_off_raw",
-                    "clip_both_title", "balls", "ball_save", "add_ball_max"):
+                    "clip_both_title", "balls", "ball_save", "add_ball_max", "start_save_s"):
             self.f[key] = ""
         for i in range(self.PARAM_CALLOUT_ROWS):
             self.f["callout_secs_%d" % i] = ""
@@ -1437,7 +1447,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             dis = {k: True for k in ("screen", "clip", "lights", "countdown", "own_sound",
                                      "end_game", "clip_both", "stack", "events", "film_clip",
                                      "film_still", "film_sound", "own_extra", "lit_shots",
-                                     "show_order", "multiball")}
+                                     "show_order", "multiball", "ball_save")}
             self.set(reasons={}, dis=dis, editor_on=False, dup_ok=False,
                      del_ok=bool(on or self._code_slug))
             return

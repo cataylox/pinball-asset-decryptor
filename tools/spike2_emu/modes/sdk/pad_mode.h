@@ -382,5 +382,14 @@ int pm_stock_counts_as(unsigned rule, uint64_t from, uint64_t to);
 int pm_multiball_start(unsigned balls, unsigned ballsave_s);
 int pm_multiball_add(unsigned n, unsigned ballsave_s);
 int pm_balls_in_play(void);
+/* A ball save on its own, with no multiball (MODE_SDK.md "A ball save of your own"). The game's
+ * own one-ball saves (Godzilla's Planet X hurry-up: 10 s; its adjustment-timed mode-start save)
+ * go through the same framework call as a multiball, asking for no more balls than are in play,
+ * with a ball save: "serve balls until the count in play are in play, with a ball save". So
+ * pm_ball_save asks exactly that: for `seconds` (1-120) a drained ball is served back and the
+ * ball does not end. It needs what a multiball needs (PM_CAN_MULTIBALL). 1 = the save is on;
+ * 0 = the game refused (no game in play, a tilt) or the port lacks the call. During the game's
+ * own multiball it only lengthens that multiball's save (the framework keeps the longer). */
+int pm_ball_save(unsigned seconds);
 
 #endif
