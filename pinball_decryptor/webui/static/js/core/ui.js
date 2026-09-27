@@ -79,32 +79,99 @@ export function Icon({ name, cls = "", title }) {
 }
 
 // --------------------------------------------------------------- tooltip
+// Every tooltip in the app shows the moment the pointer is over its element
+// and follows the pointer.  tip(text) marks an element with data-tip; a plain
+// title="" is taken over the same way (lifted off while hovered, so the
+// browser's own slow, fixed tooltip never shows, and put back on leave).
+// One delegated handler serves both; keyboard focus shows the tip under the
+// element instead, since there is no pointer to follow.
 let tipEl = null;
-function showTip(target, text) {
-  if (!text) return;
+let tipSrc = null;       // the element whose tip is current (shown, or dismissed by a click)
+let tipLifted = null;    // {el, text}: a title="" held off its element while hovered
+let tipShown = false;
+let tipFollow = false;   // shown for the pointer (follows it), not for keyboard focus
+function tipBox(text) {
   if (!tipEl) {
     tipEl = document.createElement("div");
     tipEl.className = "tip";
     document.body.appendChild(tipEl);
   }
-  tipAnchor = target;
   tipEl.textContent = text;
   tipEl.style.display = "block";
-  const z = pageZoom();
-  const rr = target.getBoundingClientRect();
-  const r = { left: rr.left / z, top: rr.top / z, bottom: rr.bottom / z, right: rr.right / z };
-  const tw = tipEl.offsetWidth, th = tipEl.offsetHeight;
-  const vw = window.innerWidth / z, vh = window.innerHeight / z;
-  let x = Math.min(vw - tw - 8, Math.max(8, r.left));
-  let y = r.bottom + 6;
-  if (y + th > vh - 8) y = r.top - th - 6;
+  tipShown = true;
+}
+function placeTip(x, y) {
   tipEl.style.left = x + "px";
   tipEl.style.top = y + "px";
 }
-let tipAnchor = null;
-function hideTip() { tipAnchor = null; if (tipEl) tipEl.style.display = "none"; }
+// Beside the pointer (client px), flipped to the other side at a window edge.
+function tipAtPointer(cx, cy) {
+  const z = pageZoom();
+  const px = cx / z, py = cy / z;
+  const tw = tipEl.offsetWidth, th = tipEl.offsetHeight;
+  const vw = window.innerWidth / z, vh = window.innerHeight / z;
+  let x = px + 12, y = py + 20;
+  if (x + tw > vw - 8) x = Math.max(8, px - tw - 12);
+  if (y + th > vh - 8) y = Math.max(8, py - th - 10);
+  placeTip(x, y);
+}
+function tipUnder(target) {
+  const z = pageZoom();
+  const rr = target.getBoundingClientRect();
+  const r = { left: rr.left / z, top: rr.top / z, bottom: rr.bottom / z };
+  const tw = tipEl.offsetWidth, th = tipEl.offsetHeight;
+  const vw = window.innerWidth / z, vh = window.innerHeight / z;
+  let y = r.bottom + 6;
+  if (y + th > vh - 8) y = r.top - th - 6;
+  placeTip(Math.min(vw - tw - 8, Math.max(8, r.left)), y);
+}
+function hideTip() { tipShown = false; if (tipEl) tipEl.style.display = "none"; }
+function restoreTitle() {
+  if (tipLifted) {
+    const { el, text } = tipLifted;
+    if (!el.hasAttribute("title")) el.setAttribute("title", text);
+    tipLifted = null;
+  }
+}
+function dropTip() { hideTip(); restoreTitle(); tipSrc = null; }
+// The nearest element (from the one under the pointer up) with a tooltip.
+function tipSource(node) {
+  for (let el = node; el && el.nodeType === 1; el = el.parentElement) {
+    if (el === tipLifted?.el) return el;
+    const t = el.getAttribute("title");
+    if (t || el.hasAttribute("data-tip")) return el;
+  }
+  return null;
+}
+function tipText(el) {
+  if (el === tipLifted?.el && !el.hasAttribute("title")) return tipLifted.text;
+  return el.getAttribute("title") || el.getAttribute("data-tip") || "";
+}
+document.addEventListener("mouseover", (e) => {
+  const src = tipSource(e.target);
+  if (src === tipSrc) return;               // still inside the same tooltip's element
+  dropTip();
+  if (!src) return;
+  const text = tipText(src);
+  if (!text) return;
+  if (src.hasAttribute("title")) {          // keep the browser's own tooltip away
+    tipLifted = { el: src, text: src.getAttribute("title") };
+    src.removeAttribute("title");
+  }
+  tipSrc = src;
+  tipBox(text);
+  tipFollow = true;
+  tipAtPointer(e.clientX, e.clientY);
+}, true);
+document.addEventListener("mousemove", (e) => {
+  if (tipShown && tipFollow) tipAtPointer(e.clientX, e.clientY);
+}, true);
+document.addEventListener("mouseout", (e) => { if (!e.relatedTarget) dropTip(); }, true);
+// A click, a key or a scroll puts the tip away until the pointer moves to
+// another element (tipSrc stays, so the same element does not bring it back).
 for (const ev of ["pointerdown", "keydown", "wheel"]) window.addEventListener(ev, () => hideTip(), true);
-setInterval(() => { if (tipAnchor && !tipAnchor.isConnected) hideTip(); }, 500);
+window.addEventListener("blur", dropTip);
+setInterval(() => { if (tipSrc && !tipSrc.isConnected) dropTip(); }, 500);
 // The page's zoom (CSS zoom on <html>): rectangles are measured in screen
 // pixels, styles are laid out in page pixels.
 export function pageZoom() { return Number(document.documentElement.style.zoom) || 1; }
@@ -112,10 +179,14 @@ export function pageZoom() { return Number(document.documentElement.style.zoom) 
 export function tip(text) {
   if (!text) return {};
   return {
-    onMouseEnter: (e) => showTip(e.currentTarget, text),
-    onMouseLeave: hideTip,
-    onFocus: (e) => showTip(e.currentTarget, text),
-    onBlur: hideTip,
+    "data-tip": text,
+    onFocus: (e) => {
+      if (!e.currentTarget.matches(":focus-visible")) return;   // a click's focus, not the keyboard's
+      tipBox(text);
+      tipFollow = false;
+      tipUnder(e.currentTarget);
+    },
+    onBlur: () => { if (!tipFollow) hideTip(); },
   };
 }
 
