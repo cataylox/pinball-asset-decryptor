@@ -85,7 +85,7 @@ exit 0
 
 
 def _drive(tmp_path, display, local=(), wslg=(), root=False, mount_works=False,
-           hostlog=None):
+           hostlog=None, hidden=False):
     """Ask the real functions what this synthetic machine's display is.
 
     `local` / `wslg` are the socket names present in each directory - `-e`, not
@@ -122,6 +122,8 @@ def _drive(tmp_path, display, local=(), wslg=(), root=False, mount_works=False,
         setdisplay = "unset DISPLAY"
     else:
         setdisplay = "DISPLAY='%s'; export DISPLAY" % display
+    if hidden:
+        setdisplay += "\nPAD_HIDDEN=1; export PAD_HIDDEN"
     scripts.append(("driver.sh", _DRIVER % setdisplay))
     for name, text in scripts:
         path = rig / name
@@ -441,3 +443,40 @@ def test_a_linux_desktop_is_not_sent_to_a_windows_settings_file():
     assert ".wslconfig" in wsl_half
     assert ".wslconfig" not in linux_half
     assert "DISPLAY" in linux_half
+
+
+# ---- a hidden run (PAD_HIDDEN=1, PAD-230) ----------------------------------
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+def test_a_hidden_run_passes_the_display_check_with_no_socket_file(tmp_path):
+    """The rig's private Xvfb listens on the ABSTRACT socket only (WSLg mounts
+    /tmp/.X11-unix read-only), so there is no file to find - and the run must
+    not be refused for it, nor sent off to "repair" WSLg's socket."""
+    assert _drive(tmp_path, ":74", hidden=True)["STATE"] == "hidden"
+    assert _drive(tmp_path, ":74")["STATE"] == "nosocket"
+
+
+def test_a_hidden_run_puts_nothing_on_the_desktop():
+    """A private display for the renderer (a real window, so the coin door and
+    trough latch exactly as in a visible run) and no playfield window - both
+    decided before the display check and before the playfield is opened."""
+    text = src("watch.sh")
+    block = text[text.index('if [ "$PAD_HIDDEN" = 1 ]; then'):]
+    block = block[:block.index("\nfi\n")]
+    assert "Xvfb" in block and "-displayfd" in block
+    assert 'export DISPLAY=":$HID_N"' in block
+    assert "export PAD_PLAYFIELD=0" in block
+    hidden = line_of(text, 'if [ "$PAD_HIDDEN" = 1 ]; then')
+    assert hidden < line_of(text, "case $(pad_display_state) in")
+    assert hidden < line_of(text, 'if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then')
+    body = text[text.index("case $(pad_display_state) in"):]
+    assert "ok|remote|hidden)" in body[:body.index("\nesac")]
+
+
+def test_the_board_says_a_run_is_hidden():
+    """The triage dashboard's rig pill names the game of a hidden run - the
+    run record is how it knows the run has no window."""
+    text = src("watch.sh")
+    rec = text[text.index("pad_board_run() {"):]
+    rec = rec[:rec.index("\n}\n")]
+    assert '"hidden":%s' in rec and '"game":"%s"' in rec
