@@ -37,6 +37,14 @@
 # Each image without a line keeps sharing. Every failure here leaves the image
 # on the shared store and the boot goes on.
 #
+# EACH IMAGE'S OWN CUSTOM MODES (PAD-226): a card's modes live on the rootfs at
+# /usr/local/padmode, and a multi-boot card has only the primary's rootfs. The
+# build copies every other image's set to $DIR/modes/img<N>/ (and makes an empty
+# $DIR/modes/none); once image N is mounted its set - or the empty one - is bound
+# over /usr/local/padmode, so the hooked game_monitor preloads the booted image's
+# modes and nobody else's. Image 0 keeps the set its own card put there. A card
+# with no $DIR/modes is left exactly as it always was.
+#
 #   select.sh                     the hook (what /etc/init.d/game calls)
 #   select.sh --lookup N [conf]   print image N's device (without :<sub>)
 #   select.sh --lookup-sub N [conf]   print image N's subdirectory ("" when none)
@@ -58,6 +66,8 @@ MOUNT=${CODESELECT_MOUNT:-mount}
 UMOUNT=${CODESELECT_UMOUNT:-umount}
 NV=${CODESELECT_NV:-/data/nv}
 NV_OWN=${CODESELECT_NV_OWN:-/data/nv.own}
+MODES=${CODESELECT_MODES:-$DIR/modes}
+PADMODE=${CODESELECT_PADMODE:-/usr/local/padmode}
 
 log() {
     [ -n "$LOG" ] && echo "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null) select.sh: $*" >> "$LOG" 2>/dev/null
@@ -176,6 +186,33 @@ own_scores() {
     fi
 }
 
+# PAD-226: bind image $idx's own custom modes (or none) over the rootfs's (see the header)
+own_modes() {
+    [ -d "$MODES" ] || return 0
+    [ "$idx" -eq 0 ] && return 0
+    src=$MODES/img$idx
+    what="its own custom modes"
+    if [ ! -d "$src" ]; then
+        src=$MODES/none
+        what="no custom modes"
+    fi
+    if [ ! -d "$src" ] || [ ! -d "$PADMODE" ]; then
+        log "image $idx: no $src or no $PADMODE: the rootfs's modes stay as they are"
+        return 0
+    fi
+    if $MOUNT --bind "$src" "$PADMODE"; then
+        log "image $idx: $src bound over $PADMODE ($what)"
+    else
+        log "image $idx: binding $src over $PADMODE failed: the rootfs's modes stay as they are"
+    fi
+}
+
+# everything that belongs to the image that is about to boot, once it is mounted
+image_ready() {
+    own_scores
+    own_modes
+}
+
 case "$1" in
     --scores)
         [ -n "$2" ] || { echo "usage: select.sh --scores N [conf]" >&2; exit 1; }
@@ -214,7 +251,7 @@ done
 # the primary boots after all: image 0's own store, when it has one
 primary() {
     idx=0
-    own_scores
+    image_ready
     exit 0
 }
 
@@ -228,7 +265,7 @@ idx=$(head -n 1 "$OUT" 2>/dev/null | tr -cd '0-9')
 
 if [ "$idx" -eq 0 ]; then
     log "image 0 is the primary, already mounted at $GAMES"
-    own_scores
+    image_ready
     exit 0
 fi
 
@@ -249,7 +286,7 @@ fi
 if [ -z "$sub" ]; then
     if $MOUNT -t ext4 -o ro,relatime,exec "$dev" "$GAMES" && has_game "$GAMES"; then
         log "image $idx: mounted $dev at $GAMES"
-        own_scores
+        image_ready
         exit 0
     fi
     log "mount $dev failed or it has no $GAMES/game: remounting the primary $PRIMARY"
@@ -265,7 +302,7 @@ else
         if [ -d "$mp/$sub" ] && $MOUNT --bind "$mp/$sub" "$GAMES" && has_game "$GAMES"; then
             log "image $idx: mounted $dev at $mp, $sub bound over $GAMES"
             materialize "$mp" "$sub"
-            own_scores
+            image_ready
             exit 0
         fi
         log "no $mp/$sub/game or the bind failed: remounting the primary $PRIMARY"

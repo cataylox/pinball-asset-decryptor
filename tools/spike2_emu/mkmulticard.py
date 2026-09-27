@@ -249,6 +249,15 @@ FORBIDDEN_OUTPUT_PREFIXES = ("/mnt/d/Pinball/images", "D:/Pinball/images", "D:\\
 
 # ---- media (item 90 v2) --------------------------------------------------------------------
 MEDIA_DIR = SELECT_DIR + "/media"
+#: EACH IMAGE'S OWN CUSTOM MODES (PAD-226).  A card's modes live on its ROOTFS
+#: (/usr/local/padmode, preloaded by the hooked /etc/init.d/game_monitor), and a multi-boot
+#: card carries only the primary's rootfs - so an extra image's modes used to be dropped and
+#: the primary's ran under every image.  The build now copies each extra image's set to
+#: MODES_DIR/img<N>/ (and an empty MODES_DIR/none), and select.sh binds the booted image's set
+#: - or none - over PADMODE_DIR.  Image 0's own set stays where its card put it.
+MODES_DIR = SELECT_DIR + "/modes"
+PADMODE_DIR = "/usr/local/padmode"
+GAME_MONITOR = "/etc/init.d/game_monitor"
 MEDIA_MANIFEST = "media.json"                 # selectmedia.py writes it; --media-dir reads it
 #: The two JSON files staged BESIDE images.conf (item 90, loading a card back).  They are not
 #: media: they never go into MEDIA_DIR (where the selector scans), never count against
@@ -2935,8 +2944,182 @@ def inject_commands(items, existing, times, existing_media=None):
     return cmds
 
 
+def read_mode_set(path):
+    """{name: (bytes, mode)} - the custom modes on a source card's rootfs (PADMODE_DIR), {} when
+    it carries none.  Plain files only, by the names the selector's own media accepts."""
+    try:
+        ref = select_ref(path)
+    except Exception:
+        return {}
+    if not debugfs_exists(ref, PADMODE_DIR):
+        return {}
+    out = {}
+    for e in debugfs_ls(ref, PADMODE_DIR):
+        name = e[4]
+        if name in (".", "..") or statmod.S_ISDIR(e[1]) or not MEDIA_NAME_RE.match(name):
+            continue
+        out[name] = (debugfs_cat(ref, PADMODE_DIR + "/" + name), 0o755 if name.endswith(".so") else 0o644)
+    return out
+
+
+def mode_summary(names):
+    """'2 mode files, 1 code mode' for a set's file names - what the report and inspect say."""
+    names = list(names or [])
+    cfgs = len([n for n in names if n.endswith(".cfg") and n != "stock.cfg"])
+    codes = len([n for n in names if n.endswith(".assets")])
+    return "%d mode file%s, %d code mode%s" % (cfgs, "" if cfgs == 1 else "s", codes, "" if codes == 1 else "s")
+
+
+def card_mode_summary(ref, index):
+    """What custom modes image `index` of a BUILT card runs (its set under MODES_DIR, image 0's
+    on the rootfs itself) as :func:`mode_summary` says it, or None when it runs none."""
+    d = PADMODE_DIR if index == 0 else "%s/img%d" % (MODES_DIR, index)
+    try:
+        if not debugfs_exists(ref, d + "/mode.so"):
+            return None
+        return mode_summary(e[4] for e in debugfs_ls(ref, d) if e[4] not in (".", ".."))
+    except Exception:
+        return None
+
+
+def carries_modes(mode_set):
+    """A set counts as modes when it has the object the hook preloads."""
+    return "mode.so" in (mode_set or {})
+
+
+def plan_mode_sets(sources):
+    """[{name: (bytes, mode)}] per image, read off each SOURCE card's rootfs.  Image 0's is
+    read too (to report it), though its set is already where its card put it."""
+    return [read_mode_set(p) if p and os.path.isfile(p) else {} for p in sources]
+
+
+def stage_mode_sets(mode_sets, stage):
+    """Stage images 1..N's mode sets -> [(staged path, card path, mode)] under MODES_DIR/img<N>/."""
+    items = []
+    for i, ms in enumerate(mode_sets or []):
+        if i == 0 or not carries_modes(ms):
+            continue
+        d = os.path.join(stage, "modes", "img%d" % i)
+        os.makedirs(d, exist_ok=True)
+        for name in sorted(ms):
+            data, mode = ms[name]
+            dst = os.path.join(d, name)
+            with open(dst, "wb") as f:
+                f.write(data)
+            items.append((dst, "%s/img%d/%s" % (MODES_DIR, i, name), mode))
+    return items
+
+
+def mode_set_commands(items, existing, need_padmode_dir, monitor=None):
+    """The debugfs -w script for MODES_DIR (pure).  `existing` = {subdir: [file names]} already
+    under MODES_DIR, or None when there is none; every one is removed first, so the card holds
+    exactly the sets asked for.  MODES_DIR/none is always made (the empty set an image with no
+    modes of its own is given).  `need_padmode_dir` mkdirs PADMODE_DIR (the mountpoint the bind
+    needs on a card whose primary carries no modes); `monitor` = (staged path, times) rewrites
+    GAME_MONITOR with the preload hook, its clocks put back."""
+    cmds = []
+    for sub, names in sorted((existing or {}).items()):
+        for n in names:
+            cmds.append("rm " + dq("%s/%s/%s" % (MODES_DIR, sub, n)))
+        cmds.append("rmdir " + dq("%s/%s" % (MODES_DIR, sub)))
+    if existing is None:
+        cmds.append("mkdir " + dq(MODES_DIR))
+    subs = ["none"] + sorted({c.split("/")[-2] for (_s, c, _m) in items})
+    dirs = [MODES_DIR] + ["%s/%s" % (MODES_DIR, x) for x in subs]
+    cmds += ["mkdir " + dq(d) for d in dirs[1:]]
+    if need_padmode_dir:
+        cmds.append("mkdir " + dq(PADMODE_DIR))
+        dirs.append(PADMODE_DIR)
+    for staged, card, _mode in items:
+        cmds.append("write %s %s" % (dq(staged), dq(card)))
+    for d in dirs:
+        cmds += ["set_inode_field %s mode 040755" % dq(d), "set_inode_field %s uid 0" % dq(d),
+                 "set_inode_field %s gid 0" % dq(d)]
+    for _staged, card, mode in items:
+        cmds += ["set_inode_field %s mode 0%o" % (dq(card), statmod.S_IFREG | mode),
+                 "set_inode_field %s uid 0" % dq(card), "set_inode_field %s gid 0" % dq(card)]
+    if monitor is not None:
+        staged, times = monitor
+        cmds += ["rm " + dq(GAME_MONITOR), "write %s %s" % (dq(staged), dq(GAME_MONITOR)),
+                 "set_inode_field %s mode 0100755" % dq(GAME_MONITOR),
+                 "set_inode_field %s uid 0" % dq(GAME_MONITOR), "set_inode_field %s gid 0" % dq(GAME_MONITOR)]
+        for k in ("atime", "ctime", "mtime"):
+            if k in times:
+                cmds.append("set_inode_field %s %s @%d" % (dq(GAME_MONITOR), k, times[k]))
+    return cmds
+
+
+def mode_set_removal(existing):
+    """The debugfs -w script that takes MODES_DIR off p2 altogether (pure) - a card rebuilt with
+    no custom modes on any image carries none of this, byte for byte a card from before it."""
+    cmds = []
+    for sub, names in sorted((existing or {}).items()):
+        for n in names:
+            cmds.append("rm " + dq("%s/%s/%s" % (MODES_DIR, sub, n)))
+        cmds.append("rmdir " + dq("%s/%s" % (MODES_DIR, sub)))
+    cmds.append("rmdir " + dq(MODES_DIR))
+    return cmds
+
+
+def _existing_mode_sets(p2_image):
+    """{subdir: [file names]} under MODES_DIR on this p2, or None when it has none."""
+    if not debugfs_exists(p2_image, MODES_DIR):
+        return None
+    out = {}
+    for e in debugfs_ls(p2_image, MODES_DIR):
+        if e[4] in (".", "..") or not statmod.S_ISDIR(e[1]):
+            continue
+        out[e[4]] = [f[4] for f in debugfs_ls(p2_image, MODES_DIR + "/" + e[4])
+                     if f[4] not in (".", "..")]
+    return out
+
+
+def inject_mode_sets(p2_image, mode_sets, stage_dir):
+    """Write images 1..N's own mode sets into p2 (MODES_DIR), and - when any extra image carries
+    modes - make sure the rootfs can preload them: PADMODE_DIR exists (the bind's mountpoint)
+    and GAME_MONITOR carries the preload hook.  -> [(staged, card path, mode)] written."""
+    import modehook
+    existing = _existing_mode_sets(p2_image)
+    if not any(carries_modes(ms) for ms in mode_sets or []):
+        if existing is not None:
+            debugfs_write_script(p2_image, mode_set_removal(existing))
+            say("no image carries custom modes: %s taken off the card" % MODES_DIR)
+        return []
+    items = stage_mode_sets(mode_sets, stage_dir)
+    need_dir = bool(items) and not debugfs_exists(p2_image, PADMODE_DIR)
+    monitor = None
+    if items:
+        mon = debugfs_cat(p2_image, GAME_MONITOR)
+        if not mon:
+            raise Refused("an extra image carries custom modes but p2 has no %s to preload them from"
+                          % GAME_MONITOR)
+        if not modehook.has_hook(mon):
+            try:
+                hooked = modehook.hook_game_monitor(mon.decode("utf-8", "replace"))
+            except modehook.Refused as e:
+                raise Refused(str(e))
+            p = os.path.join(stage_dir, "game_monitor")
+            with open(p, "wb") as f:
+                f.write(hooked.encode("utf-8"))
+            monitor = (p, debugfs_stat(p2_image, GAME_MONITOR))
+    debugfs_write_script(p2_image, mode_set_commands(items, existing, need_dir, monitor))
+    for staged, card, _mode in items:
+        with open(staged, "rb") as f:
+            if debugfs_cat(p2_image, card) != f.read():
+                raise Refused("%s read back differs from %s" % (card, staged))
+    for i, ms in enumerate(mode_sets or []):
+        if carries_modes(ms):
+            say("image %d carries custom modes (%d file%s)%s" % (
+                i, len(ms), "" if len(ms) == 1 else "s",
+                ": its card's own, already in place" if i == 0 else
+                ": copied to %s/img%d, bound over %s when it boots" % (MODES_DIR, i, PADMODE_DIR)))
+    if monitor is not None:
+        say("%s hooked to preload the booted image's modes" % GAME_MONITOR)
+    return items
+
+
 def inject_into_p2(p2_image, selector_dir, conf_text, stage_dir, media_files=None, replace_media=False,
-                   manifests=None):
+                   manifests=None, mode_sets=None):
     """Modify an extracted rootfs image in place: /usr/local/codeselect/* (+ media/, + the JSON
     sidecars `manifests` names) and the hooked game script.  Idempotent (existing files are
     removed first; an existing media directory is
@@ -2968,10 +3151,18 @@ def inject_into_p2(p2_image, selector_dir, conf_text, stage_dir, media_files=Non
             existing_media = [e[4] for e in ments]
             reclaim += sum(e[5] for e in ments)
     staged_bytes = sum(os.path.getsize(s) for (s, _c, _m) in items)
+    # PAD-226: the extra images' own mode sets land on this p2 too
+    staged_bytes += sum(len(data) for ms in (mode_sets or [])[1:] if carries_modes(ms)
+                        for (data, _mode) in ms.values())
     if staged_bytes > free + reclaim - margin:
         raise Refused("p2 has %d KB free (+ %d KB the re-injection frees) and the injection needs %d KB (+ %d KB margin)"
                       % (free >> 10, reclaim >> 10, staged_bytes >> 10, margin >> 10))
     debugfs_write_script(p2_image, inject_commands(items, existing, times, existing_media))
+    if mode_sets is not None:
+        # PAD-226: None leaves what the card holds (a menu-only inject); a list is the whole answer
+        mdir = os.path.join(stage_dir, "modesets")
+        os.makedirs(mdir, exist_ok=True)
+        inject_mode_sets(p2_image, mode_sets, mdir)
     rc, txt = e2fsck(p2_image)
     if rc != 0:
         raise Refused("p2 is not clean after injection (e2fsck rc=%d):\n%s" % (rc, txt))
@@ -2992,7 +3183,7 @@ def inject_into_p2(p2_image, selector_dir, conf_text, stage_dir, media_files=Non
 
 
 def inject_card(card, selector_dir, conf_text, workdir=None, media_files=None, replace_media=False,
-                manifests=None):
+                manifests=None, mode_sets=None):
     """Extract p2 from the card, inject, e2fsck, write it back.  -> list of card paths written."""
     geom = Geometry.from_file(card)
     t, st, cnt = geom.part(2)
@@ -3007,7 +3198,8 @@ def inject_card(card, selector_dir, conf_text, workdir=None, media_files=None, r
         copy_range(card, st * SECTOR, p2, 0, cnt * SECTOR, "p2 extract", sparse=False, progress=None)
         stage = os.path.join(tmp, "stage")
         os.mkdir(stage)
-        written = inject_into_p2(p2, selector_dir, conf_text, stage, media_files, replace_media, manifests)
+        written = inject_into_p2(p2, selector_dir, conf_text, stage, media_files, replace_media, manifests,
+                                 mode_sets=mode_sets)
         say("writing the patched p2 back to %s @LBA %d" % (card, st))
         copy_range(p2, 0, card, st * SECTOR, cnt * SECTOR, "p2 write-back", sparse=False, progress=None)
         a, b = md5_file(p2), md5_range(card, st * SECTOR, cnt * SECTOR)
@@ -4945,6 +5137,15 @@ def _update_locked(a, ts, card, dry):
                             multi_subdirs=["img%d" % i for i in range(1, len(sources))])
     versions = plan_identities(newplan, progress=None)
     report_versions(versions, a.allow_version_mismatch)
+    # PAD-226: the images' own modes follow the new list - when every source is here to read
+    # them; otherwise the card's sets are left exactly as they are, and that is said
+    if all(p and os.path.isfile(p) for p in sources):
+        mode_sets = plan_mode_sets(sources)
+        report_modes(mode_sets)
+    else:
+        mode_sets = None
+        say("custom modes: not every source image is on this machine, so the card's per-image "
+            "modes are left as they are")
     # the diff per tree and the room per partition
     free = games_free(card, plan)
     per_part_adds = {n: 0 for n in free}
@@ -5234,7 +5435,7 @@ def _update_locked(a, ts, card, dry):
         manifests = selector_manifests(newplan, newconf, a.media_dir, sources, old_build, old_media,
                                        versions=versions, trees=newrec)
         inject_card(card, a.selector_dir, newconf, workdir=workdir, media_files=media["files"] if media else None,
-                    replace_media=bool(a.media_dir), manifests=manifests)
+                    replace_media=bool(a.media_dir), manifests=manifests, mode_sets=mode_sets)
     else:
         bj = json.dumps(build_manifest(newplan, conf_now, sources, old_build, versions=versions), indent=1) + "\n"
         write_trees(card, newrec, build_json=bj, workdir=workdir)
@@ -6427,6 +6628,22 @@ version costs nothing at all - a re-skin of a build, paired with that same build
 in its artwork and shares every setting the machine holds."""
 
 
+def report_modes(mode_sets):
+    """PAD-226: the `== custom modes` block plan / build / update print - one line per image
+    that carries modes of its own, nothing at all on a card with none.  The app reads these
+    lines (``modes image N: ...``) to say which images run custom modes."""
+    carrying = [(i, ms) for i, ms in enumerate(mode_sets or []) if carries_modes(ms)]
+    if not carrying:
+        return
+    print("== custom modes")
+    for i, ms in carrying:
+        print("modes image %d: %s (%s)" % (
+            i, mode_summary(ms),
+            "the primary's own rootfs" if i == 0 else
+            "carried to %s/img%d, bound over %s when it boots" % (MODES_DIR, i, PADMODE_DIR)))
+    print("every other image boots with no custom modes")
+
+
 def report_versions(recs, allow=False):
     """Print the VERSION table and apply the gate -> the findings; raises Refused when the images
     are not the same game code and `allow` is not set.  The table always comes out FIRST, and its
@@ -6885,8 +7102,10 @@ def inspect_card(card, media_out=None):
             # the media directory.
             ("music_source", m.get("music_source")),
             ("source", src), ("source_exists", exists),
-            # PAD-226: the store name when this image keeps its own high scores
+            # PAD-226: the store name when this image keeps its own high scores, and the custom
+            # modes it runs (None = none)
             ("own_scores", (conf.get("scores") or {}).get(i)),
+            ("modes", card_mode_summary(ref, i)),
             ("title_dir", title_dir), ("bypass", state),
             # what game code this image actually is, read off the card (item 90's version gate);
             # 'built_version' is what build.json recorded when the card was written
@@ -7151,7 +7370,7 @@ def _mkext(path, kib, files, links=()):
         shutil.rmtree(stage, ignore_errors=True)
 
 
-def make_synthetic_card(path, tag, seed, with_fs=False, title=None, version=None, node_fw=None):
+def make_synthetic_card(path, tag, seed, with_fs=False, title=None, version=None, node_fw=None, p2_files=None):
     """A stock-shaped card, 10 MiB: p1@8192x2048 p2@10240x2048 p3@12288x2046 ext@14336 p5@16384x2046
     EBR2@18430 p6@18432x2046.  with_fs=False: random payloads (pure python, for the tests);
     with_fs=True: real ext4 with a stand-in game script in p2 and a title dir + game link in p3.
@@ -7184,7 +7403,9 @@ def make_synthetic_card(path, tag, seed, with_fs=False, title=None, version=None
         if with_fs and n != 1:
             p = os.path.join(d, "%s_p%d.ext4" % (tag, n))
             if n == 2:
-                _mkext(p, cnt * SECTOR // 1024, {"/etc/init.d/game": SYNTH_GAME.encode(), "/usr/local/README": b"synthetic\n"})
+                files2 = {"/etc/init.d/game": SYNTH_GAME.encode(), "/usr/local/README": b"synthetic\n"}
+                files2.update(p2_files or {})         # PAD-226: a rootfs carrying modes, a game_monitor
+                _mkext(p, cnt * SECTOR // 1024, files2)
             elif n == 3:
                 # a stock games root in miniature: spk/, the title dir (game, conagent, data/),
                 # and the three symlinks the machine boots through
@@ -8285,8 +8506,102 @@ def selftest(d, selector_file=None):
         rc8b = main(["inject", "--card", out8, "--selector-dir", sel8])
     ok &= rc8b == 2 and "carries no version string" in buf8b.getvalue(), (rc8b, buf8b.getvalue()[-400:])
     print("SELFTEST part 8 (group)", "PASS" if ok else "FAIL")
+    ok &= selftest_modes(d, sel)
     print("SELFTEST", "PASS" if ok else "FAIL")
     return bool(ok)
+
+
+#: A stock game_monitor in miniature: the restart loop whose bare "\t$1" line the mode hook
+#: replaces (modehook.RUN_LINE).
+SYNTH_MONITOR = ("#!/bin/sh\nwhile [ true ] ;\ndo\n\t$1\n\t/usr/local/bin/boot_display&\n"
+                 "\tsleep 1\n\tpkill boot_display\ndone\n")
+
+
+def selftest_modes(d, sel):
+    """PART 9 (PAD-226): each image's own custom modes.  A (no modes) + B (mode.so, mode.cfg,
+    game.port on its rootfs): read_mode_set finds B's and not A's; inject_into_p2 on A's p2 puts
+    B's set at MODES_DIR/img1, an empty MODES_DIR/none, a PADMODE_DIR mountpoint, and hooks
+    GAME_MONITOR with its clocks kept; e2fsck clean.  Injecting again with no modes anywhere
+    takes MODES_DIR off, leaving the rest alone."""
+    import contextlib
+    import io
+    import modehook
+    ok = Checks()
+    d = os.path.join(d, "modes")
+    os.makedirs(d, exist_ok=True)
+    mon = {GAME_MONITOR: SYNTH_MONITOR.encode()}
+    so = b"\x7fELF synthetic mode object\n" * 8
+    A = make_synthetic_card(os.path.join(d, "A.img"), "A", 0x0A0A0A0A, with_fs=True, p2_files=mon)
+    B = make_synthetic_card(os.path.join(d, "B.img"), "B", 0x0B0B0B0B, with_fs=True, p2_files=dict(mon, **{
+        PADMODE_DIR + "/mode.so": so, PADMODE_DIR + "/mode.cfg": b"title=ATOMIC BREATH\n",
+        PADMODE_DIR + "/game.port": b"port=synthetic\n"}))
+    print("== PART 9: per-image custom modes")
+    sets = plan_mode_sets([A, B])
+    ok &= sets[0] == {}, sets[0]
+    ok &= sorted(sets[1]) == ["game.port", "mode.cfg", "mode.so"], sorted(sets[1])
+    ok &= sets[1]["mode.so"] == (so, 0o755) and sets[1]["mode.cfg"][1] == 0o644
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        report_modes(sets)
+    ok &= "modes image 1: 1 mode file, 0 code modes (carried to %s/img1" % MODES_DIR in buf.getvalue(), buf.getvalue()
+    geom = Geometry.from_file(A)
+    _t, st, cnt = geom.part(2)
+    p2 = os.path.join(d, "A p2.img")
+    with open(p2, "wb") as f:
+        f.truncate(cnt * SECTOR)
+    copy_range(A, st * SECTOR, p2, 0, cnt * SECTOR, "p2", sparse=False, progress=None)
+    before = debugfs_stat(p2, GAME_MONITOR)
+    conf = render_images_conf(["/dev/mmcblk0p3", "/dev/mmcblk0p7"], ["A", "B"])
+    stage = os.path.join(d, "stage one")
+    os.makedirs(stage, exist_ok=True)
+    inject_into_p2(p2, sel, conf, stage, mode_sets=sets)
+    for name in ("mode.so", "mode.cfg", "game.port"):
+        ok &= debugfs_cat(p2, "%s/img1/%s" % (MODES_DIR, name)) == sets[1][name][0], name
+    ok &= debugfs_stat(p2, "%s/img1/mode.so" % MODES_DIR).get("mode") == 0o755
+    ok &= debugfs_exists(p2, MODES_DIR + "/none") and debugfs_ls(p2, MODES_DIR + "/none")[2:] == []
+    ok &= not debugfs_exists(p2, MODES_DIR + "/img0")
+    ok &= debugfs_exists(p2, PADMODE_DIR) and not debugfs_exists(p2, PADMODE_DIR + "/mode.so")
+    hooked = debugfs_cat(p2, GAME_MONITOR).decode()
+    ok &= modehook.has_hook(hooked), hooked
+    after = debugfs_stat(p2, GAME_MONITOR)
+    ok &= all(after.get(k) == before.get(k) for k in ("mtime", "ctime", "atime")), (before, after)
+    ok &= e2fsck(p2)[0] == 0
+    # what inspect reports per image off the built p2
+    ok &= card_mode_summary(p2, 1) == "1 mode file, 0 code modes", card_mode_summary(p2, 1)
+    ok &= card_mode_summary(p2, 0) is None and card_mode_summary(p2, 2) is None
+    print("== inject again, the same sets: idempotent")
+    stage2 = os.path.join(d, "stage two")
+    os.makedirs(stage2, exist_ok=True)
+    inject_into_p2(p2, sel, conf, stage2, mode_sets=sets)
+    ok &= debugfs_cat(p2, "%s/img1/mode.so" % MODES_DIR) == so
+    ok &= debugfs_cat(p2, GAME_MONITOR).decode() == hooked
+    print("== a menu-only inject (mode_sets=None) leaves the sets where they are")
+    stage3 = os.path.join(d, "stage three")
+    os.makedirs(stage3, exist_ok=True)
+    inject_into_p2(p2, sel, conf, stage3)
+    ok &= debugfs_cat(p2, "%s/img1/mode.so" % MODES_DIR) == so
+    print("== rebuilt with no modes anywhere: the sets come off")
+    stage4 = os.path.join(d, "stage four")
+    os.makedirs(stage4, exist_ok=True)
+    inject_into_p2(p2, sel, conf, stage4, mode_sets=[{}, {}])
+    ok &= not debugfs_exists(p2, MODES_DIR)
+    ok &= debugfs_exists(p2, SELECT_DIR + "/images.conf") and e2fsck(p2)[0] == 0
+    print("SELFTEST part 9 (modes)", "PASS" if ok else "FAIL")
+    return bool(ok)
+
+
+def selftest_modes_alone(d, selector_file=None):
+    """`selftest --only modes`: PART 9 with its own stand-in selector dir."""
+    need_tools("debugfs", "e2fsck", "mke2fs")
+    d = os.path.join(d, "self test")
+    sel = os.path.join(d, "seldir")
+    os.makedirs(sel, exist_ok=True)
+    with open(os.path.join(sel, "codeselect"), "wb") as f:
+        f.write(open(selector_file, "rb").read() if selector_file
+                else b"#!/bin/sh\n# codeselect 3.0 (selftest stand-in)\necho '[select] chose 0 selftest'\n")
+    with open(os.path.join(sel, "select.sh"), "w", newline="\n") as f:
+        f.write("#!/bin/sh\n# selftest placeholder\nexit 0\n")
+    return selftest_modes(d, sel)
 
 
 def selftest_crash(card):
@@ -8613,6 +8928,7 @@ def main(argv=None):
     s = sub.add_parser("selftest", help="synthetic end-to-end test (needs debugfs/mke2fs/e2fsck/sfdisk/fdisk)")
     s.add_argument("dir")
     s.add_argument("--selector", help="any small file to stand in for the codeselect binary")
+    s.add_argument("--only", choices=["modes"], help="run one part alone (modes = PART 9, PAD-226)")
     argv = list(sys.argv[1:]) if argv is None else list(argv)
     if argv and argv[0] == "selftest-crash":          # the selftest's own child, not a subcommand
         selftest_crash(argv[1])
@@ -8642,6 +8958,7 @@ def main(argv=None):
                 report_versions(recs)            # not refuse - but it says what build will do
             except Refused as e:
                 print("\n== build will REFUSE this card\n%s" % e)
+            report_modes(plan_mode_sets([plan.primary] + list(plan.extras)))
         elif a.cmd == "check-stock":
             return 0 if check_stock(a.image) else 1
         elif a.cmd == "build":
@@ -8668,6 +8985,9 @@ def main(argv=None):
                 say("WARNING: no --extra given; building a one-image card")
             versions = plan_identities(plan)                 # read off the SOURCE images...
             report_versions(versions, a.allow_version_mismatch)  # ...and refuse before --out exists
+            # PAD-226: each image's own custom modes, off each source's rootfs, before the copy
+            mode_sets = plan_mode_sets([plan.primary] + list(plan.extras))
+            report_modes(mode_sets)
             workdir = a.workdir or os.path.dirname(os.path.abspath(a.out))
             os.makedirs(workdir, exist_ok=True)
             conf = media = manifests = None
@@ -8739,7 +9059,7 @@ def main(argv=None):
                 manifests = selector_manifests(plan, conf, a.media_dir, [a.primary] + list(a.extra),
                                                versions=versions, trees=trees)
                 inject_card(a.out, a.selector_dir, conf, workdir=workdir, media_files=media["files"] if media else None,
-                            replace_media=bool(a.media_dir), manifests=manifests)
+                            replace_media=bool(a.media_dir), manifests=manifests, mode_sets=mode_sets)
                 say("injection took %.0f s" % (time.monotonic() - t1))
             else:
                 # stock p2, still recorded: verify then has something to hold p2 against
@@ -8852,6 +9172,8 @@ def main(argv=None):
             return 0 if verify_card(a.card, plan, a.selector_dir, a.media_dir,
                                     mode="quick" if a.quick else "full") else 1
         elif a.cmd == "selftest":
+            if a.only == "modes":
+                return 0 if selftest_modes_alone(a.dir, a.selector) else 1
             return 0 if selftest(a.dir, a.selector) else 1
     except Refused as e:
         print("[card] error: %s" % e, file=sys.stderr)

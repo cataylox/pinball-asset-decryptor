@@ -263,6 +263,29 @@ grep -q "cannot tell its title" "$W/out" || { echo "select_sh_test: FAIL (scores
 export CODESELECT_CONF="$W/conf"
 unset CODESELECT_NV CODESELECT_NV_OWN
 rm -rf "$G/godzilla_pro" "$NVD" "$NVO"
+# ---- PAD-226: each image's own custom modes ($DIR/modes/img<N>, else $DIR/modes/none) -------
+PM="$W/padmode"
+mkdir -p "$W/modes/img2" "$W/modes/none" "$PM"
+: > "$W/modes/img2/mode.so"
+export CODESELECT_PADMODE="$PM"
+# image 2 carries its own set: it is bound over the rootfs's
+hook modes_own 2 0 "" "umount $G" "mount -t ext4 -o ro,relatime,exec /dev/mmcblk0p7 $M" "mount --bind $M/img2 $G" \
+    "mount --bind $W/modes/img2 $PM"
+grep -q "image 2: $W/modes/img2 bound over $PM (its own custom modes)" "$W/out" || { echo "select_sh_test: FAIL (modes_own) message"; cat "$W/out"; exit 1; }
+# image 1 carries none: the empty set, so the primary's modes never run under it
+hook modes_none 1 0 "" "umount $G" "mount -t ext4 -o ro,relatime,exec /dev/mmcblk0p7 $G" "mount --bind $W/modes/none $PM"
+grep -q "(no custom modes)" "$W/out" || { echo "select_sh_test: FAIL (modes_none) message"; cat "$W/out"; exit 1; }
+# image 0 keeps the set its own card put on the rootfs
+hook modes_primary 0 0 ""
+# no mountpoint on the rootfs: nothing is bound, and the log says so
+rmdir "$PM"
+hook modes_nomount 1 0 "" "umount $G" "mount -t ext4 -o ro,relatime,exec /dev/mmcblk0p7 $G"
+grep -q "no $PM: the rootfs's modes stay as they are" "$W/out" || { echo "select_sh_test: FAIL (modes_nomount) message"; cat "$W/out"; exit 1; }
+# a card built before per-image modes (no $DIR/modes): exactly the mounts it always made
+rm -rf "$W/modes"; mkdir -p "$PM"
+hook modes_oldcard 1 0 "" "umount $G" "mount -t ext4 -o ro,relatime,exec /dev/mmcblk0p7 $G"
+unset CODESELECT_PADMODE
+rm -rf "$PM"
 # ---- deltas (item 107): a tree carrying .multiboot/deltas runs materialize.py --------------
 # the fake mount grows the index under img2 when FAKE_DELTAS is set; the fake python records
 # its command line; no --mount-dev when CODESELECT_WORKDEV is empty (a plain work directory)
@@ -339,4 +362,4 @@ else
     real="no python on this host: materialize.py's own run skipped"
 fi
 rm -rf "$W"
-echo "select_sh_test: OK ($awks; the hook against fake mounts: 21 cases; $real)"
+echo "select_sh_test: OK ($awks; the hook against fake mounts: 26 cases; $real)"
