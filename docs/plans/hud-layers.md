@@ -148,6 +148,12 @@ included. Neither is how Stern presents a mode.
   clips in the video bank, the HUD scene, 31 sounds, the validation bypass) and it was flashed, verified, onto
   David's Premium card (its old contents, stock 1.16, are in `D:\Pinball\card_backups\`). HARDWARE-CONFIRMED
   the same day: David played it on his Premium, "seems to be working appropriately".
+- 2026-09-27, MERGED WITH MAIN (v1.24.0, PAD-228 cabinet buttons as shots, which edited the same three Godzilla
+  ports): Pro 1.16 has this branch's 20 census shots plus PAD-228's 3 buttons; the three Godzilla recipes are
+  rebuilt from the merged ports and the pinned runtime from both sides. Emulator-proven in rig 1 (run mSL, Try it
+  set tryitM from the merged code on Premium 1.16): the port arms 72 sites and 24 shots with PAD-228's switch
+  edges live, all six modes start and end, 17 swaps with BAD none (same carriers as sSL), segv 0, the same 6
+  throws. **DONE: ready for `/finish feature/hud-layers`.**
 - **Owed:** a Pro hardware run (Pro 1.16 and 1.15 are emulator-proven). Four other titles' ports miss the same display values Pro 1.16 did (Foo Fighters, John Wick, King
   Kong, Metallica): not this branch's; a separate task.
 
