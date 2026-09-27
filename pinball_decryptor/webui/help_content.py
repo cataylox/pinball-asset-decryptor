@@ -2474,7 +2474,7 @@ PREVIEW_HELP = {
              "the form says whether the mode can be built."),
             ("Several modes",
              "A card holds as many modes as you make; the count is under New, "
-             "with modes written in C counted apart. Each starts from its own "
+             "with modes made of blocks and modes written in C counted apart. Each starts from its own "
              "shot, and one runs at a time: a mode whose shots come up while "
              "another is running does not start then, but its next starting shot "
              "after that one ends starts it. A card carries one end sound of a "
@@ -2529,8 +2529,28 @@ PREVIEW_HELP = {
              "a HUD of its own, with a clip and a light show at its start and "
              "end. Their clips, music and calls are cut from "
              "your own copy of the films: until they are, the example's page says "
-             "which films it needs, with Choose your films folder…. A code mode "
-             "has no form, so Start mode now cannot reach it."),
+             "which films it needs, with Choose your films folder…. Start mode "
+             "now starts the open code mode through its <folder>.start trigger, "
+             "once a Try it has built it into the running game."),
+            ("Modes made of blocks",
+             "New > Mode from blocks… makes a mode you build from blocks instead of "
+             "the form or C: a small working one on this card's shots to change. "
+             "Each script is a When block (the mode starts or ends, a shot is "
+             "made, any shot, every few seconds, some seconds left, the ball "
+             "drains, one of the game's events) with the blocks it runs under it, "
+             "top to bottom: start or end the mode, score, set or change a "
+             "variable, If and If ... else, a callout, words on the mode's own "
+             "screen, light a shot or hand its lights back, add time, a multiball, "
+             "a line in the log. Values and conditions snap into a block's slots "
+             "and nest: hits of a shot this ball, points so far, seconds left, "
+             "sums, compare, and, or, not. Drag a block from the left into a "
+             "script, or press it to add it to the script picked last; a stack's "
+             "own + adds one too. A variable holds a number for each player and "
+             "goes back to 0 each ball, each time the mode starts, or each game. "
+             "Every change saves itself; the line at the top says what is left "
+             "to fix. The app turns the blocks into a mode in C, which Try it and "
+             "Write build like any other: C it makes shows it, and Edit as C… "
+             "keeps that C and puts the blocks away, for carrying on in C."),
             ("The game's own modes",
              "The game's own modes are listed under yours. Pick one to see its "
              "page: its timers and awards (type a new value and press Set; Stock "

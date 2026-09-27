@@ -458,6 +458,11 @@ def duplicate_code_mode(project, slug, name=None):
                              % (old_name, CM.ASSETS_FILE, e)) from None
         spec.name = new_name
         CM.save(project, new_slug, spec)
+    from . import block_modes as BM                 # PAD-232: a blocks mode's C from its blocks
+    try:
+        BM.regenerate(project, new_slug, name=new_name)
+    except (OSError, ValueError):
+        pass                                        # the renamed C above still builds
     return new_slug, path
 
 

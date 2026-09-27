@@ -849,6 +849,8 @@ class TryItMixin:
         return t
 
     def on_start_now(self):
+        if getattr(self, "_code_slug", None):
+            return self._start_code_now(self._code_slug)
         if not self._slug:
             self._tryit_note("open a mode first.")
             return None
@@ -863,6 +865,28 @@ class TryItMixin:
         cmd = self.trigger_cmd(slot)
         self._in_background(cmd, lambda ok, out: self._tryit_note(
             ("asked the game to start %s. A game must be in play." % name)
+            if ok else "could not reach the emulator: %s" % out[-300:]))
+        return cmd
+
+    def _start_code_now(self, slug):
+        """Start mode now on a code mode (one made of blocks too, PAD-232): its own test
+        trigger, ``/dump/<slug>.start``, which every code mode the tab makes polls. Only a
+        mode the running Try it built in can answer it."""
+        if not self._running_fn():
+            self._tryit_note("the emulator is not running: press Try it first.")
+            return None
+        live = self._tryit_live_now()
+        if live is None:
+            self._tryit_note("the run that is up was not started by Try it, so it has none of "
+                             "this tab's modes to start.")
+            return None
+        if slug not in (live.get("codes") or []):
+            self._tryit_note("%s is not in the game that is running: press Try it to build it "
+                             "in." % slug)
+            return None
+        cmd = self._rig_cmd("modes/tryit.sh", "start-code", slug)
+        self._in_background(cmd, lambda ok, out: self._tryit_note(
+            ("asked the game to start %s. A game must be in play." % slug)
             if ok else "could not reach the emulator: %s" % out[-300:]))
         return cmd
 

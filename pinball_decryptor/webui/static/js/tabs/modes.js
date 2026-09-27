@@ -14,6 +14,7 @@ import { html, useEffect, useRef, useState, Button, Field, Select, Check, Radio,
          InfoBadge, Icon, Progress, tip, cx, call, setField, openMenu, mediaUrl, fmtClock } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { StockDialog, FilmDialog, NewCodeDialog, ClipDialog, PlayButton } from "./modes_dialogs.js";
+import { BlocksEditor, BlocksCode, BLOCKS_WORDS } from "./modes_blocks.js";
 
 export const css = true;
 
@@ -115,7 +116,7 @@ function Num({ k, value, disabled, width = 64, title }) {
 function Head({ s }) {
   const proj = s.project || "";
   const nForm = s.n_form || 0;
-  const counts = `${nForm} mode${nForm === 1 ? "" : "s"}${s.n_code ? ` + ${s.n_code} in C` : ""}`;
+  const counts = `${nForm} mode${nForm === 1 ? "" : "s"}${s.n_blocks ? ` + ${s.n_blocks} from blocks` : ""}${s.n_code ? ` + ${s.n_code} in C` : ""}`;
   const modesDir = proj ? proj.replace(/[\\/]+$/, "").split(/[\\/]/).pop() + (proj.includes("\\") ? "\\" : "/") + "modes" : "";
   // one line: the card's game and version (its full words in the tooltip), the counts, the folder
   const compact = proj && (s.title_label || s.card_label) && (s.title_text || "").startsWith("Card:");
@@ -169,7 +170,8 @@ function ReadingPanel({ r }) {
 }
 
 // ------------------------------------------------------------------ the list
-// New ▾: everything that makes a mode. A blank mode, one from an example, and under
+// New ▾: everything that makes a mode. A blank mode, one from an example, a mode made of
+// blocks (PAD-232), and under
 // Advanced a mode written in C (a blank one from the SDK's template, or one of the C
 // examples) with the Mode SDK's document. With no project, Mode in C's Blank gives Tk's
 // own sentence.
@@ -192,13 +194,16 @@ function codeItems(s, onNewCode) {
   ];
 }
 
-function newMenuItems(s, onNewCode) {
+function newMenuItems(s, onNewCode, onNewBlocks) {
   const ex = exampleItems(s);
   return [
     { label: "Blank mode", icon: "plus", disabled: !s.new_ok, onClick: () => call("modes.new"),
       title: s.new_ok ? "" : (s.cap_text || s.project_label) },
     { label: "From an example", icon: "list", disabled: !s.ex_ok || !ex.length, submenu: ex,
       title: s.ex_ok ? "" : s.ex_tip },
+    { label: "Mode from blocks…", icon: "blocks", disabled: !!(s.project && s.no_port),
+      title: s.project && s.no_port ? s.no_port : BLOCKS_WORDS.newTip,
+      onClick: () => (s.project ? onNewBlocks() : call("modes.new_blocks_mode", "")) },
     { sep: true },
     { header: "Advanced" },
     { label: "Mode in C", icon: "edit", submenu: codeItems(s, onNewCode) },
@@ -208,7 +213,8 @@ function newMenuItems(s, onNewCode) {
 // One row of the list: the person's modes (form, and code with a C pill) and the game's own
 // modes (kind "game", with a count of staged changes).
 function ListRow({ r, i, selIdx, isSel }) {
-  const where = r.kind === "code" ? "modes/" + r.slug + "/" + r.slug + ".c"
+  const where = r.blocks ? "modes/" + r.slug + " (made of blocks)"
+    : r.kind === "code" ? "modes/" + r.slug + "/" + r.slug + ".c"
     : r.kind === "game" ? "One of the game's own modes: its timers and awards" : "modes/" + r.slug;
   return html`<button type="button" role="option" key=${r.kind + r.slug}
       aria-selected=${isSel(r)} tabindex=${i === Math.max(0, selIdx) ? 0 : -1}
@@ -216,7 +222,8 @@ function ListRow({ r, i, selIdx, isSel }) {
       onClick=${() => call("modes.select", r.slug, r.kind)}
       ...${tip(where + (r.chip_tip ? "\n" + r.chip_tip : ""))}>
       <span class="ellip">${r.name}</span>
-      ${r.kind === "code" ? html`<span class="r pill" title="Written in C">C</span>`
+      ${r.blocks ? html`<span class="r pill bk-pill" title="Made of blocks">Blocks</span>`
+        : r.kind === "code" ? html`<span class="r pill" title="Written in C">C</span>`
         : r.kind === "game" ? (r.chip ? html`<span class="r chip acc sm">${r.chip}</span>` : null)
         : r.chip === "ready" ? html`<span class="r chip ok sm">ready</span>`
         : r.chip ? html`<span class="r chip warn sm">${r.chip}</span>` : null}
@@ -227,7 +234,7 @@ function ListRow({ r, i, selIdx, isSel }) {
 // GAME_FOLD_AT of them (a person's choice to open or fold them is kept in this browser).
 const GAME_FOLD_AT = 6;
 
-function ModeList({ s, onNewCode, onAllNumbers }) {
+function ModeList({ s, onNewCode, onNewBlocks, onAllNumbers }) {
   const [fold, setFold] = useStored("pad.modes.game_fold2", "auto");
   const sel = s.sel || {};
   const allGame = s.game_rows || [];
@@ -256,7 +263,7 @@ function ModeList({ s, onNewCode, onAllNumbers }) {
   };
   return html`<section class="card modes-list">
     <div class="hd"><span class="h2">Modes</span><span class="sp"></span>
-      <${Button} kind="primary" size="sm" iconRight="down" onClick=${(e) => openMenu(e.currentTarget, newMenuItems(s, onNewCode))}>New<//></div>
+      <${Button} kind="primary" size="sm" iconRight="down" onClick=${(e) => openMenu(e.currentTarget, newMenuItems(s, onNewCode, onNewBlocks))}>New<//></div>
     <div class="bd modes-list-bd">
       ${rows.length || allGame.length ? html`<div class="list" role="listbox" aria-label="Modes in this project" onKeyDown=${onKey} ref=${listRef}>
         ${allGame.length ? html`<div class="modes-list-grp" role="presentation">Yours</div>` : null}
@@ -638,6 +645,29 @@ function Editor({ s, showClip }) {
   </section>`;
 }
 
+// A mode made of blocks (PAD-232): the block editor, and the C it makes.
+function BlocksPane({ s }) {
+  const [page, setPage] = useStored("pad.modes.blockspage", "blocks");
+  const c = s.code || {};
+  const b = c.blocks || {};
+  const ready = c.status === "Ready to build.";
+  return html`<section class="card modes-editor bk-pane">
+    <div class="hd">
+      <span class="h2 ellip">${c.name}</span><span class="pill bk-pill" title="Made of blocks">Blocks</span>
+      ${c.status ? html`<span class=${cx("chip", ready ? "ok" : "warn")}><span class="dot"></span>${ready ? "Ready to build" : "To fix"}</span>` : null}
+      <span class="sp"></span><span class="small muted ellip">${b.summary || ""}</span>
+    </div>
+    ${c.status && !ready ? html`<div class="modes-status warn">${c.status}</div>` : null}
+    ${c.error || b.error ? html`<div class="modes-status warn">${c.error || b.error}</div>` : null}
+    <div class="pages" role="tablist">
+      ${[["blocks", "Blocks"], ["c", "C it makes"]].map(([k, l]) => html`<button type="button" role="tab" aria-selected=${page === k} class=${page === k ? "on" : ""} onClick=${() => setPage(k)}>${l}</button>`)}
+    </div>
+    <div class="bd modes-editor-bd bk-pane-bd">
+      ${b.program ? (page === "c" ? html`<${BlocksCode} c=${c} />` : html`<${BlocksEditor} s=${s} c=${c} key=${c.slug} />`) : null}
+    </div>
+  </section>`;
+}
+
 function CodePane({ s }) {
   const [page, setPage] = useStored("pad.modes.codepage", "code");
   const c = s.code || {};
@@ -924,7 +954,7 @@ function CheckNote({ s }) {
 
 // ------------------------------------------------------------------ the first mode
 // A project with no mode of its own yet: the three ways in, the easiest first.
-function FirstMode({ s, onNewCode }) {
+function FirstMode({ s, onNewCode, onNewBlocks }) {
   const ex = exampleItems(s);
   const off = !!s.no_port;
   return html`<section class="card modes-editor modes-first">
@@ -950,6 +980,11 @@ function FirstMode({ s, onNewCode }) {
           <div class="row"><${Button} size="sm" disabled=${!s.new_ok || off} onClick=${() => call("modes.new")}>Blank mode<//></div>
         </div>
         <div class="modes-first-opt">
+          <div class="row wrap"><${Icon} name="blocks" /><b>Build with blocks</b></div>
+          <div class="small muted wrap">${BLOCKS_WORDS.pick}</div>
+          <div class="row"><${Button} size="sm" disabled=${off} title=${s.no_port || BLOCKS_WORDS.newTip} onClick=${onNewBlocks}>Mode from blocks…<//></div>
+        </div>
+        <div class="modes-first-opt">
           <div class="row wrap"><${Icon} name="edit" /><b>Write one in C</b><${Chip} sm>advanced<//></div>
           <div class="small muted wrap">For what the form can't do. It starts from the Mode SDK's template.</div>
           <div class="row wrap">
@@ -968,7 +1003,7 @@ export default function ModesTab() {
   const s = useNs("modes");
   if (s.spin) SPIN = s.spin;
   const [stock, setStock] = useState(false);
-  const [newCode, setNewCode] = useState(false);
+  const [newCode, setNewCode] = useState(false);     // "code" | "blocks" | false
   const [clip, setClip] = useState(null);
   const showClip = (path, title) => setClip({ path, title });
   const withClip = Object.assign({}, s, { _showClip: showClip });
@@ -980,11 +1015,12 @@ export default function ModesTab() {
     <${CheckNote} s=${s} />
     ${s.insider_note ? html`<div class="modes-note"><${Note} kind="info">${s.insider_note}<//></div>` : null}
     <div class="modes-body">
-      <${ModeList} s=${s} onNewCode=${() => setNewCode(true)} onAllNumbers=${() => setStock(true)} />
+      <${ModeList} s=${s} onNewCode=${() => setNewCode("code")} onNewBlocks=${() => setNewCode("blocks")} onAllNumbers=${() => setStock(true)} />
       ${s.game_mode ? html`<${GameModePage} g=${s.game_mode} s=${s} />`
+        : s.code && s.code.blocks ? html`<${BlocksPane} s=${s} />`
         : s.code ? html`<${CodePane} s=${withClip} />`
         : s.open ? html`<${Editor} s=${s} showClip=${showClip} />`
-        : hasProject && !(s.rows || []).length ? html`<${FirstMode} s=${s} onNewCode=${() => setNewCode(true)} />`
+        : hasProject && !(s.rows || []).length ? html`<${FirstMode} s=${s} onNewCode=${() => setNewCode("code")} onNewBlocks=${() => setNewCode("blocks")} />`
         : html`<section class="card modes-editor modes-empty">
             <${Empty} icon="modes" title=${hasProject ? "No mode open" : "No project"}>
               ${hasProject ? (s.status || "Pick a mode on the left.") : s.project_label}
@@ -994,7 +1030,7 @@ export default function ModesTab() {
     <${TryFooter} s=${s} />
     ${stock ? html`<${StockDialog} s=${s} onClose=${() => setStock(false)} />` : null}
     ${s.film ? html`<${FilmDialog} film=${s.film} key=${s.film.seq} />` : null}
-    ${newCode ? html`<${NewCodeDialog} onClose=${() => setNewCode(false)} />` : null}
+    ${newCode ? html`<${NewCodeDialog} blocks=${newCode === "blocks"} onClose=${() => setNewCode(false)} />` : null}
     ${clip ? html`<${ClipDialog} path=${clip.path} title=${clip.title} onClose=${() => setClip(null)} />` : null}
   </div>`;
 }

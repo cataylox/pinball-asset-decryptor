@@ -2964,7 +2964,8 @@ def test_modes_tab_counts_the_modes_and_at_the_cap_greys_only_the_form_examples(
         w.run(svc.refresh)
         st = _st(w)
         assert st["cap_text"] == (
-            "3 of 3 modes: delete one to add another. Modes written in C are not counted.")
+            "3 of 3 modes: delete one to add another. Modes made of blocks or written in C "
+            "are not counted.")
         assert st["new_ok"] is False
         assert st["ex_ok"] is True
         states = {e.get("label") or e["name"]: e["disabled"] for e in st["examples"]}
@@ -3053,7 +3054,8 @@ def test_modes_help_names_every_port_and_the_tab_as_it_is(tmp_path):
     assert [t for t, _b in sections] == [
         "What it's for", "Which games", "Making a mode", "Several modes",
         "Scores and Insider Connected", "Another card",
-        "Try it", "Modes written in C", "The game's own modes", "Cut from a video",
+        "Try it", "Modes written in C", "Modes made of blocks", "The game's own modes",
+        "Cut from a video",
         "A preview feature"]
     bodies = dict(sections)
     assert all(isinstance(b, str) and b for b in bodies.values())
