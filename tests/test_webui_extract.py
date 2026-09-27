@@ -865,7 +865,9 @@ def test_page_info_windows_are_not_modal():
     win = body("FloatWin")
     assert 'aria-modal="false"' in win and "scrim" not in win
     assert "badge-i" not in src and "IBadge" not in src
-    assert src.count("InfoBadge") >= 4          # import + three badges
+    # import + the card and project badges (the Select card tab shows the
+    # Image Info in place, under the card, so its picker has none)
+    assert src.count("InfoBadge") >= 3
 
 
 # ----------------------------------------------------- capture extras

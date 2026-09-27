@@ -1,0 +1,216 @@
+"""The Select card tab's own half (webui/tabs/card.py + card_preview.py):
+what the page shows about the picked card - the game's loading splash or a
+multi-boot card's menu, and the Image Info report in place - read on a
+worker, never on the loop."""
+
+import io
+import time
+from pathlib import Path
+
+from tests.webui_harness import web_app
+
+from pinball_decryptor.webui import card_preview as CP
+
+_JS = Path(__file__).resolve().parents[1] / "pinball_decryptor" / "webui" / "static" / "js" / "tabs"
+
+
+def _svc(w):
+    return w.window.service("card")
+
+
+def _settled(w, timeout=20):
+    """The card state once neither half is still loading."""
+    end = time.time() + timeout
+    while time.time() < end:
+        w.drain()
+        c = w.state("card")
+        busy = [x for x in (c.get("preview"), c.get("info"))
+                if x and x.get("state") == "loading"]
+        if not busy:
+            return c
+        time.sleep(0.05)
+    raise AssertionError("still loading: %r" % (w.state("card"),))
+
+
+def _card(tmp_path, name="card.raw"):
+    p = tmp_path / name
+    p.write_bytes(b"\0" * 4096)
+    return str(p)
+
+
+def _shot(tmp_path, kind="splash", w=1360, h=768):
+    return lambda p, out: {"src": str(tmp_path / (kind + ".png")), "w": w, "h": h,
+                           "kind": kind, "card_path": ""}
+
+
+def _no_render(*_a):
+    raise AssertionError("the menu must not be drawn")
+
+
+def test_no_card_shows_nothing(tmp_path):
+    with web_app(tmp_path, mfr="stern") as w:
+        assert w.call("card.look", "") is True
+        c = w.state("card")
+        assert c["preview"] is None and c["info"] is None
+        # a path that is not there (half typed) is no card either
+        w.call("card.look", str(tmp_path / "nope.raw"))
+        assert w.state("card")["preview"] is None
+
+
+def test_details_in_place_and_nothing_to_picture(tmp_path):
+    card = _card(tmp_path)
+    with web_app(tmp_path, mfr="stern") as w:
+        w.call("card.look", card)
+        c = _settled(w)
+        titles = [s["title"] for s in c["info"]["sections"]]
+        assert "File" in titles
+        # not a Spike 2 card: nothing on the glass, and nothing said about it
+        assert c["preview"]["state"] == "none" and not c["preview"]["note"]
+        # the same card again is not read again
+        seq = _svc(w)._seq
+        w.call("card.look", card)
+        assert _svc(w)._seq == seq
+        assert w.call("card.info_copy").startswith("Image Info")
+
+
+def test_splash_shown(tmp_path, monkeypatch):
+    card = _card(tmp_path)
+    monkeypatch.setattr(CP, "cache_root", lambda: str(tmp_path / "cache"))
+    monkeypatch.setattr(CP, "games_on", lambda p: ["Godzilla Pro"])
+    monkeypatch.setattr(CP, "splash_png", _shot(tmp_path))
+    with web_app(tmp_path, mfr="stern") as w:
+        w.call("card.look", card)
+        p = _settled(w)["preview"]
+        assert (p["state"], p["kind"], p["w"], p["h"]) == ("ready", "splash", 1360, 768)
+        assert p["src"].endswith("splash.png") and not p["note"]
+
+
+def test_multiboot_menu_shown(tmp_path, monkeypatch):
+    card = _card(tmp_path)
+    calls = []
+
+    def menu(path, out, runner):
+        calls.append(path)
+        return {"src": str(tmp_path / "menu.png"), "w": 1360, "h": 768}
+
+    monkeypatch.setattr(CP, "cache_root", lambda: str(tmp_path / "cache"))
+    monkeypatch.setattr(CP, "games_on", lambda p: ["A", "B", "C"])
+    monkeypatch.setattr(CP, "menu_png", menu)
+    monkeypatch.setattr(CP, "rig_off", lambda: False)
+    with web_app(tmp_path, mfr="stern") as w:
+        w.call("card.look", card)
+        p = _settled(w)["preview"]
+        assert (p["state"], p["kind"], p["games"]) == ("ready", "menu", 3)
+        assert calls == [card]
+
+
+def test_multiboot_menu_that_fails_falls_back_to_the_splash(tmp_path, monkeypatch):
+    card = _card(tmp_path)
+
+    def menu(path, out, runner):
+        raise RuntimeError("Drawing the menu failed (exit 127)")
+
+    monkeypatch.setattr(CP, "cache_root", lambda: str(tmp_path / "cache"))
+    monkeypatch.setattr(CP, "games_on", lambda p: ["A", "B"])
+    monkeypatch.setattr(CP, "menu_png", menu)
+    monkeypatch.setattr(CP, "rig_off", lambda: False)
+    monkeypatch.setattr(CP, "splash_png", _shot(tmp_path))
+    with web_app(tmp_path, mfr="stern") as w:
+        w.call("card.look", card)
+        p = _settled(w)["preview"]
+        assert (p["state"], p["kind"]) == ("ready", "splash")
+        assert "exit 127" in p["note"]
+
+
+def test_card_in_a_reader_gets_its_splash(tmp_path, monkeypatch):
+    """The menu is drawn from an image file; a card with no cache key (the
+    card in a reader) says so and shows the first game's splash."""
+    card = _card(tmp_path)
+    monkeypatch.setattr(CP, "card_key", lambda p: None)
+    monkeypatch.setattr(CP, "cache_root", lambda: str(tmp_path / "cache"))
+    monkeypatch.setattr(CP, "games_on", lambda p: ["A", "B"])
+    monkeypatch.setattr(CP, "menu_png", _no_render)
+    monkeypatch.setattr(CP, "splash_png", _shot(tmp_path))
+    with web_app(tmp_path, mfr="stern") as w:
+        w.call("card.look", card)
+        p = _settled(w)["preview"]
+        assert p["kind"] == "splash" and "reader" in p["note"]
+
+
+def test_no_menu_render_with_the_rig_off(tmp_path, monkeypatch):
+    """PAD_UI_NO_RIG (tests, captures) runs no tool: the splash, and why."""
+    card = _card(tmp_path)
+    monkeypatch.setattr(CP, "cache_root", lambda: str(tmp_path / "cache"))
+    monkeypatch.setattr(CP, "games_on", lambda p: ["A", "B"])
+    monkeypatch.setattr(CP, "menu_png", _no_render)
+    monkeypatch.setattr(CP, "splash_png", _shot(tmp_path))
+    with web_app(tmp_path, mfr="stern") as w:
+        w.call("card.look", card)
+        p = _settled(w)["preview"]
+        assert p["kind"] == "splash" and "PAD_UI_NO_RIG" in p["note"]
+
+
+def test_a_newer_pick_drops_the_older_answer(tmp_path):
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        old = svc._seq
+        w.run(svc._forget)                  # another card was picked
+        svc._post(old, svc._preview, state="ready", kind="splash")
+        w.drain()
+        assert w.state("card")["preview"] is None
+
+
+def test_backglass_follows_the_game_folders_edition():
+    names = ["backglass_le.png", "backglass_prem.png", "backglass_pro.png"]
+    assert CP._pick_backglass(names, "godzilla_pro") == "backglass_pro.png"
+    assert CP._pick_backglass(names, "godzilla_le") == "backglass_le.png"
+    assert CP._pick_backglass(names, "godzilla_premium") == "backglass_prem.png"
+    assert CP._pick_backglass(names, "king_kong") == "backglass_prem.png"
+    assert CP._pick_backglass(["backglass_x.png"], "godzilla_le") == "backglass_x.png"
+    assert CP._pick_backglass(["2112_logo.png"], "rush_le") is None
+
+
+def test_splash_falls_back_to_the_stern_logo(tmp_path, monkeypatch):
+    """A tree with no splash of its own shows the OS partition's Stern logo,
+    and says which it is."""
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (4, 3)).save(buf, "PNG")
+    monkeypatch.setattr(CP, "splash_bytes", lambda p: None)
+    monkeypatch.setattr(CP, "boot_screen_bytes", lambda p: (buf.getvalue(), "/usr/local/spike/SternLogo.png"))
+    got = CP.splash_png("x.raw", str(tmp_path))
+    assert (got["kind"], got["w"], got["h"]) == ("boot", 4, 3)
+    monkeypatch.setattr(CP, "splash_bytes", lambda p: (buf.getvalue(), "/g/assets/lcd/GameLogo.png"))
+    assert CP.splash_png("x.raw", str(tmp_path))["kind"] == "splash"
+
+
+def test_boot_screen_prefers_the_stern_logo(monkeypatch):
+    from pinball_decryptor.plugins.stern import engine, formats
+
+    class Reader:
+        def read_file_bytes(self, node):
+            return node["data"]
+
+    monkeypatch.setattr(formats, "open_card", lambda p: io.BytesIO(b""))
+    monkeypatch.setattr(formats, "parse_all_partitions_file", lambda f: [(1, 0x83, 2048, 100)])
+    monkeypatch.setattr(engine, "_boot_screen_dir", lambda f, parts: (Reader(), {}))
+    monkeypatch.setattr(engine, "_boot_images", lambda r, n: [
+        ("/usr/local/spike/Another.png", {"data": b"no"}),
+        ("/usr/local/spike/SternLogo.png", {"data": b"yes"})])
+    assert CP.boot_screen_bytes("x.raw") == (b"yes", "/usr/local/spike/SternLogo.png")
+    monkeypatch.setattr(engine, "_boot_screen_dir", lambda f, parts: (None, None))
+    assert CP.boot_screen_bytes("x.raw") is None
+
+
+def test_page_zero_state_and_buttons():
+    """The drop zone is the zero state only, and it reads "Browse, or drop a
+    card here"; the button goes to the Extract tab and says so."""
+    card = (_JS / "card.js").read_text(encoding="utf-8")
+    ext = (_JS / "extract.js").read_text(encoding="utf-8")
+    assert ">Browse</button>, or drop a card here" in ext
+    assert "!have && !s.ssd ? html`<${DropZone}" in card
+    assert ">Go to Extract<//>" in card and "Extract…<//>" not in card
+    # the picker has no Image Info badge: the details are under the card
+    start = ext.index("export function SourceBody(")
+    body = ext[start:ext.index("\nfunction ", start)]
+    assert "InfoBadge" not in body and "DropZone" not in body

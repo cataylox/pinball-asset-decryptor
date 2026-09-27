@@ -15,3 +15,86 @@
 .c-page .c-state { margin-top: 2px; }
 .c-page .c-row.locked .c-name, .c-page .c-row.locked > .i:first-child { color: var(--ink-3); }
 .c-page .c-row.locked .c-state { color: var(--ink-3); }
+
+/* the zero state's Browse link */
+.c-page .x-browse { border: 0; background: transparent; padding: 0; font: inherit; color: var(--accent); cursor: pointer;
+  text-decoration: underline; text-underline-offset: 3px; }
+.c-page .x-browse:hover { text-decoration-thickness: 2px; }
+
+/* the glass: the machine's own screen, so it is dark in either theme */
+.c-page .c-figure { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.c-page .c-glass { position: relative; width: 100%; overflow: hidden; border-radius: 8px; background: #050608;
+  border: 1px solid var(--line-2); box-shadow: inset 0 0 0 1px rgba(255,255,255,.03), 0 6px 22px rgba(0,0,0,.28); }
+.c-page .c-glass > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block;
+  opacity: 0; transform-origin: 50% 50%; }
+/* the reveal: a CRT coming on, a line across the middle opening to the picture */
+.c-page .c-glass.on > img { animation: c-crt .6s cubic-bezier(.2,.75,.25,1) both; }
+@keyframes c-crt {
+  0%   { opacity: 1; transform: scale(.04, .006); filter: brightness(5) saturate(0); }
+  30%  { opacity: 1; transform: scale(1, .006); filter: brightness(4) saturate(0); }
+  100% { opacity: 1; transform: scale(1, 1); filter: none; }
+}
+.c-page .c-glass.over { border-color: var(--accent); }
+.c-page .c-glass-drop { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; background: rgba(5,6,8,.72); color: #f3f1ea; font-size: 14px; border: 2px dashed var(--accent); border-radius: 8px; }
+.c-page .c-glass-drop .i { width: 22px; height: 22px; color: var(--accent); }
+.c-page .c-figure figcaption { line-height: 1.45; }
+.c-page .c-cap-t { font-family: var(--cond); font-weight: 600; }
+.c-page .c-cap-note { margin-top: 2px; }
+
+/* booting: a ball rolls the screen's length over chasing insert lamps */
+.c-page .c-boot { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; color: #d9d6cc; overflow: hidden;
+  background: radial-gradient(120% 90% at 50% 40%, #151820 0%, #07080b 70%);
+  --lamp: #e8a33d; }
+.c-page .c-boot::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(255,255,255,.035) 0 1px, transparent 1px 3px); }
+.c-page .c-sweep { position: absolute; left: 0; right: 0; height: 30%; top: -30%; pointer-events: none;
+  background: linear-gradient(180deg, transparent, rgba(232,163,61,.07), transparent); animation: c-sweep 2.6s linear infinite; }
+@keyframes c-sweep { to { top: 100%; } }
+.c-page .c-lane { position: relative; width: 62%; height: 22px; border-bottom: 1px solid rgba(255,255,255,.12); }
+.c-page .c-ball { position: absolute; bottom: 1px; left: 0; width: 20px; height: 20px; border-radius: 50%;
+  background: radial-gradient(circle at 34% 30%, #ffffff 0 12%, #cfd4da 26%, #7c848d 62%, #3b4046 100%);
+  box-shadow: 0 0 12px rgba(232,163,61,.35), 0 3px 4px rgba(0,0,0,.6);
+  animation: c-roll 1.9s cubic-bezier(.45,.05,.55,.95) infinite alternate; }
+@keyframes c-roll { from { left: 0; transform: rotate(0deg); } to { left: calc(100% - 20px); transform: rotate(720deg); } }
+.c-page .c-lamps { display: flex; gap: 10px; }
+.c-page .c-lamps i { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent;
+  border-bottom: 11px solid var(--lamp); opacity: .16; filter: drop-shadow(0 0 0 transparent);
+  animation: c-chase 1.4s linear infinite; animation-delay: calc(var(--i) * .2s); }
+@keyframes c-chase {
+  0%, 100% { opacity: .16; filter: none; }
+  8%  { opacity: 1; filter: drop-shadow(0 0 6px var(--lamp)); }
+  30% { opacity: .16; filter: none; }
+}
+.c-page .c-boot-txt { font-family: var(--mono); font-size: 12.5px; letter-spacing: .14em; text-transform: uppercase; }
+.c-page .c-boot-txt::after { content: "_"; margin-left: 2px; animation: c-caret 1s steps(1) infinite; }
+@keyframes c-caret { 50% { opacity: 0; } }
+.c-page .c-boot-sub { font-size: 12px; color: #9ea4ab; margin-top: -6px; }
+
+/* the card details (the Image Info report, in place) */
+.c-page .c-info > .bd { gap: 12px; }
+.c-page .c-isec { display: flex; flex-direction: column; gap: 6px; }
+.c-page .c-isec + .c-isec { border-top: 1px solid var(--line); padding-top: 10px; }
+.c-page .c-isec-t { font-family: var(--cond); font-weight: 600; font-size: 14.5px; }
+.c-page .c-ikv { grid-template-columns: minmax(120px, 200px) minmax(0, 1fr); gap: 3px 14px; align-items: baseline; font-size: 13px; }
+.c-page .c-wrap { overflow-wrap: anywhere; white-space: pre-wrap; }
+html.bp-640 .c-page .c-ikv { grid-template-columns: minmax(0, 1fr); gap: 0 14px; }
+html.bp-640 .c-page .c-ikv > .k { margin-top: 5px; }
+/* while it is read: the rows it will fill, shimmering */
+.c-page .c-skel { display: flex; flex-direction: column; gap: 9px; }
+.c-page .c-skel-t, .c-page .c-skel-row i { display: block; height: 11px; border-radius: 4px;
+  background: linear-gradient(90deg, var(--panel-3) 0%, var(--panel-3) 35%, var(--accent-soft) 50%, var(--panel-3) 65%, var(--panel-3) 100%);
+  background-size: 300% 100%; animation: c-shimmer 1.5s ease-in-out infinite; }
+.c-page .c-skel-t { width: 26%; height: 13px; margin-top: 4px; }
+.c-page .c-skel-row { display: grid; grid-template-columns: minmax(120px, 200px) minmax(0, 1fr); gap: 14px; }
+.c-page .c-skel-row i:nth-child(2) { animation-delay: .12s; }
+@keyframes c-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .c-page .c-glass.on > img { animation: none; opacity: 1; }
+  .c-page .c-sweep, .c-page .c-ball, .c-page .c-lamps i, .c-page .c-boot-txt::after,
+  .c-page .c-skel-t, .c-page .c-skel-row i { animation: none; }
+  .c-page .c-lamps i { opacity: .6; }
+  .c-page .c-ball { left: calc(50% - 10px); }
+}

@@ -16,11 +16,22 @@ grow ``HELP_CONTENT`` into a hook on ``Manufacturer`` like ``write_intro``.
 HELP_CONTENT = {
     "Select Card": [
         ("Pick the card",
-         "Point the box at a dumped card image / update file, or drop one "
-         "on the page. Plugins with direct-media support also offer a "
-         "\"From SD card / SSD\" mode that reads the physical media in a "
-         "reader (needs Administrator on Windows). The Extract tab reads "
-         "the card picked here."),
+         "Browse to a dumped card image / update file, or drop one on the "
+         "page. Plugins with direct-media support also offer a \"From SD "
+         "card / SSD\" mode that reads the physical media in a reader "
+         "(needs Administrator on Windows). The Extract tab reads the card "
+         "picked here."),
+        ("Is it the right card?",
+         "Once a Stern Spike 2 card is picked, the page shows what the "
+         "machine puts on the screen while it starts: the game's own "
+         "loading screen, or, on a multi-boot card, its boot menu with the "
+         "default game highlighted. The menu is drawn by the same tools the "
+         "Multi-boot tab uses and takes a few seconds the first time; a card "
+         "in a reader shows the first game's loading screen instead. Under "
+         "it, Card details lists everything the app can read off the card "
+         "(firmware version, edition, games on it, asset counts, "
+         "partitions), with Copy for a bug report. Nothing on the card is "
+         "changed."),
         ("What works without an extract",
          "The list on the right says what each tab can do. Partitions, "
          "Compare, Emulate and Multi-boot work straight from a card. The "
@@ -40,9 +51,9 @@ HELP_CONTENT = {
          "under the dropdown, read straight off the card with nothing copied "
          "anywhere — so a stack of cards can be sorted out by plugging each "
          "one in and reading the line. A card carrying a boot menu says so "
-         "and how many games are on it. The ⓘ beside the dropdown opens the "
-         "same details window the image picker's does, on the card itself: "
-         "firmware version, edition, asset counts and partitions. Reading a "
+         "and how many games are on it. Card details, under the card on the "
+         "Select card tab, reads the rest off the card itself: firmware "
+         "version, edition, asset counts and partitions. Reading a "
          "card in place needs Administrator on Windows, and the line says so "
          "when it hasn't got it."),
         ("Save card as image",

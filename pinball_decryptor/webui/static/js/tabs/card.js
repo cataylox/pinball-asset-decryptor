@@ -1,13 +1,15 @@
 // Select card tab (PAD-224): pick the card image (or the card in a reader)
-// the app works on, and see which tabs work on it straight away and which
-// need it extracted first.  The card is the Extract tab's input, so the page
-// renders the extract namespace and calls extract.*; the Python half is
+// the app works on, see it (its boot screen, or a multi-boot card's menu)
+// and what it says about itself, and see which tabs work on it straight away
+// and which need it extracted first.  The picker is the Extract tab's input,
+// so the page renders the extract namespace and calls extract.* for it; the
+// preview and the details are the card namespace.  The Python half is
 // webui/tabs/card.py.
 
-import { html, Button, Card, Chip, Icon, PageHead, Seg, call, cx } from "../core/ui.js";
+import { html, useEffect, useState, Button, Card, Chip, Icon, PageHead, Seg, call, cx, mediaUrl } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { NEEDS, WHAT, tabLock } from "../core/locks.js";
-import { SourceBody, ExtractOverlays, inputPhrase, useNoStrayDrops } from "./extract.js";
+import { SourceBody, ExtractOverlays, DropZone, cardDrop, inputPhrase, useNoStrayDrops } from "./extract.js";
 
 export const css = true;
 
@@ -53,13 +55,97 @@ function WhatCard({ shell }) {
   <//>`;
 }
 
+// ------------------------------------------------------------ the glass
+// While the card is read: a ball rolls the length of the screen over a row
+// of chasing insert lamps, and the stage says what is being read.
+function Booting({ p }) {
+  const games = p && p.games;
+  return html`<div class="c-boot" role="status" aria-live="polite">
+    <div class="c-sweep"></div>
+    <div class="c-lane"><span class="c-ball"></span></div>
+    <div class="c-lamps" aria-hidden="true">${[0, 1, 2, 3, 4, 5, 6].map((i) => html`<i style=${`--i:${i}`}></i>`)}</div>
+    <div class="c-boot-txt">${(p && p.stage) || "Reading the card…"}</div>
+    ${games ? html`<div class="c-boot-sub">Multi-boot card · ${games} games</div>` : null}
+  </div>`;
+}
+
+// The machine's own picture of the card, in the space the drop zone had.
+// It still takes a dropped card, which replaces this one.
+function Glass({ p, droppable }) {
+  const [over, setOver] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [lit, setLit] = useState("");
+  const ready = p.state === "ready" && p.src;
+  const src = ready ? mediaUrl(p.src) : "";
+  const on = !!src && lit === src;
+  const ratio = ready && p.w && p.h ? `${p.w} / ${p.h}` : "16 / 9";
+  const drop = droppable ? {
+    onDragOver: (e) => { e.preventDefault(); setOver(true); },
+    onDragLeave: () => setOver(false),
+    onDrop: cardDrop(setOver, setMsg),
+  } : {};
+  const [what, about] = {
+    menu: ["Boot menu", "what the machine shows at power-up, the default game highlighted"],
+    splash: ["Loading screen", "what the game shows while it starts up"],
+    boot: ["Boot screen", "the Stern logo the machine shows while it starts; this game has no splash of its own"],
+  }[p.kind] || ["", ""];
+  return html`<figure class="c-figure">
+    <div class=${cx("c-glass", on && "on", over && "over")} style=${`aspect-ratio: ${ratio}`} ...${drop}>
+      ${src ? html`<img key=${src} src=${src} alt=${"The card's " + what.toLowerCase()} onLoad=${() => setLit(src)} />` : null}
+      ${on ? null : html`<${Booting} p=${p} />`}
+      ${over ? html`<div class="c-glass-drop"><${Icon} name="upload" /><span>Drop to use this card instead</span></div>` : null}
+    </div>
+    ${on ? html`<figcaption class="small">
+        <span class="c-cap-t">${what}</span><span class="dim"> · ${about}</span>
+        ${p.note ? html`<div class="warn-ink c-cap-note">${p.note}</div>` : null}
+      </figcaption>` : null}
+    ${msg ? html`<span class="small warn-ink">${msg}</span>` : null}
+  </figure>`;
+}
+
+// ------------------------------------------------------ the card details
+// The Image Info report, under the card tile.  While it is read the rows it
+// will fill shimmer in place.
+const SKELETON = [[38, 62], [30, 48], [44, 70], [26, 40], [34, 56]];
+function Details({ info }) {
+  const loading = info.state === "loading";
+  const sections = info.sections || [];
+  return html`<${Card} cls="c-info" title="Card details"
+      extra=${html`<span class="small dim">${loading ? "" : info.status}</span>
+        <${Button} kind="ghost" size="sm" icon="copy" disabled=${loading || !sections.length}
+          onClick=${() => call("card.info_copy")} title="Copy the report">Copy<//>
+        <${Button} kind="ghost" size="sm" icon="refresh" disabled=${loading}
+          onClick=${() => call("card.refresh")} title="Read the card again" />`}>
+    ${loading ? html`<div class="c-skel" role="status" aria-label="Reading the card">
+        <div class="c-skel-t"></div>
+        ${SKELETON.map(([k, v]) => html`<div class="c-skel-row"><i style=${`width:${k}%`}></i><i style=${`width:${v}%`}></i></div>`)}
+        <div class="c-skel-t"></div>
+        ${SKELETON.slice(0, 3).map(([k, v]) => html`<div class="c-skel-row"><i style=${`width:${v - 10}%`}></i><i style=${`width:${k + 12}%`}></i></div>`)}
+      </div>`
+      : sections.map((sec) => html`<section class="c-isec">
+          <div class="c-isec-t">${sec.title}</div>
+          <div class="kv c-ikv">${sec.rows.map(([k, v]) => html`<span class="k">${k}</span><span class="c-wrap">${v}</span>`)}</div>
+        </section>`)}
+  <//>`;
+}
+
 export default function CardTab() {
   const s = useNs("extract");
+  const c = useNs("card");
   const shell = useNs("shell");
   useNoStrayDrops();
   const hist = shell.path_history || {};
   const drive = s.drive_label === "Game SSD" ? "game SSD" : (s.drive_label || "card");
-  const have = s.ssd ? !!s.drive : !!s.input;
+  const path = s.ssd ? (s.drive || "") : (s.input || "");
+  const have = !!path;
+  // The card on the page is the one the preview and the details describe;
+  // a path typed a letter at a time settles before it is read.
+  useEffect(() => {
+    const t = setTimeout(() => call("card.look", path), 250);
+    return () => clearTimeout(t);
+  }, [path, s.mfr_key]);
+  const p = c.preview;
+  const showGlass = have && p && (p.state !== "none");
   const sub = "Pick " + inputPhrase(s.input_label) + (s.direct ? " or the " + drive + " in a reader" : "")
     + ". Some tabs work on it straight away; the rest need its files extracted into a project folder first.";
   return html`<div class="page x-page c-page">
@@ -69,11 +155,16 @@ export default function CardTab() {
         <${Card} cls="x-source" title="Card"
             extra=${s.direct ? html`<${Seg} value=${s.source} onChange=${(v) => call("extract.set_source", v)}
               options=${[{ value: "iso", label: s.iso_label }, { value: "ssd", label: s.ssd_label }]} />` : null}
-            footer=${html`<${Button} kind="primary" size="big" icon="extract" disabled=${!have}
-                title=${have ? "" : "Pick a card first"} onClick=${() => call("ui.select_tab", "extract")}>Extract…<//>
+            footer=${html`<${Button} kind="primary" size="big" iconRight="right" disabled=${!have}
+                title=${have ? "Open the Extract tab to pick a project folder and extract this card" : "Pick a card first"}
+                onClick=${() => call("ui.select_tab", "extract")}>Go to Extract<//>
               <span class="dim small grow">Only the tabs that need an extract wait for this step.</span>`}>
           <${SourceBody} s=${s} hist=${hist} />
+          ${showGlass ? html`<${Glass} p=${p} droppable=${!s.ssd} />`
+            : !have && !s.ssd ? html`<${DropZone} s=${s} />` : null}
+          ${have && p && p.state === "none" && p.note ? html`<div class="small warn-ink">${p.note}</div>` : null}
         <//>
+        ${have && c.info ? html`<${Details} info=${c.info} />` : null}
       </div>
       <div class="stack x-col">
         <${WhatCard} shell=${shell} />

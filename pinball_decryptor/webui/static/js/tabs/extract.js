@@ -31,7 +31,6 @@ export function inputPhrase(label) {
   return article(noun) + " " + noun;
 }
 
-const CARD_INFO_TIP = "What game this card is, and everything else the app can read off it — straight from the card, nothing copied";
 const IMAGE_INFO_TIP = "Technical details about this image";
 const PROJECT_INFO_TIP = "Stats about this project folder";
 
@@ -68,10 +67,25 @@ export function FdaPanel({ s }) {
   </div>`;
 }
 
-function DropZone({ s }) {
+// The Select card tab's zero state: Browse… or a card dropped on it.  Once a
+// card is picked the tab shows the card instead (that picture takes drops
+// too, see cardDrop).
+export function DropZone({ s }) {
   const [over, setOver] = useState(false);
   const [msg, setMsg] = useState("");
-  const onDrop = (e) => {
+  const onDrop = cardDrop(setOver, setMsg);
+  return html`<div class=${cx("drop x-drop", over && "over")}
+      onDragOver=${(e) => { e.preventDefault(); setOver(true); }} onDragLeave=${() => setOver(false)} onDrop=${onDrop}>
+    <${Icon} name="upload" />
+    <span><button type="button" class="x-browse" onClick=${() => call("extract.browse_input")}>Browse</button>, or drop a card here</span>
+    ${(s.extensions || []).length ? html`<span class="small muted mono">${s.extensions.join("  ")}</span>` : null}
+    ${msg ? html`<span class="small warn-ink">${msg}</span>` : null}
+  </div>`;
+}
+
+// A drop of card files: the path of the first goes to the picker.
+export function cardDrop(setOver, setMsg) {
+  return (e) => {
     e.preventDefault();
     setOver(false);
     const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
@@ -81,13 +95,6 @@ function DropZone({ s }) {
     setMsg("");
     call("extract.drop_paths", paths);
   };
-  return html`<div class=${cx("drop x-drop", over && "over")}
-      onDragOver=${(e) => { e.preventDefault(); setOver(true); }} onDragLeave=${() => setOver(false)} onDrop=${onDrop}>
-    <${Icon} name="upload" />
-    <span>Drop ${inputPhrase(s.input_label)} here</span>
-    ${(s.extensions || []).length ? html`<span class="small muted mono">${s.extensions.join("  ")}</span>` : null}
-    ${msg ? html`<span class="small warn-ink">${msg}</span>` : null}
-  </div>`;
 }
 
 // The picked drive's whole name, under the list whenever the list is too
@@ -136,7 +143,6 @@ export function SourceBody({ s, hist }) {
             <div class="row x-drvpick">
               <${Select} id="x-drive" cls="grow" value=${s.drive_display} options=${opts} title=${s.drive_display}
                 disabled=${s.drives_state !== "ok"} onChange=${(v) => call("extract.select_drive", v)} />
-              ${s.identify ? html`<${InfoBadge} text=${CARD_INFO_TIP} onClick=${() => call("extract.open_image_info", "drive")} />` : null}
             </div>
             ${s.drives_state === "ok" ? html`<${DriveFull} text=${s.drive_display} />` : null}
           </div>
@@ -157,8 +163,7 @@ export function SourceBody({ s, hist }) {
   return html`<div class="stack x-sec">
       <label class="lbl" for="x-input">${s.input_label}</label>
       <${PathCombo} id="x-input" k="input" value=${s.input} history=${hist.extract_input}
-        onBrowse=${() => call("extract.browse_input")}
-        badge=${html`<${InfoBadge} text=${IMAGE_INFO_TIP} onClick=${() => call("extract.open_image_info", "input")} />`} />
+        onBrowse=${() => call("extract.browse_input")} />
       ${det ? html`<div class="row wrap x-chips">
           ${det.caption ? html`<${Chip} kind="ok" dot>${det.caption}<//>` : null}
           ${det.size != null ? html`<${Chip}>${fmtBytes(det.size)}<//>` : null}
@@ -168,8 +173,7 @@ export function SourceBody({ s, hist }) {
       ${badge ? (badge.switch
         ? html`<button type="button" class=${cx("x-badge link", badge.kind)} onClick=${() => call("extract.switch_suggested")}><${Icon} name="warn" /><span>${badge.text}</span></button>`
         : html`<div class=${cx("x-badge", badge.kind)}><${Icon} name=${badge.kind === "info" ? "info" : "warn"} /><span>${badge.text}</span></div>`) : null}
-    </div>
-    <${DropZone} s=${s} />`;
+    </div>`;
 }
 
 function projectHint(p) {
