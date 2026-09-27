@@ -22,9 +22,9 @@ const DURATION_TIP = "Lead each extracted sound's filename with its play length 
 const READ_CARD_TIP = "Copy the whole card into a .raw image file — a backup you can flash back later, "
   + "open on the Partitions tab, or compare against another image. Nothing on the card changes.";
 
-const article = (noun) => (/^\.?[aeiou]/i.test(noun || "") ? "an" : "a");
+export const article = (noun) => (/^\.?[aeiou]/i.test(noun || "") ? "an" : "a");
 // "a card image", "an .iso file", "a ROM zip", "a file"
-function inputPhrase(label) {
+export function inputPhrase(label) {
   if (!label || label === "Input") return "a file";
   if (label.startsWith(".")) return article(label) + " " + label + " file";
   const noun = /^[A-Z][a-z]/.test(label) ? label.charAt(0).toLowerCase() + label.slice(1) : label;
@@ -50,7 +50,7 @@ function PathCombo({ k, value, history, placeholder, onBrowse, badge, title, bro
 }
 
 // ------------------------------------------------------------ card panels
-function AdminPanel({ s }) {
+export function AdminPanel({ s }) {
   const collapsed = !!s.admin_collapsed;
   return html`<div class="x-alert" role="alert">
     <button type="button" class="x-alert-hd" aria-expanded=${!collapsed} onClick=${() => call("extract.toggle_admin_warning")}>
@@ -60,7 +60,7 @@ function AdminPanel({ s }) {
   </div>`;
 }
 
-function FdaPanel({ s }) {
+export function FdaPanel({ s }) {
   return html`<div class="x-alert" role="alert">
     <div class="x-alert-hd static"><${Icon} name="warn" /><span class="grow">macOS FULL DISK ACCESS REQUIRED</span>
       <button type="button" class="x-link" onClick=${() => call("extract.dismiss_fda")}>Hide this notice ✕</button></div>
@@ -122,7 +122,7 @@ function DriveFull({ text }) {
   return clipped ? html`<div class="small mono dim x-wrapany x-drvfull">${text}</div>` : null;
 }
 
-function SourceBody({ s, hist }) {
+export function SourceBody({ s, hist }) {
   if (s.ssd) {
     const opts = (s.drives || []).length ? s.drives.map((d) => ({ value: d.display, label: d.display }))
       : [{ value: s.drive_display || "", label: s.drive_display || "" }];
@@ -251,15 +251,45 @@ function RunButton({ s, shell }) {
     ${reason ? html`<span class="dim small grow" role="note">${reason}</span>` : html`<span class="grow"></span>`}`;
 }
 
+// The card this extract reads, picked on the Select card tab (PAD-224):
+// shown here read-only with a way back to change it.
+const selectCard = () => call("ui.select_tab", "card");
+function CardSummary({ s }) {
+  const name = s.ssd ? (s.drive ? s.drive_display : "") : s.input;
+  const det = s.detected;
+  const badge = s.badge;
+  return html`<div class="stack x-sec">
+      <span class="lbl">${s.ssd ? s.drive_label : s.input_label}</span>
+      ${name ? html`<div class="row x-pathrow">
+          <span class="mono grow x-wrapany x-cardpath" title=${name}>${name}</span>
+          ${s.ssd ? null : html`<${InfoBadge} text=${IMAGE_INFO_TIP} onClick=${() => call("extract.open_image_info", "input")} />`}
+          <${Button} onClick=${selectCard} title="Pick a different card on the Select card tab">Change…<//>
+        </div>
+        ${!s.ssd && det ? html`<div class="row wrap x-chips">
+            ${det.caption ? html`<${Chip} kind="ok" dot>${det.caption}<//>` : null}
+            ${det.size != null ? html`<${Chip}>${fmtBytes(det.size)}<//>` : null}
+            ${det.era ? html`<${Chip}>${det.era}<//>` : null}
+          </div>` : null}
+        ${s.ssd && s.identify && s.card_line ? html`<div class="x-cardline">${s.card_line}</div>` : null}`
+      : html`<div class="row x-pathrow">
+          <span class="muted grow">No card selected yet. Pick the one to extract on the Select card tab.</span>
+          <${Button} kind="primary" icon="sd" onClick=${selectCard}>Select card…<//>
+        </div>`}
+      ${badge ? (badge.switch
+        ? html`<button type="button" class=${cx("x-badge link", badge.kind)} onClick=${() => call("extract.switch_suggested")}><${Icon} name="warn" /><span>${badge.text}</span></button>`
+        : html`<div class=${cx("x-badge", badge.kind)}><${Icon} name=${badge.kind === "info" ? "info" : "warn"} /><span>${badge.text}</span></div>`) : null}
+    </div>
+    ${s.ssd && s.admin_panel ? html`<${AdminPanel} s=${s} />` : null}
+    ${s.ssd && s.fda_panel ? html`<${FdaPanel} s=${s} />` : null}`;
+}
+
 function SourceCard({ s, shell }) {
   const hist = shell.path_history || {};
   const p = s.project;
   const hint = projectHint(p);
-  return html`<${Card} cls="x-source" title="Source"
-      extra=${s.direct ? html`<${Seg} value=${s.source} onChange=${(v) => call("extract.set_source", v)}
-        options=${[{ value: "iso", label: s.iso_label }, { value: "ssd", label: s.ssd_label }]} />` : null}
+  return html`<${Card} cls="x-source" title="Extract"
       footer=${html`<${RunButton} s=${s} shell=${shell} />`}>
-    <${SourceBody} s=${s} hist=${hist} />
+    <${CardSummary} s=${s} />
     <div class="stack x-sec">
       <div class="row x-lblrow"><label class="lbl" for="x-proj" ...${tip(PROJECT_TIP)}>Project folder</label>
         <${InfoBadge} text=${PROJECT_INFO_TIP} onClick=${() => call("extract.open_project_info")} /></div>
@@ -493,22 +523,32 @@ function ReadCard({ s }) {
   <//>`;
 }
 
-// ------------------------------------------------------------- the tab
-export default function ExtractTab() {
-  const s = useNs("extract");
-  const shell = useNs("shell");
-  // A file dropped anywhere but the drop zone must not navigate the window.
+// The Image Info window and the Save card as image dialog: the Select card
+// tab opens them too.
+export function ExtractOverlays({ s }) {
+  const info = s.info && s.info.open ? s.info : null;
+  return html`${info ? html`<${ImageInfo} info=${info} />` : null}
+    ${s.rc && s.rc.open ? html`<${ReadCard} s=${s} />` : null}`;
+}
+
+// A file dropped anywhere but the drop zone must not navigate the window.
+export function useNoStrayDrops() {
   useEffect(() => {
     const stop = (e) => { if (!e.defaultPrevented) e.preventDefault(); };
     window.addEventListener("dragover", stop);
     window.addEventListener("drop", stop);
     return () => { window.removeEventListener("dragover", stop); window.removeEventListener("drop", stop); };
   }, []);
+}
+
+// ------------------------------------------------------------- the tab
+export default function ExtractTab() {
+  const s = useNs("extract");
+  const shell = useNs("shell");
+  useNoStrayDrops();
   const tabs = (shell.tabs || []).filter((t) => t.visible);
   const editable = tabs.some((t) => t.group === "Replace");
-  const sub = "Open " + inputPhrase(s.input_label) + (s.direct ? " or the " + (s.drive_label === "Game SSD" ? "game SSD" : s.drive_label) : "")
-    + ", and the game's assets land in a project folder" + (editable ? " you can edit on the Replace tabs." : ".");
-  const info = s.info && s.info.open ? s.info : null;
+  const sub = "Pull the selected card's assets into a project folder" + (editable ? " you can edit on the Replace tabs." : ".");
   return html`<div class="page x-page">
     <${PageHead} title="Extract" sub=${sub} />
     <div class="cols c75 x-cols">
@@ -520,8 +560,7 @@ export default function ExtractTab() {
         <${ProjectCard} s=${s} shell=${shell} />
       </div>
     </div>
-    ${info ? html`<${ImageInfo} info=${info} />` : null}
+    <${ExtractOverlays} s=${s} />
     ${s.pinfo ? html`<${ProjectInfo} s=${s} />` : null}
-    ${s.rc && s.rc.open ? html`<${ReadCard} s=${s} />` : null}
   </div>`;
 }

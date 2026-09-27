@@ -315,6 +315,32 @@ def collect_project_stats(folder):
     return rows
 
 
+def extract_state(folder):
+    """What the rail needs to grey out the tabs that work on extracted
+    files (PAD-224): ``{"folder", "name", "exists", "extracted",
+    "archived"}`` for *folder*, or None when there is no project folder.
+    Cheap (two stats and the anchor), so it runs on the UI loop."""
+    from ..core import project_file
+    folder = (folder or "").strip()
+    if not folder:
+        return None
+    folder = os.path.normpath(folder)
+    name = os.path.basename(folder.rstrip("\\/")) or folder
+    exists = os.path.isdir(folder)
+    archived = False
+    if exists:
+        try:
+            if project_file.has_anchor(folder):
+                archived = bool(project_file.load_anchor(folder)
+                                .get("archived"))
+        except Exception:                               # noqa: BLE001
+            archived = False
+    extracted = exists and os.path.isfile(
+        os.path.join(folder, ".checksums.md5"))
+    return {"folder": folder, "name": name, "exists": exists,
+            "extracted": bool(extracted), "archived": archived}
+
+
 def project_details(folder, manufacturers=(), current=None):
     """What the "This project" card says about *folder* besides the stats:
     is it a project (hidden anchor), archived, does it hold an extract

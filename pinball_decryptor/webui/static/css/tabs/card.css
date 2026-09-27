@@ -1,0 +1,17 @@
+/* Select card tab (PAD-224): the card picker is the Extract tab's, so its
+   sheet comes along; the rest is namespaced .c-*. */
+@import url("./extract.css");
+
+.c-page .c-what-card > .bd { gap: 14px; }
+.c-page .c-sec { gap: 2px; }
+.c-page .c-sec > .lbl { margin-bottom: 4px; }
+.c-page .c-row { display: grid; grid-template-columns: 18px 92px 1fr 16px; align-items: start; gap: 10px;
+  padding: 7px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit;
+  font-size: 13.5px; text-align: left; cursor: pointer; width: 100%; }
+.c-page .c-row:hover { background: var(--panel); }
+.c-page .c-row > .i { margin-top: 1px; color: var(--ink-2); }
+.c-page .c-name { font-family: var(--cond); font-weight: 600; font-size: 14.5px; }
+.c-page .c-what { color: var(--ink-2); line-height: 1.4; display: flex; flex-direction: column; gap: 2px; }
+.c-page .c-state { margin-top: 2px; }
+.c-page .c-row.locked .c-name, .c-page .c-row.locked > .i:first-child { color: var(--ink-3); }
+.c-page .c-row.locked .c-state { color: var(--ink-3); }

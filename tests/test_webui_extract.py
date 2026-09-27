@@ -151,13 +151,14 @@ def test_stern_eras(tmp_path, era, label, cats, capture):
         assert st["direct"] is (era == "spike2")
         assert st["identify"] is (era == "spike2")
         assert st["read_card"] is (era == "spike2")
-        assert st["block_reason"] == "Pick a %s to extract first." % label
+        assert st["block_reason"] == (
+            "Pick a %s on the Select card tab first." % label)
 
 
 def test_block_reason_order(tmp_path):
     with web_app(tmp_path, mfr="jjp") as w:
         assert w.state("extract")["block_reason"] == \
-            "Pick a file to extract first."
+            "Pick a file on the Select card tab first."
         f = tmp_path / "game.iso"
         f.write_bytes(b"x")
         w.call("ui.set", "extract", "input", str(f))
@@ -907,3 +908,91 @@ def test_running_state_blocks_start(tmp_path):
             assert w.call("extract.start") is False
         finally:
             w.run(w.window.set_running, False, "write")
+
+
+# ------------------------------------------------ PAD-224: Select card tab
+def test_select_card_tab_sits_before_extract(tmp_path):
+    """The card is picked on its own tab, first in the rail, wherever the
+    Extract tab shows."""
+    with web_app(tmp_path, mfr="stern") as w:
+        rail = [t["ns"] for t in w.state("shell")["tabs"] if t["visible"]]
+        assert rail[:2] == ["card", "extract"]
+        w.call("ui.select_tab", "card")
+        assert w.state("shell")["tab"] == "card"
+
+
+def test_project_state_says_whether_the_project_holds_an_extract(tmp_path):
+    """The shell's project_state is what the rail greys tabs out by: None
+    with no project folder, extracted only once the baseline is there."""
+    proj = tmp_path / "proj"
+    with web_app(tmp_path, mfr="stern") as w:
+        _settle(w)
+        assert w.state("shell").get("project_state") is None
+        w.call("ui.set", "extract", "output", str(proj))
+        _settle(w)
+        ps = w.state("shell")["project_state"]
+        assert ps["name"] == "proj"
+        assert ps["exists"] is False and ps["extracted"] is False
+        proj.mkdir()
+        (proj / ".checksums.md5").write_text("", encoding="utf-8")
+        w.call("extract.refresh_project")
+        _settle(w)
+        ps = w.state("shell")["project_state"]
+        assert ps["exists"] is True and ps["extracted"] is True
+        assert ps["archived"] is False
+        w.call("ui.set", "extract", "output", "")
+        _settle(w)
+        assert w.state("shell")["project_state"] is None
+
+
+_LOCKS_JS = (Path(__file__).resolve().parents[1] / "pinball_decryptor"
+             / "webui" / "static" / "js" / "core" / "locks.js")
+
+_LOCK_CASES = r"""
+import { tabLock } from "./locks.js";
+const none = null;
+const bare = { folder: "C:/p", name: "p", exists: true, extracted: false, archived: false };
+const done = { ...bare, extracted: true };
+const arch = { ...done, archived: true };
+const out = {};
+for (const [k, ps] of [["unknown", undefined], ["none", none], ["bare", bare], ["done", done], ["arch", arch]]) {
+  out[k] = {};
+  for (const ns of ["images", "write", "defaults", "partitions", "emulate"]) {
+    const l = tabLock(ns, ns, ps);
+    out[k][ns] = l ? l.need + ": " + l.short : "";
+  }
+}
+console.log(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(_node() is None, reason="needs Node.js")
+def test_which_tabs_are_greyed_out_and_why(tmp_path):
+    import json
+    import subprocess
+    (tmp_path / "locks.js").write_text(
+        _LOCKS_JS.read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / "package.json").write_text('{"type": "module"}',
+                                           encoding="utf-8")
+    (tmp_path / "cases.js").write_text(_LOCK_CASES, encoding="utf-8")
+    run = subprocess.run([_node(), str(tmp_path / "cases.js")],
+                         capture_output=True, text=True, timeout=60,
+                         cwd=str(tmp_path))
+    assert run.returncode == 0, run.stderr
+    got = json.loads(run.stdout)
+    # not known yet: nothing greyed out
+    assert not any(got["unknown"].values())
+    # the card-only tabs never are
+    for k in got:
+        assert got[k]["partitions"] == got[k]["emulate"] == ""
+    # no project folder: everything that needs one
+    assert got["none"]["images"].startswith("extract: Needs an extract")
+    assert got["none"]["write"].startswith("extract: ")
+    assert got["none"]["defaults"].startswith("project: Needs a project")
+    # a folder with no extract: the extract tabs only
+    assert "nothing is extracted" in got["bare"]["images"]
+    assert got["bare"]["defaults"] == ""
+    # extracted: nothing; archived: the extract tabs again
+    assert not any(got["done"].values())
+    assert "archived" in got["arch"]["images"]
+    assert got["arch"]["defaults"] == ""

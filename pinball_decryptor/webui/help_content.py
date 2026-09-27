@@ -14,12 +14,27 @@ grow ``HELP_CONTENT`` into a hook on ``Manufacturer`` like ``write_intro``.
 # (title, body) sections per notebook-tab name.  Keys match the tab captions
 # exactly (the tab's key, as the ? window asks for it).
 HELP_CONTENT = {
+    "Select Card": [
+        ("Pick the card",
+         "Point the box at a dumped card image / update file, or drop one "
+         "on the page. Plugins with direct-media support also offer a "
+         "\"From SD card / SSD\" mode that reads the physical media in a "
+         "reader (needs Administrator on Windows). The Extract tab reads "
+         "the card picked here."),
+        ("What works without an extract",
+         "The list on the right says what each tab can do. Partitions, "
+         "Compare, Emulate and Multi-boot work straight from a card. The "
+         "Replace tabs, Write and Mod Pack work on the files an extract "
+         "pulls off the card, so until the project folder holds an extract "
+         "they are greyed out in the list on the left, with a lock. They "
+         "still open, under a banner saying what is missing and where to "
+         "go next."),
+    ],
     "Extract": [
         ("Pick a source",
-         "Point the input box at a dumped card image / update file. Plugins "
-         "with direct-media support also offer a \"From SD card / SSD\" mode "
-         "that reads the physical media in a reader (needs Administrator on "
-         "Windows)."),
+         "The card comes from the Select card tab (a dumped card image / "
+         "update file, or the physical media in a reader); the Extract tab "
+         "shows it with a Change button that goes back there."),
         ("Which game is this card?",
          "In \"From SD card\" mode the game on the card you picked is named "
          "under the dropdown, read straight off the card with nothing copied "
@@ -108,7 +123,7 @@ HELP_CONTENT = {
          "ARCHIVED project is different: that's the hydrate — your edited "
          "files are set aside first and restored over the fresh extraction "
          "automatically.) After a finished extract the Extract button greys "
-         "out until you pick the card or folder again, change an option, or "
+         "out until you pick the card (on Select card) or folder again, change an option, or "
          "the card file changes, so a second click can't redo it by accident."),
     ],
     "Replace Audio": [
