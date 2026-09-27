@@ -356,32 +356,36 @@ _OLD = r'''old() { touch -d '10 minutes ago' "$1" 2>/dev/null || touch -t 200001
 '''
 
 
-def test_an_unused_lock_lapses_and_list_says_so():
+def test_an_unused_lock_is_cleared_by_the_next_look_at_the_board():
+    """David 2026-09-27: the locks must clear THEMSELVES when not in use."""
     rc, out, err = _sh(_BOARD + _OLD + r'''
 L take --slot 1 PAD-228 app >/dev/null 2>&1
 L take --slot 2 PAD-226 build >/dev/null 2>&1
 old "$PAD_BOARD/slot-1.lock"
 L list | sed -n 3,4p
+ls "$PAD_BOARD"
 rm -rf "$t"
 ''')
-    one, two = out.splitlines()
-    assert "(PAD-228)" in one and "LAPSED" in one
-    assert "PAD-226" in two and re.search(r"idle [0-9]s", two)
+    lines = out.splitlines()
+    assert "(free)" in lines[0]
+    assert "PAD-226" in lines[1] and re.search(r"idle [0-9]s", lines[1])
+    assert "slot-1.lock" not in lines[2:] and "slot-2.lock" in lines[2:]
+    assert "was PAD-228's" in err and "cleared" in err
 
 
-def test_take_any_prefers_a_free_slot_then_seizes_a_lapsed_one():
+def test_take_any_clears_a_lapsed_lock_and_takes_its_slot():
     rc, out, err = _sh(_BOARD + _OLD + r'''
 L take --slot 1 PAD-228 app >/dev/null 2>&1
 old "$PAD_BOARD/slot-1.lock"
-L take --any PAD-231 first 2>/dev/null
+L take --any PAD-231 first
 L take --any PAD-232 second 2>/dev/null
-L take --any PAD-233 third
+L take --any PAD-233 third 2>/dev/null
 L take --any PAD-234 none left 2>/dev/null || echo "full"
 sed -n 's/.*"who":"\([^"]*\)".*/\1/p' "$PAD_BOARD/slot-1.lock"
 ls "$PAD_BOARD" | grep -c seize
 rm -rf "$t"
 ''')
-    assert out.splitlines() == ["slot=2", "slot=3", "slot=1", "full", "PAD-233", "0"]
+    assert out.splitlines() == ["slot=1", "slot=2", "slot=3", "full", "PAD-231", "0"]
     assert "was PAD-228's" in err
 
 

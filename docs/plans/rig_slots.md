@@ -118,12 +118,15 @@ merged.
   the lock's mtime, the run record's and (slot 0) the legacy file's; the lock
   is touched by `take`, `note`, `use`, and watch.sh's teardown (so the clock
   starts when a run ENDS, not when the slot was taken).
-- **A lapsed slot is free to anyone.** `take --any` takes free slots first
-  and seizes a lapsed one only when none is free (the returning holder then
-  usually finds its NVRAM, builds and save states where it left them). The
-  seize is a rename, judged again after the move and put back if its holder
-  used it in between. `list` shows `idle 2m` / `LAPSED (holder)`; `free`
-  offers a lapsed slot when no slot is free.
+- **A lapsed lock is CLEARED, by itself.** David, the same day: the tickets
+  must "auto-clear them themselves when they are not in use". Every
+  `take`, `use`, `free` and `list` sweeps lapsed locks first, and so do the
+  app's board reads (`rigslot.board`, every few seconds on the Emulate tab)
+  and the triage dashboard's (pad-triage v0.9.1 `rigboard.clear_lapsed`,
+  which polls all day - the reader that always runs). The clear is a rename,
+  judged again after the move and put back if its holder used the rig in
+  between. The slot's upper layer (NVRAM, builds, save states) stays; the
+  holder's next command takes the slot back if nobody else did.
 - **Use takes the slot back.** `riglock.sh use N <who>` renews my lease,
   takes a free or lapsed slot, and refuses one someone else is using.
   `pad_slot_use` (padpath.sh) says it before watch.sh starts, killgame.sh
@@ -142,9 +145,10 @@ merged.
   (`release_claimed`, never while a run of ours is up). The title names the
   ticket; the rig number is on the rig strip and every run window. The
   Emulate tab's strip counts a lapsed hold as free and shows `idle Nm`.
-- **Deliberately not done:** pad-triage does not release a ticket's rigs at
-  merge. The lease frees them within five minutes of their last use on its
-  own, and pad-triage's engine had another session's work in flight.
+- **Deliberately not done:** no release hook at merge in pad-triage's
+  engine. The dashboard's clear frees a merged ticket's rigs within five
+  minutes of their last use anyway, and the engine had another session's
+  work in flight.
 
 ### Who is it for: the label, on every window
 

@@ -152,7 +152,7 @@ def test_no_ticket_or_a_chosen_rig_claims_nothing(board, monkeypatch):
     assert not os.listdir(str(board))
 
 
-def test_the_board_says_running_active_and_lapsed(board):
+def test_the_board_says_running_and_active_and_clears_lapsed(board):
     now = time.time()
     _put(board, "slot-1.lock", {"slot": 1, "who": "a"})
     _put(board, "slot-1.run", {"slot": 1, "game": "g", "started": 1})
@@ -160,8 +160,10 @@ def test_the_board_says_running_active_and_lapsed(board):
     _put(board, "slot-3.lock", {"slot": 3, "who": "c"}, age=rigslot.IDLE_S + 60)
     rows = {r["slot"]: r for r in rigslot.board(now=now)}
     assert [rows[n]["state"] for n in range(5)] == ["free", "running", "active",
-                                                   "lapsed", "free"]
+                                                   "free", "free"]
     assert 55 <= rows[2]["idle_s"] <= 65
+    # the lapsed one was CLEARED by the read, not only shown
+    assert rigslot.state(3) == "free" and _lock(board, 3) is None
 
 
 def test_the_colours_match_the_playfield_band():

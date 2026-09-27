@@ -16,8 +16,9 @@
 # only locks when it is ACTIVELY using it"). A held slot is RUNNING while a run
 # is up in it, ACTIVE for PAD_LOCK_IDLE seconds (default 300) after its holder
 # last used it - a run ending, a rig command, a note - and LAPSED after that.
-# A lapsed slot is free to anyone: `take` seizes it (free slots first), and
-# the holder's own next rig command takes it straight back if nobody did
+# A lapsed lock is CLEARED - by every take, use, free and list, and by the
+# app's and the triage dashboard's reads of the board - and the holder's own
+# next rig command takes the slot straight back if nobody else did
 # (watch.sh, killgame.sh and restorestate.sh call `use` before they act - see
 # pad_slot_use in padpath.sh). So a session never has to remember to release,
 # and a ticket that was merged, or a window that was killed, holds nothing
@@ -139,7 +140,7 @@ seize() {                         # <slot> -> 0 if the slot is now unheld
         fi
         prev=$(pad_board_field "$tmp" who)
         rm -f "$tmp"
-        echo "riglock: slot $1 was ${prev:-somebody}'s, unused for $(age "$IDLE")+ - lapsed, taken over" >&2
+        echo "riglock: slot $1 was ${prev:-somebody}'s, unused for $(age "$IDLE")+ - lapsed, cleared" >&2
     fi
     [ "$1" = 0 ] && rm -f "$LEGACY"
     return 0
@@ -169,6 +170,20 @@ take_one() {                      # <slot> <who> <what>
     return 0
 }
 
+# LAPSED LOCKS ARE CLEARED, not only shown as lapsed (David, 2026-09-27: the
+# tickets must "auto-clear them themselves when they are not in use"). Every
+# take, use, free and list sweeps them first, and so do the app's and the
+# triage dashboard's reads of the board (core/rigslot.py, pad-triage
+# rigboard.py) - the dashboard polls all day, so an unused lock is gone within
+# seconds of lapsing whether or not any session runs this script.
+sweep() {
+    local n
+    for n in $(seq 0 "$PAD_SLOTS_MAX"); do
+        held "$n" && [ "$(state "$n")" = lapsed ] && seize "$n"
+    done
+    return 0
+}
+
 mount_hint() {
     local n=$1
     [ "$n" = 0 ] && return 0
@@ -193,6 +208,7 @@ cmd_take() {
     shift || true
     what=$(clean "${*:-}")
     mkdir -p "$BOARD" || die "cannot create the board at $BOARD"
+    sweep
     if [ -n "$slot" ]; then
         take_one "$slot" "$who" "$what" || { cmd_show "$slot" >&2; die "slot $slot is held"; }
         echo "slot=$slot"
@@ -231,6 +247,7 @@ cmd_use() {
         return 0
     fi
     mkdir -p "$BOARD" || die "cannot create the board at $BOARD"
+    sweep
     if take_one "$n" "$who" "$what"; then
         echo "riglock: slot $n is $who's now (it was free)" >&2
         return 0
@@ -303,6 +320,7 @@ cmd_show() {                      # one human line for slot N
 
 cmd_list() {
     local n
+    sweep
     if [ "${1:-}" = --json ]; then
         printf '{"board":"%s","max":%s,"now":%s,"slots":[' "$BOARD" "$PAD_SLOTS_MAX" "$(now)"
         for n in $(seq 0 "$PAD_SLOTS_MAX"); do
@@ -322,6 +340,7 @@ cmd_list() {
 
 cmd_free() {                      # a free slot, else a lapsed one
     local n
+    sweep
     for n in $(seq 1 "$PAD_SLOTS_MAX"); do
         held "$n" || { echo "$n"; return 0; }
     done

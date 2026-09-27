@@ -102,6 +102,12 @@ def board(now=None):
     [{"slot", "colour", "holder", "doing", "held_s", "run": {...} | None}]."""
     now = now or time.time()
     d = board_dir()
+    # A LAPSED lock is cleared, not only shown (riglock.sh sweep()): the
+    # Emulate tab reads this every few seconds, so an unused lock goes away
+    # whether or not any session runs riglock.sh.
+    for n in range(0, SLOTS_MAX + 1):
+        if state(n, now) == "lapsed":
+            _seize(n)
     out = []
     for n in range(0, SLOTS_MAX + 1):
         lock, lm = _read(os.path.join(d, "slot-%d.lock" % n))
