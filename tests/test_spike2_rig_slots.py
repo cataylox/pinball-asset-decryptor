@@ -496,3 +496,50 @@ def test_rigbatch_spreads_a_list_across_rigs_and_frees_them():
     assert res == ["a", "pass", "b", "pass", "bad", "fail", "c", "pass"]
     assert out.split("--- locks left")[1].split("--- tail")[0].strip() == ""
     assert "ALL DONE: 3/4 pass" in out and "FAIL VERDICT bad fail" in out
+
+
+_STAGED = r'''
+t=$(mktemp -d) || exit 1
+mkdir -p "$t/rig" "$t/home" "$t/board" "$t/slowdisk" "$t/stage"
+cp "$R"/padpath.sh "$R"/padslot.sh "$R"/riglock.sh "$R"/rigbatch.sh "$R"/cardstage.sh "$t/rig/"
+printf '#!/bin/bash\necho 0\n' > "$t/rig/alive.sh"
+printf '#!/bin/bash\n:\n' > "$t/rig/killgame.sh"
+for c in a b c; do head -c 2048 /dev/urandom > "$t/slowdisk/$c.raw"; done
+cat > "$t/job.sh" <<'JOB'
+#!/bin/bash
+echo "$1 $2" >> "$JOBLOG"
+cmp -s "$2" "$SLOW/$(basename "$2")" || { echo "VERDICT $1 fail not a copy"; exit 1; }
+echo "VERDICT $1 pass"
+JOB
+printf 'a|%s|\nb|%s|\nnone|%s|\nc|%s|\n' "$t/slowdisk/a.raw" "$t/slowdisk/b.raw" \
+    "$t/slowdisk/missing.raw" "$t/slowdisk/c.raw" > "$t/l.list"
+export PAD_HOME="$t/home" PAD_BOARD="$t/board" PAD_SLOTS_MAX=3 JOBLOG="$t/jobs.txt"
+export PAD_RIGBATCH_ASSUME_MOUNTED=1 PAD_STAGE_COPY=cp SLOW="$t/slowdisk" PAD_STAGE_SPARE_GB=0
+bash "$t/rig/rigbatch.sh" -n 2 --who PAD-9 --out "$t/out" --stage "$t/stage" "$t/l.list" \
+    -- bash "$t/job.sh" > "$t/stdout" 2>&1
+echo "rc=$?"
+echo "--- jobs"; sed "s#$t#T#g" "$t/jobs.txt" | sort
+echo "--- results"; cut -f1,3 "$t/out/results.tsv" | sort
+echo "--- staged"; ls "$t/stage" | sort
+echo "--- again"
+bash "$t/rig/rigbatch.sh" -n 2 --who PAD-9 --out "$t/out2" --stage "$t/stage" "$t/l.list" \
+    -- bash "$t/job.sh" > /dev/null 2>&1
+grep -c ' reuse ' "$t/out2/stage.log"
+rm -rf "$t"
+'''
+
+
+@needs_proc
+def test_rigbatch_boots_staged_copies_and_reuses_them():
+    """cardstage.sh: every rig boots a copy staged off the slow disk; a card
+    that cannot be staged fails its build (not the batch); a second sweep
+    reuses what the first staged."""
+    rc, out, err = _sh(_STAGED, {"PAD_HOME": "/nonexistent"}, timeout=180)
+    assert "rc=1" in out, out + err
+    jobs = out.split("--- jobs")[1].split("--- results")[0].split()
+    assert jobs == ["a", "T/stage/a.raw", "b", "T/stage/b.raw", "c", "T/stage/c.raw"]
+    res = out.split("--- results")[1].split("--- staged")[0].split()
+    assert res == ["a", "pass", "b", "pass", "c", "pass", "none", "fail"]
+    staged = out.split("--- staged")[1].split("--- again")[0].split()
+    assert staged == ["a.raw", "a.raw.src", "b.raw", "b.raw.src", "c.raw", "c.raw.src"]
+    assert out.split("--- again")[1].strip() == "3"
