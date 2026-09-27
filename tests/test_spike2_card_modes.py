@@ -400,9 +400,18 @@ def test_run_game_asks_again_for_the_image_its_menu_chose():
     assert own < src.index('bash "$S/modes/cardmodes.sh" "${PAD_CARD:-}" | tail -1')
     # ...and asked again right after a non-primary image is bound, before the game's preload
     bound = src.index('- bound over /games/$GAME"')
-    again = src.index('PAD_CARD_IMAGE="$SEL_CHOICE" bash "$S/modes/cardmodes.sh" "$PAD_CARD"')
+    again = src.index('PAD_CARD_IMAGE="$SEL_CARDIDX" bash "$S/modes/cardmodes.sh" "$PAD_CARD"')
     assert bound < again < src.index("${PAD_MODE_SO:+$PAD_MODE_SO:}/lib/hwshim.so")
     assert '[ "${PAD_CARDMODES_OWN:-}" = 1 ]' in src[bound:again]
+    # keyed by the CARD's index for the chosen device (the menu counts the trees it found),
+    # from the table the outer part writes off the card's own images.conf
+    table = src.index('> "$R/dump/codeselect.cardidx"')
+    assert table < src.index("unshare $USERNS")
+    look = src.index("'$1 == t' \"$R/dump/codeselect.cardidx\"")
+    assert bound < look < again
+    # ...and the image's own machine store bound the way select.sh binds it on the machine
+    bind = src.index('mount --bind "$_store" "$R/data/nv/$_title"')
+    assert look < bind < src.index("${PAD_MODE_SO:+$PAD_MODE_SO:}/lib/hwshim.so")
 
 
 OTHER = b"\x7fELF" + b"\x02" * 2048
