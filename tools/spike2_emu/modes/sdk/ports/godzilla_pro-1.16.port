@@ -257,6 +257,12 @@ value display_priority_at    0xe
 value layered_record_size    16
 value layered_priority_at    12
 value layered_wait_for_at    0xa0
+# hud-layers 2026-09-27: the two return addresses the display hold compares (without layered_waiter_call the
+# display priority stayed OFF on this build: "the port's display lines are incomplete"). Derived by the offsets
+# Premium 1.16 and Pro 1.15 share (the waiter + 0x58, the waiter - 0x14c) and checked in this program: each
+# follows a BL, to layered_priority 0x3ce7c and to the function 0x260 before scene_show, as on both.
+value layered_waiter_call    0x00052dac
+value effect_waiter_call     0x00052c08
 value layered_fg_at          0x58
 value layered_fg_flags_at    0x60
 
@@ -325,7 +331,10 @@ value tank_maser_hits_at    0xb0      # + 4 * (player - 1)
 value tank_path_entries     6
 value tank_path_entry_size  16
 
-# ---- shots: COPIED from Godzilla Premium/LE 1.16, the same title; unverified ----
+# ---- shots: from a census on this build (hud-layers run c116, 2026-09-27: census_mode.c + shot_census.py, every
+# playfield switch pressed on a stock Pro 1.16 card). They were copied from Premium/LE 1.16 until then, which was
+# wrong for the shields: Pro has two shield targets (left 0x80000000, right 0x100000000, as Pro 1.15) and no center;
+# 0x200000000 is sent by the right spinner, not a target. The right spinner is 0x20000 (Premium's shield ramp spinner). ----
 shot 0x00100000    Left ramp
 shot 0x00200000    Right ramp
 shot 0x00400000    Building
@@ -335,8 +344,7 @@ shot 0x10000000    Powerline left
 shot 0x20000000    Powerline center
 shot 0x40000000    Powerline right
 shot 0x80000000    Shield target left
-shot 0x100000000   Shield target center
-shot 0x200000000   Shield target right
+shot 0x100000000   Shield target right
 shot 0x400000000   Skill shot
 shot 0x1000000000  Big loop
 shot 0x2           Slingshot
@@ -346,7 +354,7 @@ shot 0x40          Pop bumper
 shot 0x10000000000 Mecha exit bottom
 shot 0x200         Left spinner
 shot 0x2000        Top spinner
-shot 0x20000       Shield ramp spinner
+shot 0x20000       Right spinner
 
 # ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
 # sites played each id and the game's audio was transcribed: countdown 1287 (clips 1-5 said "ONE", "2", "Three", "4", "Five."); ten_seconds 1291 ("Time is running out!"); time_up 1295 ("Time is up!")

@@ -378,6 +378,7 @@ static void on_init(void)
         if (spike_mask[i]) spike_all |= 1u << i;
         else pm_log("this port has no \"%s\": %u spikes charge the roll", SPIKE_SHOT[i], N_SPIKES - 1);
     }
+    kit_hud_pips(&hud, (int)spikes_of_game());   /* Godzilla Pro: two shield targets, two pips */
     roll_mask = pm_shot(ROLL_SHOT);
     pa_load(&own);
     pm_log("ready on %s %s: joins the game's own battles; spikes 0x%llx 0x%llx 0x%llx, roll 0x%llx", pm_game(),

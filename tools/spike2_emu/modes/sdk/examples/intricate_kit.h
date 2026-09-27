@@ -682,6 +682,7 @@ struct kit_hud {
     char want_title[KIT_HUD_WORDS], want_line[KIT_HUD_WORDS], want_award[KIT_HUD_WORDS], want_awardsub[KIT_HUD_WORDS];
     char want_c[3][3][24], want_glabel[24];
     int want_timer, want_gauge;            /* -1 = hidden */
+    int pips;                              /* pips in use: 0 = all the build made (kit_hud_pips) */
     unsigned long award_until, hide_at;
     int noting;                            /* up only for a qualification note */
 };
@@ -805,6 +806,14 @@ static KIT_UNUSED void kit_hud_counter(struct kit_hud *h, int k, const char *lab
 /* the timer badge's seconds; -1 hides the badge */
 static KIT_UNUSED void kit_hud_timer(struct kit_hud *h, int seconds) { h->want_timer = seconds; }
 
+/* How many of the build's pips the gauge uses (a port with fewer of the shots than the card was built
+ * for: ANGUIRUS's spikes on Godzilla Pro, two shield targets where Premium has three). The rest are hidden
+ * rather than left dark, so a full charge reads full. 0 = all of them. Kept across the mode's starts. */
+static KIT_UNUSED void kit_hud_pips(struct kit_hud *h, int n)
+{
+    h->pips = n;
+}
+
 /* the gauge: `level` pips of the build's count lit (-1 hides it), and its label */
 static KIT_UNUSED void kit_hud_gauge(struct kit_hud *h, int level, const char *label)
 {
@@ -874,11 +883,12 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
         if (up) {
             kit_hud_text(h->t_glabel, h->w_glabel, sizeof h->w_glabel, h->want_glabel);
             for (k = 0; k < h->n_pips; k++) {
-                int lit = k < h->want_gauge;
-                if (lit == h->pip_lit[k]) continue;
-                pm_show(h->pip_on[k], lit);
-                pm_show(h->pip_off[k], !lit);
-                h->pip_lit[k] = lit;
+                int lit = k < h->want_gauge, gone = h->pips > 0 && k >= h->pips;
+                int state = gone ? 2 : lit;        /* 2: a pip past the ones in use, both pictures hidden */
+                if (state == h->pip_lit[k]) continue;
+                pm_show(h->pip_on[k], state == 1);
+                pm_show(h->pip_off[k], state == 0);
+                h->pip_lit[k] = state;
             }
         }
     }
