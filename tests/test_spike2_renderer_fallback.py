@@ -459,8 +459,8 @@ def test_stopping_the_renderer_is_sigint_first_and_waits():
     text = src("watch.sh")
     body = text[text.index("pad_gl_stop() {"):]
     body = body[:body.index("\n}\n")]
-    assert line_of(body, "kill -INT") < line_of(body, "pgrep -x padglhost")
-    assert line_of(body, "pgrep -x padglhost") < line_of(body, "kill -9")
+    assert line_of(body, "kill -INT") < line_of(body, "pad_pids -x padglhost")
+    assert line_of(body, "pad_pids -x padglhost") < line_of(body, "kill -9")
     # And the pgid teardown would have killed is cleared, so a trap firing
     # after this cannot signal a process group that has been replaced.
     assert 'HOSTPG=""' in body

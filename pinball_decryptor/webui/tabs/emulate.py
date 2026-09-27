@@ -215,8 +215,15 @@ class EmulateTab(TabService):
         self._mute_var.trace_add("write", self._on_volume_change)
 
         rig_ok = rig.rig_available()
+        # The board as it stands when the tab opens; the status poll keeps it
+        # current from then on. File reads only - see core/rigslot.py.
+        try:
+            from ...core import rigslot
+            rigs = rigslot.board()
+        except Exception:                                # noqa: BLE001
+            rigs = []
         self.set(
-            platform=sys.platform, no_rig=no_rig(), rig=rig_ok,
+            platform=sys.platform, no_rig=no_rig(), rig=rig_ok, rigs=rigs,
             rig_missing="" if rig_ok else self._rig_missing_text(),
             countries=[rig.COUNTRY_GAME] + list(rig.COUNTRIES),
             powers=[label for label, _env in rig.POWER_CHOICES],
@@ -2147,6 +2154,16 @@ class EmulateTab(TabService):
         for key, name in (("root", "PAD_ROOT"), ("tables", "PAD_TABLES")):
             if fields.get(key):
                 env[name] = fields[key]
+        # WHICH RIG (core/rigslot.py): the window titles itself with it, and a
+        # rig >= 1's window carries the marker its own Stop matches on (and
+        # every other rig's Stop leaves alone) - watch.sh's launch does both.
+        from ...core import rigslot
+        n = int(fields.get("slot") or rigslot.slot() or 0)
+        if n:
+            env["PAD_SLOT"] = str(n)
+            cmd.append("--pad-slot=%d" % n)
+        if rigslot.label():
+            env["PAD_LABEL"] = rigslot.label()
         # PAD-204: the window's status bar moves this tab's volume / Mute
         env["PAD_AUDIO_CTL"] = audio_ctl_file()
         try:
@@ -2431,6 +2448,13 @@ class EmulateTab(TabService):
                 rt = runtime.status()
             except Exception:                            # noqa: BLE001
                 rt = None
+            # WHO HOLDS THE OTHER RIGS (core/rigslot.py): file reads on the
+            # Windows side, no WSL call, so it rides this poll for free.
+            try:
+                from ...core import rigslot
+                rigs = rigslot.board()
+            except Exception:                            # noqa: BLE001
+                rigs = []
             if self._stopped:
                 self._poll_busy = False
                 return
@@ -2441,6 +2465,7 @@ class EmulateTab(TabService):
                 self._runtime_apply(rt)
                 self._apply(info)
                 self._follow_audio_ctl()
+                self.set(rigs=rigs)
             self._post(apply_and_release)
 
         self._thread(run)

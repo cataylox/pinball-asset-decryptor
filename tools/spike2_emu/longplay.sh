@@ -37,9 +37,10 @@
 set -u
 
 S=$(cd "$(dirname "$0")" && pwd)
+. "$S/padslot.sh"
 . "$S/gamestate.sh"
 
-LOG=${1:-$HOME/gzwatch.log}
+LOG=${1:-${PAD_LOGDIR:-$HOME}/gzwatch.log}
 MINS=${2:-25}
 WANT=${3:-520x294}
 OUTDIR=${LONGPLAY_OUT:-/tmp/longplay}
@@ -69,7 +70,7 @@ poke() { PAD_SW_SRC=g python3 "$S/swpoke.py" "$1" "${2:-90}" >/dev/null 2>&1; }
 # The same union as padpath.sh's pad_guest_up (this script sources only
 # gamestate.sh): comm=game on every platform measured; the interpreter names
 # are platform details - arm-binfmt is WSL's, qemu-arm a container's.
-guest_up() { pgrep -x game >/dev/null 2>&1 || pgrep -f 'arm-binfmt|qemu-arm' >/dev/null 2>&1; }
+guest_up() { [ -n "$(pad_pids -x game)" ] || [ -n "$(pad_pids -f 'arm-binfmt|qemu-arm')" ]; }
 
 # One ball into play. plunge.py takes the lowest trough ball still held, so a
 # `reset` first is what makes this repeatable across blocks.

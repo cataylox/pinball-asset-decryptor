@@ -9,6 +9,8 @@
 
 set -u
 RIG=$(cd "$(dirname "$0")" && pwd)
+# The running guest is found among THIS rig slot's processes (PAD_SLOT).
+. "$RIG/padslot.sh"
 SLOT=${1:-quicksave}
 # A SUBSHELL, because padpath.sh sets ROOT and this script's ROOT comes from
 # the RUNNING GUEST's own environment first (see below) - sourcing it here
@@ -43,7 +45,7 @@ esac
 # Find the slot. It lives under the running guest's rootfs if one is up, else
 # read the rootfs from the slot meta of any guest - but the simplest robust
 # path is the slot's own recorded rootfs, so try the common locations.
-PID=$(pgrep -x game | head -1)
+PID=$(pad_pids -x game | head -1)
 ROOT=""
 GGAME=""
 if [ -n "$PID" ]; then

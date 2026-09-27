@@ -29,13 +29,23 @@ CMD=${1:-list}
 [ "$(id -u)" = 0 ] || { echo "slots: needs root. Use: wsl -u root -e bash $0 ..."; exit 2; }
 
 # --- find the saves dir ---------------------------------------------------
+# THIS rig slot's guest (PAD_SLOT, padslot.sh) - another session's run in
+# another slot has its own saves, and listing or deleting those from here
+# would be reaching into someone else's rig.
+. "$(dirname "$0")/padslot.sh"
 find_root() {
     local pid r d
-    pid=$(pgrep -x game | head -1)
+    pid=$(pad_pids -x game | head -1)
     if [ -n "$pid" ]; then
         r=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null \
             | sed -n 's/^PAD_ROOT=//p' | head -1)
         [ -n "$r" ] && [ -d "$r/saves" ] && { echo "$r/saves"; return 0; }
+    fi
+    if [ "${PAD_SLOT:-0}" != 0 ]; then
+        for d in /home/*/padslots/"$PAD_SLOT"/root/saves; do
+            [ -d "$d" ] && { echo "$d"; return 0; }
+        done
+        return 1
     fi
     for d in /home/*/spike2root/saves /root/spike2root/saves; do
         [ -d "$d" ] && { echo "$d"; return 0; }

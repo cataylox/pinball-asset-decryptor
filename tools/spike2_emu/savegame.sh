@@ -15,6 +15,8 @@
 
 set -u
 RIG=$(cd "$(dirname "$0")" && pwd)
+# The running guest is found among THIS rig slot's processes (PAD_SLOT).
+. "$RIG/padslot.sh"
 SLOT=${1:-quicksave}
 LABEL=${2:-}
 # A SUBSHELL, for savestate.sh's sake: this script hands it an explicit
@@ -31,7 +33,7 @@ case "$SLOT" in
 esac
 
 [ "$(id -u)" = 0 ] || { echo "savegame: needs root. Use: wsl -u root -e bash $0 [slot]"; exit 2; }
-PID=$(pgrep -x game | head -1)
+PID=$(pad_pids -x game | head -1)
 [ -n "$PID" ] || { echo "[savegame] no game is running - start one with PAD_PIVOT=1 first"; exit 1; }
 
 # SAY WHY when the running game cannot be saved, before criu burns seconds
