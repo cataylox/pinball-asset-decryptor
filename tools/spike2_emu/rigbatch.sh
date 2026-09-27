@@ -125,7 +125,7 @@ finish() {
     [ -n "$SPID" ] && { kill -TERM -- "-$SPID" 2>/dev/null; kill -TERM "$SPID" 2>/dev/null; }
     for p in "${WPIDS[@]}"; do kill -TERM -- "-$p" 2>/dev/null; kill -TERM "$p" 2>/dev/null; done
     for s in "${SLOTS[@]}"; do
-        PAD_SLOT=$s bash "$RIG/killgame.sh" > /dev/null 2>&1 < /dev/null
+        PAD_SLOT=$s PAD_LABEL="$WHO" bash "$RIG/killgame.sh" > /dev/null 2>&1 < /dev/null
         bash "$RIG/riglock.sh" release "$s" "$WHO" --force > /dev/null 2>&1 < /dev/null
     done
     if [ -n "$STAGE" ]; then
@@ -150,9 +150,13 @@ worker() {
         if [ -n "$STAGE" ]; then
             # the staged copy (cardstage.sh), not the slow disk's original
             bash "$RIG/riglock.sh" note "$slot" "rigbatch $key (waiting for its card)" > /dev/null 2>&1 < /dev/null
+            t0=0
             while [ ! -f "$OUT/stage/$i" ] && [ ! -f "$OUT/stage/$i.fail" ]; do
                 [ -e "$OUT/stop" ] && return 0
                 sleep 2
+                # a long copy must not let the rig's lease lapse under the batch
+                t0=$((t0 + 1))
+                [ $((t0 % 30)) = 0 ] && bash "$RIG/riglock.sh" use "$slot" "$WHO" > /dev/null 2>&1 < /dev/null
             done
             if [ -f "$OUT/stage/$i.fail" ]; then
                 v="VERDICT $key fail staging: $(cat "$OUT/stage/$i.fail")"
@@ -174,7 +178,7 @@ worker() {
         [ -n "$v" ] || { [ "$rc" = 0 ] && v="VERDICT $key pass" || v="VERDICT $key fail rc=$rc"; }
         # A job that left its rig running would hand the next build a live one.
         [ "$(PAD_SLOT=$slot bash "$RIG/alive.sh" --total 2>/dev/null < /dev/null)" = 0 ] \
-            || PAD_SLOT=$slot bash "$RIG/killgame.sh" > /dev/null 2>&1 < /dev/null
+            || PAD_SLOT=$slot PAD_LABEL="$WHO" bash "$RIG/killgame.sh" > /dev/null 2>&1 < /dev/null
         flock "$OUT/results.tsv" bash -c 'printf "%s\n" "$2" >> "$1"' _ "$OUT/results.tsv" \
             "$(printf '%s\t%s\t%s\t%s\t%s' "$key" "$slot" "$(awk '{print $3}' <<<"$v")" \
                "$(( $(date +%s) - t0 ))" "$v")"

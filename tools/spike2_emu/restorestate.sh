@@ -20,6 +20,7 @@ CRIU=${CRIU:-$(pad_criu)}
 R=$ROOT
 
 [ "$(id -u)" = 0 ] || { echo "restorestate: needs root. Use: wsl -u root -e bash $0 ..."; exit 2; }
+pad_slot_use restore || exit 1   # the lease (riglock.sh): never into someone else's run
 [ -x "$CRIU" ] || {
     echo "restorestate: this machine has no criu, and Ubuntu does not package one."
     echo "restorestate:   wsl -u root -e bash $RIG/getcriu.sh   (builds it, once)"

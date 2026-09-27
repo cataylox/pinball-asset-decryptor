@@ -408,6 +408,41 @@ pad_label() {
     printf '%s' "$l" | tr -cd 'A-Za-z0-9 ._/:#+-' | cut -c1-40
 }
 
+#: WHO IS ASKING, never who holds the slot: PAD_LABEL, PAD_TICKET, or the
+#: checkout's branch. pad_label() falls back to the holder, which is right for
+#: a window title and exactly wrong for "is this slot mine?".
+pad_own_label() {
+    local l=${PAD_LABEL:-${PAD_TICKET:-}}
+    if [ -z "$l" ]; then
+        l=$(pad_branch)
+        case "$l" in main|master) l= ;; ticket/*) l=${l#ticket/} ;; esac
+    fi
+    printf '%s' "$l" | tr -cd 'A-Za-z0-9 ._/:#+-' | cut -c1-40
+}
+
+# ★ "I AM USING THIS SLOT NOW" - the lease (riglock.sh, "A LOCK IS A LEASE").
+# watch.sh, killgame.sh and restorestate.sh call this before they act: it
+# renews the lease if the slot is ours, takes it if it is free or lapsed, and
+# REFUSES if it is someone else's and in use - a session whose lease lapsed
+# while it was reading logs, and whose slot another session took meanwhile,
+# must not Stop or restore into that session's run.
+#
+# Skipped with nobody to name (David's own runs from main, an installed app on
+# rig 0: exactly as before leases), with PAD_NO_CLAIM=1, under pytest unless the
+# test gave it a board of its own (a test must never write the real board), and
+# in a child of a process that already said it - a run's own helpers.
+pad_slot_use() {                  # [what...]
+    local me
+    [ -n "${PAD_NO_CLAIM:-}" ] && return 0
+    [ "${PAD_SLOT_USED:-}" = "$PAD_SLOT" ] && return 0
+    [ -n "${PYTEST_CURRENT_TEST:-}" ] && [ -z "${PAD_BOARD:-}" ] && return 0
+    me=$(pad_own_label)
+    [ -n "$me" ] || return 0
+    PAD_NO_CLAIM=1 bash "$RIG/riglock.sh" use "$PAD_SLOT" "$me" "$@" < /dev/null || return 1
+    PAD_SLOT_USED=$PAD_SLOT
+    export PAD_SLOT_USED
+}
+
 #: What every window a run opens puts at the FRONT of its title (the end is
 #: what a taskbar button cuts off), so a window says whose it is:
 #: "[rig 2: item/48]", "[PAD-231]" for a labelled slot-0 run, or

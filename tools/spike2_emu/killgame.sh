@@ -24,6 +24,9 @@ if [ ! -d /proc/1 ] || ! grep -qs . /proc/1/comm 2>/dev/null; then
     echo "  Run it inside WSL:  wsl -e bash \$0" >&2
     exit 2
 fi
+# THE LEASE (riglock.sh): a Stop on a slot another session is using now would
+# end ITS run - refused; ours, or free, and the Stop goes ahead.
+pad_slot_use stop || exit 1
 #
 # THE COUNTING LIVES IN alive.sh, NOT HERE. This script used to keep its own
 # copy of the process list, and the two drifted: alive.sh grew the audio player

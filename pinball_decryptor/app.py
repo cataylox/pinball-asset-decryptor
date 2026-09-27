@@ -280,13 +280,13 @@ class App:
         else:
             from .worktree_picker import checkout_badge
             self._checkout_badge = checkout_badge()
-            # WHICH EMULATOR RIG this window drives (core/rigslot.py). A copy
-            # launched for a triage ticket claims a rig of its own, so its
-            # Stop can never end another ticket's run; the title says which,
-            # in the same words as every window that rig opens. Empty on an
-            # ordinary install, which drives rig 0 exactly as before.
+            # WHO this window is for (core/rigslot.py): a copy launched for a
+            # triage ticket names the ticket. Its RIG is taken at the Emulate
+            # tab's Start and given back at Stop (claim_for_run - a rig is
+            # held only while it is used), so the rig number is on the tab's
+            # rig strip and every window the run opens, not up here. Empty on
+            # an ordinary install, which drives rig 0 exactly as before.
             from .core import rigslot
-            rigslot.claim_for_ticket()
             self._rig_badge = rigslot.title_tag()
 
         self._settings = self._load_settings_file()

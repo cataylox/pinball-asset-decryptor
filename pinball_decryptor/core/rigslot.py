@@ -38,6 +38,11 @@ RUN_FRESH_S = 120
 COLOURS = ("#8b9196", "#4fb3d9", "#c08cf0", "#f0845d", "#6fcf8a")
 
 _claimed = []           # [slot] this process took and must give back
+_home = []              # the rigs this app has run on, last one last
+_atexit = []
+#: A held rig nobody has used for this long has LAPSED (riglock.sh's
+#: PAD_LOCK_IDLE): anyone may take it.
+IDLE_S = 300
 
 
 def board_dir():
@@ -80,7 +85,7 @@ def title_tag():
     n, l = slot(), label()
     if n:
         return "rig %d%s" % (n, (": " + l) if l else "")
-    return ""
+    return l        # a ticket's app before its first run: no rig yet
 
 
 def _read(path):
@@ -97,12 +102,21 @@ def board(now=None):
     [{"slot", "colour", "holder", "doing", "held_s", "run": {...} | None}]."""
     now = now or time.time()
     d = board_dir()
+    # A LAPSED lock is cleared, not only shown (riglock.sh sweep()): the
+    # Emulate tab reads this every few seconds, so an unused lock goes away
+    # whether or not any session runs riglock.sh.
+    for n in range(0, SLOTS_MAX + 1):
+        if state(n, now) == "lapsed":
+            _seize(n)
     out = []
     for n in range(0, SLOTS_MAX + 1):
         lock, lm = _read(os.path.join(d, "slot-%d.lock" % n))
         run, rm = _read(os.path.join(d, "slot-%d.run" % n))
         row = {"slot": n, "colour": COLOURS[n], "holder": "", "doing": "",
-               "held_s": None, "distro": "", "run": None, "mine": n == slot()}
+               "held_s": None, "distro": "", "run": None, "mine": n == slot(),
+               "state": state(n, now), "idle_s": None}
+        if row["state"] in ("active", "lapsed"):
+            row["idle_s"] = int(now - max(lm, rm))
         if lock:
             row.update(holder=str(lock.get("who") or ""),
                        doing=str(lock.get("what") or ""),
@@ -118,6 +132,37 @@ def board(now=None):
     return out
 
 
+def _lock_path(n):
+    return os.path.join(board_dir(), "slot-%d.lock" % n)
+
+
+def _mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return None
+
+
+def _running(n, now=None):
+    """A run record with a heartbeat: a run is up in rig n."""
+    rm = _mtime(os.path.join(board_dir(), "slot-%d.run" % n))
+    return rm is not None and (now or time.time()) - rm < RUN_FRESH_S
+
+
+def state(n, now=None):
+    """riglock.sh's lease, read from the board: "free", "running" (a run
+    record with a heartbeat), "active" (its holder used it in the last
+    IDLE_S) or "lapsed" (held, unused since - anyone may take it)."""
+    now = now or time.time()
+    lm = _mtime(_lock_path(n))
+    if lm is None:
+        return "free"
+    if _running(n, now):
+        return "running"
+    rm = _mtime(os.path.join(board_dir(), "slot-%d.run" % n)) or 0
+    return "active" if now - max(lm, rm) < IDLE_S else "lapsed"
+
+
 def _take(n, who, what):
     d = board_dir()
     os.makedirs(d, exist_ok=True)
@@ -125,44 +170,97 @@ def _take(n, who, what):
            "user": os.environ.get("USERNAME") or os.environ.get("USER") or "",
            "taken": int(time.time())}
     try:
-        with open(os.path.join(d, "slot-%d.lock" % n), "x", encoding="utf-8") as fh:
+        with open(_lock_path(n), "x", encoding="utf-8") as fh:
             fh.write(json.dumps(rec, separators=(",", ":")) + "\n")
         return True
     except OSError:
         return False
 
 
+def _seize(n):
+    """Take a LAPSED lock off its old holder - riglock.sh's seize(): the rename
+    is the atomic step, and the moved file is judged again in case its holder
+    used the rig between our look and our move (then it goes back)."""
+    path = _lock_path(n)
+    tmp = "%s.seize.%d" % (path, os.getpid())
+    try:
+        os.rename(path, tmp)
+    except OSError:
+        return False
+    try:
+        if time.time() - os.path.getmtime(tmp) < IDLE_S or _running(n):
+            try:
+                with open(tmp, encoding="utf-8", errors="replace") as old:
+                    back = old.read()
+                with open(path, "x", encoding="utf-8") as fh:
+                    fh.write(back)
+            except OSError:
+                pass
+            return False
+        return True
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _mine(n):
+    lock, _ = _read(_lock_path(n))
+    return bool(lock) and lock.get("who") == label()
+
+
 def release_claimed():
-    """Give back the rig claim_for_ticket() took - only ours, only once."""
+    """Give back the rig claim_for_run() took - only ours, only while no run
+    of ours is up in it. Stop calls this; so does the app's exit."""
     while _claimed:
         n = _claimed.pop()
-        path = os.path.join(board_dir(), "slot-%d.lock" % n)
-        rec, _ = _read(path)
-        if rec and rec.get("who") == label():
+        if _mine(n) and not _running(n):
             try:
-                os.remove(path)
+                os.remove(_lock_path(n))
             except OSError:
                 pass
 
 
-def claim_for_ticket():
-    """An app launched for a triage ticket takes a rig of its own.
+def claim_for_run():
+    """The rig an app launched for a triage ticket runs on - taken at START,
+    given back at Stop (riglock.sh, "A LOCK IS A LEASE").
 
-    The triage app launches this app with PAD_TICKET=PAD-n and no PAD_SLOT, one
-    per ticket, and all of them used to drive rig 0 - so a Stop in one ticket's
-    window killed another ticket's run. Here the first free rig >= 1 is
-    claimed on the board (atomic create, the same O_EXCL riglock.sh uses),
-    PAD_SLOT is set for every rig command this process makes, and the claim
-    is given back when the app exits. Returns the rig, or 0 when there is no
-    ticket, a rig was already chosen, or every rig is held (rig 0 then, as
-    before - and the board says who holds the rest).
+    Until 2026-09-27 the app took its rig when its window opened and held it
+    until the window closed: three ticket windows held three idle rigs, a
+    killed window held one forever, and a merged ticket's window still held
+    one. Now the rig is taken only for a run. The one this app ran on last is
+    asked for first (its NVRAM and save states are in that rig), then a free
+    one, then a lapsed one. Returns the rig; 0 with no ticket or when the app
+    was launched on a chosen rig (PAD_SLOT, which is then simply used); None
+    when every rig is in use by someone else - the caller refuses the Start.
     """
-    if not os.environ.get("PAD_TICKET") or os.environ.get("PAD_SLOT"):
+    if not os.environ.get("PAD_TICKET"):
         return slot()
-    for n in range(1, SLOTS_MAX + 1):
-        if _take(n, label(), "app"):
-            os.environ["PAD_SLOT"] = str(n)
+    if os.environ.get("PAD_SLOT") and not _home:
+        return slot()                   # launched on a chosen rig
+    order = list(_home[-1:]) + [n for n in range(1, SLOTS_MAX + 1)
+                                if n not in _home[-1:]]
+
+    def got(n):
+        os.environ["PAD_SLOT"] = str(n)
+        if n not in _claimed:
             _claimed.append(n)
+        if not _home or _home[-1] != n:
+            _home.append(n)
+        if not _atexit:
             atexit.register(release_claimed)
-            return n
-    return 0
+            _atexit.append(True)
+        return n
+
+    for n in order:
+        if _mine(n):
+            os.utime(_lock_path(n), None)
+            return got(n)
+    for n in order:
+        if state(n) == "free" and _take(n, label(), "app run"):
+            return got(n)
+    for n in order:
+        if state(n) == "lapsed" and _seize(n) and _take(n, label(), "app run"):
+            return got(n)
+    return None

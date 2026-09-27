@@ -1987,6 +1987,15 @@ class EmulateTab(TabService):
             self._refuse_start("the emulator is not set up on this PC; use "
                                "Check setup on the Emulate tab")
             return
+        # A TICKET'S RIG IS TAKEN NOW, for this run, and given back at Stop
+        # (core/rigslot.py claim_for_run). Nothing changes without a ticket.
+        from ...core import rigslot
+        if rigslot.claim_for_run() is None:
+            busy = ", ".join("rig %d: %s" % (r["slot"], r["holder"])
+                             for r in rigslot.board()[1:] if r["holder"])
+            self._refuse_start("every emulator rig is in use right now (%s). "
+                               "Try again when one is free." % busy)
+            return
         self._cancel_prepare = False
         self._starting = True
         self._run_label(False, True)
@@ -2221,6 +2230,9 @@ class EmulateTab(TabService):
                     except Exception:                    # noqa: BLE001
                         pass
             self._close_playfield()
+            # the rig goes back the moment it is not used (claim_for_run)
+            from ...core import rigslot
+            rigslot.release_claimed()
             self._stopping = False
             if needs_restart and sys.platform == "win32":
                 self._post(self._offer_wsl_restart)

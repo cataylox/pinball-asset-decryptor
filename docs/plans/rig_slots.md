@@ -104,6 +104,52 @@ slot, judged by the run record's heartbeat AND `alive.sh`), `list [--json]`,
 `free`. **Slot 0 also writes the pre-slot `~/.pad_rig_lock`**, so a session on
 the old protocol still sees the ordinary rig as held.
 
+### A lock is a lease: held only while the rig is used (PAD-229)
+
+David, 2026-09-27, after merging a ticket whose rig was still locked: "i would
+expect that it only locks when it is ACTIVELY using it in conversation". The
+board at that moment had every rig held and one running: three app windows
+held a rig each from the moment they opened, one of them for a ticket already
+merged.
+
+- **States.** A held slot is `running` (a run record with a heartbeat; on
+  slots >= 1 also `alive.sh`), `active` for `PAD_LOCK_IDLE` seconds (default
+  300) after its last use, and `lapsed` after that. Last use = the newest of
+  the lock's mtime, the run record's and (slot 0) the legacy file's; the lock
+  is touched by `take`, `note`, `use`, and watch.sh's teardown (so the clock
+  starts when a run ENDS, not when the slot was taken).
+- **A lapsed lock is CLEARED, by itself.** David, the same day: the tickets
+  must "auto-clear them themselves when they are not in use". Every
+  `take`, `use`, `free` and `list` sweeps lapsed locks first, and so do the
+  app's board reads (`rigslot.board`, every few seconds on the Emulate tab)
+  and the triage dashboard's (pad-triage v0.9.1 `rigboard.clear_lapsed`,
+  which polls all day - the reader that always runs). The clear is a rename,
+  judged again after the move and put back if its holder used the rig in
+  between. The slot's upper layer (NVRAM, builds, save states) stays; the
+  holder's next command takes the slot back if nobody else did.
+- **Use takes the slot back.** `riglock.sh use N <who>` renews my lease,
+  takes a free or lapsed slot, and refuses one someone else is using.
+  `pad_slot_use` (padpath.sh) says it before watch.sh starts, killgame.sh
+  stops and restorestate.sh restores - so a session whose lease lapsed while
+  it read logs, and whose slot was taken meanwhile, cannot Stop the new
+  holder's run. Who is asking is `PAD_LABEL`, `PAD_TICKET` or the branch
+  (`pad_own_label`, never the holder); nobody to name (main, an installed
+  app) skips it, as does a child of a process that already said it, and a
+  test with no board of its own (`PYTEST_CURRENT_TEST` without `PAD_BOARD`).
+  rigbatch passes its `--who` to its own killgame calls, and keeps its
+  leases warm while a worker waits for a staged card.
+- **The app takes its rig at Start, not when its window opens**
+  (`rigslot.claim_for_run`, was `claim_for_ticket` at start-up): the rig it
+  ran on last first, then a free one, then a lapsed one; none in use -> the
+  Start is refused with who holds what. Stop gives it back
+  (`release_claimed`, never while a run of ours is up). The title names the
+  ticket; the rig number is on the rig strip and every run window. The
+  Emulate tab's strip counts a lapsed hold as free and shows `idle Nm`.
+- **Deliberately not done:** no release hook at merge in pad-triage's
+  engine. The dashboard's clear frees a merged ticket's rigs within five
+  minutes of their last use anyway, and the engine had another session's
+  work in flight.
+
 ### Who is it for: the label, on every window
 
 `pad_label` (padpath.sh) = `PAD_LABEL`, else the holder of this slot's lock,
@@ -283,6 +329,16 @@ take several; what was missing was something to spread a list across them.
   renderer windows were proven on a private Xvfb (`:7`) by title, not seen on
   the desktop. The playfield windows were seen on the desktop.
 
+**2026-09-27 - PAD-229: leases.** Everything under "A lock is a lease" above.
+Proven by tests (test_rigslot.py: the app holds nothing until Start, Start
+takes free-then-lapsed and the same rig first, Stop gives it back, a run up
+keeps it; test_spike2_rig_slots.py: lapse and `list`, take --any's order and
+the seize, a run keeps a stale lock live, `use` renew/take/refuse, the
+refusal in pad_slot_use, the pytest guard) and by `list` on the real board,
+which read the three app-window locks as LAPSED and PAD-225's sweep as
+running. Owed: an app-driven Start/Stop on a claimed rig in PAD-Runtime
+(the app windows open at the time run the old code until reopened).
+
 ### The protocol text for the `/next` skill, at merge
 
 > **Rig slots - several rigs, one per session.** Take a rig of your own
@@ -293,8 +349,11 @@ take several; what was missing was something to spread a list across them.
 > It prints `slot=N` and mounts rig N. Run EVERY rig command with
 > `PAD_SLOT=N` (`wsl -e bash -c "PAD_SLOT=N PAD_AUDIO=0 bash <rig>/watch.sh 8"`,
 > `PAD_SLOT=N bash killgame.sh`, `PAD_SLOT=N bash alive.sh`). Say what you
-> are doing as it changes: `riglock.sh note N <what>`. Give it back when
-> `PAD_SLOT=N alive.sh` reads 0: `riglock.sh release N item/<N>`.
+> are doing as it changes: `riglock.sh note N <what>`. The lock is a lease:
+> it lapses five minutes after your last use, and your next watch.sh,
+> killgame.sh or restorestate.sh takes it back if nobody else did (and
+> refuses if somebody is using it - then `take --any` again). Done with the
+> rig for good: `riglock.sh release N item/<N>`.
 > `riglock.sh list` shows every rig; David sees the same board on the triage
 > dashboard and the Emulate tab. Rig 0 (`--slot 0`) is the ordinary rig and
 > the base every other rig is layered over: take it only to change the base
