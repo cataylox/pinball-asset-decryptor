@@ -146,8 +146,9 @@ included. Neither is how Stern presents a mode.
 - 2026-09-27, the Premium hardware card: Write (`engine.write_image`, this branch, `C:\tmp\pad_hud\build_card.py`)
   built projSL on the stock godzilla_le 1.16 image in 13 min (the six modes' mode.so + game_monitor hook, 37
   clips in the video bank, the HUD scene, 31 sounds, the validation bypass) and it was flashed, verified, onto
-  David's Premium card (its old contents, stock 1.16, are in `D:\Pinball\card_backups\`).
-- **Owed:** a hardware run (Premium and Pro). Four other titles' ports miss the same display values Pro 1.16 did (Foo Fighters, John Wick, King
+  David's Premium card (its old contents, stock 1.16, are in `D:\Pinball\card_backups\`). HARDWARE-CONFIRMED
+  the same day: David played it on his Premium, "seems to be working appropriately".
+- **Owed:** a Pro hardware run (Pro 1.16 and 1.15 are emulator-proven). Four other titles' ports miss the same display values Pro 1.16 did (Foo Fighters, John Wick, King
   Kong, Metallica): not this branch's; a separate task.
 
 ## How to test it
