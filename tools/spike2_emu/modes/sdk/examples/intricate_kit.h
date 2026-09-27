@@ -60,6 +60,16 @@ static KIT_UNUSED const char *kit_num(char *buf, unsigned cap, uint64_t v)
     return buf;
 }
 
+/* a value that fits a HUD counter's 200 px in the big font (hud-layers): 950,000 / 4.25M / 42.5M / 425M */
+static KIT_UNUSED const char *kit_short(char *buf, unsigned cap, uint64_t v)
+{
+    if (v < 1000000u) return kit_num(buf, cap, v);
+    if (v < 10000000u) pm_snprintf(buf, cap, "%u.%02uM", (unsigned)(v / 1000000u), (unsigned)(v % 1000000u / 10000u));
+    else if (v < 100000000u) pm_snprintf(buf, cap, "%u.%uM", (unsigned)(v / 1000000u), (unsigned)(v % 1000000u / 100000u));
+    else pm_snprintf(buf, cap, "%uM", (unsigned)(v / 1000000u));
+    return buf;
+}
+
 /* ---- the debounce ------------------------------------------------------------------------
  * One slot per shot bit that has been seen: its last time. A shot bit seen again inside
  * KIT_DEBOUNCE_MS is not fresh. Measured motive (David, the film pack): one target hit

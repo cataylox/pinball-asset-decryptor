@@ -64,12 +64,6 @@
       "length": 1.4,
       "what": "Ghidorah's shriek in the final battle at Mt. Fuji (the game's own Ghidorah screech matches 0.74; a pulsed trill clear of music)"
      },
-     "regrow": {
-      "film": "ghi64",
-      "from": 4787.1,
-      "length": 1.3,
-      "what": "Ghidorah's trilling cackle in the final battle (the game's own Ghidorah screech matches 0.84; the clearest trill, a 6 dB step at its start)"
-     },
      "won": {
       "film": "am65",
       "from": 5484.5,
@@ -208,12 +202,6 @@
       "from": 5616.8,
       "length": 3.0,
       "what": "Godzilla's last roar as it surfaces (harmonic roar, -15 dB, the loudest in the scene)"
-     },
-     "lost": {
-      "film": "g54",
-      "from": 3391.9,
-      "length": 3.0,
-      "what": "Godzilla's roar in the Tokyo rampage (the game's own 1954 roar matches 0.86)"
      }
     },
     "clips": {
@@ -371,18 +359,6 @@
       "from": 2607.4,
       "length": 1.8,
       "what": "Megalon's cry as it shrugs the attack off (harmonic roar cpp 0.34)"
-     },
-     "won": {
-      "film": "meg73",
-      "from": 2595.7,
-      "length": 2.5,
-      "what": "the big fireball (the strongest broadband onset in the scene, 0:43:15.8)"
-     },
-     "lost": {
-      "film": "meg73",
-      "from": 2426.7,
-      "length": 2.2,
-      "what": "Megalon's roar (the game's own long Megalon roar matches 0.83; a clear onset)"
      }
     },
     "clips": {
@@ -506,12 +482,6 @@
       "from": 5437.7,
       "length": 2.4,
       "what": "Godzilla roaring through the smoke in the city (the game's own 1954 roar matches 0.77; a harmonic roar)"
-     },
-     "phase2": {
-      "film": "fw04",
-      "from": 6604.0,
-      "length": 2.0,
-      "what": "Keizer Ghidorah's three heads rising and roaring as Monster X becomes it"
      },
      "won": {
       "film": "fw04",
@@ -676,12 +646,6 @@
       "from": 2751.0,
       "length": 1.8,
       "what": "Anguirus's roar in the castle fight (the game's own Anguirus roar matches 0.88)"
-     },
-     "lost": {
-      "film": "ra55",
-      "from": 2741.9,
-      "length": 3.0,
-      "what": "Godzilla's roar over Anguirus (the game's own Raids Again roar matches 0.84)"
      }
     },
     "clips": {
@@ -892,12 +856,63 @@
     },
     "music": {
      "film": "des95",
-     "from": 4410.5,
-     "length": 15.9,
-     "what": "PLACEHOLDER - the Burning Godzilla night walk's own sound; a real bed is chosen with the bed finder"
+     "from": 6015.56,
+     "length": 19.53,
+     "what": "Akira Ifukube's end-title march under the credits: the driving ostinato of the Godzilla theme (bed finder: final 0.821, loop chroma 0.835, 0 untuned blocks, beat-locked)"
     },
-    "calls": {}
+    "calls": {
+     "lit": {
+      "film": "des95",
+      "from": 4158.95,
+      "length": 2.9,
+      "what": "Godzilla's roar in close-up, mouth open (1:09:19), ending where the roar ends",
+      "priority": 4
+     },
+     "jackpot": {
+      "film": "des95",
+      "from": 5645.0,
+      "length": 2.15,
+      "what": "the red spiral ray firing at Destoroyah (1:34:05)",
+      "priority": 3
+     },
+     "cool": {
+      "film": "des95",
+      "from": 5795.3,
+      "length": 2.85,
+      "what": "the freezer beams hitting Godzilla, the white cloud bursting (1:36:35)",
+      "priority": 4
+     },
+     "critical": {
+      "film": "des95",
+      "from": 5146.45,
+      "length": 2.05,
+      "what": "Burning Godzilla roaring through the steam (1:25:46)",
+      "priority": 4
+     },
+     "meltdown": {
+      "film": "des95",
+      "from": 5729.5,
+      "length": 3.0,
+      "what": "the biggest blast of the final battle (1:35:29)",
+      "priority": 4
+     },
+     "won": {
+      "film": "des95",
+      "from": 5997.92,
+      "length": 3.0,
+      "what": "Godzilla Junior's roar as he rises, revived (1:39:58)",
+      "priority": 4
+     },
+     "add": {
+      "film": "des95",
+      "from": 5149.2,
+      "length": 1.3,
+      "what": "a short Burning Godzilla roar (1:25:49)",
+      "priority": 3
+     }
+    }
    }
   }
- ]
+ ],
+ "about_calls": "Godzilla Premium/LE 1.16 measures 21 stock requests that can carry a call of a mode's own (mode_sounds.Carriers.calls); the six examples keep 20 between them (hud-layers). A cue a card does not carry plays the game's own call or nothing (pad_mode_assets.h)."
 }

@@ -3,9 +3,10 @@
  * Dr. Serizawa's weapon (Godzilla, 1954). Its value drains away in real time: collect it
  * before it is gone, then deliver it for double.
  *
- *   START      Hit the Godzilla target 3 times in one ball. Up to 3 times a game per player,
- *              and not again for 15 s after it ends (it needs 3 fresh hits every time). It
- *              runs beside anything the game is doing (a hurry-up only adds points).
+ *   START      Spin the LEFT SPINNER 25 times in one ball (hud-layers: it used to be the Godzilla
+ *              target 3 times, which MELTDOWN's ten captive-ball hits would always set off first).
+ *              Up to 3 times a game per player, and not again for 15 s after it ends (25 fresh spins
+ *              every time). It runs beside anything the game is doing (a hurry-up only adds points).
  *   HURRY-UP   The value starts at 20,000,000 and falls 800,000 every second, down to 0 at
  *              25 s. The LEFT RAMP collects it. The Godzilla target holds it off: each hit
  *              puts 2 seconds (1,600,000) back, up to 20,000,000, three times at most.
@@ -37,8 +38,9 @@
 /* ---- the knobs ------------------------------------------------------------------------------ */
 #define MODE_NAME          "OXYGEN DESTROYER"
 #define FOLDER             "oxygen_destroyer"
-#define START_SHOT         "Godzilla target"
-#define HITS_TO_START      3
+#define START_SHOT         "Godzilla target"   /* the hold-off (the captive ball); it no longer starts it */
+#define SPIN_SHOT          "Left spinner"
+#define HITS_TO_START      25                  /* spins, each one counted (a spinner shot is many spins) */
 #define STARTS_PER_GAME    3
 #define COOLDOWN_MS        15000
 #define VALUE_START        20000000ull
@@ -52,7 +54,7 @@
 #define GAUGE_PIPS         10
 
 /* ---- state ----------------------------------------------------------------------------------- */
-static uint64_t start_mask, collect_mask, super_mask;
+static uint64_t start_mask, collect_mask, super_mask, spin_mask;
 static unsigned hits[5], ran_game[5];
 static unsigned long ended_at[5];         /* pm_ms() + 1 of the last end, per player; 0 = none */
 static struct kit_db db;
@@ -162,8 +164,8 @@ static void show(void)
     show_lamps();
     if (run.phase == PHASE_SUPER) {
         kit_hud_title(&hud, "OXYGEN DESTROYER", "SUPER JACKPOT: SHOOT THE RIGHT RAMP");
-        kit_hud_counter(&hud, 0, "COLLECTED", kit_num(n, sizeof n, run.collected), " ");
-        kit_hud_counter(&hud, 1, "SUPER JACKPOT", kit_num(sub, sizeof sub, 2 * run.collected), "RIGHT RAMP");
+        kit_hud_counter(&hud, 0, "COLLECTED", kit_short(n, sizeof n, run.collected), " ");
+        kit_hud_counter(&hud, 1, "SUPER JACKPOT", kit_short(sub, sizeof sub, 2 * run.collected), "RIGHT RAMP");
         kit_hud_counter(&hud, 2, 0, 0, 0);
         kit_hud_timer(&hud, (int)kit_timer_seconds(&run.super_clock));
         kit_hud_gauge(&hud, GAUGE_PIPS, "DOUBLE");
@@ -174,7 +176,7 @@ static void show(void)
                                                                       : "SHOOT THE LEFT RAMP");
     pm_snprintf(sub, sizeof sub, "%u HOLD-OFF%s LEFT", HOLD_OFFS - run.hold_offs, HOLD_OFFS - run.hold_offs == 1 ? "" : "S");
     kit_hud_counter(&hud, 0, 0, 0, 0);
-    kit_hud_counter(&hud, 1, "HURRY-UP", kit_num(n, sizeof n, v), sub);
+    kit_hud_counter(&hud, 1, "HURRY-UP", kit_short(n, sizeof n, v), sub);
     kit_hud_counter(&hud, 2, 0, 0, 0);
     kit_hud_timer(&hud, (int)seconds_left());
     pips = (int)((v * GAUGE_PIPS + VALUE_START - 1) / VALUE_START);          /* the oxygen left */
@@ -244,39 +246,41 @@ static void end(const char *why, int won)
 static void on_init(void)
 {
     start_mask = pm_shot(START_SHOT);
+    spin_mask = pm_shot(SPIN_SHOT);
+    if (!spin_mask) pm_log("this port has no \"%s\": only the start trigger starts it", SPIN_SHOT);
     collect_mask = pm_shot(COLLECT_SHOT);
     super_mask = pm_shot(SUPER_SHOT);
     if (!start_mask) pm_log("this port has no \"%s\": only the start trigger starts it", START_SHOT);
     if (!collect_mask || !super_mask) pm_log("this port lacks \"%s\" or \"%s\"", COLLECT_SHOT, SUPER_SHOT);
     pa_load(&own);
-    pm_log("ready on %s %s: starts on %s x%d (0x%llx); collect 0x%llx, super 0x%llx", pm_game(), pm_version(),
-           START_SHOT, HITS_TO_START, (unsigned long long)start_mask, (unsigned long long)collect_mask,
-           (unsigned long long)super_mask);
+    pm_log("ready on %s %s: starts on %s x%d (0x%llx); hold-off %s (0x%llx); collect 0x%llx, super 0x%llx", pm_game(),
+           pm_version(), SPIN_SHOT, HITS_TO_START, (unsigned long long)spin_mask, START_SHOT,
+           (unsigned long long)start_mask, (unsigned long long)collect_mask, (unsigned long long)super_mask);
 }
 
 static void qualify_shot(uint64_t shot, unsigned p)
 {
     char line[KIT_WORDS];
     unsigned long since;
-    if (!start_mask || !(shot & start_mask) || !kit_fresh(&db, start_mask)) return;
+    if (!spin_mask || !(shot & spin_mask)) return;        /* every spin counts: no debounce */
     if (ran_game[p] >= STARTS_PER_GAME) {
-        pm_log("%s: not counted - it already ran %d times this game", START_SHOT, STARTS_PER_GAME);
+        if (hits[p] == 0) pm_log("%s: not counted - it already ran %d times this game", SPIN_SHOT, STARTS_PER_GAME);
         return;
     }
     if (ended_at[p]) {
         since = pm_ms() - (ended_at[p] - 1);
         if (since < COOLDOWN_MS) {
-            pm_log("%s: not counted - cooling down, %lu s left", START_SHOT, (COOLDOWN_MS - since + 999) / 1000);
+            pm_log("%s: not counted - cooling down, %lu s left", SPIN_SHOT, (COOLDOWN_MS - since + 999) / 1000);
             return;
         }
     }
     if (hits[p] < HITS_TO_START) hits[p]++;
-    pm_log("%s %u of %d (player %u)", START_SHOT, hits[p], HITS_TO_START, p);
+    if (hits[p] % 5 == 0 || hits[p] >= HITS_TO_START) pm_log("%s %u of %d (player %u)", SPIN_SHOT, hits[p], HITS_TO_START, p);
     if (hits[p] >= HITS_TO_START) {
-        start("Godzilla target", 1);
+        start("the left spinner", 1);
     } else if (!kit_running) {
-        pm_snprintf(line, sizeof line, "DESTROYER %u OF %d", hits[p], HITS_TO_START);
-        kit_hud_note(&hud, 2000, line, "OXYGEN DESTROYER");
+        pm_snprintf(line, sizeof line, "%u SPINS FOR THE DESTROYER", HITS_TO_START - hits[p]);
+        kit_hud_note(&hud, 1500, line, "OXYGEN DESTROYER");
     }
 }
 

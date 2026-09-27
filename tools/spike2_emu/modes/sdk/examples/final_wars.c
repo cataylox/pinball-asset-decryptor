@@ -31,10 +31,16 @@
  *              full-screen shot awards, multiball and battle start screens and totals are not
  *              shown while it runs; the battle select screen, the raid award and the tilt
  *              warning still come through.
- *   LIGHTS     No light sweep: the port's example sweep recolours the inserts around the
- *              shots (measured, item 157), so it would make shots that pay nothing look lit.
- *   SCREEN     Each phase's own lines, e.g. "SAVE 2 CITIES 18" / "PHASE 1 INVASION",
- *              "HIT POWERLINE C 1/3", "SHOOT THE BUILDING 12" / "WIZARD 42,000,000".
+ *   THE GLASS  (hud-layers) Godzilla charging his atomic breath, full screen, then each phase its
+ *              own world BEHIND the score panel: Rodan over New York at night (INVASION), Godzilla
+ *              against Monster X in ruined Tokyo (MONSTER X), Keizer Ghidorah towering over the city
+ *              (GHIDORAH). At the edges: the phase, what is left and the add-time across the top, the
+ *              FINAL WARS badge counting the phase's clock, the phases won as a gauge on the right.
+ *              A phase won plays the atomic breath across the city behind the HUD. The ending is
+ *              full screen: the red spiral ray (GODZILLA WINS) or the gravity beams (THE XILIENS WIN).
+ *   LIGHTS     Its own shows: at the start, a turning rainbow over a blaze of red and orange with the
+ *              GI strobing; a white and gold burst at each phase; at the end, a rainbow firestorm
+ *              (won) or purple beams closing in (lost). No light sweep (item 157).
  *
  * The qualification is the pack's ledger (intricate_kit.h): each of the other three modes notes
  * it was played, and whether it was won, when it starts and ends. Built without them, FINAL
@@ -62,10 +68,7 @@
 #define ADD_SECONDS        3
 #define ADDS_PER_PHASE     3
 #define LIT_NOTE_DELAY_MS  7000           /* after the mode that lit it has shown its total */
-#define TOTAL_SHOWN_MS     7000
-
-#define SCREEN_NODE "PadMode_" FOLDER "_Screen"
-#define SCREEN_TEXT "PadMode_" FOLDER "_Screen.PadMode_" FOLDER "_Screen_Words"
+#define TOTAL_SHOWN_MS     10000          /* the ending clip (5 s) full screen, then the total */
 
 #define N_P1 3
 static const struct { const char *shot, *says; } P1[N_P1] = {
@@ -87,7 +90,37 @@ static struct kit_game game;
 static struct kit_lamps lamps;
 static int between_balls;                 /* a ball ended; the next shot or ball start clears it */
 static int ball_start_event = -1;
-static struct kit_screen screen = { .node_name = SCREEN_NODE, .text_name = SCREEN_TEXT, .alt_ms = 1500 };
+static struct kit_hud hud = { .slug = FOLDER };
+static struct kit_show show_fx;
+
+/* ---- light shows (hud-layers): unique to FINAL WARS, every colour at once ---------------------------- */
+#define FW_FIRE        PM_RGB(255, 60, 0)
+#define FW_GOLD        PM_RGB(255, 190, 0)
+#define FW_XILIEN      PM_RGB(150, 0, 255)
+static const struct kit_fx_step SHOW_START[] = {
+    { KIT_FX_STROBE,    500, KIT_WHITE, FW_FIRE, KIT_AT_CENTER, 60, KIT_GI_FLASH },
+    { KIT_FX_FIRE,     1000, FW_GOLD, FW_FIRE, KIT_AT_CENTER, 0, KIT_GI_DARK },      /* the world on fire */
+    { KIT_FX_RAINBOW,  1600, 0, 0, KIT_AT_BUILDING, 50, KIT_GI_DARK },              /* every monster at once */
+    { KIT_FX_BURST,     700, KIT_WHITE, FW_GOLD, KIT_AT_BUILDING, 0, KIT_GI_KEEP },
+    { KIT_FX_FADE_OUT,  400, FW_GOLD, 0, KIT_AT_CENTER, 0, KIT_GI_KEEP },
+};
+static const struct kit_fx_step SHOW_PHASE[] = {
+    { KIT_FX_BURST,     700, KIT_WHITE, FW_GOLD, KIT_AT_CENTER, 0, KIT_GI_FLASH },    /* a phase won */
+    { KIT_FX_FADE_OUT,  400, FW_GOLD, 0, KIT_AT_CENTER, 0, KIT_GI_KEEP },
+};
+static const struct kit_fx_step SHOW_WON[] = {
+    { KIT_FX_STROBE,    600, KIT_WHITE, FW_FIRE, KIT_AT_CENTER, 45, KIT_GI_FLASH },   /* the spiral ray */
+    { KIT_FX_BURST,     800, KIT_WHITE, FW_FIRE, KIT_AT_BUILDING, 0, KIT_GI_DARK },
+    { KIT_FX_RAINBOW,  2200, 0, 0, KIT_AT_CENTER, 35, KIT_GI_KEEP },
+    { KIT_FX_SPARKLE,   900, FW_GOLD, 0, KIT_AT_CENTER, 0, KIT_GI_KEEP },
+    { KIT_FX_FADE_OUT,  600, FW_GOLD, 0, KIT_AT_CENTER, 0, KIT_GI_KEEP },
+};
+static const struct kit_fx_step SHOW_LOST[] = {
+    { KIT_FX_SPIN,     1200, FW_XILIEN, 0, KIT_AT_CENTER, 90, KIT_GI_DARK },          /* the gravity beams */
+    { KIT_FX_IMPLODE,   900, FW_GOLD, FW_XILIEN, KIT_AT_CENTER, 0, KIT_GI_DARK },
+    { KIT_FX_FADE_OUT,  700, FW_XILIEN, 0, KIT_AT_CENTER, 0, KIT_GI_KEEP },
+};
+#define N_SHOW(a) (int)(sizeof (a) / sizeof (a)[0])
 static unsigned poll;
 static unsigned rnd = 12345;
 
@@ -107,10 +140,15 @@ enum cue { CUE_LIT, CUE_START, CUE_PHASE, CUE_HIT, CUE_MOVE, CUE_ADD_TIME, CUE_W
 static void sound(enum cue c)
 {
     switch (c) {
-    case CUE_START:   pa_start(&own); break;                     /* its music, its start clip */
+    case CUE_START:   pa_start(&own); break;                     /* its music, its intro, then phase 1's loop */
     case CUE_PHASE:                                              /* the phase before this one was won */
         if (run.phase == 2) pa_call(&own, "phase1");
         else if (run.phase == 3) pa_call(&own, "phase2");
+        if (run.phase >= 2) {                                    /* this phase's own world behind the HUD */
+            const char *loop = pa_clip_name(&own, run.phase == 2 ? "loop2" : "loop3");
+            if (loop) pm_backdrop(loop);
+            pa_clip_event(&own, "phase");                        /* the breath across the city first */
+        }
         break;
     case CUE_WIZARD:  pa_call(&own, "won"); break;               /* GODZILLA WINS */
     case CUE_TIME_UP:                                            /* a phase lost: THE XILIENS WIN */
@@ -205,20 +243,31 @@ static void idle_lamps(void)
 /* ---- phases ------------------------------------------------------------------------------------- */
 static void show(void)
 {
-    char a[KIT_WORDS], b[KIT_WORDS], n[24];
-    unsigned s = kit_timer_seconds(&run.clock);
+    static const char *const phase_name[4] = { "", "INVASION", "MONSTER X", "GHIDORAH" };
+    char line[KIT_HUD_WORDS], v[24], ph[4], adds[4];
+    unsigned i, k = 0;
     show_lamps();
+    pm_snprintf(ph, sizeof ph, "%d", run.phase);
+    pm_snprintf(adds, sizeof adds, "%u", ADDS_PER_PHASE - run.adds);
+    kit_hud_counter(&hud, 0, "PHASE", ph, phase_name[run.phase]);
+    kit_hud_counter(&hud, 2, "ADD TIME", adds, "SHIELDS +3 SEC");
     if (run.phase == 1) {
-        pm_snprintf(a, sizeof a, "SAVE %u %s %u", run.p1_left, run.p1_left == 1 ? "CITY" : "CITIES", s);
-        pm_snprintf(b, sizeof b, "PHASE 1 INVASION");
+        k = (unsigned)pm_snprintf(line, sizeof line, "SAVE");
+        for (i = 0; i < N_P1; i++)
+            if (!(run.p1_done & (1u << i))) k += (unsigned)pm_snprintf(line + k, sizeof line - k, "  %s", P1[i].says);
+        pm_snprintf(v, sizeof v, "%u", run.p1_left);
+        kit_hud_counter(&hud, 1, "CITIES", v, "TO SAVE");
     } else if (run.phase == 2) {
-        pm_snprintf(a, sizeof a, "HIT %s %u/%d", P2[run.p2_lit].says, run.p2_hits, P2_HITS);
-        pm_snprintf(b, sizeof b, "PHASE 2 MONSTER X %u", s);
+        pm_snprintf(line, sizeof line, "HIT MONSTER X AT %s", P2[run.p2_lit].says);
+        pm_snprintf(v, sizeof v, "%u/%d", run.p2_hits, P2_HITS);
+        kit_hud_counter(&hud, 1, "MONSTER X", v, "HITS");
     } else {
-        pm_snprintf(a, sizeof a, "SHOOT THE BUILDING %u", s);
-        pm_snprintf(b, sizeof b, "WIZARD %s", kit_num(n, sizeof n, wizard_value()));
+        pm_snprintf(line, sizeof line, "WIZARD SHOT: THE BUILDING");
+        kit_hud_counter(&hud, 1, "WIZARD", kit_short(v, sizeof v, wizard_value()), "BUILDING");
     }
-    kit_screen_status(&screen, a, b);
+    kit_hud_title(&hud, "GODZILLA: FINAL WARS", line);
+    kit_hud_timer(&hud, (int)kit_timer_seconds(&run.clock));
+    kit_hud_gauge(&hud, run.phase - 1, "PHASES");
 }
 
 static void phase(int k)
@@ -237,7 +286,9 @@ static void phase(int k)
         run.p2_lit = next_random(N_P2);
         run.p2_moved = pm_ms();
     }
-    kit_screen_flash(&screen, 2000, says[k]);
+    kit_hud_award(&hud, 2500, says[k], k == 1 ? "SAVE THE CITIES" : k == 2 ? "HIT MONSTER X 3 TIMES"
+                                                                          : "THE BUILDING IS THE WIZARD SHOT");
+    if (k > 1) kit_show_start(&show_fx, "final wars phase", SHOW_PHASE, N_SHOW(SHOW_PHASE));
     sound(CUE_PHASE);
     pm_log("PHASE %d (%s): %u s%s%s", k, says[k] + 9, secs[k], k == 2 ? ", lit " : "", k == 2 ? P2[run.p2_lit].shot : "");
     show();
@@ -265,7 +316,8 @@ static int start(const char *why)
     lit[p] = 0;
     lit_note_at = 0;
     for (k = 0; k < KIT_LEDGER_MODES; k++) kit_ledger.played[p][k] = kit_ledger.won[p][k] = 0;
-    kit_screen_show(&screen, 1);
+    kit_hud_begin(&hud, "GODZILLA: FINAL WARS", "");
+    kit_show_start(&show_fx, "final wars start", SHOW_START, N_SHOW(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, score %llu - the qualification is used up", why, p, (unsigned long long)pm_score(p));
     phase(1);
@@ -280,10 +332,18 @@ static void end(const char *why, int won)
     kit_lamps_off(&lamps);                         /* every insert back to the game, at once */
     kit_end();
     sound(CUE_END);
-    pm_snprintf(a, sizeof a, "TOTAL %s", kit_num(n, sizeof n, run.total));
-    kit_screen_status(&screen, a, won ? "GODZILLA WINS" : "THE XILIENS WIN");
-    screen.flash[0] = 0;
-    kit_screen_hide_in(&screen, TOTAL_SHOWN_MS);
+    pa_clip_full(&own, won ? "won" : "lost");      /* the ending, full screen */
+    kit_show_start(&show_fx, won ? "final wars won" : "final wars lost", won ? SHOW_WON : SHOW_LOST,
+                   won ? N_SHOW(SHOW_WON) : N_SHOW(SHOW_LOST));
+    pm_snprintf(a, sizeof a, "%s", kit_num(n, sizeof n, run.total));
+    kit_hud_title(&hud, won ? "GODZILLA WINS" : "THE XILIENS WIN", " ");
+    kit_hud_counter(&hud, 0, 0, 0, 0);
+    kit_hud_counter(&hud, 1, 0, 0, 0);
+    kit_hud_counter(&hud, 2, 0, 0, 0);
+    kit_hud_timer(&hud, -1);
+    kit_hud_gauge(&hud, -1, 0);
+    kit_hud_award(&hud, TOTAL_SHOWN_MS, a, "FINAL WARS TOTAL");
+    kit_hud_hide_in(&hud, TOTAL_SHOWN_MS);
     pm_log("END (%s): %s in phase %d, total %llu, score %llu", why, won ? "WON" : "not won", run.phase,
            (unsigned long long)run.total, (unsigned long long)pm_score(run.player));
 }
@@ -303,7 +363,7 @@ static void add_time(uint64_t shot)
         kit_timer_add(&run.clock, ADD_SECONDS);
         pm_log("ADD TIME: %s +%d s (%u of %d this phase), %u s left", SHIELDS[i], ADD_SECONDS, run.adds,
                ADDS_PER_PHASE, kit_timer_seconds(&run.clock));
-        kit_screen_flash(&screen, 1000, "SHIELDS +3 SEC");
+        kit_hud_award(&hud, 1200, "SHIELDS", "+3 SECONDS");
         sound(CUE_ADD_TIME);
         return;
     }
@@ -327,7 +387,7 @@ static void war_shot(uint64_t shot)
             got = pay(P1_PAYS);
             pm_log("phase 1: %s +%llu, %u left", P1[i].shot, (unsigned long long)got, run.p1_left);
             pm_snprintf(line, sizeof line, "%s SAVED", P1[i].says);
-            kit_screen_flash(&screen, 1200, line);
+            kit_hud_award(&hud, 1300, line, kit_num(n, sizeof n, got));
             sound(CUE_HIT);
             if (!run.p1_left) {
                 phase(2);
@@ -353,7 +413,7 @@ static void war_shot(uint64_t shot)
                 return;
             }
             pm_snprintf(line, sizeof line, "MONSTER X HIT %u", run.p2_hits);
-            kit_screen_flash(&screen, 1200, line);
+            kit_hud_award(&hud, 1300, line, kit_num(n, sizeof n, got));
             sound(CUE_HIT);
             run.p2_lit = (run.p2_lit + 1 + next_random(N_P2 - 1)) % N_P2;   /* it moves at once */
             run.p2_moved = pm_ms();
@@ -368,8 +428,8 @@ static void war_shot(uint64_t shot)
         got = pay(asked);
         pm_log("WIZARD JACKPOT: %s with %u s left, +%llu (asked %llu)", START_SHOT, kit_timer_seconds(&run.clock),
                (unsigned long long)got, (unsigned long long)asked);
-        pm_snprintf(line, sizeof line, "WIZARD %s", kit_num(n, sizeof n, got));
-        kit_screen_flash(&screen, 2500, line);
+        (void)line;
+        (void)n;
         sound(CUE_WIZARD);
         end("wizard jackpot", 1);
     }
@@ -422,7 +482,8 @@ static void check_triggers(void)
 static void on_tick(void)
 {
     unsigned p;
-    kit_screen_tick(&screen);
+    kit_hud_tick(&hud);
+    kit_show_tick(&show_fx, &lamps);
     pa_tick(&own);
     if (++poll % KIT_POLL == 0) {
         check_triggers();
@@ -439,7 +500,7 @@ static void on_tick(void)
     }
     if (lit_note_at && !run.on && pm_ms() >= lit_note_at) {
         p = pm_player();
-        if (!kit_running && p >= 1 && p <= 4 && lit[p] && kit_screen_note(&screen, 3000, "FINAL WARS IS LIT"))
+        if (!kit_running && p >= 1 && p <= 4 && lit[p] && kit_hud_note(&hud, 3500, "FINAL WARS IS LIT", "SHOOT THE BUILDING"))
             lit_note_at = 0;              /* otherwise another screen is up: try again next tick */
     }
     if (!run.on) {

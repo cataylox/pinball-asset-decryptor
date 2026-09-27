@@ -201,6 +201,21 @@ int pm_backdrop_once(const char *name)
     return 1;
 }
 int pm_backdrop_showing(void) { return backdrop_now[0] != 0; }
+/* hud-layers: MELTDOWN's balls - the serve answers at once; "balls N" sets the count in play */
+static int balls_in_play = 1;
+int pm_multiball_start(unsigned balls, unsigned save_s)
+{
+    printf("%6lu MULTIBALL %u balls, save %u s\n", now_ms, balls, save_s);
+    balls_in_play = (int)balls;
+    return 1;
+}
+int pm_multiball_add(unsigned n, unsigned save_s)
+{
+    printf("%6lu ADD-A-BALL %u, save %u s\n", now_ms, n, save_s);
+    balls_in_play += (int)n;
+    return 1;
+}
+int pm_balls_in_play(void) { return balls_in_play; }
 const char *pm_port_text(const char *name)
 {
     if (!strcmp(name, "example_lights_on"))
@@ -537,6 +552,7 @@ int main(int argc, char **argv)
             current = 0;
         } else if (!strcmp(c, "battle")) { battle = atoi(argv[++k]); printf("%6lu >> battle %d\n", now_ms, battle); }
         else if (!strcmp(c, "multiball")) { multiball = atoi(argv[++k]); printf("%6lu >> multiball %d\n", now_ms, multiball); }
+        else if (!strcmp(c, "balls")) { balls_in_play = atoi(argv[++k]); printf("%6lu >> balls in play %d\n", now_ms, balls_in_play); }
         else if (!strcmp(c, "ball_end")) {
             printf("%6lu >> ball_end\n", now_ms);
             EACH_MODE(m) if (m->ball_end) { current = m; m->ball_end(); }

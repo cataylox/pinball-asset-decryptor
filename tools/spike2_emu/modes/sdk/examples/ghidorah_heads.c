@@ -210,7 +210,7 @@ static void show_status(void)
     if (run.phase == PHASE_FINAL) {
         char n[24];
         kit_hud_title(&hud, "KING GHIDORAH", "FINAL BLOW: SHOOT THE MASER");
-        pm_snprintf(line, sizeof line, "%s", kit_num(n, sizeof n, super_value()));
+        pm_snprintf(line, sizeof line, "%s", kit_short(n, sizeof n, super_value()));
         kit_hud_counter(&hud, 0, 0, 0, 0);
         kit_hud_counter(&hud, 1, "SUPER JACKPOT", line, "MASER TARGET");
         kit_hud_counter(&hud, 2, 0, 0, 0);

@@ -39,10 +39,16 @@
  *              A moment counts only while the panel is in view, so a display of the game's
  *              that beats 180 (a jackpot, the battle's own start or total) never eats it.
  *              Between the moments the battle's displays play as the game wants.
- *   LIGHTS     No light sweep: the port's example sweep recolours the inserts around the
- *              shots (measured, item 157), so it would make shots that pay nothing look lit.
- *   SCREEN     "SPIKES 2 OF 3" alternating with "ANGUIRUS ASSISTS"; "BIG LOOP 8,000,000"
- *              alternating with "ROLL 4" (the window's seconds).
+ *   THE GLASS  (hud-layers) The battle keeps its own clip, title, counters and BATTLE badge.
+ *              ANGUIRUS keeps to the RIGHT EDGE: its SPIKES gauge (a spike lights as it charges)
+ *              from its entrance to its exit, out of the battle's way. Its entrance is Anguirus
+ *              bursting through an explosion, full screen; the spikes charged and each rolling
+ *              attack play their clip full screen for a moment (the spiked ball smashing into its
+ *              target); its moments speak on the award line in the middle. The exit is full screen:
+ *              Anguirus victorious beside Godzilla, or beaten.
+ *   LIGHTS     Its own shows: at its entrance, an orange spiral turning out from the shields; each
+ *              rolling attack a cyan wheel racing round the playfield; at the exit, an orange burst
+ *              into a rainbow (it rolled) or embers fading (it did not). No light sweep (item 157).
  *
  * Emulator test triggers: /dump/anguirus_assist.start (start now, without a battle: it then
  * leaves at once unless the battle query is not available), .stop, .shot "<shot name>".
@@ -59,6 +65,7 @@
 #define ROLL_MAX           16000000ull
 #define ROLL_WINDOW_MS     6000
 #define TOTAL_SHOWN_MS     6000
+#define EXIT_SHOWN_MS      6000           /* the exit clip (5 s) full screen, then the HUD goes */
 #define SETTLE_MS          1000           /* the screen in view this long before the entrance */
 #define ENTRANCE_WAIT_MS   12000          /* at most this long for the battle's own start screen */
 #define ENTRANCE_SAY_MS    11500          /* the clip (8 s, from 0.5 s) and 3 s of the panel after it */
@@ -66,8 +73,6 @@
 #define TOTAL_SAY_MS       4000
 #define LEAVE_WAIT_MS      12000          /* at most this long for the battle's own total */
 
-#define SCREEN_NODE "PadMode_" FOLDER "_Screen"
-#define SCREEN_TEXT "PadMode_" FOLDER "_Screen.PadMode_" FOLDER "_Screen_Words"
 
 #define N_SPIKES 3
 static const char *const SPIKE_SHOT[N_SPIKES] = { "Shield target left", "Shield target center", "Shield target right" };
@@ -80,7 +85,31 @@ static int battle_joined;                 /* this battle already had its Anguiru
 static int can_tell = 1;
 static struct kit_db db;
 static struct kit_lamps lamps;
-static struct kit_screen screen = { .node_name = SCREEN_NODE, .text_name = SCREEN_TEXT, .alt_ms = 1500 };
+static struct kit_hud hud = { .slug = FOLDER };
+static struct kit_show show_fx;
+
+/* ---- light shows (hud-layers): unique to ANGUIRUS, amber spikes and a cyan roll ---------------------- */
+#define ANG_AMBER      PM_RGB(255, 110, 0)
+#define ANG_EMBER      PM_RGB(80, 25, 0)
+static const struct kit_fx_step SHOW_ENTER[] = {
+    { KIT_FX_BURST,     700, KIT_WHITE, ANG_AMBER, KIT_AT_SHIELDS, 0, KIT_GI_FLASH },   /* through the explosion */
+    { KIT_FX_SPIN,     1400, ANG_AMBER, ANG_EMBER, KIT_AT_SHIELDS, 90, KIT_GI_KEEP },
+    { KIT_FX_FADE_OUT,  400, ANG_AMBER, 0, KIT_AT_CENTER, 0, KIT_GI_KEEP },
+};
+static const struct kit_fx_step SHOW_ROLL[] = {
+    { KIT_FX_CHASE_RING, 900, KIT_CYAN, 0, KIT_AT_CENTER, 40, KIT_GI_KEEP },             /* the spiked ball */
+    { KIT_FX_BURST,      500, KIT_WHITE, KIT_CYAN, KIT_AT_TOP, 0, KIT_GI_FLASH },
+};
+static const struct kit_fx_step SHOW_WON[] = {
+    { KIT_FX_BURST,     800, KIT_WHITE, ANG_AMBER, KIT_AT_CENTER, 0, KIT_GI_FLASH },
+    { KIT_FX_RAINBOW,  1600, 0, 0, KIT_AT_SHIELDS, 60, KIT_GI_KEEP },
+    { KIT_FX_FADE_OUT,  500, ANG_AMBER, 0, KIT_AT_CENTER, 0, KIT_GI_KEEP },
+};
+static const struct kit_fx_step SHOW_LOST[] = {
+    { KIT_FX_SPARKLE,   900, ANG_AMBER, ANG_EMBER, KIT_AT_CENTER, 0, KIT_GI_DARK },
+    { KIT_FX_FADE_OUT,  800, ANG_EMBER, 0, KIT_AT_CENTER, 0, KIT_GI_KEEP },
+};
+#define N_SHOW(a) (int)(sizeof (a) / sizeof (a)[0])
 static unsigned poll;
 
 static struct {
@@ -102,12 +131,16 @@ static void sound(enum cue c)
     case CUE_JOIN:     pa_priorities(&own); break;               /* its calls' priorities, before any call */
     case CUE_ENTRANCE: pa_start(&own); break;                    /* its music, its start clip */
     case CUE_CHARGE:   pa_call(&own, "spike"); break;            /* a spike charged */
-    case CUE_ROLL:     pa_call(&own, "roll"); break;             /* a rolling attack */
+    case CUE_ROLL_LIT: pa_clip_full(&own, "spike"); break;       /* all spikes charged: the close roar */
+    case CUE_ROLL:                                               /* a rolling attack */
+        pa_call(&own, "roll");
+        pa_clip_full(&own, "roll");
+        break;
     case CUE_LEAVE:                                              /* the battle is over */
         pa_call(&own, run.rolls ? "won" : "lost");
         pa_end(&own);
         break;
-    default: break;                                              /* the roll lit, the roll over */
+    default: break;                                              /* the roll over */
     }
 }
 
@@ -152,18 +185,9 @@ static void show_lamps(void)
 
 static void show(void)
 {
-    char a[KIT_WORDS], b[KIT_WORDS], n[24];
     show_lamps();
-    if (run.rolling) {
-        unsigned long used = pm_ms() - run.roll_at;
-        unsigned left = used >= ROLL_WINDOW_MS ? 0 : (unsigned)((ROLL_WINDOW_MS - used + 999) / 1000);
-        pm_snprintf(a, sizeof a, "BIG LOOP %s", kit_num(n, sizeof n, run.roll_value));
-        pm_snprintf(b, sizeof b, "ROLL %u", left);
-    } else {
-        pm_snprintf(a, sizeof a, "SPIKES %u OF %u", spikes_charged(), spikes_of_game());
-        pm_snprintf(b, sizeof b, "ANGUIRUS ASSISTS");
-    }
-    kit_screen_status(&screen, a, b);
+    /* the gauge on the right edge: the spikes charged, all of them while it rolls */
+    kit_hud_gauge(&hud, (int)(run.rolling ? spikes_of_game() : spikes_charged()), run.rolling ? "ROLLING!" : "SPIKES");
 }
 
 /* ---- the screen, in moments -------------------------------------------------------------------
@@ -175,13 +199,14 @@ static void say(unsigned long ms)
         run.holding = pm_display_priority(KIT_DISPLAY_MODE);
         if (run.holding) pm_log("display priority %d held for a moment: the panel speaks", KIT_DISPLAY_MODE);
     }
-    if (!screen.up) kit_screen_show(&screen, 1);
+    if (!hud.up) kit_hud_show(&hud, 1);
     if (run.say_left < ms) run.say_left = ms;
 }
 
+/* the moment is over: the battle's own displays again; the gauge stays at the edge */
 static void quiet(void)
 {
-    kit_screen_show(&screen, 0);
+    kit_hud_award(&hud, 0, 0, 0);
     if (run.holding) {
         pm_display_priority(0);
         run.holding = 0;
@@ -191,11 +216,11 @@ static void quiet(void)
 
 /* a moment on the screen, once it has made its entrance: the panel (its status line), with a
  * message over it for `ms` when there is one */
-static void moment(unsigned ms, const char *line)
+static void moment(unsigned ms, const char *line, const char *sub)
 {
     if (!run.entered || run.leaving) return;
     say(SAY_MS);
-    if (line && line[0]) kit_screen_flash(&screen, ms, line);
+    if (line && line[0]) kit_hud_award(&hud, ms, line, sub ? sub : "ANGUIRUS");
 }
 
 /* ---- start and end ---------------------------------------------------------------------------- */
@@ -230,10 +255,11 @@ static int start(const char *why)
 static void entrance(const char *how)
 {
     run.entered = 1;
-    kit_screen_show(&screen, 1);
+    kit_hud_begin(&hud, " ", " ");                /* the battle's own title and line stay */
     show();
-    kit_screen_flash(&screen, 2000, "ANGUIRUS JOINS");
+    kit_hud_award(&hud, 2500, "ANGUIRUS JOINS", "SHIELDS CHARGE HIS SPIKES");
     say(ENTRANCE_SAY_MS);
+    kit_show_start(&show_fx, "anguirus enters", SHOW_ENTER, N_SHOW(SHOW_ENTER));
     sound(CUE_ENTRANCE);
     pm_log("ENTRANCE %lu ms after it joined (%s): its clip, its music, its panel", pm_ms() - run.join_at, how);
 }
@@ -248,16 +274,26 @@ static void end(const char *why)
     if (!run.leaving) sound(CUE_LEAVE);
     run.holding = 0;
     kit_end();                                     /* gives the display priority up too */
-    pm_snprintf(a, sizeof a, "TOTAL %s", kit_num(n, sizeof n, run.total));
-    kit_screen_status(&screen, a, "ANGUIRUS RETREATS");
-    screen.flash[0] = 0;
+    (void)a;
+    (void)n;
+    kit_hud_gauge(&hud, -1, 0);
+    if (run.entered) {
+        pa_clip_full(&own, run.rolls ? "won" : "lost");                    /* the exit, full screen */
+        kit_show_start(&show_fx, run.rolls ? "anguirus won" : "anguirus lost", run.rolls ? SHOW_WON : SHOW_LOST,
+                       run.rolls ? N_SHOW(SHOW_WON) : N_SHOW(SHOW_LOST));
+    }
     if (run.leaving) {
-        kit_screen_hide_in(&screen, 0);            /* its total has had its time in view */
+        kit_hud_award(&hud, 0, 0, 0);
+        kit_hud_hide_in(&hud, EXIT_SHOWN_MS);      /* its total has had its time in view */
         pm_log("the total was shown: the screen is the game's again (%s)", why);
         return;
     }
-    if (screen.up || run.entered) kit_screen_show(&screen, 1);
-    kit_screen_hide_in(&screen, TOTAL_SHOWN_MS);
+    {
+        char t[24];
+        kit_hud_award(&hud, TOTAL_SHOWN_MS, kit_num(t, sizeof t, run.total), "ANGUIRUS RETREATS");
+    }
+    if (hud.up || run.entered) kit_hud_show(&hud, 1);
+    kit_hud_hide_in(&hud, TOTAL_SHOWN_MS);
     pm_log("END (%s): %u charge(s), %u rolling attack(s), total %llu, score %llu", why, run.charges, run.rolls,
            (unsigned long long)run.total, (unsigned long long)pm_score(run.player));
 }
@@ -274,12 +310,11 @@ static void leave(const char *why)
     kit_copy(run.why, sizeof run.why, why);
     kit_lamps_off(&lamps);
     sound(CUE_LEAVE);
-    pm_snprintf(a, sizeof a, "TOTAL %s", kit_num(n, sizeof n, run.total));
-    kit_screen_status(&screen, a, "ANGUIRUS RETREATS");
-    screen.flash[0] = 0;
+    pm_snprintf(a, sizeof a, "%s", kit_num(n, sizeof n, run.total));
     run.entered = 1;
     run.say_left = 0;
     say(TOTAL_SAY_MS);
+    kit_hud_award(&hud, TOTAL_SAY_MS + LEAVE_WAIT_MS, a, "ANGUIRUS TOTAL");
     pm_log("END (%s): %u charge(s), %u rolling attack(s), total %llu, score %llu - its total shows once the "
            "battle's own is done", why, run.charges, run.rolls, (unsigned long long)run.total,
            (unsigned long long)pm_score(run.player));
@@ -297,8 +332,9 @@ static void assist_shot(uint64_t shot)
         run.rolls++;
         pm_log("ROLLING ATTACK %u at %s: +%llu, %lu ms after the last", run.rolls, ROLL_SHOT, (unsigned long long)got,
                pm_ms() - run.roll_at);
-        pm_snprintf(line, sizeof line, "ROLLING %s", kit_num(n, sizeof n, got));
-        moment(1500, line);
+        pm_snprintf(line, sizeof line, "ROLLING ATTACK %u", run.rolls);
+        moment(2500, line, kit_num(n, sizeof n, got));
+        kit_show_start(&show_fx, "anguirus roll", SHOW_ROLL, N_SHOW(SHOW_ROLL));
         sound(CUE_ROLL);
         if (run.roll_value < ROLL_MAX) run.roll_value *= 2;
         if (run.roll_value > ROLL_MAX) run.roll_value = ROLL_MAX;
@@ -323,10 +359,11 @@ static void assist_shot(uint64_t shot)
             run.roll_value = ROLL_FIRST;
             run.roll_at = pm_ms();
             pm_log("ROLL LIT: %s for %llu, %d ms to make it", ROLL_SHOT, (unsigned long long)run.roll_value, ROLL_WINDOW_MS);
-            moment(1500, "ROLLING ATTACK LIT");
+            moment(2500, "ROLLING ATTACK LIT", "SHOOT THE BIG LOOP");
             sound(CUE_ROLL_LIT);
         } else {
-            moment(0, 0);                          /* the panel: SPIKES 2 OF 3 */
+            pm_snprintf(line, sizeof line, "SPIKE %u OF %u", spikes_charged(), spikes_of_game());
+            moment(1800, line, kit_num(n, sizeof n, got));
         }
         show();
     }
@@ -415,12 +452,13 @@ static void screen_tick(void)
         }
         return;
     }
-    if (!run.say_left && (run.holding || screen.up)) quiet();
+    if (!run.say_left && run.holding) quiet();
 }
 
 static void on_tick(void)
 {
-    kit_screen_tick(&screen);
+    kit_hud_tick(&hud);
+    kit_show_tick(&show_fx, &lamps);
     pa_tick(&own);
     if (++poll % KIT_POLL == 0) {
         check_triggers();
@@ -437,7 +475,7 @@ static void on_tick(void)
         pm_log("the roll is over (%u rolling attack(s) so far): charge the spikes again", run.rolls);
         run.rolling = 0;
         run.spikes = 0;
-        moment(1500, "CHARGE THE SPIKES");
+        moment(1800, "CHARGE THE SPIKES", "HIT THE SHIELDS");
         sound(CUE_ROLL_OVER);
     }
     show();

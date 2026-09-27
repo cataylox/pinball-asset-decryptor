@@ -24,11 +24,17 @@
  *              are a dim blue, so the whole chain is on the playfield. The next shot is solid
  *              while no window runs (the first step), and BLINKS while the window runs, faster
  *              as it closes. Everything is handed back the moment the mode ends.
- *   DISPLAY    Priority 180 (the game's full-screen shot awards are not shown over the panel;
- *              its jackpots, starts and the tilt warning come through, and the panel is back).
- *   LIGHTS     No light sweep: the port's example sweep recolours the inserts around the
- *              shots (measured, item 157), so it would make shots that pay nothing look lit.
- *   SCREEN     "NEXT RIGHT RAMP 5" (the window's seconds) alternating with "x2  TIME 31".
+ *   DISPLAY    Priority 180 (the game's full-screen shot awards are not shown over it; its
+ *              jackpots, starts and the tilt warning come through).
+ *   THE GLASS  (hud-layers) The Maser tanks rolling up and firing, full screen, then the night
+ *              battle - beams sparking off Godzilla - looping BEHIND the score panel. At the edges:
+ *              the multiplier, the window's seconds and the barrages across the top, the MASER
+ *              badge counting the clock, the chain's three steps as a gauge on the right, the
+ *              next shot above the score panel. A barrage plays its volley behind the HUD with
+ *              the jackpot; a broken chain plays a tank blown apart. The ending is full screen.
+ *   LIGHTS     Its own shows: at the start, Maser beams sweeping round from the Maser in electric
+ *              blue and white; at the end, the beams collapsing into the middle (won), or blue
+ *              draining off the playfield (lost).
  *
  * Emulator test triggers: /dump/maser_barrage.start, .stop, .shot "<shot name>".
  */
@@ -49,10 +55,7 @@
 #define STEP_PAYS          1000000ull     /* x the multiplier */
 #define JACKPOT_PAYS       5000000ull     /* x the multiplier */
 #define MULT_MAX           5
-#define TOTAL_SHOWN_MS     6000
-
-#define SCREEN_NODE "PadMode_" FOLDER "_Screen"
-#define SCREEN_TEXT "PadMode_" FOLDER "_Screen.PadMode_" FOLDER "_Screen_Words"
+#define TOTAL_SHOWN_MS     10000          /* the ending clip (5 s) full screen, then the total */
 
 #define N_STEPS 3
 static const struct { const char *shot, *says; } STEP[N_STEPS] = {
@@ -70,7 +73,31 @@ static int skill_event = -1;
 static struct kit_db db;
 static struct kit_game game;
 static struct kit_lamps lamps;
-static struct kit_screen screen = { .node_name = SCREEN_NODE, .text_name = SCREEN_TEXT, .alt_ms = 1500 };
+static struct kit_hud hud = { .slug = FOLDER };
+static struct kit_show show_fx;
+
+/* ---- light shows (hud-layers): unique to MASER BARRAGE, electric blue and white -------------------- */
+#define MASER_BLUE     PM_RGB(0, 120, 255)
+#define MASER_ICE      PM_RGB(140, 220, 255)
+static const struct kit_fx_step SHOW_START[] = {
+    { KIT_FX_STROBE,     450, KIT_WHITE, MASER_BLUE, KIT_AT_MASER, 55, KIT_GI_FLASH },  /* the cannons charge */
+    { KIT_FX_SPIN,      1600, MASER_ICE, 0, KIT_AT_MASER, 110, KIT_GI_DARK },          /* beams sweeping round */
+    { KIT_FX_SWEEP_LR,   500, KIT_WHITE, MASER_BLUE, KIT_AT_CENTER, 0, KIT_GI_DARK },
+    { KIT_FX_SWEEP_RL,   500, KIT_WHITE, MASER_BLUE, KIT_AT_CENTER, 0, KIT_GI_DARK },
+    { KIT_FX_FADE_OUT,   400, MASER_BLUE, 0, KIT_AT_CENTER, 0, KIT_GI_KEEP },
+};
+static const struct kit_fx_step SHOW_WON[] = {
+    { KIT_FX_IMPLODE,    800, KIT_WHITE, MASER_BLUE, KIT_AT_CENTER, 0, KIT_GI_DARK },  /* every beam on one spot */
+    { KIT_FX_STROBE,     600, KIT_WHITE, 0, KIT_AT_CENTER, 50, KIT_GI_FLASH },
+    { KIT_FX_CHASE_RING, 1400, MASER_ICE, MASER_BLUE, KIT_AT_CENTER, 45, KIT_GI_KEEP },
+    { KIT_FX_FADE_OUT,   500, MASER_BLUE, 0, KIT_AT_CENTER, 0, KIT_GI_KEEP },
+};
+static const struct kit_fx_step SHOW_LOST[] = {
+    { KIT_FX_SPARKLE,    700, KIT_RED, MASER_BLUE, KIT_AT_CENTER, 0, KIT_GI_DARK },    /* the tanks burning */
+    { KIT_FX_SWEEP_DOWN, 900, MASER_BLUE, 0, KIT_AT_CENTER, 0, KIT_GI_DARK },
+    { KIT_FX_FADE_OUT,   500, MASER_BLUE, 0, KIT_AT_CENTER, 0, KIT_GI_KEEP },
+};
+#define N_SHOW(a) (int)(sizeof (a) / sizeof (a)[0])
 static unsigned poll;
 
 static struct {
@@ -88,9 +115,15 @@ enum cue { CUE_START, CUE_STEP, CUE_JACKPOT, CUE_BROKEN, CUE_TIME_UP, CUE_END };
 static void sound(enum cue c)
 {
     switch (c) {
-    case CUE_START:   pa_start(&own); break;                     /* its music, its start clip */
-    case CUE_JACKPOT: pa_call(&own, "barrage"); break;           /* a barrage completed */
-    case CUE_BROKEN:  pa_call(&own, "broken"); break;            /* the chain broke */
+    case CUE_START:   pa_start(&own); break;                     /* its music, its intro, then the loop */
+    case CUE_JACKPOT:                                            /* a barrage completed */
+        pa_call(&own, "barrage");
+        pa_clip_event(&own, "barrage");
+        break;
+    case CUE_BROKEN:                                             /* the chain broke */
+        pa_call(&own, "broken");
+        pa_clip_event(&own, "broken");
+        break;
     case CUE_TIME_UP:                                            /* the clock: won with a barrage */
         if (!pa_call(&own, run.barrages ? "won" : "lost")) pm_callout(pm_callout_id("time_up"));
         break;
@@ -134,11 +167,22 @@ static void show_lamps(void)
 
 static void show(void)
 {
-    char a[KIT_WORDS], b[KIT_WORDS];
-    if (run.step == 0) pm_snprintf(a, sizeof a, "START: %s", STEP[0].says);
-    else pm_snprintf(a, sizeof a, "NEXT %s %u", STEP[run.step].says, window_left_s());
-    pm_snprintf(b, sizeof b, "x%u  TIME %u", run.mult, kit_timer_seconds(&run.clock));
-    kit_screen_status(&screen, a, b);
+    char line[KIT_HUD_WORDS], m[8], w[8], b[8], sub[24];
+    pm_snprintf(line, sizeof line, "SHOOT THE %s", STEP[run.step].says);
+    kit_hud_title(&hud, "MASER BARRAGE", line);
+    pm_snprintf(m, sizeof m, "X%u", run.mult);
+    pm_snprintf(sub, sizeof sub, "JACKPOT %uM", (unsigned)(JACKPOT_PAYS * run.mult / 1000000u));
+    kit_hud_counter(&hud, 0, "MULTIPLIER", m, sub);
+    if (run.step == 0) {
+        kit_hud_counter(&hud, 1, "WINDOW", "-", "NO CLOCK YET");
+    } else {
+        pm_snprintf(w, sizeof w, "%u", window_left_s());
+        kit_hud_counter(&hud, 1, "WINDOW", w, "SECONDS");
+    }
+    pm_snprintf(b, sizeof b, "%u", run.barrages);
+    kit_hud_counter(&hud, 2, "BARRAGES", b, run.breaks ? "CHAIN BROKEN" : " ");
+    kit_hud_timer(&hud, (int)kit_timer_seconds(&run.clock));
+    kit_hud_gauge(&hud, (int)run.step, "CHAIN");
     show_lamps();
 }
 
@@ -170,9 +214,10 @@ static int start(const char *why, int counted)
     held_until = 0;
     if (counted) ran_ball[p]++;
     kit_ledger_note(KIT_MASER, p, 0);
-    kit_screen_show(&screen, 1);
+    kit_hud_begin(&hud, "MASER BARRAGE", "");
     show();
-    kit_screen_flash(&screen, 2000, "MASER BARRAGE");
+    kit_hud_award(&hud, 2500, "MASER BARRAGE", "LEFT RAMP  >  RIGHT RAMP  >  BUILDING");
+    kit_show_start(&show_fx, "maser start", SHOW_START, N_SHOW(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, %u s, sequence %s > %s > %s, window %lu ms, score %llu", why, p, RUN_SECONDS,
            STEP[0].shot, STEP[1].shot, STEP[2].shot, run.window_ms, (unsigned long long)pm_score(p));
@@ -188,11 +233,19 @@ static void end(const char *why)
     kit_end();
     kit_ledger_note(KIT_MASER, run.player, run.barrages > 0);
     sound(CUE_END);
-    pm_snprintf(a, sizeof a, "TOTAL %s", kit_num(n, sizeof n, run.total));
-    pm_snprintf(b, sizeof b, "BARRAGES %u  BEST x%u", run.barrages, run.best_mult);
-    kit_screen_status(&screen, a, b);
-    screen.flash[0] = 0;
-    kit_screen_hide_in(&screen, TOTAL_SHOWN_MS);
+    pa_clip_full(&own, run.barrages ? "won" : "lost");          /* the ending, full screen */
+    kit_show_start(&show_fx, run.barrages ? "maser won" : "maser lost", run.barrages ? SHOW_WON : SHOW_LOST,
+                   run.barrages ? N_SHOW(SHOW_WON) : N_SHOW(SHOW_LOST));
+    pm_snprintf(a, sizeof a, "%s", kit_num(n, sizeof n, run.total));
+    pm_snprintf(b, sizeof b, "%u BARRAGE%s  -  BEST X%u", run.barrages, run.barrages == 1 ? "" : "S", run.best_mult);
+    kit_hud_title(&hud, "MASER BARRAGE TOTAL", b);
+    kit_hud_counter(&hud, 0, 0, 0, 0);
+    kit_hud_counter(&hud, 1, 0, 0, 0);
+    kit_hud_counter(&hud, 2, 0, 0, 0);
+    kit_hud_timer(&hud, -1);
+    kit_hud_gauge(&hud, -1, 0);
+    kit_hud_award(&hud, TOTAL_SHOWN_MS, a, " ");
+    kit_hud_hide_in(&hud, TOTAL_SHOWN_MS);
     pm_log("END (%s): %u barrage(s), best x%u, %u chain(s) broken, total %llu, score %llu", why, run.barrages,
            run.best_mult, run.breaks, (unsigned long long)run.total, (unsigned long long)pm_score(run.player));
 }
@@ -214,8 +267,8 @@ static void chain_shot(uint64_t shot)
                run.mult, pm_ms() - run.step_at);
         run.step_at = pm_ms();
         if (++run.step < N_STEPS) {
-            pm_snprintf(line, sizeof line, "%s x%u", STEP[i].says, run.mult);
-            kit_screen_flash(&screen, 900, line);
+            pm_snprintf(line, sizeof line, "%s X%u", STEP[i].says, run.mult);
+            kit_hud_award(&hud, 1000, line, kit_num(n, sizeof n, got));
             sound(CUE_STEP);
             show();
             return;
@@ -225,8 +278,13 @@ static void chain_shot(uint64_t shot)
         pm_log("BARRAGE %u: jackpot +%llu (x%u); multiplier -> x%u, +%u s, window %lu -> %lu ms", run.barrages,
                (unsigned long long)got, run.mult, run.mult < MULT_MAX ? run.mult + 1 : MULT_MAX, BARRAGE_ADDS_SECONDS,
                run.window_ms, run.window_ms > WINDOW_MIN_MS ? run.window_ms - WINDOW_SHRINK_MS : run.window_ms);
-        pm_snprintf(line, sizeof line, "JACKPOT %s", kit_num(n, sizeof n, got));
-        kit_screen_flash(&screen, 2000, line);
+        {
+            char sub[KIT_HUD_WORDS];
+            pm_snprintf(line, sizeof line, "BARRAGE JACKPOT");
+            pm_snprintf(sub, sizeof sub, "%s   NOW X%u", kit_num(n, sizeof n, got),
+                        run.mult < MULT_MAX ? run.mult + 1 : MULT_MAX);
+            kit_hud_award(&hud, 2500, line, sub);
+        }
         sound(CUE_JACKPOT);
         if (run.mult < MULT_MAX) run.mult++;
         if (run.mult > run.best_mult) run.best_mult = run.mult;
@@ -295,7 +353,7 @@ static void qualify_shot(uint64_t shot, unsigned p)
         start("Maser target", 1);
     } else if (!kit_running) {
         pm_snprintf(line, sizeof line, "MASER %u OF %d", hits[p], HITS_TO_START);
-        kit_screen_note(&screen, 2000, line);
+        kit_hud_note(&hud, 2000, line, "MASER BARRAGE");
     }
 }
 
@@ -325,7 +383,8 @@ static void check_triggers(void)
 static void on_tick(void)
 {
     unsigned p;
-    kit_screen_tick(&screen);
+    kit_hud_tick(&hud);
+    kit_show_tick(&show_fx, &lamps);
     pa_tick(&own);
     if (++poll % KIT_POLL == 0) check_triggers();
     if (kit_new_game(&game)) {
@@ -358,7 +417,7 @@ static void on_tick(void)
         run.step = 0;
         run.mult = 1;
         run.window_ms = WINDOW_MS;
-        kit_screen_flash(&screen, 1500, "CHAIN BROKEN");
+        kit_hud_award(&hud, 1800, "CHAIN BROKEN", "BACK TO X1 - START AT THE LEFT RAMP");
         sound(CUE_BROKEN);
     }
     show();
