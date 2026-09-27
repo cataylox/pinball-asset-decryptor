@@ -75,10 +75,15 @@ class _ModeCard:
         return None
 
 
-def _mode_card(monkeypatch, tmp_path, with_sound=True, audio_edit=False, sound_idx=0):
+def _mode_card(monkeypatch, tmp_path, with_sound=True, audio_edit=False, sound_idx=0, swapped=()):
     params = _params(4)
     grown = [dict(p) for p in params]
     grown[sound_idx].update(body_off=0x40000, length=3 * 44100 + BLOCK, grown=True, shadows=4)
+    for k, i in enumerate(swapped):
+        # a swapped sound's record (item 163): grown, its stock key and its appended one as the
+        # staged bank's decode reports them
+        grown[i].update(body_off=0x50000 + 0x10000 * k, length=44100, grown=True, shadows=4,
+                        stock_findkey=bytes([0xa0 + i]) * 8, findkey=bytes([0xb0 + i]) * 8)
     _r, staged = _grow_card(monkeypatch, tmp_path, params, grown_rows=grown)
     card = _ModeCard()
 
@@ -857,6 +862,7 @@ def _own_sounds_card(monkeypatch, tmp_path, **kw):
     carrier's request resolving to its own stock record (the time-up call to idx 0); the music's
     bed (item 150 follow-up: Pro 1.15's first bed, sid 257) resolves to idx 3."""
     from pinball_decryptor.plugins.stern import mode_sounds as MS
+    kw.setdefault("swapped", (1,))
     card, staged, project, encoded, hmac = _mode_card(monkeypatch, tmp_path, **kw)
     calls = list(MS.TITLES[("godzilla_pro", "1.15")].calls)
     records = {1295: 0, calls[0]: 1, 125: 3}
@@ -893,9 +899,12 @@ def test_a_modes_start_sound_and_music_go_on_the_card_on_their_carriers(monkeypa
     assert frames >= MS.bed_min_frames(secs) > frames - loop
     assert staged["path"]
     own = plan["modes"]["own_sounds"]
+    # hud-layers: the start sound is SWAPPED in (Pro 1.15's calls share their carriers now): its
+    # record is a grown copy of the carrier's own, and the mode swaps the carrier's key for it
     assert own == [
         {"slug": "atomic_breath", "name": "ATOMIC BREATH", "key": "sound_start",
-         "request": calls[0], "idx": 1, "ms": 500},
+         "request": calls[0], "idx": 1, "ms": 500, "swap": True,
+         "stock_key": (bytes([0xa1]) * 8).hex(), "our_key": (bytes([0xb1]) * 8).hex()},
         {"slug": "atomic_breath", "name": "ATOMIC BREATH", "key": "music", "request": 125,
          "sid": 257, "idx": 3, "ms": None}]
     assert plan["modes"]["end_sound"] == {"name": "KAIJU RUSH", "request": 1295, "idx": 0}
@@ -903,24 +912,37 @@ def test_a_modes_start_sound_and_music_go_on_the_card_on_their_carriers(monkeypa
     cfgs = {os.path.basename(c): open(c, encoding="utf-8").read()
             for c in plan["modes"]["payload"]["cfgs"]}
     assert "sound_start    %d 500" % calls[0] in cfgs["mode.cfg"]
+    assert "swap %d %s %s" % (calls[0], (bytes([0xa1]) * 8).hex(), (bytes([0xb1]) * 8).hex()) in \
+        " ".join(cfgs["mode.cfg"].split())
     assert "music          125 257" in cfgs["mode.cfg"]
     assert "sound_start" not in cfgs["mode1.cfg"] and "music" not in cfgs["mode1.cfg"]
     assert _said(msgs, "ATOMIC BREATH's own start sound (go.wav, 0.50 s) goes on the card as a "
-                       "new record for request %d" % calls[0])
+                       "new record (a copy of sound idx 1, the carrier's own) that request %d plays "
+                       "for the mode alone" % calls[0])
     assert _said(msgs, "is made a seamless 0.600 s loop and repeated %d time(s)" % (frames // loop))
     assert _said(msgs, "its own start sound go.wav (request %d)" % calls[0])
     engine._rmtree_grow_plan(plan)
 
 
-def test_a_carrier_that_another_edit_replaces_is_refused(monkeypatch, tmp_path):
+def test_a_carrier_that_another_edit_replaces_is_not_its_host(monkeypatch, tmp_path):
+    """hud-layers: a swapped sound never goes in place of a record the project replaces: the carrier's
+    own record is not its host then, and with no other record to hold it (this card's sounds carry
+    no keys) it is left out and the log says why, where the one-carrier route refused the build."""
     _card, _staged, project, _enc, calls = _own_sounds_card(monkeypatch, tmp_path, audio_edit=True,
-                                                             sound_idx=1)
-    monkeypatch.setattr(MW, "request_record",
-                        lambda elf, head, params, sites, request, mask:
-                        {1295: 0, calls[0]: 1, 125: 3}[request])
-    _msgs, log = _capture()
-    with pytest.raises(RuntimeError, match="start sound goes in place of sound idx 1"):
-        _compute(project, log)
+                                                             sound_idx=1, swapped=())
+    records = {1295: 0, calls[0]: 1, 125: 3}
+
+    def request_record(elf, head, params, sites, request, mask):
+        if request not in records:
+            raise MW.ModeWriteError("request %d: not this card's" % request)
+        return records[request]
+    monkeypatch.setattr(MW, "request_record", request_record)
+    msgs, log = _capture()
+    _w, _c, plan, _m, _v = _compute(project, log)
+    assert not any(u["key"] == "sound_start" for u in plan["modes"]["own_sounds"])
+    assert _said(msgs, "ATOMIC BREATH's own start sound is not put on this card: no carrier takes it")
+    assert _said(msgs, "no record is left to hold it beside request %d's" % calls[0])
+    engine._rmtree_grow_plan(plan)
 
 
 def test_the_sound_gate_closed_leaves_the_carried_sounds_out_too(monkeypatch, tmp_path):

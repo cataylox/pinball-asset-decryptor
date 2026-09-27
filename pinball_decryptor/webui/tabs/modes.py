@@ -1877,7 +1877,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             return str(e)
         if not code:
             return ("No code modes in this project. New code mode… starts one from the SDK's "
-                    "template; Examples has five written in C, with clips, music and calls cut "
+                    "template; Examples has six written in C, with clips, music and calls cut "
                     "from the films.")
         parts = []
         for slug, spec in code:
@@ -1887,12 +1887,15 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
 
     @staticmethod
     def _code_words_one(spec):
-        have = [w for w, on in (("clip", spec.clip), ("picture", spec.screen_art),
-                                ("music", spec.music)) if on]
+        clips = spec.clip_list() if hasattr(spec, "clip_list") else ([("start", spec.clip)] if spec.clip else [])
+        have = [w for w, on in (("%d clips" % len(clips) if len(clips) > 1 else "clip", clips),
+                                ("picture", spec.screen_art), ("music", spec.music)) if on]
         if spec.calls:
             have.append("%d call(s)" % len(spec.calls))
         recipe = (spec.film or {}).get("recipe")
-        if have:
+        if have:                                    # the HUD is built by Write, not cut: only beside assets
+            if getattr(spec, "hud", None):
+                have.insert(1 if clips else 0, "its HUD")
             return "%s (%s)" % (spec.name, ", ".join(have))
         if recipe:
             return "%s (its film assets are not cut yet)" % spec.name
@@ -1930,6 +1933,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             for key, name in (("art", spec.screen_art), ("clip", spec.clip), ("music", spec.music)):
                 path = os.path.join(folder, name) if name else ""
                 files[key] = path if path and os.path.isfile(path) else ""
+            clips = []                                     # hud-layers: a clip per cue
+            for cue, name in spec.clip_list():
+                path = os.path.join(folder, name) if name else ""
+                clips.append({"cue": cue, "file": name, "path": path if path and os.path.isfile(path) else ""})
             calls = []
             for cue, wav, prio in spec.call_list():
                 path = os.path.join(folder, wav) if wav else ""
@@ -1945,7 +1952,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 name=spec.name, seconds=spec.seconds, screen=bool(spec.screen),
                 screen_art=spec.screen_art, words_on_art=bool(spec.words_on_art),
                 panel_color=spec.panel_color, title_color=spec.title_color, clip=spec.clip,
-                music=spec.music, calls=calls, files=files, describe=words,
+                music=spec.music, calls=calls, clips=clips, hud=dict(spec.hud or {}), files=files, describe=words,
                 summary=self._code_words_one(spec),
                 recipe=CM.recipe_lines(film.get("recipe")),
                 needs_films=needs, needs_files=needs_files,
@@ -1974,6 +1981,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if r.get("calls"):
             cut = cut and bool(spec.calls) and all(
                 wav and os.path.isfile(os.path.join(folder, wav)) for _c, wav, _p in spec.call_list())
+        if r.get("clips"):                                  # hud-layers: every clip of the recipe cut
+            names = dict(spec.clip_list())
+            cut = cut and all(names.get(cue) and os.path.isfile(os.path.join(folder, names[cue])) for cue in r["clips"])
         if cut:
             return "", ""
         keys = CM.recipe_films({"recipe": r})

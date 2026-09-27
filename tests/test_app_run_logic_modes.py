@@ -2807,17 +2807,17 @@ def test_a_mode_edit_makes_the_write_tab_rescan(tmp_path, monkeypatch):
 
 # ---------------------------------------------------------------------- code modes with assets
 @pytest.mark.usefixtures("preview_modes_on")
-def test_modes_tab_offers_the_five_intricate_modes_as_code_examples(tmp_path):
-    """Examples lists the form modes, then the SDK's five intricate modes as CODE modes (a Godzilla
+def test_modes_tab_offers_the_six_intricate_modes_as_code_examples(tmp_path):
+    """Examples lists the form modes, then the SDK's six intricate modes as CODE modes (a Godzilla
     title only: their shots are Godzilla's)."""
     project = _modes_card_project(tmp_path, "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0")
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, project)
         labels = [e.get("label") or e["name"] for e in _st(w)["examples"]]
         assert labels[0] == "KAIJU RUSH"
-        assert labels[-5:] == ["KING GHIDORAH (code mode)", "OXYGEN DESTROYER (code mode)",
-                               "MASER BARRAGE (code mode)", "FINAL WARS (code mode)",
-                               "ANGUIRUS (code mode)"]
+        assert sorted(labels[-6:]) == ["ANGUIRUS (code mode)", "FINAL WARS (code mode)",
+                                       "KING GHIDORAH (code mode)", "MASER BARRAGE (code mode)",
+                                       "MELTDOWN (code mode)", "OXYGEN DESTROYER (code mode)"]
         assert "No code modes in this project" in _st(w)["code_words"]
 
 
@@ -2843,7 +2843,8 @@ def test_a_code_example_without_its_films_is_added_and_the_tab_says_which(tmp_pa
         assert _wait(w, lambda: "ANGUIRUS (its film assets are not cut yet)" in _st(w)["code_words"])
         # its own page says which films it needs, until they are cut
         assert _wait(w, lambda: (_st(w).get("code") or {}).get("slug") == "anguirus_assist")
-        assert _st(w)["code"]["needs_films"] == "Godzilla Raids Again (1955)"
+        assert _st(w)["code"]["needs_films"] == (          # its clips come from three films
+            "Godzilla Raids Again (1955), Godzilla: Final Wars (2004) and Destroy All Monsters (1968)")
         assert _st(w)["code"]["needs_files"].endswith(".mp4")
         # not a form mode: a code mode has no mode.json
         assert [r for r in _st(w)["rows"] if r["kind"] == "form"] == []
@@ -2969,7 +2970,7 @@ def test_modes_tab_counts_the_modes_and_at_the_cap_greys_only_the_form_examples(
         states = {e.get("label") or e["name"]: e["disabled"] for e in st["examples"]}
         assert states["KAIJU RUSH"] is True
         code = {k: v for k, v in states.items() if k.endswith(" (code mode)")}
-        assert len(code) == 5 and set(code.values()) == {False}
+        assert len(code) == 6 and set(code.values()) == {False}
         w.run(svc.delete_mode, slugs[0])
         st = _st(w)
         assert st["cap_text"] == "" and st["n_form"] == 2

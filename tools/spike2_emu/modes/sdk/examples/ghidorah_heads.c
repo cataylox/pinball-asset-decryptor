@@ -31,12 +31,19 @@
  *              The final blow: MASER and MASER READY flash white (faster in its last 5 s).
  *              Everything is handed back the moment the mode ends, however it ends.
  *   DISPLAY    Priority 180: BATTLE IS LIT waits until it ends and the game's full-screen shot
- *              awards (LOOPS, POWERLINE ATTACK) are not shown over the panel; its jackpots, battle
- *              and multiball starts and the tilt warning still come through, and the panel is
- *              back when they end.
- *   LIGHTS     No light sweep: the port's example sweep recolours the inserts around the
- *              shots (measured, item 157), so it would make shots that pay nothing look lit.
- *   SCREEN     "HIT LEFT HEAD  41" alternating with "HEADS  L3  M1  RX" (X = severed).
+ *              awards (LOOPS, POWERLINE ATTACK) are not shown over it; its jackpots, battle and
+ *              multiball starts and the tilt warning still come through.
+ *   THE GLASS  (hud-layers) As the game shows its own battles: Ghidorah's arrival full screen, then
+ *              Ghidorah over burning Yokohama looping BEHIND the score panel (the backdrop). At the
+ *              edges: the three heads' health across the top (LEFT / MIDDLE / RIGHT HEAD, the lit
+ *              one marked), the GHIDORAH timer badge on the left, the heads severed on the right,
+ *              KING GHIDORAH and what to shoot above the score panel. A sever and a regrowth play
+ *              their clip behind the HUD with a big award line; the ending is full screen (Ghidorah
+ *              falling, or blasting Godzilla), then the total.
+ *   LIGHTS     Its own shows: at the start, gold lightning strikes the playfield in the dark and
+ *              bursts from the Building; won, a white burst into a turning rainbow; lost, gold
+ *              rising away up the playfield. No light sweep: the port's example sweep recolours
+ *              the inserts around the shots (item 157).
  *
  * Emulator test triggers (checked twice a second):
  *   echo 1 > /dump/ghidorah_heads.start      start now (not counted against the limits)
@@ -61,10 +68,8 @@
 #define SUPER_BASE         20000000ull
 #define SUPER_PER_SECOND   1000000ull
 #define STARTS_PER_GAME    2
-#define TOTAL_SHOWN_MS     6000
+#define TOTAL_SHOWN_MS     10000          /* the ending clip (5 s) full screen, then the total */
 
-#define SCREEN_NODE "PadMode_" FOLDER "_Screen"
-#define SCREEN_TEXT "PadMode_" FOLDER "_Screen.PadMode_" FOLDER "_Screen_Words"
 
 #define N_HEADS 3
 static const struct {
@@ -87,7 +92,31 @@ static unsigned ran_ball[5], ran_game[5];
 static struct kit_db db;
 static struct kit_game game;
 static struct kit_lamps lamps;
-static struct kit_screen screen = { .node_name = SCREEN_NODE, .text_name = SCREEN_TEXT, .alt_ms = 2000 };
+static struct kit_hud hud = { .slug = FOLDER };
+static struct kit_show show;
+
+/* ---- light shows (hud-layers): unique to KING GHIDORAH, gold and white -------------------------- */
+#define GHID_GOLD      PM_RGB(255, 175, 0)
+#define GHID_EMBER     PM_RGB(90, 30, 0)
+static const struct kit_fx_step SHOW_START[] = {
+    { KIT_FX_BOLTS,   1500, GHID_GOLD, 0, KIT_AT_CENTER, 190, KIT_GI_DARK },        /* gravity beams strike */
+    { KIT_FX_STROBE,   500, KIT_WHITE, GHID_GOLD, KIT_AT_CENTER, 60, KIT_GI_FLASH },
+    { KIT_FX_BURST,    800, GHID_GOLD, GHID_EMBER, KIT_AT_BUILDING, 0, KIT_GI_DARK },  /* from the Building */
+    { KIT_FX_FADE_OUT, 400, GHID_EMBER, 0, KIT_AT_CENTER, 0, KIT_GI_KEEP },
+};
+static const struct kit_fx_step SHOW_WON[] = {
+    { KIT_FX_STROBE,   400, KIT_WHITE, 0, KIT_AT_CENTER, 50, KIT_GI_FLASH },
+    { KIT_FX_BURST,    700, KIT_WHITE, GHID_GOLD, KIT_AT_MASER, 0, KIT_GI_DARK },      /* the final blow */
+    { KIT_FX_RAINBOW, 1800, 0, 0, KIT_AT_CENTER, 60, KIT_GI_KEEP },
+    { KIT_FX_FADE_OUT, 500, GHID_GOLD, 0, KIT_AT_CENTER, 0, KIT_GI_KEEP },
+};
+static const struct kit_fx_step SHOW_LOST[] = {
+    { KIT_FX_SWEEP_UP,   900, GHID_GOLD, GHID_EMBER, KIT_AT_CENTER, 0, KIT_GI_DARK },  /* Ghidorah flies off */
+    { KIT_FX_SWEEP_UP,   900, GHID_GOLD, 0, KIT_AT_CENTER, 0, KIT_GI_DARK },
+    { KIT_FX_SPARKLE,    700, GHID_GOLD, 0, KIT_AT_CENTER, 0, KIT_GI_DARK },
+    { KIT_FX_FADE_OUT,   400, GHID_EMBER, 0, KIT_AT_CENTER, 0, KIT_GI_KEEP },
+};
+#define N_STEPS(a) (int)(sizeof (a) / sizeof (a)[0])
 static unsigned poll;
 
 enum { PHASE_HEADS, PHASE_FINAL };
@@ -110,9 +139,15 @@ enum cue { CUE_START, CUE_DAMAGE, CUE_GLANCE, CUE_SEVER, CUE_REGROW, CUE_FINAL, 
 static void sound(enum cue c)
 {
     switch (c) {
-    case CUE_START:   pa_start(&own); break;                     /* its music, its start clip */
-    case CUE_SEVER:   pa_call(&own, "sever"); break;             /* a head severed */
-    case CUE_REGROW:  pa_call(&own, "regrow"); break;            /* a wounded head grows back */
+    case CUE_START:   pa_start(&own); break;                     /* its music, its intro, then the loop */
+    case CUE_SEVER:                                              /* a head severed */
+        pa_call(&own, "sever");
+        pa_clip_event(&own, "sever");
+        break;
+    case CUE_REGROW:                                             /* a wounded head grows back */
+        pa_call(&own, "regrow");
+        pa_clip_event(&own, "regrow");
+        break;
     case CUE_SUPER:   pa_call(&own, "won"); break;               /* the super jackpot: GHIDORAH DEFEATED */
     case CUE_TIME_UP:                                            /* GHIDORAH ESCAPES */
         if (!pa_call(&own, "lost")) pm_callout(pm_callout_id("time_up"));
@@ -170,22 +205,29 @@ static void show_lit(void)
 
 static void show_status(void)
 {
-    char a[KIT_WORDS], b[KIT_WORDS], n[24];
-    unsigned i, k = 0;
+    char line[KIT_HUD_WORDS];
+    unsigned i;
     if (run.phase == PHASE_FINAL) {
-        pm_snprintf(a, sizeof a, "SHOOT THE MASER %u", kit_timer_seconds(&run.final_clock));
-        pm_snprintf(b, sizeof b, "SUPER %s", kit_num(n, sizeof n, super_value()));
+        char n[24];
+        kit_hud_title(&hud, "KING GHIDORAH", "FINAL BLOW: SHOOT THE MASER");
+        pm_snprintf(line, sizeof line, "%s", kit_short(n, sizeof n, super_value()));
+        kit_hud_counter(&hud, 0, 0, 0, 0);
+        kit_hud_counter(&hud, 1, "SUPER JACKPOT", line, "MASER TARGET");
+        kit_hud_counter(&hud, 2, 0, 0, 0);
+        kit_hud_timer(&hud, (int)kit_timer_seconds(&run.final_clock));
     } else {
-        pm_snprintf(a, sizeof a, "HIT %s %u", HEAD[run.lit].name, kit_timer_seconds(&run.clock));
-        k = (unsigned)pm_snprintf(b, sizeof b, "HEADS");
+        pm_snprintf(line, sizeof line, "SHOOT THE %s", HEAD[run.lit].name);
+        kit_hud_title(&hud, "KING GHIDORAH", line);
         for (i = 0; i < N_HEADS; i++) {
-            char hp[4];
+            char hp[8];
             if (run.hp[i]) pm_snprintf(hp, sizeof hp, "%u", run.hp[i]);
             else kit_copy(hp, sizeof hp, "X");
-            k += (unsigned)pm_snprintf(b + k, sizeof b - k, "  %s%s", HEAD[i].tag, hp);
+            kit_hud_counter(&hud, (int)i, HEAD[i].name, hp,
+                            !run.hp[i] ? "SEVERED" : i == run.lit ? ">> LIT <<" : "HEALTH");
         }
+        kit_hud_timer(&hud, (int)kit_timer_seconds(&run.clock));
     }
-    kit_screen_status(&screen, a, b);
+    kit_hud_gauge(&hud, (int)run.severed, "SEVERED");
 }
 
 /* ---- start and end ------------------------------------------------------------------------------- */
@@ -223,10 +265,11 @@ static int start(const char *why, int counted)
     }
     qual[p] = 0;
     kit_ledger_note(KIT_GHIDORAH, p, 0);
-    kit_screen_show(&screen, 1);
+    kit_hud_begin(&hud, "KING GHIDORAH", "");
     show_status();
-    kit_screen_flash(&screen, 2500, "GHIDORAH ATTACKS");
+    kit_hud_award(&hud, 3000, "GHIDORAH ATTACKS", "SEVER ALL THREE HEADS");
     show_lit();
+    kit_show_start(&show, "ghidorah start", SHOW_START, N_STEPS(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, %u s, heads %u/%u/%u, lit %s, start %u this game, score %llu", why, p,
            RUN_SECONDS, run.hp[0], run.hp[1], run.hp[2], HEAD[run.lit].name, ran_game[p],
@@ -240,13 +283,21 @@ static void end(const char *why, int won)
     if (!run.on) return;
     run.on = 0;
     kit_lamps_off(&lamps);                         /* every insert back to the game, at once */
-    kit_end();
+    kit_end_after(TOTAL_SHOWN_MS);      /* the ending clip and the total keep the screen */
     kit_ledger_note(KIT_GHIDORAH, run.player, won);
     sound(CUE_END);
-    pm_snprintf(a, sizeof a, "TOTAL %s", kit_num(n, sizeof n, run.total));
-    kit_screen_status(&screen, a, won ? "GHIDORAH DEFEATED" : "GHIDORAH ESCAPES");
-    screen.flash[0] = 0;
-    kit_screen_hide_in(&screen, TOTAL_SHOWN_MS);
+    pa_clip_full(&own, won ? "won" : "lost");      /* the ending, full screen */
+    kit_show_start(&show, won ? "ghidorah won" : "ghidorah lost", won ? SHOW_WON : SHOW_LOST,
+                   won ? N_STEPS(SHOW_WON) : N_STEPS(SHOW_LOST));
+    pm_snprintf(a, sizeof a, "%s", kit_num(n, sizeof n, run.total));
+    kit_hud_title(&hud, won ? "GHIDORAH DEFEATED" : "GHIDORAH ESCAPES", " ");
+    kit_hud_counter(&hud, 0, 0, 0, 0);
+    kit_hud_counter(&hud, 1, 0, 0, 0);
+    kit_hud_counter(&hud, 2, 0, 0, 0);
+    kit_hud_timer(&hud, -1);
+    kit_hud_gauge(&hud, -1, 0);
+    kit_hud_award(&hud, TOTAL_SHOWN_MS, a, "KING GHIDORAH TOTAL");
+    kit_hud_hide_in(&hud, TOTAL_SHOWN_MS);
     pm_log("END (%s): %s, %u of %d heads severed, %u hits, total %llu, score %llu", why,
            won ? "WON" : "not won", run.severed, N_HEADS, run.hits, (unsigned long long)run.total,
            (unsigned long long)pm_score(run.player));
@@ -270,14 +321,18 @@ static void sever(unsigned i)
         kit_timer_set(&run.final_clock, FINAL_SECONDS, 1);
         pm_log("FINAL BLOW: %s lit for %u s, super jackpot %llu", FINAL_SHOT, FINAL_SECONDS,
                (unsigned long long)super_value());
-        kit_screen_flash(&screen, 2500, "FINAL BLOW: MASER");
+        kit_hud_award(&hud, 3000, "ALL HEADS SEVERED", "FINAL BLOW: THE MASER");
         sound(CUE_FINAL);
     } else {
         kit_timer_add(&run.clock, SEVER_ADDS_SECONDS);
         run.lit = next_living(i);
         run.lit_since = pm_ms();
-        pm_snprintf(line, sizeof line, "%s SEVERED", HEAD[i].name);
-        kit_screen_flash(&screen, 2000, line);
+        {
+            char n[24], sub[KIT_HUD_WORDS];
+            pm_snprintf(line, sizeof line, "%s SEVERED", HEAD[i].name);
+            pm_snprintf(sub, sizeof sub, "%s   +%d SECONDS", kit_num(n, sizeof n, got), SEVER_ADDS_SECONDS);
+            kit_hud_award(&hud, 2500, line, sub);
+        }
     }
     show_lit();
 }
@@ -296,7 +351,7 @@ static void head_hit(unsigned i, unsigned damage, const char *shot)
         pm_log("%s: glancing blow on %s (lit: %s) +%llu", shot, HEAD[i].name, HEAD[run.lit].name,
                (unsigned long long)got);
         pm_snprintf(line, sizeof line, "HIT THE %s", HEAD[run.lit].name);
-        kit_screen_flash(&screen, 1200, line);
+        kit_hud_award(&hud, 1200, "GLANCING BLOW", line);
         sound(CUE_GLANCE);
         return;
     }
@@ -308,8 +363,11 @@ static void head_hit(unsigned i, unsigned damage, const char *shot)
     if (run.hp[i] == 0) {
         sever(i);
     } else {
-        pm_snprintf(line, sizeof line, "%s -%u", HEAD[i].name, damage);
-        kit_screen_flash(&screen, 1200, line);
+        {
+            char n[24];
+            pm_snprintf(line, sizeof line, "%s -%u", HEAD[i].name, damage);
+            kit_hud_award(&hud, 1300, line, kit_num(n, sizeof n, got));
+        }
         sound(CUE_DAMAGE);
         show_lit();                                /* its inserts blink faster, at once */
     }
@@ -324,8 +382,8 @@ static void battle_shot(uint64_t shot)
             uint64_t asked = super_value(), got = pay(asked);
             pm_log("SUPER JACKPOT: %s with %u s left, +%llu (asked %llu)", FINAL_SHOT,
                    kit_timer_seconds(&run.final_clock), (unsigned long long)got, (unsigned long long)asked);
-            pm_snprintf(line, sizeof line, "SUPER %s", kit_num(n, sizeof n, got));
-            kit_screen_flash(&screen, 2500, line);
+            (void)line;
+            (void)n;
             sound(CUE_SUPER);
             end("super jackpot", 1);
         }
@@ -377,7 +435,7 @@ static void qualify_shot(uint64_t shot, unsigned p)
             start("three powerlines", 1);
         } else if (!kit_running) {
             pm_snprintf(line, sizeof line, "POWERLINES %u OF %d", n, N_HEADS);
-            kit_screen_note(&screen, 2000, line);
+            kit_hud_note(&hud, 2000, line, "KING GHIDORAH");
         }
         return;
     }
@@ -432,7 +490,7 @@ static void battle_tick(void)
         run.last_damage[i] = now;
         pm_log("%s REGROWS: health %u", HEAD[i].name, run.hp[i]);
         pm_snprintf(line, sizeof line, "%s REGROWS", HEAD[i].name);
-        kit_screen_flash(&screen, 1500, line);
+        kit_hud_award(&hud, 1800, line, "FINISH IT BEFORE IT TURNS");
         sound(CUE_REGROW);
     }
     if (now - run.lit_since >= LIT_MOVES_MS) {  /* Ghidorah turns */
@@ -451,7 +509,8 @@ static void battle_tick(void)
 static void on_tick(void)
 {
     unsigned p;
-    kit_screen_tick(&screen);
+    kit_hud_tick(&hud);
+    kit_show_tick(&show, &lamps);
     pa_tick(&own);
     if (++poll % KIT_POLL == 0) check_triggers();
     if (kit_new_game(&game)) {
@@ -470,12 +529,16 @@ static void on_ball_end(void)
 {
     unsigned p;
     end("ball ended", 0);
+    kit_end_now();
     for (p = 0; p < 5; p++) qual[p] = ran_ball[p] = 0;
 }
 
 static void on_event(unsigned id)
 {
-    if (kit_is_tilt(id)) end("tilted", 0);        /* its lights go dark with the game's */
+    if (kit_is_tilt(id)) {
+        end("tilted", 0);                          /* its lights go dark with the game's */
+        kit_end_now();
+    }
 }
 
 static const struct pm_mode ghidorah_heads = {

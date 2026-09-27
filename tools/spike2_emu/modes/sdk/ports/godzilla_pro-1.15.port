@@ -232,6 +232,17 @@ value effect_waiter_call     0x00052c08
 value layered_fg_at          0x58
 value layered_fg_flags_at    0x60
 
+# ---- the backdrop (hud-layers): a mode's clip BEHIND the HUD, in the main-play background's place --------
+# BDLBackground::v[8] (slot 8 of BDLMainplayBG's vtable) and the scene_show it calls, read off this program by
+# the shape of Premium 1.16's measured lines (docs/plans/hud-layers.md); emulator-proven on this build (hud-layers
+# run tp115, 2026-09-27: all six Godzilla examples' loops and event clips behind the HUD, no render gap).
+site backdrop_draw       0x0003fd74 0xe5903054 0xe92d4010
+site scene_show          0x003ba964 0xe92d4070 0xe3074e84
+data backdrop_city_vtable    0x00622a90
+value backdrop_video_at      0x54
+value backdrop_scene_at      0x18
+text backdrop_crop           ScoreFrame
+
 # ---- named inserts (item mode-leds): MODE_SDK.md "Lights: named inserts" ----------------------------
 # The game's lamp LAYERS (lamp groups): the active list's head is the word after the free list's at
 # lamp_layers; each group holds a pointer to one 40-byte slot per light (+0), its priority (+4), its

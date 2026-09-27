@@ -3,9 +3,10 @@
  * Dr. Serizawa's weapon (Godzilla, 1954). Its value drains away in real time: collect it
  * before it is gone, then deliver it for double.
  *
- *   START      Hit the Godzilla target 3 times in one ball. Up to 3 times a game per player,
- *              and not again for 15 s after it ends (it needs 3 fresh hits every time). It
- *              runs beside anything the game is doing (a hurry-up only adds points).
+ *   START      Spin the LEFT SPINNER 25 times in one ball (hud-layers: it used to be the Godzilla
+ *              target 3 times, which MELTDOWN's ten captive-ball hits would always set off first).
+ *              Up to 3 times a game per player, and not again for 15 s after it ends (25 fresh spins
+ *              every time). It runs beside anything the game is doing (a hurry-up only adds points).
  *   HURRY-UP   The value starts at 20,000,000 and falls 800,000 every second, down to 0 at
  *              25 s. The LEFT RAMP collects it. The Godzilla target holds it off: each hit
  *              puts 2 seconds (1,600,000) back, up to 20,000,000, three times at most.
@@ -19,12 +20,15 @@
  *              (MAGNA GRAB) PULSES while a hold-off is left. Collected: those two go back to the
  *              game and the RIGHT RAMP flashes white for the super jackpot (faster in its last
  *              3 s). Everything is handed back the moment the mode ends, however it ends.
- *   DISPLAY    Priority 180 (the game's full-screen shot awards are not shown over the panel;
- *              its jackpots, starts and the tilt warning come through, and the panel is back).
- *   LIGHTS     No light sweep: the port's example sweep recolours the inserts around the
- *              shots (measured, item 157), so it would make shots that pay nothing look lit.
- *   SCREEN     "LEFT RAMP 13,440,000" (the live value), then "SUPER RIGHT RAMP 9" alternating
- *              with the super jackpot's value.
+ *   DISPLAY    Priority 180 (the game's full-screen shot awards are not shown over it; its
+ *              jackpots, starts and the tilt warning come through).
+ *   THE GLASS  (hud-layers) The canister on the sea bed full screen as it starts, then the murky
+ *              depths looping BEHIND the score panel. At the edges: the falling value as the big
+ *              counter, the OXYGEN badge counting its seconds, and the oxygen gauge on the right
+ *              draining segment by segment. The collect plays the bubbles erupting behind the HUD;
+ *              the ending is full screen (Godzilla dissolving, or surging out of the sea).
+ *   LIGHTS     Its own shows: bubbles rising up the playfield in blue at the start; delivered, a
+ *              white flash dissolving into a slow blue fade; lost, a blue wash draining away.
  *
  * Emulator test triggers: /dump/oxygen_destroyer.start, .stop, .shot "<shot name>".
  */
@@ -34,8 +38,9 @@
 /* ---- the knobs ------------------------------------------------------------------------------ */
 #define MODE_NAME          "OXYGEN DESTROYER"
 #define FOLDER             "oxygen_destroyer"
-#define START_SHOT         "Godzilla target"
-#define HITS_TO_START      3
+#define START_SHOT         "Godzilla target"   /* the hold-off (the captive ball); it no longer starts it */
+#define SPIN_SHOT          "Left spinner"
+#define HITS_TO_START      25                  /* spins, each one counted (a spinner shot is many spins) */
 #define STARTS_PER_GAME    3
 #define COOLDOWN_MS        15000
 #define VALUE_START        20000000ull
@@ -45,19 +50,40 @@
 #define COLLECT_SHOT       "Left ramp"
 #define SUPER_SHOT         "Right ramp"
 #define SUPER_SECONDS      12
-#define TOTAL_SHOWN_MS     6000
-
-#define SCREEN_NODE "PadMode_" FOLDER "_Screen"
-#define SCREEN_TEXT "PadMode_" FOLDER "_Screen.PadMode_" FOLDER "_Screen_Words"
+#define TOTAL_SHOWN_MS     10000          /* the ending clip (5 s) full screen, then the total */
+#define GAUGE_PIPS         10
 
 /* ---- state ----------------------------------------------------------------------------------- */
-static uint64_t start_mask, collect_mask, super_mask;
+static uint64_t start_mask, collect_mask, super_mask, spin_mask;
 static unsigned hits[5], ran_game[5];
 static unsigned long ended_at[5];         /* pm_ms() + 1 of the last end, per player; 0 = none */
 static struct kit_db db;
 static struct kit_game game;
 static struct kit_lamps lamps;
-static struct kit_screen screen = { .node_name = SCREEN_NODE, .text_name = SCREEN_TEXT, .alt_ms = 1500 };
+static struct kit_hud hud = { .slug = FOLDER };
+static struct kit_show show_fx;
+
+/* ---- light shows (hud-layers): unique to OXYGEN DESTROYER, the deep sea's blues ------------------- */
+#define OXY_DEEP       PM_RGB(0, 20, 70)
+#define OXY_AQUA       PM_RGB(60, 220, 255)
+static const struct kit_fx_step SHOW_START[] = {
+    { KIT_FX_SPARKLE,   900, OXY_AQUA, OXY_DEEP, KIT_AT_CENTER, 0, KIT_GI_DARK },      /* the sea bed */
+    { KIT_FX_SWEEP_UP,  900, KIT_WHITE, OXY_DEEP, KIT_AT_CENTER, 0, KIT_GI_DARK },     /* bubbles rise */
+    { KIT_FX_SWEEP_UP,  800, OXY_AQUA, OXY_DEEP, KIT_AT_CENTER, 0, KIT_GI_DARK },
+    { KIT_FX_PULSE,     900, OXY_AQUA, OXY_DEEP, KIT_AT_CENTER, 220, KIT_GI_KEEP },
+};
+static const struct kit_fx_step SHOW_WON[] = {
+    { KIT_FX_STROBE,    400, KIT_WHITE, 0, KIT_AT_CENTER, 60, KIT_GI_FLASH },           /* the device fires */
+    { KIT_FX_BURST,     900, KIT_WHITE, OXY_AQUA, KIT_AT_MAGNA, 0, KIT_GI_DARK },
+    { KIT_FX_SPARKLE,  1200, KIT_WHITE, OXY_DEEP, KIT_AT_CENTER, 0, KIT_GI_DARK },      /* he dissolves */
+    { KIT_FX_FADE_OUT,  900, OXY_AQUA, 0, KIT_AT_CENTER, 0, KIT_GI_KEEP },
+};
+static const struct kit_fx_step SHOW_LOST[] = {
+    { KIT_FX_SWEEP_DOWN, 900, OXY_AQUA, OXY_DEEP, KIT_AT_CENTER, 0, KIT_GI_DARK },     /* the oxygen drains */
+    { KIT_FX_PULSE,      900, KIT_RED, 0, KIT_AT_CENTER, 300, KIT_GI_DARK },
+    { KIT_FX_FADE_OUT,   600, OXY_DEEP, 0, KIT_AT_CENTER, 0, KIT_GI_KEEP },
+};
+#define N_STEPS(a) (int)(sizeof (a) / sizeof (a)[0])
 static unsigned poll;
 
 enum { PHASE_HURRY, PHASE_SUPER };
@@ -77,8 +103,11 @@ enum cue { CUE_START, CUE_HOLD_OFF, CUE_COLLECT, CUE_SUPER, CUE_LOST, CUE_TIME_U
 static void sound(enum cue c)
 {
     switch (c) {
-    case CUE_START:   pa_start(&own); break;                     /* its music, its start clip */
-    case CUE_COLLECT: pa_call(&own, "collect"); break;           /* the hurry-up collected */
+    case CUE_START:   pa_start(&own); break;                     /* its music, its intro, then the loop */
+    case CUE_COLLECT:                                            /* the hurry-up collected */
+        pa_call(&own, "collect");
+        pa_clip_event(&own, "collect");
+        break;
     case CUE_SUPER:   pa_call(&own, "won"); break;               /* the super jackpot delivered */
     case CUE_LOST:                                               /* the value ran out: LOST */
     case CUE_TIME_UP:                                            /* the super jackpot ran out */
@@ -129,18 +158,29 @@ static void show_lamps(void)
 
 static void show(void)
 {
-    char a[KIT_WORDS], b[KIT_WORDS], n[24];
+    char n[24], sub[24];
     uint64_t v;
+    int pips;
     show_lamps();
     if (run.phase == PHASE_SUPER) {
-        pm_snprintf(a, sizeof a, "SUPER RIGHT RAMP %u", kit_timer_seconds(&run.super_clock));
-        pm_snprintf(b, sizeof b, "SUPER %s", kit_num(n, sizeof n, 2 * run.collected));
-        kit_screen_status(&screen, a, b);
+        kit_hud_title(&hud, "OXYGEN DESTROYER", "SUPER JACKPOT: SHOOT THE RIGHT RAMP");
+        kit_hud_counter(&hud, 0, "COLLECTED", kit_short(n, sizeof n, run.collected), " ");
+        kit_hud_counter(&hud, 1, "SUPER JACKPOT", kit_short(sub, sizeof sub, 2 * run.collected), "RIGHT RAMP");
+        kit_hud_counter(&hud, 2, 0, 0, 0);
+        kit_hud_timer(&hud, (int)kit_timer_seconds(&run.super_clock));
+        kit_hud_gauge(&hud, GAUGE_PIPS, "DOUBLE");
         return;
     }
     v = value_now();
-    pm_snprintf(a, sizeof a, "LEFT RAMP %s", kit_num(n, sizeof n, v));
-    kit_screen_status(&screen, a, 0);
+    kit_hud_title(&hud, "OXYGEN DESTROYER", run.hold_offs < HOLD_OFFS ? "LEFT RAMP COLLECTS  -  CAPTIVE BALL HOLDS"
+                                                                      : "SHOOT THE LEFT RAMP");
+    pm_snprintf(sub, sizeof sub, "%u HOLD-OFF%s LEFT", HOLD_OFFS - run.hold_offs, HOLD_OFFS - run.hold_offs == 1 ? "" : "S");
+    kit_hud_counter(&hud, 0, 0, 0, 0);
+    kit_hud_counter(&hud, 1, "HURRY-UP", kit_short(n, sizeof n, v), sub);
+    kit_hud_counter(&hud, 2, 0, 0, 0);
+    kit_hud_timer(&hud, (int)seconds_left());
+    pips = (int)((v * GAUGE_PIPS + VALUE_START - 1) / VALUE_START);          /* the oxygen left */
+    kit_hud_gauge(&hud, pips, "OXYGEN");
 }
 
 /* ---- start and end ---------------------------------------------------------------------------- */
@@ -165,9 +205,10 @@ static int start(const char *why, int counted)
     hits[p] = 0;
     if (counted) ran_game[p]++;
     kit_ledger_note(KIT_OXYGEN, p, 0);
-    kit_screen_show(&screen, 1);
+    kit_hud_begin(&hud, "OXYGEN DESTROYER", "");
     show();
-    kit_screen_flash(&screen, 1500, "OXYGEN DESTROYER");
+    kit_hud_award(&hud, 2500, "OXYGEN DESTROYER", "COLLECT IT BEFORE IT IS GONE");
+    kit_show_start(&show_fx, "oxygen start", SHOW_START, N_STEPS(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, the value %llu falls %llu a second; collect at %s; start %u this game, "
            "score %llu", why, p, (unsigned long long)VALUE_START, (unsigned long long)VALUE_PER_SECOND,
@@ -181,14 +222,22 @@ static void end(const char *why, int won)
     if (!run.on) return;
     run.on = 0;
     kit_lamps_off(&lamps);                         /* every insert back to the game, at once */
-    kit_end();
+    kit_end_after(TOTAL_SHOWN_MS);      /* the ending clip and the total keep the screen */
     ended_at[run.player] = pm_ms() + 1;
     kit_ledger_note(KIT_OXYGEN, run.player, won);
     sound(CUE_END);
-    pm_snprintf(a, sizeof a, "TOTAL %s", kit_num(n, sizeof n, run.total));
-    kit_screen_status(&screen, a, won ? "GODZILLA IS GONE" : run.collected ? "OXYGEN DESTROYER" : "LOST");
-    screen.flash[0] = 0;
-    kit_screen_hide_in(&screen, TOTAL_SHOWN_MS);
+    pa_clip_full(&own, won ? "won" : "lost");      /* the ending, full screen */
+    kit_show_start(&show_fx, won ? "oxygen won" : "oxygen lost", won ? SHOW_WON : SHOW_LOST,
+                   won ? N_STEPS(SHOW_WON) : N_STEPS(SHOW_LOST));
+    pm_snprintf(a, sizeof a, "%s", kit_num(n, sizeof n, run.total));
+    kit_hud_title(&hud, won ? "GODZILLA IS GONE" : run.collected ? "OXYGEN DESTROYER" : "THE OXYGEN IS GONE", " ");
+    kit_hud_counter(&hud, 0, 0, 0, 0);
+    kit_hud_counter(&hud, 1, 0, 0, 0);
+    kit_hud_counter(&hud, 2, 0, 0, 0);
+    kit_hud_timer(&hud, -1);
+    kit_hud_gauge(&hud, -1, 0);
+    kit_hud_award(&hud, TOTAL_SHOWN_MS, a, "OXYGEN DESTROYER TOTAL");
+    kit_hud_hide_in(&hud, TOTAL_SHOWN_MS);
     pm_log("END (%s): %s, collected %llu, total %llu, score %llu", why, won ? "WON" : "not won",
            (unsigned long long)run.collected, (unsigned long long)run.total, (unsigned long long)pm_score(run.player));
 }
@@ -197,39 +246,42 @@ static void end(const char *why, int won)
 static void on_init(void)
 {
     start_mask = pm_shot(START_SHOT);
+    spin_mask = pm_shot(SPIN_SHOT);
+    if (!spin_mask) pm_log("this port has no \"%s\": only the start trigger starts it", SPIN_SHOT);
     collect_mask = pm_shot(COLLECT_SHOT);
     super_mask = pm_shot(SUPER_SHOT);
     if (!start_mask) pm_log("this port has no \"%s\": only the start trigger starts it", START_SHOT);
     if (!collect_mask || !super_mask) pm_log("this port lacks \"%s\" or \"%s\"", COLLECT_SHOT, SUPER_SHOT);
     pa_load(&own);
-    pm_log("ready on %s %s: starts on %s x%d (0x%llx); collect 0x%llx, super 0x%llx", pm_game(), pm_version(),
-           START_SHOT, HITS_TO_START, (unsigned long long)start_mask, (unsigned long long)collect_mask,
-           (unsigned long long)super_mask);
+    pm_log("ready on %s %s: starts on %s x%d (0x%llx); hold-off %s (0x%llx); collect 0x%llx, super 0x%llx", pm_game(),
+           pm_version(), SPIN_SHOT, HITS_TO_START, (unsigned long long)spin_mask, START_SHOT,
+           (unsigned long long)start_mask, (unsigned long long)collect_mask, (unsigned long long)super_mask);
 }
 
 static void qualify_shot(uint64_t shot, unsigned p)
 {
     char line[KIT_WORDS];
     unsigned long since;
-    if (!start_mask || !(shot & start_mask) || !kit_fresh(&db, start_mask)) return;
+    if (!spin_mask || !(shot & spin_mask)) return;        /* every spin counts: no debounce */
     if (ran_game[p] >= STARTS_PER_GAME) {
-        pm_log("%s: not counted - it already ran %d times this game", START_SHOT, STARTS_PER_GAME);
+        if (hits[p] == 0) pm_log("%s: not counted - it already ran %d times this game", SPIN_SHOT, STARTS_PER_GAME);
         return;
     }
     if (ended_at[p]) {
         since = pm_ms() - (ended_at[p] - 1);
         if (since < COOLDOWN_MS) {
-            pm_log("%s: not counted - cooling down, %lu s left", START_SHOT, (COOLDOWN_MS - since + 999) / 1000);
+            pm_log("%s: not counted - cooling down, %lu s left", SPIN_SHOT, (COOLDOWN_MS - since + 999) / 1000);
             return;
         }
     }
     if (hits[p] < HITS_TO_START) hits[p]++;
-    pm_log("%s %u of %d (player %u)", START_SHOT, hits[p], HITS_TO_START, p);
+    if (hits[p] % 5 == 0 || hits[p] >= HITS_TO_START) pm_log("%s %u of %d (player %u)", SPIN_SHOT, hits[p], HITS_TO_START, p);
     if (hits[p] >= HITS_TO_START) {
-        start("Godzilla target", 1);
+        start("the left spinner", 1);
     } else if (!kit_running) {
-        pm_snprintf(line, sizeof line, "DESTROYER %u OF %d", hits[p], HITS_TO_START);
-        kit_screen_note(&screen, 2000, line);
+        pm_snprintf(line, sizeof line, "%u SPIN%s TO GO", HITS_TO_START - hits[p],
+                    HITS_TO_START - hits[p] == 1 ? "" : "S");
+        kit_hud_note(&hud, 1500, line, "OXYGEN DESTROYER");
     }
 }
 
@@ -244,7 +296,7 @@ static void hurry_shot(uint64_t shot)
             run.drained_ms = run.drained_ms > HOLD_OFF_MS ? run.drained_ms - HOLD_OFF_MS : 0;
             pm_log("%s: hold-off %u of %d, the value is back to %llu", START_SHOT, run.hold_offs, HOLD_OFFS,
                    (unsigned long long)value_now());
-            kit_screen_flash(&screen, 1000, "HELD OFF +2 SEC");
+            kit_hud_award(&hud, 1200, "HELD OFF", "+2 SECONDS");
             sound(CUE_HOLD_OFF);
         }
     }
@@ -256,8 +308,8 @@ static void hurry_shot(uint64_t shot)
                (unsigned long long)(2 * run.collected), SUPER_SHOT, SUPER_SECONDS);
         run.phase = PHASE_SUPER;
         kit_timer_set(&run.super_clock, SUPER_SECONDS, 1);
-        pm_snprintf(line, sizeof line, "COLLECTED %s", kit_num(n, sizeof n, run.collected));
-        kit_screen_flash(&screen, 2000, line);
+        pm_snprintf(line, sizeof line, "SUPER %s AT THE RIGHT RAMP", kit_num(n, sizeof n, 2 * run.collected));
+        kit_hud_award(&hud, 2500, "COLLECTED", line);
         sound(CUE_COLLECT);
         show();
     }
@@ -272,8 +324,8 @@ static void super_shot(uint64_t shot)
     got = pay(asked);
     pm_log("SUPER JACKPOT at %s: +%llu (asked %llu) with %u s left", SUPER_SHOT, (unsigned long long)got,
            (unsigned long long)asked, kit_timer_seconds(&run.super_clock));
-    pm_snprintf(line, sizeof line, "SUPER %s", kit_num(n, sizeof n, got));
-    kit_screen_flash(&screen, 2500, line);
+    (void)line;
+    (void)n;
     sound(CUE_SUPER);
     end("super jackpot", 1);
 }
@@ -307,7 +359,8 @@ static void on_tick(void)
 {
     unsigned p, s;
     unsigned long now, d;
-    kit_screen_tick(&screen);
+    kit_hud_tick(&hud);
+    kit_show_tick(&show_fx, &lamps);
     pa_tick(&own);
     if (++poll % KIT_POLL == 0) check_triggers();
     if (kit_new_game(&game)) {
@@ -350,12 +403,16 @@ static void on_ball_end(void)
 {
     unsigned p;
     end("ball ended", 0);
+    kit_end_now();
     for (p = 0; p < 5; p++) hits[p] = 0;
 }
 
 static void on_event(unsigned id)
 {
-    if (kit_is_tilt(id)) end("tilted", 0);        /* its lights go dark with the game's */
+    if (kit_is_tilt(id)) {
+        end("tilted", 0);                          /* its lights go dark with the game's */
+        kit_end_now();
+    }
 }
 
 static const struct pm_mode oxygen_destroyer = {

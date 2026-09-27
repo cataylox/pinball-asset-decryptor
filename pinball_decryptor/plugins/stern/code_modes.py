@@ -14,13 +14,21 @@ code mode, or one of its Examples). What it plays of its own sits beside it, nam
       "clip": "clip.mp4",            its start clip ("" = none)
       "music": "music.wav",          its own music bed ("" = none)
       "calls": {"sever": "sever.wav", "spike": {"wav": "spike.wav", "priority": 3}},
+      "clips": {"intro": "intro.mp4", "loop": "loop.mp4", "sever": "sever.mp4"},
+      "hud": {"title": "KING GHIDORAH", "timer": {"label": "GHIDORAH", "icon": "bolt"}, ...},
       "film": {...}                  where each was cut from (an Example's recipe), optional
     }
+
+hud-layers: ``clips`` names a clip per CUE - "intro" plays full screen when the mode starts, "loop"
+plays behind the HUD while it runs (the runtime's backdrop), any other cue on an event or at the end
+(``pad_mode_assets.h``); the old ``clip`` is the "start" cue. ``hud`` is the mode's HUD at the glass's
+edges (:mod:`.mode_hud`: its title and instruction line, counters, timer badge and gauge), built into
+Godzilla's slide-outs scene. A mode with a HUD needs no ``screen``.
 
 The CUES are the mode's own words (``pa_call(&own, "sever")`` in its C); the project maps each
 to a WAV. Write (and Try it, which is Write's own code) then does for a code mode what it does
 for a form mode: the screen into the HUD scene, the clip into the video bank, the music on a
-bed and each call on a carrier of its own (:mod:`.mode_sounds`), and the mode compiled into the
+bed and each call on a carrier, shared with the other modes' (:mod:`.mode_sounds`), and the mode compiled into the
 object the card carries with ``mode_file.c``. The carriers it chose go on the card as
 ``<slug>.assets`` beside ``mode.so`` (:func:`runtime_text`), which the mode reads through
 ``tools/spike2_emu/modes/sdk/pad_mode_assets.h``.
@@ -48,6 +56,8 @@ FORMAT = 1
 RUNTIME_SUFFIX = ".assets"
 #: pad_mode_assets.h reads at most this many calls
 MAX_CALLS = 16
+#: pad_mode_assets.h reads at most this many clips (hud-layers)
+MAX_CLIPS = 12
 CUE_RE = re.compile(r"^[a-z][a-z0-9_]{0,14}$")
 SECONDS_MAX = 600
 
@@ -68,6 +78,8 @@ class CodeAssets:
     clip: str = ""
     music: str = ""
     calls: dict = field(default_factory=dict)
+    clips: dict = field(default_factory=dict)     # hud-layers: {cue: file}
+    hud: dict = field(default_factory=dict)       # hud-layers: the HUD at the glass's edges
     film: dict = field(default_factory=dict)
     extra: dict = field(default_factory=dict)
 
@@ -107,8 +119,15 @@ class CodeAssets:
                 out.append((cue, str(v or ""), 4))
         return out
 
+    def clip_list(self):
+        """``[(cue, file)]``: every clip, the old start ``clip`` as the "start" cue (hud-layers)."""
+        out = [(str(cue), str(f or "")) for cue, f in (self.clips or {}).items()]
+        if self.clip and not any(c in ("start", "intro") for c, _f in out):
+            out.insert(0, ("start", str(self.clip)))
+        return out
+
     def has_assets(self):
-        return bool(self.screen or self.clip or self.music or self.calls)
+        return bool(self.screen or self.clip or self.clips or self.hud or self.music or self.calls)
 
 
 # ---- the project -------------------------------------------------------------------------------
@@ -191,6 +210,17 @@ def validate(spec, folder=None):
         calls = []
     if len(calls) > MAX_CALLS:
         out.append("%s: a code mode carries at most %d calls." % (spec.name, MAX_CALLS))
+    if not isinstance(spec.clips, dict) or not isinstance(spec.hud, dict):
+        out.append("%s: clips maps each cue to a video, and hud is an object." % spec.name)
+    else:
+        clips = spec.clip_list()
+        if len(clips) > MAX_CLIPS:
+            out.append("%s: a code mode carries at most %d clips." % (spec.name, MAX_CLIPS))
+        for cue, f in clips:
+            if not CUE_RE.match(cue):
+                out.append("%s: the clip cue %r is 1 to 15 lower-case letters, digits or _." % (spec.name, cue))
+            if not f:
+                out.append("%s: the %s clip names no video." % (spec.name, cue))
     for cue, wav, prio in calls:
         if not CUE_RE.match(cue):
             out.append("%s: the cue %r is 1 to 15 lower-case letters, digits or _." % (spec.name, cue))
@@ -199,7 +229,8 @@ def validate(spec, folder=None):
         if not wav:
             out.append("%s: the %s call names no WAV." % (spec.name, cue))
     if folder is not None:
-        named = [("the picture", spec.screen_art), ("the clip", spec.clip), ("the music", spec.music)]
+        named = [("the picture", spec.screen_art), ("the music", spec.music)]
+        named += [("the %s clip" % cue, f) for cue, f in (spec.clip_list() if isinstance(spec.clips, dict) else [])]
         named += [("the %s call" % cue, wav) for cue, wav, _p in calls]
         for what, name in named:
             if name and not os.path.isfile(os.path.join(folder, name)):
@@ -258,6 +289,14 @@ def sound_wants(project, code):
     return out
 
 
+def clip_name(slug, cue):
+    """The name a code mode's clip for ``cue`` has in the video bank: the start cue keeps the old
+    ``PadMode_<slug>_Clip``, every other is ``PadMode_<slug>_<Cue>`` (hud-layers)."""
+    if cue == "start":
+        return MP.asset_names(slug)["clip"]
+    return "PadMode_%s_%s" % (slug, cue[:1].upper() + cue[1:])
+
+
 def runtime_text(slug, spec, prof, own_sounds=(), screen=False, clip=False):
     """``<slug>.assets``, the file the mode reads (pad_mode_assets.h): its screen and clip as the
     build named them, and every own sound the build CARRIED (*own_sounds*: the engine's list,
@@ -269,7 +308,8 @@ def runtime_text(slug, spec, prof, own_sounds=(), screen=False, clip=False):
     if screen:
         lines.append("screen %s %s" % (names["screen_node"], names["screen_text"]))
     if clip:
-        lines.append("clip   start %s" % names["clip"])
+        for cue, _f in spec.clip_list():
+            lines.append("clip   %s %s" % (cue, clip_name(slug, cue)))
     mine = [u for u in own_sounds or () if u.get("slug") == slug]
     prio = {cue: p for cue, _w, p in spec.call_list()}
     for u in mine:
@@ -277,7 +317,9 @@ def runtime_text(slug, spec, prof, own_sounds=(), screen=False, clip=False):
             lines.append("music  %d%s" % (int(u["request"]), " %d" % int(u["sid"]) if u.get("sid") else ""))
     for u in mine:
         if u.get("stock_key") and u.get("our_key"):     # item 163: swapped in at run time
-            lines.append("swap   %d %s %s" % (int(u["request"]), u["stock_key"], u["our_key"]))
+            # hud-layers: and whose ("music" or "call:<cue>"): a carrier can take several of the
+            # mode's sounds' neighbours in other modes, so the mode picks its own swap by cue
+            lines.append("swap   %d %s %s %s" % (int(u["request"]), u["stock_key"], u["our_key"], u["key"]))
     for cue, _w, _p in spec.call_list():
         u = next((u for u in mine if u.get("key") == call_key(cue)), None)
         if u is None:
@@ -293,8 +335,14 @@ def describe(slug, spec, carried=None, prof=None):
     can_clip = prof is None or prof.can("clip")
     if spec.screen and can_screen:
         parts.append("its own screen%s" % (" with its picture %s" % spec.screen_art if spec.screen_art else ""))
-    if spec.clip and can_clip:
-        parts.append("its own start clip %s (a new file)" % spec.clip)
+    clips = spec.clip_list()
+    if clips and can_clip:
+        if len(clips) == 1:
+            parts.append("its own %s clip %s (a new file)" % (clips[0][0], clips[0][1]))
+        else:
+            parts.append("%d clips of its own (%s)" % (len(clips), ", ".join(c for c, _f in clips)))
+    if spec.hud and can_screen:
+        parts.append("its own HUD at the screen's edges")
     got = {u["key"]: u for u in (carried or ()) if u.get("slug") == slug}
     if spec.music:
         u = got.get("music")
@@ -366,6 +414,7 @@ def recipe_films(ex):
     out = []
     r = ex.get("recipe") or {}
     parts = [r.get("clip"), r.get("art"), r.get("music")] + list((r.get("calls") or {}).values())
+    parts += list((r.get("clips") or {}).values())
     for p in parts:
         if p and p.get("film") not in out:
             out.append(p["film"])
@@ -406,6 +455,8 @@ def recipe_lines(recipe):
     m = r.get("music")
     if m:
         out.append("Music: %s of %s from %s, looped" % (_length(m.get("length")), title(m), _clock(m.get("from"))))
+    for cue, p in (r.get("clips") or {}).items():
+        out.append("Clip %s: %s of %s from %s" % (cue, _length(p.get("length")), title(p), _clock(p.get("from"))))
     calls = r.get("calls") or {}
     if calls:
         out.append("Calls: " + "; ".join("%s, %s of %s from %s" % (cue, _length(p.get("length")), title(p),
@@ -467,14 +518,18 @@ def example_spec(ex, cut=False):
     """The :class:`CodeAssets` an example brings. *cut*: its assets are in the folder (the films
     were found); otherwise only its screen (a generated panel) and its recipe."""
     r = ex.get("recipe") or {}
-    spec = CodeAssets(name=ex["name"], seconds=int(ex.get("seconds") or 60), screen=True,
+    spec = CodeAssets(name=ex["name"], seconds=int(ex.get("seconds") or 60), screen=not ex.get("hud"),
                       panel_color=ex.get("panel_color", "#146e28"), title_color=ex.get("title_color", "#ffe600"))
+    if ex.get("hud"):
+        spec.hud = dict(ex["hud"])
     spec.film = {"recipe": r, "films": {k: FILMS.get(k, k) for k in recipe_films(ex)},
                  "titles": {k: FILM_TITLES.get(k, k) for k in recipe_films(ex)}}
     if cut:
-        if r.get("art"):
+        if r.get("clips"):
+            spec.clips = {cue: "%s.mp4" % cue for cue in r["clips"]}
+        if r.get("art") and not ex.get("hud"):
             spec.screen_art, spec.words_on_art = "screen.png", True
-        if r.get("clip"):
+        if r.get("clip") and not r.get("clips"):
             spec.clip = "clip.mp4"
         if r.get("music"):
             spec.music = "music.wav"
@@ -561,7 +616,14 @@ def cut_example(project, slug, ex, dirs, ffmpeg=None, log=None):
         return pictures[path]
 
     used_dir = ""
-    if r.get("clip"):
+    for cue, c in (r.get("clips") or {}).items():
+        path = film_of(c)
+        FC.cut_clip(path, c["from"], c["length"], os.path.join(folder, "%s.mp4" % cue), ff,
+                    crop=c.get("crop", "fill"), picture=picture(path))
+        say("%s: %s.mp4 cut from %s at %s for %g s" % (ex["name"], cue, os.path.basename(path),
+                                                       FC.format_time(c["from"]), c["length"]))
+        used_dir = os.path.dirname(path)
+    if r.get("clip") and not r.get("clips"):
         c = r["clip"]
         path = film_of(c)
         FC.cut_clip(path, c["from"], c["length"], os.path.join(folder, "clip.mp4"), ff,
@@ -569,7 +631,7 @@ def cut_example(project, slug, ex, dirs, ffmpeg=None, log=None):
         say("%s: clip.mp4 cut from %s at %s for %g s" % (ex["name"], os.path.basename(path),
                                                          FC.format_time(c["from"]), c["length"]))
         used_dir = os.path.dirname(path)
-    if r.get("art"):
+    if r.get("art") and not ex.get("hud"):
         a = r["art"]
         path = film_of(a)
         still = os.path.join(folder, "screen_frame.png")
