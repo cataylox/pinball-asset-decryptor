@@ -55,7 +55,7 @@ _STR_FIELDS = (
     "clip_both_title", "clip_both_seconds", "restore_after",
     "callout_secs_0", "callout_id_0", "callout_secs_1", "callout_id_1",
     "callout_secs_2", "callout_id_2", "callout_secs_3", "callout_id_3",
-    "balls", "ball_save", "add_ball_shot", "add_ball_max",                     # item 167
+    "balls", "ball_save", "add_ball_shot", "add_ball_max", "mb_on_shot",       # item 167, PAD-228
     "also_shot_0", "also_count_0", "also_shot_1", "also_count_1", "after_mode", "after_when")  # PAD-227
 _DEFAULTS = {
     "screen": True, "countdown": True, "lights": False, "advanced": False, "stack": True,
@@ -68,6 +68,7 @@ _DEFAULTS = {
     "ends_kind": "drain", "award_ladder": "rising", "end_shot": "(only when time runs out)",
     "clip_both": "none", "clip_both_seconds": "4", "restore_after": "6",
     "multiball": False, "balls": "3", "ball_save": "10", "add_ball_shot": "(none)", "add_ball_max": "1",
+    "mb_on_shot": "(when it starts)",
     "also_shot_0": "(nothing else)", "also_count_0": "1", "also_shot_1": "(nothing else)",
     "also_count_1": "1", "after_mode": "(any time)", "after_when": "game",
 }
@@ -230,6 +231,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     PARAM_NEVER = "(only when time runs out)"
     #: item 167: the add-a-ball list's first entry
     BALL_NONE = "(none)"
+    #: PAD-228: the multiball's balls come when the mode starts, not on a shot
+    MB_ON_START = "(when it starts)"
     #: PAD-227: the "and also" shot lists' first entry, the "only after" list's, and the rows shown
     ALSO_NONE = "(nothing else)"
     AFTER_NONE = "(any time)"
@@ -1016,6 +1019,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 f[key] = str(getattr(spec, key))
         shot = getattr(spec, "add_ball_shot", "") or ""
         f["add_ball_shot"] = shot if shot else self.BALL_NONE
+        shot = getattr(spec, "multiball_on_shot", "") or ""        # PAD-228
+        f["mb_on_shot"] = shot if shot else self.MB_ON_START
 
     def _collect_multiball(self, spec):
         def number(text):
@@ -1031,6 +1036,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         spec.add_ball_max = number(self.f["add_ball_max"])
         shot = str(self.f["add_ball_shot"]).strip()
         spec.add_ball_shot = "" if shot == self.BALL_NONE else shot
+        shot = str(self.f["mb_on_shot"]).strip()                  # PAD-228
+        spec.multiball_on_shot = "" if shot == self.MB_ON_START else shot
 
     def _open_display_lights(self, spec):
         colour = spec.light_shots if isinstance(spec.light_shots, str) else ""
@@ -1229,7 +1236,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if p is None:
             return {"key": "", "label": "", "port": "", "shots": [], "cols": 2,
                     "callouts": [], "callouts_none": "", "events": [],
-                    "end_shots": [self.PARAM_NEVER], "ball_shots": [self.BALL_NONE]}
+                    "end_shots": [self.PARAM_NEVER], "ball_shots": [self.BALL_NONE],
+                    "mb_on_shots": [self.MB_ON_START]}
         names = [n for n, _m in p.shots]
         choices = [{"label": "%s (%d)" % (label, number), "number": number}
                    for label, number in MP.callout_choices(p) if number]
@@ -1240,7 +1248,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "callouts_none": ("" if choices else
                                   "(no callouts measured on %s: type an id)" % p.label),
                 "events": events, "end_shots": [self.PARAM_NEVER] + names,
-                "ball_shots": [self.BALL_NONE] + names}
+                "ball_shots": [self.BALL_NONE] + names,
+                "mb_on_shots": [self.MB_ON_START] + names}
 
     #: the note on a port the app worked out itself and no Try it has run yet: Write leaves
     #: the modes off a card until one has (mode_write.card_refusal)

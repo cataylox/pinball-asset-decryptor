@@ -122,7 +122,12 @@ GODZILLA_PRO_1_15 = TitleProfile(
         ("Left spinner", 0x200),
         ("Top spinner", 0x2000),
         ("Right spinner", 0x20000),
+        # PAD-228: the cabinet buttons, from the framework's switch drain (the port's `switch` lines)
+        ("Action button", 0x1000000000000000),
+        ("Left flipper button", 0x2000000000000000),
+        ("Right flipper button", 0x4000000000000000),
     ),
+    switch_shots=("Action button", "Left flipper button", "Right flipper button"),
     callout_countdown=1287,
     callout_ten_seconds=1291,
     callout_time_up=1295,
@@ -521,7 +526,12 @@ SWITCH_SHOTS_PROVEN = frozenset({"beatles-1.29"})
 #: Builds whose shots from the framework's switch drain (site switch_edge, `switch` lines) were seen
 #: reaching a mode in the emulator, each switch once, as ``<game>-<version>`` (2026-09-23: The Beatles
 #: 1.29 and Star Wars ELG 1.10 of generation B, Batman 66 1.13 and Rush LE 1.18 of generation A).
-SWITCH_EDGE_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10", "batman-1.13", "rush_le-1.18"})
+#: PAD-228 (2026-09-27, rig 2): the Godzilla builds' cabinet buttons - Action 34, left flipper 60, right
+#: flipper 59 - one hit per press on the press edge (the game's mode mask is 0 in play), a mode scored the
+#: flipper buttons +1M and +2M and served its multiball on the Action button, and the shim's LED view had
+#: the Action button solid red for the whole run of the mode (the game's own animation before it).
+SWITCH_EDGE_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10", "batman-1.13", "rush_le-1.18",
+                                "godzilla_pro-1.15", "godzilla_pro-1.16", "godzilla_le-1.16"})
 
 
 def _core_names(port):
@@ -1447,6 +1457,9 @@ class ModeSpec:
     ball_save: int = 10                  # seconds a drained ball comes back for, 0-60
     add_ball_shot: str = ""              # a shot that puts one more ball in play; "" = none
     add_ball_max: int = 1                # ... up to this many times a run, 1-6
+    # PAD-228: the balls come on this shot while the mode runs (the Action button: "press it now for a
+    # multiball"), not when it starts; its clock is the window to hit it. "" = when it starts
+    multiball_on_shot: str = ""
     # PAD-227: more than one thing to meet before it starts (MODE_PARAMETERS.md `trigger_also`, `after`)
     start_also: list = field(default_factory=list)   # [[shot name, count]]: hit these too, in one ball
     after: str = ""                      # another mode's NAME: starts only once that one has run; "" = none
@@ -1740,6 +1753,10 @@ def _retarget_advanced(out, old_key, p, names, dropped):
         if out.add_ball_shot not in dropped:                # item 167
             dropped.append(out.add_ball_shot)
         out.add_ball_shot = ""
+    if isinstance(out.multiball_on_shot, str) and out.multiball_on_shot and out.multiball_on_shot not in names:
+        if out.multiball_on_shot not in dropped:            # PAD-228
+            dropped.append(out.multiball_on_shot)
+        out.multiball_on_shot = ""
     if old_key == p.key or not isinstance(out.callout_at, list):
         return
     try:
@@ -2100,6 +2117,11 @@ def validate_multiball(spec, p):
         n = _int_or_none(spec.add_ball_max)
         if n is None or not 1 <= n <= ADD_BALL_MAX:
             out.append("A shot adds a ball 1 to %d times a multiball." % ADD_BALL_MAX)
+    if spec.multiball_on_shot:                                       # PAD-228
+        if spec.multiball_on_shot not in dict(p.shots):
+            out.append("%s has no shot called %r to start the multiball on." % (p.label, spec.multiball_on_shot))
+        if not _int_or_none(spec.seconds):
+            out.append("A multiball that starts on a shot needs Runs for: its seconds are the time to hit the shot.")
     return out
 
 
@@ -2110,6 +2132,8 @@ def multiball_lines(spec, p):
     lines = ["multiball      %d %d" % (int(spec.balls), int(spec.ball_save))]
     if spec.add_ball_shot:
         lines.append("add_ball       0x%08x %d" % (p.mask([spec.add_ball_shot]), int(spec.add_ball_max)))
+    if spec.multiball_on_shot:                                       # PAD-228
+        lines.append("multiball_on   0x%08x" % p.mask([spec.multiball_on_shot]))
     return lines
 
 
