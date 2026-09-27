@@ -447,3 +447,52 @@ def test_a_save_state_load_keeps_a_rigs_overlay_root():
     s = _src("restorestate.sh")
     assert 'mountpoint -q "$R" 2>/dev/null && PAD_NS_KEEP_ROOT=$R' in s
     assert r'[ "\$mp" = "\$PAD_NS_KEEP_ROOT" ] && continue' in s
+
+
+# --------------------------------------------------------------------------
+# rigbatch.sh: one list of builds, spread across several rigs
+# --------------------------------------------------------------------------
+
+_BATCH = r'''
+t=$(mktemp -d) || exit 1
+mkdir -p "$t/rig" "$t/home" "$t/board"
+cp "$R"/padpath.sh "$R"/padslot.sh "$R"/riglock.sh "$R"/rigbatch.sh "$t/rig/"
+# STUB rigs: nothing here may ever reach a real one on this machine
+printf '#!/bin/bash\necho 0\n' > "$t/rig/alive.sh"
+printf '#!/bin/bash\n:\n' > "$t/rig/killgame.sh"
+cat > "$t/job.sh" <<'JOB'
+#!/bin/bash
+# a job: note which rig ran which build, fail the one named "bad"
+echo "$PAD_SLOT $1 $2 $FLAVOUR" >> "$JOBLOG"
+sleep 0.3
+[ "$1" = bad ] && { echo "VERDICT $1 fail 1s state=booting"; exit 1; }
+echo "VERDICT $1 pass 1s state=attract"
+JOB
+printf 'a|/cards/a.raw|FLAVOUR=x\n# comment\n\nb|/cards/b.raw|\nbad|/cards/bad.raw|\nc|/cards/c.raw|\n' > "$t/l.list"
+export PAD_HOME="$t/home" PAD_BOARD="$t/board" PAD_SLOTS_MAX=3 JOBLOG="$t/jobs.txt"
+export PAD_RIGBATCH_ASSUME_MOUNTED=1
+bash "$t/rig/rigbatch.sh" -n 2 --who PAD-9 --out "$t/out" "$t/l.list" -- bash "$t/job.sh" > "$t/stdout" 2>&1
+echo "rc=$?"
+echo "--- jobs"; sort "$t/jobs.txt"
+echo "--- results"; cut -f1,3 "$t/out/results.tsv" | sort
+echo "--- locks left"; ls "$t/board"
+echo "--- tail"; tail -3 "$t/out/progress.txt"
+rm -rf "$t"
+'''
+
+
+@needs_proc
+def test_rigbatch_spreads_a_list_across_rigs_and_frees_them():
+    """Linux only, like the rig: rigbatch's workers need setsid and flock."""
+    rc, out, err = _sh(_BATCH, {"PAD_HOME": "/nonexistent"}, timeout=120)
+    assert "rc=1" in out, out + err                     # one build failed
+    body = out.split("--- jobs")[1].split("--- results")[0].strip().splitlines()
+    rigs = {ln.split()[0] for ln in body}
+    keys = sorted(ln.split()[1] for ln in body)
+    assert keys == ["a", "b", "bad", "c"]               # every build once
+    assert rigs == {"1", "2"}                           # both rigs worked
+    assert any(ln.split()[1:] == ["a", "/cards/a.raw", "x"] for ln in body)
+    res = out.split("--- results")[1].split("--- locks left")[0].split()
+    assert res == ["a", "pass", "b", "pass", "bad", "fail", "c", "pass"]
+    assert out.split("--- locks left")[1].split("--- tail")[0].strip() == ""
+    assert "ALL DONE: 3/4 pass" in out and "FAIL VERDICT bad fail" in out

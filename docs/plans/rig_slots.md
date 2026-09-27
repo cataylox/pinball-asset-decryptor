@@ -204,8 +204,46 @@ distros. After merge, rig 0's Stop matches only unmarked windows.
   `tests/test_spike2_rig_slots.py`; 52 pass under WSL, 50 + 2 `/proc` skips
   under Git Bash; the diff's targeted zones (7661 tests) pass.
 
+**2026-09-27, pass 3: one ticket, many rigs - library sweeps in parallel.**
+
+David: *"a ticket needs to test emulated changes in our whole spike 2 library.
+right now, it's going one by one"*. Every sweep so far was a throwaway serial
+loop (`mb_batch.sh` for the multiball proof: 36 builds, median 3.0 min each,
+p90 6.5 min, ~2 h a pass). Nothing ties a rig to a session, so one ticket can
+take several; what was missing was something to spread a list across them.
+
+- **`rigbatch.sh [-n RIGS] [--who PAD-n] <list> [-- command...]`**: the list
+  is the sweeps' own `key|card|ENV=v` format; one worker per rig takes the
+  next build off a shared queue (flock) and runs the ticket's command as
+  `command key card` with that rig's `PAD_SLOT`; results.tsv, progress.txt
+  and a log per build; each rig is noted on the board as it starts a build,
+  so the dashboard shows the sweep live; a rig left running is stopped before
+  its next build; Ctrl-C stops and frees every rig. Default rigs = the CPU's
+  (`nproc*10/28`, a rig ~2.8 cores): over-committing starves the emulated
+  games and healthy builds fail on timing, so more than that is a warning.
+- **`bootcheck.sh key card`**: the default job and the template for a ticket's
+  own - boot the card (read-only in place, no cache copy, muted, no playfield
+  window), wait for attract, stop the rig, print one `VERDICT` line.
+- **WSL cores 6 -> 10** (`~/.wslconfig`, David's call): three rigs at full
+  speed instead of two. Takes effect at the next `wsl --shutdown`.
+- **Proof, 4 real card images** (aerosmith_le 1.15, batman 1.13,
+  stranger_things_le 1.12, guardians_le 1.14), Ubuntu, 6 cores, Xvfb +
+  llvmpipe: one rig after another took 7 m 33 s of job time; on 2 rigs the
+  same four passed 4/4 in **5 m 04 s**, each build's time matching its
+  single-rig run (aerosmith 54 s vs 73 s, batman 151 vs 152, stranger_things
+  88 vs 93, guardians 145) - so two rigs on six cores cost no build any time.
+  A list of four splits unevenly; over 36 builds 2 rigs is ~2x, 3 rigs ~3x.
+- Seen once: stranger_things_le 1.12 segfaulted into its own watchdog in rig
+  1's first boot; it passed on rig 0 (control) and on rig 1 again, and in the
+  parallel run. A one-off, noted in case it recurs.
+- Tests: `test_rigbatch_spreads_a_list_across_rigs_and_frees_them` (stub rigs,
+  Linux only - rigbatch needs setsid and flock like the rig itself).
+
 **Owed**
 
+- The 3-rig proof on 10 cores, after David's next `wsl --shutdown`: the full
+  multiball list (`C:/tmp/pad_generic/mb`) through rigbatch with mb_e2e.sh as
+  the job, verdicts compared with the serial proof of 2026-09-26.
 - **At merge, the session protocol moves to `riglock.sh`** (text below):
   `~/.claude/skills/next/SKILL.md` "The rig lock" and "Starting the app",
   `plans/TODO.md`'s non-negotiable, and the `reference_pad_rig_lock` memory.
