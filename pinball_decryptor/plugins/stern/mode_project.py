@@ -2000,6 +2000,11 @@ def copy_modes(src, dest, slugs=None):
                 # a code mode is modes/<slug>/<slug>.c: the file follows its folder's new name
                 os.replace(os.path.join(mode_folder(dest, new_slug), slug + ".c"),
                            os.path.join(mode_folder(dest, new_slug), new_slug + ".c"))
+                from . import block_modes as BM   # PAD-232: a blocks mode's C names its folder
+                try:
+                    BM.regenerate(dest, new_slug)
+                except (OSError, ValueError):
+                    pass                            # its old C, renamed, still builds
             taken.add(new_slug)
             report.modes.append(CopiedMode(slug, name, COPY_CODE, new_slug,
                                            "a build says if %s lacks a shot it names" % p.label))

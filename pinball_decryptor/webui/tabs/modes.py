@@ -29,6 +29,7 @@ import shutil
 import tempfile
 import threading
 
+from ...plugins.stern import block_modes as BM   # PAD-232
 from ...plugins.stern import mode_assets as MA
 from ...plugins.stern import mode_project as MP
 from ...plugins.stern import mode_tryit as MT
@@ -317,7 +318,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                  reasons={}, dis={}, code=None, code_words="", cut_ok=False,
                  stock={"msg": "", "rows": [], "on": False, "sel": None, "note": "",
                         "value": "", "row_on": False},
-                 film=None, about=self.ABOUT_TIP, n_form=0, n_code=0, ready=False,
+                 film=None, about=self.ABOUT_TIP, n_form=0, n_code=0, n_blocks=0, ready=False,
                  fix_pages=[], spin=dict(self.SPINBOXES), sdk_doc=self.sdk_doc(),
                  no_port_details="", ex_tip="", own_extra_ok=True, write_waits=False,
                  game_hidden=0, check_offer=False, check_wanted=False, check_done=None,
@@ -564,11 +565,12 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if not project:
             text = ""
         elif n >= MP.MAX_MODES:
-            text = ("%d of %d modes: delete one to add another. Modes written in C are "
-                    "not counted." % (n, MP.MAX_MODES))
+            text = ("%d of %d modes: delete one to add another. Modes made of blocks or "
+                    "written in C are not counted." % (n, MP.MAX_MODES))
         else:
             text = ""                       # the head says "N modes"
-        self.set(cap_text=text, n_form=n, n_code=len(self._code_list))
+        n_blocks = sum(1 for slug, _n in self._code_list if BM.is_blocks(project, slug))
+        self.set(cap_text=text, n_form=n, n_code=len(self._code_list) - n_blocks, n_blocks=n_blocks)
         self._publish_examples()
 
     def _publish_examples(self):
@@ -647,7 +649,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             except Exception:                      # noqa: BLE001 - the list must never fail on a chip
                 chip, tip = "", ""
             rows.append({"slug": slug, "kind": "code", "name": name, "chip": chip,
-                         "chip_tip": tip})
+                         "chip_tip": tip, "blocks": BM.is_blocks(self.project(), slug)})
         sel = ({"slug": str(self._game_mode), "kind": "game"} if self._game_mode is not None else
                {"slug": self._code_slug, "kind": "code"} if self._code_slug else
                {"slug": self._slug, "kind": "form"} if self._slug else None)
@@ -1961,10 +1963,123 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                         "Ready to build." if not problems
                         else "To fix before it can be built: " + " ".join(problems)),
                 has_assets_file=os.path.isfile(os.path.join(folder, CM.ASSETS_FILE)))
+        self._add_blocks(data, project, slug)
         self._game_mode = None
         self.set(code=data, status="", save_state="", game_mode=None)
         self._grey_what_the_title_cannot(False)
         self._publish_rows()
+
+    # ------------------------------------------------------------------
+    # PAD-232: modes made of blocks (a code mode whose C its blocks.json makes)
+    # ------------------------------------------------------------------
+    def _blocks_choices(self):
+        """What the block editor's boxes offer on the shown title: its shots, the events its
+        port reports (with the start and end lists' words) and the callouts."""
+        p = self._shown or self._profile
+        shots = [n for n, _m in p.shots] if p is not None else list(self._shot_names)
+        events = [{"name": n, "label": MP.EVENT_LABELS.get(n, n)} for n in (p.events or ())]             if p is not None else []
+        callouts = [{"role": r, "label": label} for r, label in BM.CALLOUT_ROLES.items()]
+        if p is not None:
+            roles = {getattr(p, "callout_ten_seconds", None), getattr(p, "callout_time_up", None)}
+            callouts += [{"id": number, "label": "%s (%d)" % (label, number)}
+                         for label, number in MP.callout_choices(p) if number and number not in roles]
+        return {"shots": shots, "events": events, "callouts": callouts,
+                "title": p.label if p is not None else ""}
+
+    def _blocks_check(self, program):
+        """``(problems, notes)`` of a program on the shown title (its shots and events)."""
+        p = self._shown or self._profile
+        shots = [n for n, _m in p.shots] if p is not None else None
+        events = list(p.events or ()) if p is not None else None
+        return BM.problems(program, shots, events), BM.notes(program)
+
+    def _add_blocks(self, data, project, slug):
+        """A code mode made of blocks: its program, what is wrong with it, and the C it makes,
+        for the block editor in the code pane's place."""
+        if not BM.is_blocks(project, slug):
+            data["blocks"] = None
+            return
+        try:
+            program = BM.load(project, slug)
+        except (OSError, ValueError) as e:
+            data["blocks"] = {"error": "Its blocks could not be read: %s" % e}
+            return
+        from ...plugins.stern import code_modes as CM
+        problems, notes = self._blocks_check(program)
+        try:
+            with open(CM.source_path(project, slug), "r", encoding="utf-8", errors="replace") as f:
+                c_text = f.read()
+        except OSError:
+            c_text = ""
+        data["blocks"] = {"program": program, "problems": problems, "notes": notes,
+                          "summary": BM.summary(program), "c": c_text,
+                          "choices": self._blocks_choices()}
+        if not self._refusal():
+            data["status"] = ("Ready to build." if not problems else
+                              "To fix before it can be built: " + " ".join(problems))
+        data["summary"] = BM.summary(program)
+
+    @rpc
+    def new_blocks_mode(self, name):
+        """New ▸ Blocks: a mode made of blocks, from a starter program on the card's shots."""
+        if not self.project():
+            self._tryit_note(MP.NO_PROJECT_HELP)
+            return None
+        if not name or not str(name).strip():
+            return None
+        why = self._refusal()
+        if why:
+            self._tryit_note(why)
+            return None
+        self._save_if_edited()
+        p = self._shown or self._profile
+        shots = [n for n, _m in p.shots] if p is not None else list(self._shot_names)
+        try:
+            slug, _path = BM.new_blocks_mode(self.project(), str(name).strip(), shots=shots)
+        except (MT.TryItError, OSError) as e:
+            self._tryit_note(str(e))
+            return None
+        self.stamp_code_title(self.project(), slug, p.key if p is not None else "")
+        self._say("made modes/%s: a mode made of blocks" % slug)
+        self.refresh(select_code=slug)
+        return slug
+
+    @rpc
+    def blocks_save(self, slug, program):
+        """The block editor changed the program of ``slug``: save it, write its C again, and
+        say what is wrong with it now. Only the open mode's blocks are saved."""
+        project = self.project()
+        if not project or slug != self._code_slug or not BM.is_blocks(project, slug):
+            return None
+        if not isinstance(program, dict):
+            return None
+        try:
+            BM.save(project, slug, program)
+        except (OSError, ValueError) as e:
+            self._tryit_note("%s could not be saved: %s" % (slug, e))
+            return None
+        self._refresh_list()
+        c = self.get("code") or {}
+        b = c.get("blocks") or {}
+        return {"problems": b.get("problems", []), "notes": b.get("notes", [])}
+
+    @rpc
+    def blocks_to_code(self):
+        """Edit as C: the open blocks mode keeps the C its blocks made and becomes a code mode."""
+        slug = self._code_slug
+        project = self.project()
+        if not slug or not BM.is_blocks(project, slug):
+            return False
+        if not compat.messagebox.askyesno(
+                "Edit as C", "Carry on with %s in C? Its C file stays as its blocks made it, and "
+                "the blocks are put away (as blocks.json.bak in its folder), so the tab no longer "
+                "edits it with blocks." % ((self.get("code") or {}).get("name") or slug)):
+            return False
+        BM.detach(project, slug)
+        self._say("modes/%s is a code mode now; its blocks are in blocks.json.bak" % slug)
+        self._refresh_list()
+        self.open_path(os.path.join(MP.mode_folder(project, slug), slug + ".c"))
+        return True
 
     @staticmethod
     def _films_needed(spec, folder):
