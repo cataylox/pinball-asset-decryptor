@@ -1056,7 +1056,7 @@ int pm_lights_as(unsigned owner, const char *command)
 #define LAMP_MODES   64
 #define LAMP_SAY_MAX 400
 
-struct lamp { char name[40]; unsigned light[3]; int mono; uint64_t shot; };
+struct lamp { char name[40]; unsigned light[3]; int mono; uint64_t shot; int x, y; };   /* x, y: -1 = not placed */
 static struct lamp lamps[N_LAMPS];
 static int n_lamps;
 
@@ -1108,6 +1108,17 @@ static void lamp_line(const char *s)
     x->shot = number(&s, &ok);
     if (!ok) return;
     rest(s, x->name, sizeof x->name);
+    x->x = x->y = -1;
+    {   /* hud-layers: the comment's "at X,Y" (the insert's place on the playfield picture), when given */
+        const char *c = s;
+        for (; *c && *c != 10; c++)
+            if (c[0] == 'a' && c[1] == 't' && c[2] == ' ' && c > s && c[-1] == ' ') {
+                const char *q = c + 3;
+                int ok1 = 0, ok2 = 0;
+                long px = (long)number(&q, &ok1), py;
+                if (*q == ',') { q++; py = (long)number(&q, &ok2); if (ok1 && ok2 && (px || py)) { x->x = (int)px; x->y = (int)py; } }
+            }
+    }
     for (i = 0; x->name[i]; i++)                          /* a trailing comment is not the name */
         if (x->name[i] == '#' && i && (x->name[i - 1] == ' ' || x->name[i - 1] == '\t')) {
             while (i && (x->name[i - 1] == ' ' || x->name[i - 1] == '\t')) i--;
@@ -1143,6 +1154,14 @@ const char *pm_lamp_at(int i, uint64_t *shots)
     if (!(can & PM_CAN_LAMPS) || i < 0 || i >= n_lamps) return 0;
     if (shots) *shots = lamps[i].shot;
     return lamps[i].name;
+}
+
+int pm_lamp_xy(int i, int *x, int *y)
+{
+    if (!(can & PM_CAN_LAMPS) || i < 0 || i >= n_lamps || lamps[i].x < 0) return 0;
+    if (x) *x = lamps[i].x;
+    if (y) *y = lamps[i].y;
+    return 1;
 }
 
 int pm_lamp_find(const char *name)
@@ -1317,6 +1336,34 @@ static int lamp_hold(const int *list, int n, unsigned rgb, int pattern, unsigned
     lamp_say("lamps: %d insert(s) held (%s): %06x %s, %u ms, layer %u", n, what, rgb & 0xffffffu,
              lamp_pattern_name[pattern], period_ms, prio);
     return n;
+}
+
+/* hud-layers: ONE insert held solid in `rgb`, quietly - a light show paints every insert every tick,
+ * and only a level that changed reaches the game (lamp_write). 0 black is still held (dark). */
+int pm_lamp_paint(int k, unsigned rgb)
+{
+    struct lamp_held *h;
+    int layer;
+    if (!(can & PM_CAN_LAMPS) || k < 0 || k >= n_lamps) return 0;
+    h = &lamp_held[k];
+    if (h->owner == (current ? current : (const struct pm_mode *)&lamps) && h->pattern == PM_LAMP_SOLID) {
+        h->rgb = rgb;
+        return 1;
+    }
+    layer = lamp_layer_for(lamp_prio_of(current));
+    if (layer < 0) return 0;
+    if (h->owner && h->layer != layer) lamp_let_go(k);
+    h->owner = current ? current : (const struct pm_mode *)&lamps;
+    h->rgb = rgb;
+    h->pattern = PM_LAMP_SOLID;
+    h->period = 150u;
+    h->t0 = pm_ms();
+    h->chase_i = 0;
+    h->chase_n = 1;
+    h->layer = layer;
+    h->last[0] = h->last[1] = h->last[2] = -1;
+    h->on_ms = 0;
+    return 1;
 }
 
 /* the lamps a comma-separated list names, in its order; unknown names are said once */
@@ -2233,7 +2280,10 @@ static void on_display_effect_start(unsigned *r)
  * does; a mode start (0x40) or total (0x04) counts as one of the game's mode displays (mode_level) and
  * comes through when that beats the hold; any other display counts as its layered-display effect
  * (priority 1). Of those, a full-screen one (0x10) waits; a framed one plays under the mode's screen,
- * as the game layers it, except while the mode's own clip plays (it would take the one surface). */
+ * as the game layers it, except while the mode's own clip plays (it would take the one surface) or its
+ * backdrop is up (hud-layers: the game's framed award would take the backdrop's place, and its words
+ * sit where the mode's title does - measured, run t1: the Maser's "2 MORE TO LIGHT MASER CANNON" over
+ * KING GHIDORAH's title; the game's own battles keep the glass the same way). */
 static int disp_layered_must_wait(unsigned flags, unsigned hold, unsigned mode_level, int our_clip)
 {
     unsigned level;
@@ -2262,7 +2312,7 @@ static void on_layered_priority(unsigned *r)
     rec = (unsigned char *)(unsigned long)(*(unsigned *)(unsigned long)t + id * (unsigned)pm_port_value("layered_record_size", 16));
     flags = *(unsigned *)rec;
     if (!disp_layered_must_wait(flags, disp_prio, (unsigned)pm_port_value("display_mode_level", 184),
-                                clip.on && !disp_clip_lost)) return;
+                                (clip.on && !disp_clip_lost) || bd.on)) return;
     *(unsigned *)(disp_fake_layered + pm_port_value("layered_fg_at", 0x58)) = 1;
     disp_fake_layered[pm_port_value("layered_fg_at", 0x58) + 4] = 255;   /* the foreground's priority, read by the waiter */
     r[0] = (unsigned)(unsigned long)disp_fake_layered;
@@ -2295,7 +2345,7 @@ static void on_layered_waiter(unsigned *r)
     rec = (unsigned char *)(unsigned long)(*(unsigned *)(unsigned long)t + id * (unsigned)pm_port_value("layered_record_size", 16));
     flags = *(unsigned *)rec;
     if (!disp_layered_must_wait(flags, disp_prio, (unsigned)pm_port_value("display_mode_level", 184),
-                                clip.on && !disp_clip_lost)) return;
+                                (clip.on && !disp_clip_lost) || bd.on)) return;
     r[1] = 0;
     if (id < 256 && !(disp_said_dropped[id / 32] & (1u << (id % 32)))) {
         disp_said_dropped[id / 32] |= 1u << (id % 32);

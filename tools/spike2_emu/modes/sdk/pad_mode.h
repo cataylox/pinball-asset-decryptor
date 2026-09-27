@@ -198,6 +198,11 @@ int pm_lights_as(unsigned owner, const char *command);    /* a specific owner id
 int pm_lamp_count(void);                                   /* how many inserts the port names */
 const char *pm_lamp_at(int i, uint64_t *shots);            /* the i-th insert's name, and its shots */
 int pm_lamp_find(const char *name);                        /* its index, or -1 */
+int pm_lamp_xy(int i, int *x, int *y);                     /* its place on the playfield picture (the port's
+                                                              "at X,Y"; x 0-300 across, y 0-600 down); 0 = not placed */
+int pm_lamp_paint(int i, unsigned rgb);                    /* hold ONE insert solid in rgb, quietly: a light
+                                                              show paints them all every tick, only changes reach
+                                                              the game; release them as usual */
 int pm_lamp_set(const char *names, unsigned rgb, int pattern, unsigned period_ms);
 int pm_lamp_shot(uint64_t shots, unsigned rgb, int pattern, unsigned period_ms);   /* a shot's inserts */
 int pm_lamp_all(unsigned rgb, int pattern, unsigned period_ms);      /* every insert the port names */

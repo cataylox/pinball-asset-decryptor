@@ -13,6 +13,11 @@
  *     name   KING GHIDORAH
  *     screen PadMode_<folder>_Screen PadMode_<folder>_Screen.PadMode_<folder>_Screen_Words
  *     clip   start PadMode_<folder>_Clip          a clip the build added to the game's video bank
+ *     clip   intro PadMode_<folder>_Intro         hud-layers: a clip per CUE - "intro" (or "start")
+ *     clip   loop  PadMode_<folder>_Loop            plays full screen when the mode starts, "loop"
+ *     clip   sever PadMode_<folder>_Sever           behind the HUD while it runs, any other cue on
+ *                                                 an event (pa_clip_event) or at the end
+ *                                                 (pa_clip_full)
  *     music  125 618                              the music carrier, and this mode's own bed (a sid)
  *     call   sever 1251 1850 4                    a call of its own: cue, carrier request, its own
  *     call   spike 1249 700 3                     length in ms, and its priority on the voice bus
@@ -71,7 +76,8 @@
 #define PA_MUSIC_WAIT_MS    260         /* the game's music fades 250 ms before ours starts */
 #define PA_MUSIC_FADE_MS    400
 #define PA_POLL_MS          500
-#define PA_FILE_MAX         2048
+#define PA_FILE_MAX         4096
+#define PA_CLIPS_MAX        12          /* hud-layers: clips by cue */
 
 #define PA_UNUSED __attribute__((unused))
 
@@ -82,6 +88,8 @@ struct pa_assets {
     int loaded, looked;                   /* found and read; looked for at least once */
     char name[PA_NAME];
     char clip_start[PA_NAME];             /* "" = no clip of its own */
+    struct { char cue[PA_CUE]; char name[PA_NAME]; } clips[PA_CLIPS_MAX];   /* hud-layers: by cue */
+    unsigned n_clips;
     unsigned music, music_sid;            /* 0 = no music of its own */
     struct pa_call calls[PA_CALLS_MAX];
     unsigned n_calls;
@@ -177,8 +185,20 @@ static PA_UNUSED void pa_parse_line(struct pa_assets *a, const char *s)
     if (pa_is(key, "name")) {
         pa_rest(s, a->name, sizeof a->name);
     } else if (pa_is(key, "clip")) {
-        pa_word(&s, w, sizeof w);                                    /* when: start */
-        if (pa_is(w, "start")) pa_word(&s, a->clip_start, sizeof a->clip_start);
+        pa_word(&s, w, sizeof w);                                    /* its cue: start, intro, loop, ... */
+        if (a->n_clips < PA_CLIPS_MAX && w[0]) {
+            unsigned i;
+            for (i = 0; w[i] && i + 1 < PA_CUE; i++) a->clips[a->n_clips].cue[i] = w[i];
+            a->clips[a->n_clips].cue[i] = 0;
+            if (pa_word(&s, a->clips[a->n_clips].name, sizeof a->clips[a->n_clips].name)) {
+                if (pa_is(w, "start") || pa_is(w, "intro")) {
+                    for (i = 0; a->clips[a->n_clips].name[i] && i + 1 < sizeof a->clip_start; i++)
+                        a->clip_start[i] = a->clips[a->n_clips].name[i];
+                    a->clip_start[i] = 0;
+                }
+                a->n_clips++;
+            }
+        }
     } else if (pa_is(key, "music")) {
         if (pa_word(&s, w, sizeof w)) a->music = pa_num(w);
         if (pa_word(&s, w, sizeof w)) a->music_sid = pa_num(w);
@@ -233,14 +253,17 @@ static PA_UNUSED int pa_load(struct pa_assets *a)
     a->n_calls = 0;
     a->music = a->music_sid = 0;
     a->clip_start[0] = 0;
+    a->n_clips = 0;
     for (line = buf; *line; ) {
         pa_parse_line(a, line);
         while (*line && *line != '\n') line++;
         if (*line) line++;
     }
-    pm_log("own assets: %s (%s): %u call(s)%s%s%s", path, a->name[0] ? a->name : a->folder, a->n_calls,
+    pm_log("own assets: %s (%s): %u call(s)%s%s%s, %u clip(s)", path, a->name[0] ? a->name : a->folder, a->n_calls,
            a->music ? ", its own music" : "", a->music_sid ? " on its own bed" : "",
-           a->clip_start[0] ? ", a start clip" : "");
+           a->clip_start[0] ? ", a start clip" : "", a->n_clips);
+    for (i = 0; i < a->n_clips; i++)
+        pm_log("own assets:   clip %-10s %s", a->clips[i].cue, a->clips[i].name);
     for (i = 0; i < a->n_calls; i++)
         pm_log("own assets:   call %-10s request %u, %u ms, priority %u", a->calls[i].cue, a->calls[i].request,
                a->calls[i].ms, a->calls[i].prio);
@@ -545,6 +568,38 @@ static PA_UNUSED void pa_music_after(void)
     pa_music.nbus1 = -1;                  /* the look after the end always says what it found */
 }
 
+/* ---- clips by cue (hud-layers) ------------------------------------------------------------------ */
+/* The clip the build carried for `cue`, or 0. */
+static PA_UNUSED const char *pa_clip_name(const struct pa_assets *a, const char *cue)
+{
+    unsigned i;
+    for (i = 0; a->loaded && i < a->n_clips; i++)
+        if (pa_is(a->clips[i].cue, cue)) return a->clips[i].name;
+    return 0;
+}
+
+/* An event's clip, played ONCE in the backdrop's place (behind the HUD), then the loop again. 1 = the
+ * card carries it and the backdrop took it; 0 = play nothing (or the game's own). */
+static PA_UNUSED int pa_clip_event(struct pa_assets *a, const char *cue)
+{
+    const char *n = pa_clip_name(a, cue);
+    if (!n || !a->running) return 0;
+    if (pm_backdrop_once(n)) {
+        pm_log("own clip %s (%s) behind the HUD", cue, n);
+        return 1;
+    }
+    return 0;
+}
+
+/* A clip full screen, over everything (the HUD too): an ending. The backdrop waits for it. */
+static PA_UNUSED int pa_clip_full(struct pa_assets *a, const char *cue)
+{
+    const char *n = pa_clip_name(a, cue);
+    if (!n) return 0;
+    pm_log("own clip %s (%s) full screen: %s", cue, n, pm_clip(n) ? "started" : "NOT started (not in the bank?)");
+    return 1;
+}
+
 /* ---- start, end, tick ------------------------------------------------------------------------- */
 /* The mode started: its carriers' priorities, its music, and its start clip half a second from now
  * (a clip started inside the shot that started the mode loses the one video surface to the game's
@@ -557,6 +612,7 @@ static PA_UNUSED void pa_start(struct pa_assets *a)
     pa_priorities(a);
     pa_music_begin(a);
     a->clip_due = a->clip_start[0] ? pm_ms() + PA_CLIP_AFTER_MS : 0;
+    if (!a->clip_start[0] && pa_clip_name(a, "loop")) pm_backdrop(pa_clip_name(a, "loop"));
 }
 
 /* The mode ended (any way): its music fades and the game's comes back; a start clip still waiting
@@ -569,6 +625,7 @@ static PA_UNUSED void pa_end(struct pa_assets *a)
         pm_log("own clip %s dropped before it played: the mode ended first", a->clip_start);
         a->clip_due = 0;
     }
+    if (pa_clip_name(a, "loop")) pm_backdrop(0);        /* hud-layers: the city again */
     pa_music_finish(a);
 }
 
@@ -577,8 +634,11 @@ static PA_UNUSED void pa_tick(struct pa_assets *a)
     unsigned long now = pm_ms();
     int i;
     if (a->clip_due && now >= a->clip_due) {
+        const char *loop = pa_clip_name(a, "loop");
         a->clip_due = 0;
         pm_log("own clip %s %s", a->clip_start, pm_clip(a->clip_start) ? "started" : "NOT started (not in the bank?)");
+        /* hud-layers: the loop behind the HUD - the runtime holds it while the intro is on the glass */
+        if (loop) pm_log("own clip loop %s behind the HUD: %s", loop, pm_backdrop(loop) ? "asked" : "this port has no backdrop");
     }
     for (i = 0; i < PA_STOPS_MAX; i++) {
         if (!a->stops[i].request || now < a->stops[i].due) continue;

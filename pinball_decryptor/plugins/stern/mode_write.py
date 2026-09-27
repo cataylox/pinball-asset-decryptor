@@ -710,7 +710,7 @@ def mode_file_text(project, slug, spec, own_sounds):
 
 
 def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_ok=(True, ""),
-         log=None, end_sound="choose", own_sounds=None, progress=None, stock_font=b""):
+         log=None, end_sound="choose", own_sounds=None, progress=None, stock_font=b"", hud_font=b""):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -738,7 +738,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     except MP.ModeProjectError as e:
         raise ModeWriteError(str(e)) from None
     port = find_port(prof, game_elf)
-    if (any(spec.clip != "none" for _s, spec in modes) or any(c.clip for _s, c in code)) and not ffmpeg:
+    if (any(spec.clip != "none" for _s, spec in modes) or any(c.clip_list() for _s, c in code)) and not ffmpeg:
         from ...core.audio import find_ffmpeg
         ffmpeg = find_ffmpeg()
     tree = os.path.join(scratch, "tree")
@@ -746,6 +746,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         kw = {"code": code, "prof": prof} if code else {}     # a form-mode build is called as before
         if stock_font:
             kw["stock_font"] = stock_font
+        if hud_font:
+            kw["hud_font"] = hud_font
         if progress is not None:
             kw["progress"] = progress
         build = mode_assets.build(project, stock_hud, stock_bank, tree, ffmpeg=ffmpeg, **kw)
@@ -2046,7 +2048,7 @@ def code_plan(project, result, code, tree, prof, log=None):
     for slug, spec in code:
         text = CM.runtime_text(slug, spec, prof, own_sounds=result.own_sounds,
                                screen=bool(spec.screen and prof.can("screen")),
-                               clip=bool(spec.clip and prof.can("clip")))
+                               clip=bool(spec.clip_list() and prof.can("clip")))
         path = os.path.join(padmode, slug + CM.RUNTIME_SUFFIX)
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)

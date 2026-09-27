@@ -5170,6 +5170,10 @@ _MODE_CLIP_CONTAINER = 64 << 10
 #: A mode's own screen: its picture, at most 1360x768 (mode_assets.load_art)
 #: at a byte a pixel (BC3), added to the HUD scene the build re-serialises.
 _MODE_SCREEN_BYTES = 1360 * 768
+#: hud-layers: the game font a code mode's HUD carries into the slide-outs scene (1.6 MB once), and each
+#: HUD's own art and nodes (a timer badge, a gauge of up to 12 pips, the texts)
+_MODE_HUD_FONT_BYTES = 1700000
+_MODE_HUD_BYTES = 200000
 
 #: Past this many clips to settle, the log says why the build is probing
 #: videos before it encodes anything.
@@ -5364,12 +5368,19 @@ def _unsized_bytes(assets_dir, mode_list, code_list, radimg_edits):
                                   both.get("file", ""), folder)
             if getattr(spec, "screen", False):
                 total += _MODE_SCREEN_BYTES
+        huds = 0
         for slug, spec in code_list or ():
             folder = _MP.mode_folder(assets_dir, slug)
-            if getattr(spec, "clip", ""):
-                total += clip("file", 0, spec.clip, folder)
+            clips = spec.clip_list() if hasattr(spec, "clip_list") else (
+                [("start", spec.clip)] if getattr(spec, "clip", "") else [])
+            for _cue, f in clips:
+                total += clip("file", 0, f, folder)
             if getattr(spec, "screen", False):
                 total += _MODE_SCREEN_BYTES
+            if getattr(spec, "hud", None):
+                huds += 1
+        if huds:        # hud-layers: the game font carried once, and each HUD's art
+            total += _MODE_HUD_FONT_BYTES + huds * _MODE_HUD_BYTES
     return total + sum(_kept_size_scenes(radimg_edits).values())
 
 
@@ -7022,6 +7033,11 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 from . import scene_write as _SWF
                 _font_node = (_MW.lookup(reader, "%s/%s" % (_mprof.game_dir, _SWF.SYSTEM_FONT_SCENE))
                               if _hud_rel else None)
+                # hud-layers: the battle scene whose font a code mode's HUD is lettered in
+                from . import mode_hud as _MHF
+                _hudfont_node = (_MW.lookup(reader, "%s/%s" % (_mprof.game_dir, _MHF.GAME_FONT_SCENE))
+                                 if _hud_rel and any(getattr(_c, "hud", None) for _s, _c in (_MW.code_mode_list(assets_dir) or ()))
+                                 else None)
                 mode_plan = _MW.plan(
                     assets_dir,
                     reader.read_file_bytes(_mnodes[_hud_rel]) if _hud_rel else b"",
@@ -7031,7 +7047,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     end_sound=mode_sound_used, own_sounds=mode_own_used,
                     progress=_span(progress, 91, 94),
                     stock_font=(bytes(reader.read_file_bytes(_font_node))
-                                if _font_node is not None else b""))
+                                if _font_node is not None else b""),
+                    hud_font=(bytes(reader.read_file_bytes(_hudfont_node))
+                              if _hudfont_node is not None else b""))
                 _ipath = {bytes(n["i_block"]): p.lstrip("/")
                           for p, _i, n in reader.iter_regular_files(
                               min_size=1, max_depth=20)}

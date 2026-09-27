@@ -181,6 +181,26 @@ void pm_set_text(void *text, const char *words)
 int pm_clip(const char *name) { printf("%6lu CLIP %s\n", now_ms, name); return 1; }
 int pm_clip_playing(void) { return 0; }
 void pm_clip_stop(void) {}
+/* hud-layers: the backdrop (a clip behind the HUD) */
+static char backdrop_now[96];
+int pm_backdrop(const char *name)
+{
+    if (!name || !*name) {
+        if (backdrop_now[0]) printf("%6lu BACKDROP OFF\n", now_ms);
+        backdrop_now[0] = 0;
+        return 1;
+    }
+    if (strcmp(backdrop_now, name)) printf("%6lu BACKDROP %s\n", now_ms, name);
+    snprintf(backdrop_now, sizeof backdrop_now, "%s", name);
+    return 1;
+}
+int pm_backdrop_once(const char *name)
+{
+    if (!backdrop_now[0]) return 0;
+    printf("%6lu BACKDROP ONCE %s\n", now_ms, name);
+    return 1;
+}
+int pm_backdrop_showing(void) { return backdrop_now[0] != 0; }
 const char *pm_port_text(const char *name)
 {
     if (!strcmp(name, "example_lights_on"))
@@ -424,6 +444,9 @@ int pm_lamp_release_all(void)
         if (held[k].owner && held[k].owner == current) { lamp_off(k); n++; }
     return n;
 }
+/* hud-layers: the desk has no playfield picture, so no insert is placed and a light show paints none */
+int pm_lamp_xy(int i, int *x, int *y) { (void)i; (void)x; (void)y; return 0; }
+int pm_lamp_paint(int i, unsigned rgb) { (void)i; (void)rgb; return 0; }
 int pm_lamp_priority(unsigned p)
 {
     printf("%6lu LAMP PRIORITY %u %s\n", now_ms, p, mode_name(current));

@@ -626,4 +626,479 @@ static KIT_UNUSED int kit_stock_busy(unsigned kinds, const char *who, const char
     return k > 0;
 }
 
+/* ---- the mode's HUD at the glass's EDGES (hud-layers) ----------------------------------------------
+ * The card build puts ONE Sprite group per mode in the HUD scene (pinball_decryptor/plugins/stern/
+ * mode_hud.py), laid out as the game's own battles are: the title and an instruction line above the
+ * score panel, three counters across the top, a big award line, a timer badge on the left edge (the
+ * stock BATTLE badge with the mode's label and icon, one slot above it) and a gauge of pips on the right
+ * edge. The names are the build's (PadMode_<folder>_Hud_...). Texts are written only when they change
+ * (every pm_set_text leaks a small string inside the game) and HIDDEN by writing a space - only a
+ * Sprite may be shown or hidden (a Text's visibility slot is another virtual), so every piece that comes
+ * and goes (the badge, the gauge, each pip's lit and dark picture) is its own Sprite group. A mode that
+ * finds no HUD (another title, an older card) runs the same with nothing on the glass. */
+#define KIT_HUD_PIPS   12
+#define KIT_HUD_WORDS  48
+
+struct kit_hud {
+    const char *slug;                      /* the mode's folder */
+    void *group, *timer, *gauge, *pip_on[KIT_HUD_PIPS], *pip_off[KIT_HUD_PIPS];
+    void *t_title, *t_line, *t_award, *t_awardsub, *t_timer, *t_glabel, *t_c[3][3];
+    unsigned tries;
+    int found, up, timer_up, gauge_up, n_pips, pip_lit[KIT_HUD_PIPS];
+    char w_title[KIT_HUD_WORDS], w_line[KIT_HUD_WORDS], w_award[KIT_HUD_WORDS], w_awardsub[KIT_HUD_WORDS];
+    char w_timer[8], w_glabel[24], w_c[3][3][24];
+    /* what is wanted (written to the glass when found and up) */
+    char want_title[KIT_HUD_WORDS], want_line[KIT_HUD_WORDS], want_award[KIT_HUD_WORDS], want_awardsub[KIT_HUD_WORDS];
+    char want_c[3][3][24], want_glabel[24];
+    int want_timer, want_gauge;            /* -1 = hidden */
+    unsigned long award_until, hide_at;
+    int noting;                            /* up only for a qualification note */
+};
+
+/* The pack's HUD that is up now: a HUD coming up takes the place of the one showing (a mode's TOTAL
+ * from a moment ago). Weak and shared, like the ledger. */
+__attribute__((weak, visibility("hidden"))) struct kit_hud *kit_hud_up;
+
+static KIT_UNUSED void kit_hud_text(void *node, char *written, unsigned cap, const char *want)
+{
+    const char *w = want && want[0] ? want : " ";
+    if (!node || kit_same(written, w)) return;
+    kit_copy(written, cap, w);
+    pm_set_text(node, written);
+}
+
+static KIT_UNUSED void *kit_hud_find1(const struct kit_hud *h, const char *fmt, int text, int k)
+{
+    char path[160];
+    int n = pm_snprintf(path, sizeof path, "PadMode_%s_Hud", h->slug);
+    if (fmt) n += pm_snprintf(path + n, sizeof path - (unsigned)n, fmt, h->slug, k, k);
+    (void)n;
+    return text ? pm_text("hud", path) : pm_node("hud", path);
+}
+
+/* Twice a second until found: the HUD scene can load after init. Found while the mode is not using
+ * it, the whole group is hidden at once (a built HUD is visible until a mode hides it). */
+static KIT_UNUSED void kit_hud_find(struct kit_hud *h)
+{
+    static const char *const cl[3] = { "Label", "Value", "Sub" };
+    int k, j;
+    char f[96];
+    if (h->found || !h->slug || !pm_can(PM_CAN_SCREENS) || (h->tries++ % KIT_POLL) != 0) return;
+    h->group = kit_hud_find1(h, 0, 0, 0);
+    if (!h->group) return;
+    h->found = 1;
+    h->t_title = kit_hud_find1(h, ".PadMode_%s_Hud_Title", 1, 0);
+    h->t_line = kit_hud_find1(h, ".PadMode_%s_Hud_Line", 1, 0);
+    h->t_award = kit_hud_find1(h, ".PadMode_%s_Hud_Award", 1, 0);
+    h->t_awardsub = kit_hud_find1(h, ".PadMode_%s_Hud_AwardSub", 1, 0);
+    h->timer = kit_hud_find1(h, ".PadMode_%s_Hud_Timer", 0, 0);
+    if (h->timer) {
+        char p[96];
+        pm_snprintf(p, sizeof p, ".PadMode_%s_Hud_Timer.PadMode_%s_Hud_Timer_Num", h->slug, h->slug);
+        h->t_timer = kit_hud_find1(h, p, 1, 0);
+    }
+    for (k = 0; k < 3; k++)
+        for (j = 0; j < 3; j++) {
+            pm_snprintf(f, sizeof f, ".PadMode_%%s_Hud_C%%d_%s", cl[j]);
+            h->t_c[k][j] = kit_hud_find1(h, f, 1, k + 1);
+        }
+    h->gauge = kit_hud_find1(h, ".PadMode_%s_Hud_Gauge", 0, 0);
+    if (h->gauge) {
+        char p[128];
+        pm_snprintf(p, sizeof p, ".PadMode_%s_Hud_Gauge.PadMode_%s_Hud_Gauge_Label", h->slug, h->slug);
+        h->t_glabel = kit_hud_find1(h, p, 1, 0);
+        for (k = 0; k < KIT_HUD_PIPS; k++) {
+            pm_snprintf(p, sizeof p, ".PadMode_%s_Hud_Gauge.PadMode_%s_Hud_G%d_On", h->slug, h->slug, k + 1);
+            h->pip_on[k] = kit_hud_find1(h, p, 0, 0);
+            pm_snprintf(p, sizeof p, ".PadMode_%s_Hud_Gauge.PadMode_%s_Hud_G%d_Off", h->slug, h->slug, k + 1);
+            h->pip_off[k] = kit_hud_find1(h, p, 0, 0);
+            if (!h->pip_on[k] || !h->pip_off[k]) break;
+            h->pip_lit[k] = -1;
+        }
+        h->n_pips = k;
+    }
+    h->w_title[0] = h->w_line[0] = h->w_award[0] = h->w_awardsub[0] = h->w_timer[0] = h->w_glabel[0] = 0;
+    for (k = 0; k < 3; k++) for (j = 0; j < 3; j++) h->w_c[k][j][0] = 0;
+    h->timer_up = h->gauge_up = -1;
+    pm_show(h->group, h->up);
+    pm_log("hud %s found: title %s, line %s, award %s, timer %s, counters %s, gauge %s (%d pips) - %s",
+           h->slug, h->t_title ? "yes" : "NO", h->t_line ? "yes" : "NO", h->t_award ? "yes" : "NO",
+           h->timer ? (h->t_timer ? "yes" : "no number") : "none", h->t_c[0][1] ? "yes" : "none",
+           h->gauge ? "yes" : "none", h->n_pips, h->up ? "shown, the mode is using it" : "hidden until the mode uses it");
+}
+
+static KIT_UNUSED void kit_hud_show(struct kit_hud *h, int on)
+{
+    if (on && kit_hud_up && kit_hud_up != h) {
+        struct kit_hud *o = kit_hud_up;
+        o->up = 0;
+        o->hide_at = 0;
+        o->noting = 0;
+        if (o->group) pm_show(o->group, 0);
+    }
+    if (on) kit_hud_up = h;
+    else if (kit_hud_up == h) kit_hud_up = 0;
+    h->up = on;
+    h->hide_at = 0;
+    if (!on) {
+        h->want_award[0] = h->want_awardsub[0] = 0;
+        h->award_until = 0;
+        h->noting = 0;
+    }
+    if (h->group) pm_show(h->group, on);
+}
+
+/* hide the HUD `ms` from now (0 = now): a mode's TOTAL stays up that long after its end */
+static KIT_UNUSED void kit_hud_hide_in(struct kit_hud *h, unsigned ms)
+{
+    if (!ms) { kit_hud_show(h, 0); return; }
+    h->hide_at = pm_ms() + ms;
+}
+
+/* the battle's own two lines: the mode's title (orange) and what to shoot (white) */
+static KIT_UNUSED void kit_hud_title(struct kit_hud *h, const char *title, const char *line)
+{
+    if (title) kit_copy(h->want_title, sizeof h->want_title, title);
+    if (line) kit_copy(h->want_line, sizeof h->want_line, line);
+}
+
+/* counter k (0-2, left to right): a label, a big value, a sub-label; all three 0/"" hides it */
+static KIT_UNUSED void kit_hud_counter(struct kit_hud *h, int k, const char *label, const char *value, const char *sub)
+{
+    if (k < 0 || k > 2) return;
+    kit_copy(h->want_c[k][0], sizeof h->want_c[k][0], label ? label : "");
+    kit_copy(h->want_c[k][1], sizeof h->want_c[k][1], value ? value : "");
+    kit_copy(h->want_c[k][2], sizeof h->want_c[k][2], sub ? sub : "");
+}
+
+/* the timer badge's seconds; -1 hides the badge */
+static KIT_UNUSED void kit_hud_timer(struct kit_hud *h, int seconds) { h->want_timer = seconds; }
+
+/* the gauge: `level` pips of the build's count lit (-1 hides it), and its label */
+static KIT_UNUSED void kit_hud_gauge(struct kit_hud *h, int level, const char *label)
+{
+    h->want_gauge = level;
+    if (label) kit_copy(h->want_glabel, sizeof h->want_glabel, label);
+}
+
+/* a big line and a smaller one under it, for `ms` (a jackpot, a head severed) */
+static KIT_UNUSED void kit_hud_award(struct kit_hud *h, unsigned ms, const char *big, const char *sub)
+{
+    kit_copy(h->want_award, sizeof h->want_award, big ? big : "");
+    kit_copy(h->want_awardsub, sizeof h->want_awardsub, sub ? sub : "");
+    h->award_until = pm_ms() + ms;
+}
+
+/* A QUALIFICATION note on a HUD the mode is not using ("POWERLINES 2 OF 3"): the award line alone for
+ * `ms`, then hidden. Polite: while another of the pack's HUDs is up (a mode running, or the total of
+ * one that just ended) nothing is shown. 1 = shown. */
+static KIT_UNUSED int kit_hud_note(struct kit_hud *h, unsigned ms, const char *big, const char *sub)
+{
+    int k;
+    if (kit_hud_up && kit_hud_up != h) return 0;
+    if (h->up && !h->noting) return 0;
+    h->want_title[0] = h->want_line[0] = 0;
+    for (k = 0; k < 3; k++) kit_hud_counter(h, k, 0, 0, 0);
+    h->want_timer = h->want_gauge = -1;
+    kit_hud_award(h, ms, big, sub);
+    if (!h->up) kit_hud_show(h, 1);
+    h->noting = 1;
+    h->hide_at = pm_ms() + ms;
+    return 1;
+}
+
+/* every tick: find, expire the award, and send the glass what changed */
+static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
+{
+    int k, j;
+    kit_hud_find(h);
+    if (h->hide_at && pm_ms() >= h->hide_at) {
+        kit_hud_show(h, 0);
+        return;
+    }
+    if (h->award_until && pm_ms() >= h->award_until) {
+        h->award_until = 0;
+        h->want_award[0] = h->want_awardsub[0] = 0;
+    }
+    if (!h->found || !h->up) return;
+    kit_hud_text(h->t_title, h->w_title, sizeof h->w_title, h->want_title);
+    kit_hud_text(h->t_line, h->w_line, sizeof h->w_line, h->want_line);
+    kit_hud_text(h->t_award, h->w_award, sizeof h->w_award, h->want_award);
+    kit_hud_text(h->t_awardsub, h->w_awardsub, sizeof h->w_awardsub, h->want_awardsub);
+    for (k = 0; k < 3; k++)
+        for (j = 0; j < 3; j++)
+            kit_hud_text(h->t_c[k][j], h->w_c[k][j], sizeof h->w_c[k][j], h->want_c[k][j]);
+    if (h->timer) {
+        int up = h->want_timer >= 0;
+        if (up != h->timer_up) { pm_show(h->timer, up); h->timer_up = up; }
+        if (up) {
+            char b[8];
+            pm_snprintf(b, sizeof b, "%02d", h->want_timer > 99 ? 99 : h->want_timer);
+            kit_hud_text(h->t_timer, h->w_timer, sizeof h->w_timer, b);
+        }
+    }
+    if (h->gauge) {
+        int up = h->want_gauge >= 0;
+        if (up != h->gauge_up) { pm_show(h->gauge, up); h->gauge_up = up; }
+        if (up) {
+            kit_hud_text(h->t_glabel, h->w_glabel, sizeof h->w_glabel, h->want_glabel);
+            for (k = 0; k < h->n_pips; k++) {
+                int lit = k < h->want_gauge;
+                if (lit == h->pip_lit[k]) continue;
+                pm_show(h->pip_on[k], lit);
+                pm_show(h->pip_off[k], !lit);
+                h->pip_lit[k] = lit;
+            }
+        }
+    }
+}
+
+/* a mode's start: everything cleared, the badge and gauge hidden until asked, the group shown */
+static KIT_UNUSED void kit_hud_begin(struct kit_hud *h, const char *title, const char *line)
+{
+    int k;
+    h->noting = 0;
+    h->hide_at = 0;
+    h->want_award[0] = h->want_awardsub[0] = 0;
+    h->award_until = 0;
+    for (k = 0; k < 3; k++) kit_hud_counter(h, k, 0, 0, 0);
+    h->want_timer = h->want_gauge = -1;
+    h->want_glabel[0] = 0;
+    kit_hud_title(h, title, line ? line : "");
+    kit_hud_show(h, 1);
+}
+
+/* ---- LIGHT SHOWS at a mode's start and end (hud-layers) --------------------------------------------
+ * David, 2026-09-26: "add some intricate light shows when the modes start and end. They should be
+ * unique and colorful." A show is a short list of STEPS, each a pattern over the playfield's inserts by
+ * their PLACE (the port's "at X,Y": x 0-300 across, y 0-600 down the playfield picture) for some ms, in
+ * the step's colours. Every tick the show paints each placed insert (pm_lamp_paint: held in the mode's
+ * layer, only a change reaches the game), and the GI strings (not placed) follow the step's GI setting:
+ * dark for a spotlight show, flashed white on a strobe. When it ends every insert goes back to the game
+ * and the mode's own shot lights are sent again. */
+enum kit_fx {
+    KIT_FX_BURST,        /* a ring from (x, y) outwards, colour a, trailing into colour b */
+    KIT_FX_IMPLODE,      /* the same ring coming IN to (x, y) */
+    KIT_FX_SWEEP_UP,     /* a band from the flippers to the top, a then b behind it */
+    KIT_FX_SWEEP_DOWN,   /* the band from the top down */
+    KIT_FX_SWEEP_LR,     /* left to right */
+    KIT_FX_SWEEP_RL,     /* right to left */
+    KIT_FX_SPIN,         /* a beam turning round (x, y): a on the beam, b off it */
+    KIT_FX_RAINBOW,      /* the hue turns round (x, y) */
+    KIT_FX_STROBE,       /* all a / all b, every `rate` ms */
+    KIT_FX_SPARKLE,      /* b, with inserts flashing a at random */
+    KIT_FX_FIRE,         /* a flickering blaze: b at the bottom rising into a */
+    KIT_FX_PULSE,        /* all inserts breathing between a and b (a heartbeat when rate is short) */
+    KIT_FX_CHASE_RING,   /* inserts in order round (x, y) lighting one after another */
+    KIT_FX_FADE_OUT,     /* a fading to black */
+    KIT_FX_BOLTS         /* lightning: jagged bands from the top striking down, a on b */
+};
+#define KIT_GI_KEEP   0   /* the GI does what the game says */
+#define KIT_GI_DARK   1   /* the GI off: only the show lights the playfield */
+#define KIT_GI_FLASH  2   /* the GI flashing white with a strobe */
+struct kit_fx_step { int fx; unsigned ms; unsigned a, b; int x, y; unsigned rate; int gi; };
+/* places on Godzilla's playfield picture (the port's lamp lines), for a show's (x, y) */
+#define KIT_AT_CENTER     150, 330
+#define KIT_AT_BUILDING   123, 202
+#define KIT_AT_MASER       51, 417
+#define KIT_AT_SHIELDS    199, 346
+#define KIT_AT_FLIPPERS   150, 560
+#define KIT_AT_TOP        150, 120
+#define KIT_AT_MAGNA       89, 260
+#define KIT_SHOW_STEPS 10
+#define KIT_SHOW_LAMPS 128
+
+struct kit_show {
+    const char *name;
+    struct kit_fx_step steps[KIT_SHOW_STEPS];
+    int n, step, on;
+    unsigned long t0, step_t0;
+    unsigned seed;
+    int gi[8], n_gi, placed;
+};
+
+static KIT_UNUSED unsigned kit_mix(unsigned a, unsigned b, int f256)       /* a..b by f/256 */
+{
+    int k, out = 0;
+    if (f256 < 0) f256 = 0;
+    if (f256 > 256) f256 = 256;
+    for (k = 0; k < 3; k++) {
+        int ca = (int)((a >> (16 - 8 * k)) & 255u), cb = (int)((b >> (16 - 8 * k)) & 255u);
+        out |= ((ca + (cb - ca) * f256 / 256) & 255) << (16 - 8 * k);
+    }
+    return (unsigned)out;
+}
+
+static KIT_UNUSED unsigned kit_scale(unsigned c, int f256) { return kit_mix(0, c, f256); }
+
+static KIT_UNUSED unsigned kit_hue(int h)             /* 0..1535 round the colour wheel, full brightness */
+{
+    int s = ((h % 1536) + 1536) % 1536, i = s / 256, f = s % 256;
+    switch (i) {
+    case 0: return PM_RGB(255, f, 0);
+    case 1: return PM_RGB(255 - f, 255, 0);
+    case 2: return PM_RGB(0, 255, f);
+    case 3: return PM_RGB(0, 255 - f, 255);
+    case 4: return PM_RGB(f, 0, 255);
+    default: return PM_RGB(255, 0, 255 - f);
+    }
+}
+
+static KIT_UNUSED unsigned kit_rand(unsigned *s)
+{
+    *s = *s * 1103515245u + 12345u;
+    return (*s >> 16) & 0x7fffu;
+}
+
+static KIT_UNUSED int kit_isqrt(int v)
+{
+    int r = 0, b = 1 << 14;
+    if (v <= 0) return 0;
+    while (b > v) b >>= 2;
+    while (b) {
+        if (v >= r + b) { v -= r + b; r = (r >> 1) + b; } else r >>= 1;
+        b >>= 2;
+    }
+    return r;
+}
+
+/* atan2 in 1/1536 turns (the hue wheel's), good to a few degrees */
+static KIT_UNUSED int kit_angle(int dx, int dy)
+{
+    int ax = dx < 0 ? -dx : dx, ay = dy < 0 ? -dy : dy, a;
+    if (!ax && !ay) return 0;
+    a = ax >= ay ? (ay * 192) / (ax ? ax : 1) : 384 - (ax * 192) / (ay ? ay : 1);   /* 0..384 = 0..90 deg */
+    if (dx < 0) a = 768 - a;
+    if (dy < 0) a = 1536 - a;
+    return a % 1536;
+}
+
+static KIT_UNUSED void kit_show_start(struct kit_show *s, const char *name, const struct kit_fx_step *steps, int n)
+{
+    int i, k, cnt = pm_lamp_count();
+    if (n > KIT_SHOW_STEPS) n = KIT_SHOW_STEPS;
+    for (i = 0; i < n; i++) s->steps[i] = steps[i];
+    s->n = n;
+    s->name = name;
+    s->step = 0;
+    s->on = pm_can(PM_CAN_LAMPS) && n > 0;
+    s->t0 = s->step_t0 = pm_ms();
+    s->seed = (unsigned)s->t0 | 1u;
+    s->n_gi = s->placed = 0;
+    for (k = 0; k < cnt && k < KIT_SHOW_LAMPS; k++) {
+        const char *nm = pm_lamp_at(k, 0);
+        int x, y;
+        if (pm_lamp_xy(k, &x, &y)) s->placed++;
+        else if (nm && s->n_gi < 8 && nm[0] && (nm[0] == 'L' || nm[0] == 'U') && kit_names_have(
+                     "LOWER PLAYFIELD GI-WHT(X9),UPPER PLAYFIELD GI-WHT(X12),LOWER PLAYFIELD GI-RED(X4),UPPER PLAYFIELD GI-RED(X9)", nm))
+            s->gi[s->n_gi++] = k;
+    }
+    if (s->on) pm_log("show %s: %d step(s) over %d placed inserts, %d GI string(s)", name, n, s->placed, s->n_gi);
+}
+
+/* the colour of the insert at (x, y) for step st at `t` ms into it */
+static KIT_UNUSED unsigned kit_fx_colour(struct kit_show *s, const struct kit_fx_step *st, int x, int y, int idx, unsigned t)
+{
+    int f = st->ms ? (int)((unsigned long)t * 256u / st->ms) : 256;     /* 0..256 through the step */
+    int dx = x - st->x, dy = y - st->y, d, r, w, v;
+    unsigned rate = st->rate ? st->rate : 100;
+    switch (st->fx) {
+    case KIT_FX_BURST:
+    case KIT_FX_IMPLODE:
+        d = kit_isqrt(dx * dx + dy * dy);
+        r = st->fx == KIT_FX_BURST ? f * 700 / 256 : (256 - f) * 700 / 256;
+        w = d - r;
+        if (w > 0 && w < 60) return kit_scale(st->a, 256 - w * 4);          /* the ring's leading edge */
+        if (w <= 0 && w > -140) return kit_mix(st->a, st->b, -w * 256 / 140); /* its wake */
+        return w <= 0 ? st->b : 0;
+    case KIT_FX_SWEEP_UP:
+    case KIT_FX_SWEEP_DOWN:
+        r = st->fx == KIT_FX_SWEEP_UP ? 640 - f * 720 / 256 : f * 720 / 256 - 40;
+        w = st->fx == KIT_FX_SWEEP_UP ? y - r : r - y;
+        if (w >= 0 && w < 50) return st->a;
+        if (w >= 50) return kit_mix(st->a, st->b, (w - 50) * 3);
+        return 0;
+    case KIT_FX_SWEEP_LR:
+    case KIT_FX_SWEEP_RL:
+        r = st->fx == KIT_FX_SWEEP_LR ? f * 380 / 256 - 40 : 340 - f * 380 / 256;
+        w = st->fx == KIT_FX_SWEEP_LR ? r - x : x - r;
+        if (w >= 0 && w < 30) return st->a;
+        if (w >= 30) return kit_mix(st->a, st->b, (w - 30) * 4);
+        return 0;
+    case KIT_FX_SPIN:
+        v = (kit_angle(dx, dy) - (int)(t * 1536u / (rate * 8u))) % 1536;
+        if (v < 0) v += 1536;
+        return v < 160 ? st->a : v < 400 ? kit_mix(st->a, st->b, (v - 160) * 256 / 240) : st->b;
+    case KIT_FX_RAINBOW:
+        return kit_hue(kit_angle(dx, dy) + (int)(t * 1536u / (rate * 10u)) + kit_isqrt(dx * dx + dy * dy) * 2);
+    case KIT_FX_STROBE:
+        return (t / rate) % 2 ? st->b : st->a;
+    case KIT_FX_SPARKLE:
+        return ((kit_rand(&s->seed) + (unsigned)idx * 7u) % 100u) < 18u ? st->a : st->b;
+    case KIT_FX_FIRE:
+        v = (int)(kit_rand(&s->seed) % 90u);
+        w = (600 - y) * 256 / 600;                                           /* 0 at the flippers */
+        return kit_scale(kit_mix(st->b, st->a, w + v - 45), 150 + v);
+    case KIT_FX_PULSE:
+        v = (int)((t % (rate * 2u)) * 512u / (rate * 2u));
+        v = v < 256 ? v : 512 - v;
+        return kit_mix(st->b, st->a, v);
+    case KIT_FX_CHASE_RING:
+        v = (kit_angle(dx, dy) * 12 / 1536 + 12 - (int)((t / rate) % 12u)) % 12;
+        return v == 0 ? st->a : v == 1 ? kit_scale(st->a, 110) : st->b;
+    case KIT_FX_FADE_OUT:
+        return kit_scale(st->a, 256 - f);
+    case KIT_FX_BOLTS:
+        v = (int)((t / rate) % 5u);                                          /* five strikes */
+        r = 40 + v * 55 + (int)((unsigned)(y * 13 + v * 71) % 40u) - 20;     /* the bolt's jagged x */
+        w = x - r;
+        if (w < 0) w = -w;
+        return w < 18 && (t % rate) < rate * 2 / 3 ? st->a : st->b;
+    }
+    return 0;
+}
+
+/* Every tick while the show runs. `lamps` is the mode's own shot lights, sent again at the end.
+ * Returns 1 while it runs. */
+static KIT_UNUSED int kit_show_tick(struct kit_show *s, struct kit_lamps *lamps)
+{
+    const struct kit_fx_step *st;
+    unsigned long now = pm_ms();
+    unsigned t;
+    int k, cnt;
+    if (!s->on) return 0;
+    while (s->step < s->n && now - s->step_t0 >= s->steps[s->step].ms) {
+        s->step_t0 += s->steps[s->step].ms;
+        s->step++;
+    }
+    if (s->step >= s->n) {
+        s->on = 0;
+        pm_lamp_release_all();
+        if (lamps) lamps->n_now = 0;       /* the mode's own lights: all sent again at its next commit */
+        pm_log("show %s: over, %lu ms", s->name, now - s->t0);
+        return 0;
+    }
+    st = &s->steps[s->step];
+    t = (unsigned)(now - s->step_t0);
+    cnt = pm_lamp_count();
+    for (k = 0; k < cnt && k < KIT_SHOW_LAMPS; k++) {
+        int x, y;
+        if (pm_lamp_xy(k, &x, &y)) pm_lamp_paint(k, kit_fx_colour(s, st, x, y, k, t));
+    }
+    for (k = 0; k < s->n_gi; k++) {
+        if (st->gi == KIT_GI_DARK) pm_lamp_paint(s->gi[k], 0);
+        else if (st->gi == KIT_GI_FLASH) pm_lamp_paint(s->gi[k], ((t / (st->rate ? st->rate : 100)) % 2) ? 0 : KIT_WHITE);
+        else pm_lamp_release(pm_lamp_at(s->gi[k], 0));
+    }
+    return 1;
+}
+
+static KIT_UNUSED void kit_show_stop(struct kit_show *s, struct kit_lamps *lamps)
+{
+    if (!s->on) return;
+    s->on = 0;
+    pm_lamp_release_all();
+    if (lamps) lamps->n_now = 0;
+}
+
 #endif

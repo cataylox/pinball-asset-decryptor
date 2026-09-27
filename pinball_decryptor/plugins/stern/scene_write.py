@@ -825,9 +825,14 @@ class _Walk:
         self.o += n
 
 
-def _walk_font(d, o=9):
-    """Walk the font entry at ``o``: (key, class bytes span, face, end, walk)."""
+def _walk_font(d, o=9, variants=False):
+    """Walk the font entry at ``o``: (key, class bytes span, face, end, walk). A font may end in
+    named style VARIANTS, ``[u64 v] v x (name, [u64 s] sizes)`` (a scene's own game fonts:
+    GameFont_Primary, GameFont_Secondary); the system font's list is empty, and only a walk asked
+    for ``variants`` accepts one (hud-layers). ``walk.variant`` names each size's variant ("" =
+    the base sizes)."""
     w = _Walk(d, o)
+    w.variant = {}
     key = w.take("<I")
     cls_at = w.o
     if w.take("<I") & FLAG and w.string() != b"Font":
@@ -842,23 +847,35 @@ def _walk_font(d, o=9):
     w.o += 2
     n = w.take("<Q")
     w.o += 2 * n
-    for _ in range(w.take("<Q")):
-        w.o += 4
-        w.new()
-        w.keys.append(w.o)
-        if w.take("<I") != key:
-            raise SceneWriteError("a system font size does not name its font")
-        w.sizes.append((w.ids[-1][1], struct.unpack_from("<f", d, w.o)[0]))
-        w.o += 13
+
+    def sizes(variant):
         for _ in range(w.take("<Q")):
-            w.o += 2
+            w.o += 4
             w.new()
-            w.o += 29 + 16
-            w.page()
-            if w.take("<Q"):
-                raise SceneWriteError("a system font glyph has a list the walk does not know")
-    if w.take("<Q"):
+            w.keys.append(w.o)
+            if w.take("<I") != key:
+                raise SceneWriteError("a system font size does not name its font")
+            w.sizes.append((w.ids[-1][1], struct.unpack_from("<f", d, w.o)[0]))
+            w.variant[w.ids[-1][1]] = variant
+            w.o += 13
+            for _ in range(w.take("<Q")):
+                w.o += 2
+                w.new()
+                w.o += 29 + 16
+                w.page()
+                kern = w.take("<Q")        # a game font's kerning pairs: (u16 char, f32 adjust)
+                if kern and not variants or kern > 256:
+                    raise SceneWriteError("a system font glyph has a list the walk does not know")
+                w.o += 6 * kern
+
+    sizes("")
+    nv = w.take("<Q")
+    if nv and not variants:
         raise SceneWriteError("the system font has a tail the walk does not know")
+    if nv > 16:
+        raise SceneWriteError("a font with %d variants: not a font the walk knows" % nv)
+    for _ in range(nv):
+        sizes(w.string().decode("latin1"))
     return key, (cls_at, cls_end), face, w.o, w
 
 
@@ -884,7 +901,30 @@ def carried_font(source, font_class, key, base):
     return u32(key) + u32(font_class) + bytes(out), base + size_id - 1, ""
 
 
-def add_screens(data, screens, stock=None, clips=None, font_source=None):
+def carried_game_font(source, font_class, key, base):
+    """hud-layers: a scene's own GAME font - its first library entry, with its named variants and
+    kerning (Godzilla's battle scenes carry GameFont_Primary, white with a black outline, and
+    GameFont_Secondary, the orange gradient, in five sizes) - as a library entry of another scene.
+    Returns (entry bytes, {variant: [(new size id, line px)]}), ids renumbered from ``base``."""
+    if not source or source[0] != 1:
+        raise SceneWriteError("the font's scene is not a scene")
+    _old, (_cls_at, cls_end), _face, end, w = _walk_font(source, 9, variants=True)
+    top = max(i for _a, i in w.ids)
+    if sorted(i for _a, i in w.ids) != list(range(1, top + 1)):
+        raise SceneWriteError("the font's object ids are not 1..%d" % top)
+    patch = {a: FLAG | (base + i - 1) for a, i in w.ids}
+    patch.update({a: base + i - 1 for a, i in w.pages})
+    patch.update({a: key for a in w.keys})
+    out = bytearray(source[cls_end:end])
+    for at, v in patch.items():
+        struct.pack_into("<I", out, at - cls_end, v)
+    sizes = {}
+    for sid, px in w.sizes:
+        sizes.setdefault(w.variant[sid], []).append((base + sid - 1, px))
+    return u32(key) + u32(font_class) + bytes(out), sizes
+
+
+def add_screens(data, screens, stock=None, clips=None, font_source=None, huds=None, hud_font_source=None):
     """Splice SEVERAL screens into a profiled stock scene in one pass (item 127: a card
     carries several modes, item 133 - and this refuses any file that is not the measured
     stock one, so screens cannot be added one call at a time). ``screens`` is a list of
@@ -902,6 +942,10 @@ def add_screens(data, screens, stock=None, clips=None, font_source=None):
     ``font_source`` (the card's :data:`SYSTEM_FONT_SCENE`) carries its full font into a scene whose
     profile names ``words_font``, and the screens' words use it (:func:`carried_font`).
 
+    ``huds`` ([(slug, spec)], hud-layers) adds each code mode's HUD at the glass's edges
+    (:mod:`.mode_hud`), in Godzilla's slide-outs scene only, with the game's own font carried from
+    ``hud_font_source`` (the bytes of ``mode_hud.GAME_FONT_SCENE``). The info then carries ``huds``.
+
     Every screen is authored visible, and every one needs the mode.so that hides it."""
     if stock is None:
         p = profile_for(data)
@@ -911,7 +955,7 @@ def add_screens(data, screens, stock=None, clips=None, font_source=None):
         check(stock, p)
         p = _rebased(p, stock, data)
         check(data, p)
-    if not screens and not clips:
+    if not screens and not clips and not huds:
         raise SceneWriteError("no screens to add")
     names = [s["name"] for s in screens]
     if len(set(names)) != len(names):
@@ -951,6 +995,18 @@ def add_screens(data, screens, stock=None, clips=None, font_source=None):
         libs.append(entry)
         groups.insert(0, surf)
         infos.append({"video_scene": p.scene_id, "tree": p.tree, "node_bytes": len(surf)})
+    if huds:
+        from . import mode_hud
+        if not hud_font_source:
+            raise SceneWriteError("a mode's HUD needs the game font's scene")
+        try:
+            entry, hud_groups, hud_names = mode_hud.build_huds(p, data, huds, hud_font_source)
+        except mode_hud.HudError as e:
+            raise SceneWriteError(str(e))
+        libs.append(entry)
+        groups.extend(hud_groups)
+        infos.append({"huds": hud_names, "hud_scene": p.scene_id, "tree": p.tree,
+                      "node_bytes": sum(len(g) for g in hud_groups)})
     lib = b"".join(libs)
     lib_at = _stage_at(data, p) - 8 if lib else p.root_count_at
     new = (bytearray(data[:lib_at]) + lib + bytearray(data[lib_at:p.insert_at]) + b"".join(groups)
