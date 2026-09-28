@@ -40,6 +40,7 @@ checkout, and no table is written into a title's own directory. A card is opened
 read only and stays that way.
 """
 import argparse
+import filecmp
 import os
 import re
 import shutil
@@ -145,6 +146,20 @@ def _stale(dest, source):
         return False               # nothing to compare against; keep what we have
     try:
         return os.path.getmtime(dest) < os.path.getmtime(source)
+    except OSError:
+        return True
+
+
+def _art_differs(src, dest):
+    """Whether the cached drawing `dest` is not a copy of `src`.
+
+    Size, then bytes. Not mtime: copyfile stamps the copy newer than its
+    source, and an older build's drawing on a card can carry any date at all.
+    """
+    if not os.path.exists(dest):
+        return True
+    try:
+        return not filecmp.cmp(src, dest, shallow=False)
     except OSError:
         return True
 
@@ -303,7 +318,11 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
     # the window must not depend on that working.
     art_dest = os.path.join(tdir, "playfield.png")
     art_src = gameinfo.find_playfield_art(game)
-    if art_src and (force or not os.path.exists(art_dest)):
+    # A PNG cannot carry the `# binary:` line that keeps device_xy.txt honest,
+    # so the test is against the SOURCE drawing: the cache is keyed by title,
+    # and a second build of that title shipping a different picture must not
+    # keep the first build's drawing under the new build's device positions.
+    if art_src and (force or _art_differs(art_src, art_dest)):
         try:
             shutil.copyfile(art_src, art_dest)
             made["playfield.png"] = art_dest
