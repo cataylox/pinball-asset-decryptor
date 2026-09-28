@@ -199,10 +199,20 @@ function startMain() {
     else v = waitingView(main);
     let panel = null;
     if (S.panel) { panel = keyPanel(S.panel); body.append(panel.el); }
+    // the extra information (PAD-238) sits at the head of the side panel,
+    // folded away, never over the playfield; before padbinds brings the key
+    // panel the side panel holds only this
+    let info = null;
+    if (S.view && S.view.info) {
+      info = infoPanel(S.view.info, S.live || []);
+      if (panel) panel.el.prepend(info.el);
+      else { const side = el("aside", "pf-panel"); side.append(info.el); body.append(side); }
+    }
     app.append(body, status);
     view = {
       frame(f) {
         if (f.status != null) stxt.textContent = f.status;
+        if (f.live && info) info.live(f.live);
         if (v.frame) v.frame(f);
         if (panel && f.panel) panel.update(f.panel);
       },
@@ -338,13 +348,6 @@ function startMain() {
   // ================================================== the artwork view
   function fieldView(main) {
     const V = S.view, D = S.dyn || {};
-    // the title's switch / lamp / coil totals (PAD-238): the same line the
-    // schematic's bar opens with, from the tables, so it shows before any write
-    if (V.bar) {
-      const bar = el("div", "pf-bar");
-      bar.append(el("div", "txt", V.bar));
-      main.append(bar);
-    }
     const wrap = el("div", "pf-stagewrap");
     const stage = el("div", "pf-stage" + (V.art ? "" : " noart"));
     if (V.art) {
@@ -577,6 +580,54 @@ function startMain() {
         if (f.grid) { for (const k in f.grid) { gridData[k] = f.grid[k]; paintCell(k); } }
         if (f.trough && trough) trough.update(f.trough);
       },
+    };
+  }
+
+  // ================================================== the info accordion
+  // "This title" is the switch / lamp / coil totals from the tables, there
+  // from the first frame; "Live" is what the status strip used to say (the
+  // rates, the counts the game has written, the alarms). Rows are
+  // [label, value, note(, alarm)]. Each section remembers whether it was
+  // left open. A folded Live section is not redrawn at 60 fps.
+  function infoPanel(title, live) {
+    const root = el("div", "pf-info");
+    function section(key, name) {
+      const acc = el("details", "kp-acc");
+      let open = false;
+      try { open = localStorage.getItem("pf-acc-" + key) === "1"; } catch (e) { /* no storage */ }
+      acc.open = open;
+      const sum = el("summary", null, name);
+      // never keep the keyboard: a focused summary would eat the space bar
+      sum.tabIndex = -1;
+      sum.addEventListener("mousedown", (ev) => ev.preventDefault());
+      const rows = el("div", "kp-kv");
+      acc.append(sum, rows);
+      root.append(acc);
+      return { acc, rows };
+    }
+    function fill(rows, data) {
+      rows.textContent = "";
+      for (const r of data) {
+        const row = el("div", "r" + (r[3] ? " alarm" : ""));
+        row.append(el("span", "k", r[0]), el("span", "v", r[1]));
+        if (r[2]) row.append(el("span", "n", r[2]));
+        rows.append(row);
+      }
+    }
+    const t = section("title", "THIS TITLE");
+    fill(t.rows, title);
+    const l = section("live", "LIVE");
+    let latest = live;
+    fill(l.rows, latest);
+    for (const [k, sec] of [["title", t], ["live", l]]) {
+      sec.acc.addEventListener("toggle", () => {
+        try { localStorage.setItem("pf-acc-" + k, sec.acc.open ? "1" : "0"); } catch (e) { /* no storage */ }
+        if (k === "live" && sec.acc.open) fill(l.rows, latest);
+      });
+    }
+    return {
+      el: root,
+      live(data) { latest = data; if (l.acc.open) fill(l.rows, data); },
     };
   }
 

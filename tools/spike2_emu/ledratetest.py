@@ -197,14 +197,15 @@ def run_case(name, script, secs, expect_led, expect_data, expect_gap,
         led = playfield._rate(view._draw_ev, t)
         data = playfield._rate(view._data_ev, t)
         gap = view._gap_worst
-        bar = view.status
+        # the rates are the side panel's Live rows now (PAD-238)
+        bar = "   ".join("%s %s" % (r[0], r[1]) for r in view.live)
 
     print("\n--- %s ---" % name)
     print("  fed        : %d frames, %d lamp writes in %.0f s"
           % (feed.frames, feed.written, secs))
     print("  window says: LED %.1f Hz   data %.1f Hz   poll %.0f fps   "
           "worst gap %.2f s" % (led, data, view.fps, gap))
-    print("  status bar : %s" % bar.strip())
+    print("  live rows  : %s" % bar)
 
     fail = []
     lo, hi = expect_led
