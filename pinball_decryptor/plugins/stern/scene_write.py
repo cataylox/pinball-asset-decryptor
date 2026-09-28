@@ -578,9 +578,35 @@ PROFILES = {
 }
 
 
+def _edited_in_place(data):
+    """PAD-250: the profile of a stock scene an earlier build EDITED IN PLACE - a card PAD built
+    (DragonRR's Godzilla "Heisei" V1.93: three pictures of the HUD slide-outs replaced) is the
+    card the next project is extracted from, so its HUD is no longer the stock md5. A picture,
+    colour or same-length text written in place keeps the file's size and every offset the
+    profile names, so a scene of the stock size that :func:`check` passes at those offsets is
+    that scene. Two DIFFERENT profiles passing is refused (None) rather than guessed."""
+    found = []
+    for p in PROFILES.values():
+        if p.size != len(data):
+            continue
+        try:
+            check(data, p)
+        except (SceneWriteError, struct.error):
+            continue
+        found.append(p)
+    shapes = {repr([(k, v) for k, v in p.__dict__.items() if k not in ("label", "md5")]) for p in found}
+    return found[0] if len(shapes) == 1 else None
+
+
+def _profile(data):
+    """The measured profile of ``data``: its own md5's, or the stock scene's it was edited from
+    in place (:func:`_edited_in_place`); None when neither."""
+    return PROFILES.get(hashlib.md5(data).hexdigest()) or _edited_in_place(data)
+
+
 def profile_for(data):
     md5 = hashlib.md5(data).hexdigest()
-    p = PROFILES.get(md5)
+    p = _profile(data)
     if p is None:
         raise SceneWriteError("no measured profile for a scene with md5 %s; read it off a boot "
                               "with modes/scenelog.c first (scenelog.want)" % md5)
@@ -706,7 +732,7 @@ def _stage_at(data, p):
 
 def grafts_video(data):
     """True when ``data`` is a profiled scene a Video can be grafted into."""
-    p = PROFILES.get(hashlib.md5(data).hexdigest())
+    p = _profile(data)
     return bool(p and p.video)
 
 

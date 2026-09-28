@@ -173,6 +173,33 @@ def test_add_screen_refuses_a_scene_nobody_measured():
         SW.add_screen(b"\0" * 64, "X", _art(), "Y")
 
 
+def test_a_scene_an_earlier_build_edited_in_place_keeps_its_profile(monkeypatch):
+    # PAD-250: a card PAD built (pictures replaced in place) is the next project's card, so its
+    # HUD is not the stock md5 - but it is the stock size, and the profile's offsets still hold
+    data, p = _fake_scene(monkeypatch)
+    edited = data[:300] + b"\x77" * 50 + data[350:]
+    assert SW.profile_for(edited) is p
+    new, _info = SW.add_screen(edited, "Mode_Screen", _art(), "HELLO")
+    assert new[p.insert_at + _info["node_bytes"]:] == edited[p.insert_at:]
+
+
+def test_an_in_place_match_is_refused_when_the_offsets_do_not_hold(monkeypatch):
+    data, p = _fake_scene(monkeypatch)
+    moved = data[:p.insert_at] + b"\0" + data[p.insert_at + 1:]      # not the child it measured
+    with pytest.raises(SW.SceneWriteError, match="no measured profile"):
+        SW.profile_for(moved)
+    with pytest.raises(SW.SceneWriteError, match="no measured profile"):
+        SW.profile_for(data + b"\0")                                   # not the stock size
+
+
+def test_two_different_profiles_matching_in_place_are_refused(monkeypatch):
+    data, p = _fake_scene(monkeypatch)
+    monkeypatch.setitem(SW.PROFILES, "other", SW.SceneProfile(**{**p.__dict__, "md5": "other",
+                                                                  "first_free_id": 0x900}))
+    with pytest.raises(SW.SceneWriteError, match="no measured profile"):
+        SW.profile_for(data[:300] + b"\x77" + data[301:])
+
+
 def test_add_screen_refuses_an_object_id_the_scene_already_uses(monkeypatch):
     real = SW.PROFILES["f9daed5a19aafc807bf9eb3c2def6c27"]
     data, _p = _fake_scene(monkeypatch, used_id=real.first_free_id + 2)
