@@ -2995,3 +2995,30 @@ def test_group_roll_names_the_card_rather_than_its_place(mk):
                             extra=[], group_roll=["1=any"])
     with pytest.raises(mk.Refused, match="there is no group 1"):
         mk.resolve_image_args(a2)
+
+
+# ---- PAD-254: a scratch folder that cannot hold symlinks -----------------------------------
+def test_tree_scratch_leaves_a_folder_that_refuses_symlinks(mk, monkeypatch, tmp_path):
+    """The build's scratch defaults to the output's folder; on an exFAT drive (/mnt/f) rdump
+    died at the first symlink of the games tree.  The tree then goes to the Linux side."""
+    out_dir = tmp_path / "exfat"
+    out_dir.mkdir()
+    linux = tmp_path / "linux"
+    linux.mkdir()
+    monkeypatch.setattr(mk, "LINUX_SCRATCH", str(linux))
+    monkeypatch.setattr(mk, "holds_symlinks", lambda d: os.path.abspath(d) != str(out_dir))
+    said = []
+    monkeypatch.setattr(mk, "say", lambda m: said.append(m))
+    d = mk.tree_scratch(str(out_dir), "mkmulticard.tree.")
+    assert os.path.dirname(d) == str(linux)
+    assert any("cannot hold symlinks" in m for m in said)
+    # a folder that takes symlinks keeps the tree, and says nothing
+    said.clear()
+    d2 = mk.tree_scratch(str(linux), "mkmulticard.tree.")
+    assert os.path.dirname(d2) == str(linux) and not said
+
+
+def test_holds_symlinks_leaves_no_probe_behind(mk, tmp_path):
+    mk.holds_symlinks(str(tmp_path))
+    assert os.listdir(tmp_path) == []
+    assert mk.holds_symlinks(str(tmp_path / "missing")) is False
