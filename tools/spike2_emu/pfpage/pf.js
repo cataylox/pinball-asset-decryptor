@@ -338,6 +338,13 @@ function startMain() {
   // ================================================== the artwork view
   function fieldView(main) {
     const V = S.view, D = S.dyn || {};
+    // the title's switch / lamp / coil totals (PAD-238): the same line the
+    // schematic's bar opens with, from the tables, so it shows before any write
+    if (V.bar) {
+      const bar = el("div", "pf-bar");
+      bar.append(el("div", "txt", V.bar));
+      main.append(bar);
+    }
     const wrap = el("div", "pf-stagewrap");
     const stage = el("div", "pf-stage" + (V.art ? "" : " noart"));
     if (V.art) {

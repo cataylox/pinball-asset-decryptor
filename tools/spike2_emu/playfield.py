@@ -1100,6 +1100,58 @@ def load_switch_list():
     return trough.load_list(os.path.join(TDIR, "switch_list.txt"))
 
 
+def inventory(switch_list=None, positioned=None, leds=None, fixtures=None,
+              coils=None):
+    """ONE LINE, BOTH VIEWS: how many switches, lamps and coils the title has
+    (PAD-238, from the PAD-81 list).
+
+    From the TABLES, never the wire, so it is on screen from the first frame -
+    boot is exactly when someone asks "did this title's tables load?", and the
+    status strips stay silent until the game writes. Both views call this so
+    one fact has one spelling. The optional arguments are what the Field view
+    PLACES on its artwork; the schematic places nothing and passes none.
+
+    ★ A ZERO IS NOT A COUNT. An empty switch_list.txt is a first run (the game
+    publishes it a few seconds in: "not known yet"); an empty device table
+    (`0 records`, 13 of the 32 titles here) names no lamps and no coils, and
+    no run will change that ("no lamp table"). Neither prints 0 - and on a
+    schematic title the LED grid, whose roster is the WIRE's (item 50), is the
+    other lamp number, so the table's is never passed off as the grid's.
+    """
+    def part(n, word, none, placed=None, *how):
+        if not n:
+            return none
+        notes = []
+        if placed is not None and placed != n:
+            notes.append("%d on the artwork" % placed)
+        notes += [h for h in how if h]
+        return "%d %s%s" % (n, word, " (%s)" % ", ".join(notes) if notes else "")
+
+    def count(xs):
+        return None if xs is None else len(xs)
+
+    if switch_list is None:
+        switch_list = load_switch_list()
+    # every LED row, ANY image and resolved or not: load_led_names() drops a
+    # lamp whose board is unknown (Bond's backbox group), which is still a
+    # lamp the title has. The TOPPERS are most of it on a title that has
+    # them (378 of godzilla_le's 515), so they are said, or the total reads
+    # as a mistake next to 83 inserts.
+    lamp_rows = [r for r in DEV_ROWS if r["kind"] == "led"]
+    topper = sum(1 for r in lamp_rows if "topper" in r["image"].lower())
+    all_coils = len(coilmap.load(os.path.join(TDIR or "", "device_xy.txt")))
+    # " · " and not spaces: the page collapses a run of spaces, and the
+    # three counts ran together into one sentence
+    return "%s: " % GAME + " · ".join([
+        part(len(switch_list) or count(positioned), "switches",
+             "switches not known yet", count(positioned)),
+        part(len(lamp_rows), "lamps", "no lamp table", count(leds),
+             "%d inserts" % len(fixtures) if fixtures else None,
+             "%d on toppers" % topper if topper else None),
+        part(all_coils, "coils", "no coil table", count(coils)),
+    ])
+
+
 def read_merged():
     """The whole merged switch array - what the GAME is being handed - or None.
 
@@ -3016,11 +3068,17 @@ class Field(LedRing):
             self.sw.set_rows(load_switch_list())
         self._sw_next = time.monotonic() + SWITCH_POLL_S
         self.status = ""
+        self._count()
+
+    def _count(self):
+        self.bar = inventory(positioned=self.switches, leds=self.leds,
+                             fixtures=self.fixtures, coils=self.coils)
 
     # ---- what the page draws ------------------------------------------------
     def spec(self):
         return {
             "kind": "field",
+            "bar": self.bar,
             "art": "art" if self.art else None,
             "base": list(self.base or (313, 710)),
             "fixtures": [[F["fid"], round(F["x"], 2), round(F["y"], 2)]
@@ -3063,6 +3121,7 @@ class Field(LedRing):
             self.sw.set_rows(load_switch_list())
         self.sw_rows = list(rows)
         self.make_trough()
+        self._count()
         return True
 
     def make_trough(self):
@@ -3374,12 +3433,12 @@ class Schematic:
         # addresses this rig has (SwitchWatch.addressable()).
         dead = sum(1 for sw in switches
                    if not (0 <= sw["id"] < padsw.MAX_ID))
-        note = ("  - click a row to close that switch" if not dead else
-                "  - %d of them cannot be read or clicked on this build "
+        note = (" - click a row to close that switch" if not dead else
+                " - %d of them cannot be read or clicked on this build "
                 "(their ids are past the %d this rig addresses)"
                 % (dead, padsw.MAX_ID))
-        self.bar = "%s: %d switches, no playfield artwork in this title%s" % (
-            GAME, len(switches), note)
+        self.bar = "%s - no playfield artwork in this title%s" % (
+            inventory(switch_list=switches), note)
         self.sw = SwitchWatch(switches,
                               every=round(1000.0 / POLL_MS / max(1.0, SW_HZ)))
         self._dot_drawn = {}
