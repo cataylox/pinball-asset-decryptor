@@ -4648,6 +4648,26 @@ int shim_ioctl(int fd, unsigned long req, ...)
  * The copy that fills this uses `sizeof nb_req`, so the size lives here alone. */
 static unsigned char nb_req[256];
 static int nb_req_len;
+
+/* PAD-237: a node board's motor status (cmd 52) reports that board's own
+ * switch inputs; see the reply builder. The inputs are the ones the last 0x11
+ * poll of the node was answered with, kept here rather than recomputed because
+ * sw_scan_bytes() counts owed closures and rip phases per call. */
+static unsigned char nb_motor_in[64][8];
+static unsigned char nb_motor_in_ok[64];
+static unsigned char nb_motor_cfg[64];
+
+static int nb_motor_on(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("PAD_NB_MOTOR");
+        v = (e && e[0] == '0') ? 0 : 1;
+    }
+    return v;
+}
+static void motor_note(const unsigned char *p, int n);
+static void motor_tick(unsigned nid);
 static int nb_log_budget = 400;
 static int nb_reply = 1;           /* 0 = stay silent, 1 = answer with zeros */
 
@@ -8546,6 +8566,165 @@ int pad_sw_level(unsigned id)
     sw_shm_merge();
     if (!sw_edged[id]) return -1;
     return sw_mrg[id] != 0;
+}
+
+/* ---- PAD-237: A NODE BOARD'S MOTOR, RUN TO ITS END STOPS ----------------
+ *
+ * The board runs the motor itself (see the cmd 52 reply): the game says "go
+ * to that end" and watches the board's own switch inputs for the answer. So
+ * this plays the car. cmd 51 names each end's STOP SWITCH by input bit
+ * (0x40|bit - payload[1] for cmd 53's end, payload[2] for cmd 54's), cmd 53 or
+ * 54 sends the motor there: the switch at the end it LEAVES opens at once,
+ * and the one at the end it is sent to closes PAD_MOTOR_MS later (default
+ * 600, inside the ~0.9 s the game waits before sending the move again - it
+ * re-sends while the car has not arrived, and every send is a screech).
+ *
+ * Which end is which is measured, not guessed: on john_wick_le a reply
+ * showing CAR MOTOR HOME made ended the cmd 53 retries and CAR MOTOR AWAY the
+ * cmd 54 ones. The car starts BETWEEN the stops, which is what a machine
+ * whose position is unknown reads as - the game homes it itself at boot.
+ *
+ * The edges go into the MERGE, the same answer the keyboard and the scripts
+ * write, tagged `m`: the game, the [sw] log and every padsw reader (the
+ * playfield window) see one switch state. Last edge wins as ever, so a human
+ * holding a stop switch still overrides the car until its next move.
+ *
+ * NOT MODELLED: the car's ball optos (front/hold/back). Nothing carries a
+ * ball into the car, so they stay open, which is a car with no ball in it. */
+#define NB_MOTORS 4
+
+struct nb_motor {
+    unsigned char cfg;          /* cmd 51 seen for this motor              */
+    signed char stop[2];        /* input bit per end: [0] cmd 53, [1] 54    */
+    signed char at;             /* the end it is at; -1 between             */
+    signed char going;          /* the end it is travelling to; -1 idle     */
+    unsigned long due;          /* pad_ms() it arrives                     */
+};
+static struct nb_motor nb_motors[64][NB_MOTORS];
+
+static unsigned long motor_ms(void)
+{
+    static long v = -1;
+    if (v < 0) {
+        const char *e = getenv("PAD_MOTOR_MS");
+        v = (e && *e) ? atoi(e) : 600;
+        if (v < 0) v = 0;
+    }
+    return (unsigned long)v;
+}
+
+/* The switch id behind (node, input bit), from the game's own table - the
+ * same walk sw_scan_bytes() makes in the other direction. 0 = none. */
+static unsigned motor_switch_id(unsigned nid, unsigned bit)
+{
+    unsigned st = tread(SW_STRUCT), n = tread(SW_COUNT), id;
+    if (!sw_ok(st) || n > 4096) return 0;
+    for (id = 1; id < n && id < 256; id++) {
+        const unsigned char *e = (const unsigned char *)(unsigned long)(st + id * 32);
+        if (e[20] == nid && *(const unsigned short *)(e + 18) == bit) return id;
+    }
+    return 0;
+}
+
+/* One edge into the merge, with the bookkeeping sw_shm_merge() does for its
+ * own - the latch owes a scan to a short closure, the node gets the news. */
+static void motor_switch(unsigned nid, int bit, int made)
+{
+    unsigned id, n;
+    if (bit < 0 || !sw_shm || sw_shm->magic != PADSW_MAGIC) return;
+    id = motor_switch_id(nid, (unsigned)bit);
+    if (!id) return;
+    sw_shm_merge();               /* settle the inputs' snapshots first */
+    made = made ? 1 : 0;
+    if (sw_mrg[id] == made) return;
+    sw_mrg[id] = (unsigned char)made;
+    sw_src[id] = 'm';
+    sw_edged[id] = 1;
+    if (nid < 64 && nb_news[nid] != 1) nb_news[nid] = 1;
+    if (made) {
+        sw_served[id] = 0;
+        sw_made_at[id] = pad_ms();
+    } else if (!sw_served[id] && sw_latch_on()) {
+        sw_owed[id] = (unsigned char)sw_latch_scans();
+        sw_shut_at[id] = pad_ms();
+    }
+    for (n = 0; n < 256; n++) sw_shm->mrg[n] = sw_mrg[n];
+    __sync_synchronize();
+    sw_shm->mrg_gen++;
+}
+
+static void motor_say(const char *s)
+{
+    static int budget = 400;
+    if (budget > 0) {
+        budget--;
+        logmsg(s);
+        if (!budget) logmsg("[motor] log budget spent\n");
+    }
+}
+
+static void motor_tick(unsigned nid)
+{
+    unsigned k;
+    if (nid >= 64 || !nb_motor_cfg[nid] || !nb_motor_on()) return;
+    for (k = 0; k < NB_MOTORS; k++) {
+        struct nb_motor *m = &nb_motors[nid][k];
+        if (!m->cfg || m->going < 0 || pad_ms() < m->due) continue;
+        motor_switch(nid, m->stop[(int)m->going], 1);
+        m->at = m->going;
+        m->going = -1;
+        {
+            char b[96];
+            snprintf(b, sizeof b, "[motor] %lu ms node %u motor %u arrived at "
+                     "end %d (input %d made)\n", pad_ms(), nid, k, m->at,
+                     m->stop[(int)m->at]);
+            motor_say(b);
+        }
+    }
+}
+
+/* On the WRITE, because cmd 51 asks for no reply (its reply-length byte is
+ * 00) and so never reaches the reply builder, which runs when the game reads. */
+static void motor_note(const unsigned char *p, int n)
+{
+    unsigned nid, k;
+    struct nb_motor *m;
+    char b[128];
+    if (n < 5 || !(p[0] & 0x80)) return;
+    if (p[2] != 0x51 && p[2] != 0x53 && p[2] != 0x54) return;
+    nid = (unsigned)p[0] & 0x3f;
+    k = p[3];
+    if (nid >= 64 || k >= NB_MOTORS) return;
+    m = &nb_motors[nid][k];
+    if (p[2] == 0x51) {
+        if (n < 7 || m->cfg) return;
+        m->cfg = 1;
+        m->stop[0] = (p[4] & 0x40) ? (signed char)(p[4] & 0x3f) : -1;
+        m->stop[1] = (p[5] & 0x40) ? (signed char)(p[5] & 0x3f) : -1;
+        m->at = -1;
+        m->going = -1;
+        nb_motor_cfg[nid] = 1;
+        snprintf(b, sizeof b, "[motor] node %u motor %u: cmd 53 stops on input "
+                 "%d, cmd 54 on input %d%s\n", nid, k, m->stop[0], m->stop[1],
+                 nb_motor_on() ? "" : " - PAD_NB_MOTOR=0, not answered");
+        motor_say(b);
+        return;
+    }
+    if (!m->cfg || !nb_motor_on()) return;
+    motor_tick(nid);
+    {
+        int end = p[2] == 0x53 ? 0 : 1;
+        if (m->going == end || (m->going < 0 && m->at == end)) return;
+        if (m->going < 0 && m->at >= 0)
+            motor_switch(nid, m->stop[(int)m->at], 0);   /* it leaves the stop */
+        m->at = -1;
+        m->going = (signed char)end;
+        m->due = pad_ms() + motor_ms();
+        snprintf(b, sizeof b, "[motor] %lu ms node %u motor %u sent to end %d "
+                 "(cmd %02x), arrives in %lu ms\n", pad_ms(), nid, k, end,
+                 p[2], motor_ms());
+        motor_say(b);
+    }
 }
 
 /* [sw] - every EDGE in the MERGED switch state, logged at the point the shim
@@ -12669,7 +12848,13 @@ long shim_read(int fd, void *b, unsigned long n)
                 unsigned nid = (unsigned)(nb_req[0] & 0x3f);
                 unsigned char bits[8];
                 if (nid < 64) nb_news[nid] = 0;    /* item 52: news delivered */
+                motor_tick(nid);                   /* PAD-237: a car arriving */
                 if (sw_scan_bytes(nid, bits)) {
+                    if (nid < 64) {            /* PAD-237: the motor status */
+                        unsigned q;
+                        for (q = 0; q < 8; q++) nb_motor_in[nid][q] = bits[q];
+                        nb_motor_in_ok[nid] = 1;
+                    }
                     /* Same trace as [cabchg], for the node bus half. A burst of
                      * 27 playfield switches was seen flipping together at 35 s
                      * with nothing injected, and the only way to tell "the shim
@@ -12812,6 +12997,67 @@ long shim_read(int fd, void *b, unsigned long n)
                  * pinnode-*-1_35_0.hex carries 01, ws2812node 05. */
                 p[10] = (unsigned char)var;
             }
+            /* ★ PAD-237: A NODE BOARD'S MOTOR STATUS CARRIES ITS OWN SWITCH
+             * INPUTS, and answering it with zeros is what kept john_wick_le's
+             * car screeching from ball start.
+             *
+             * The car is not a coil. It is a motor the NODE BOARD runs: cmd
+             * 51 configures motor 0 on node 9 once a second -
+             *     51 | 00 44 43 0f 00 00 00 d0 51 52 00 ...
+             * motor 0, stop switches 0x40|4 (CAR MOTOR HOME) and 0x40|3 (CAR
+             * MOTOR AWAY), outputs 0x50|0x80, 0x51, 0x52 - the LED-class
+             * device records CAR MOTOR ENABLE / CONTROL 1A / CONTROL 2A,
+             * which have no playfield position and so are in no table here.
+             * cmd 53 and 54 move it (`00 fa 14 c8 00`: motor, speed, accel,
+             * decel - the CAR MOTOR AWAY/HOME SPEED/ACCEL/DECEL adjustments),
+             * and cmd 52 `00` is polled every 50 ms for the result.
+             *
+             * MEASURED with PAD_NB_CREPLY on the 4-byte 52 reply (8 builds,
+             * 40 s from Start each): only BYTE 2 matters, and it reads as the
+             * board's inputs 0..7 - 0x08 (bit 3, AWAY) ends the 53 retries,
+             * 0x10 (bit 4, HOME) ends the 54 retries, 0x01 (bit 0, CAR FRONT
+             * OPTO: a ball at the car) stops the game moving it at all. With
+             * zeros the game re-sent the move every ~0.9 s for ever, and the
+             * tyre screech is the move's own sound.
+             *
+             * So byte 2 is the node's first switch byte as the last 0x11 poll
+             * of that node was answered - the same state the game reads as
+             * switches, so the two can never disagree - and only on a node the
+             * game has configured a motor on. What MOVES those switches is
+             * the motor model (motor_note / motor_tick); this is only the
+             * board telling the truth about them. PAD_NB_MOTOR=0 restores the
+             * zero reply and stops the model. */
+            if (nb_req_len > 3) {
+                unsigned nid = (unsigned)(nb_req[0] & 0x3f);
+                if (nb_req[2] == 0x52 && nid < 64 && plen >= 3 &&
+                    nb_motor_cfg[nid] && nb_motor_in_ok[nid] && nb_motor_on())
+                    p[2] = nb_motor_in[nid][0];
+            }
+            /* PAD_NB_CREPLY=<cmd>:<hex bytes>[,...] - ONE command's reply
+             * payload, byte for byte from payload[0] (PAD-237). PAD_NB_CFILL
+             * writes one value into every byte, which can say THAT a reply
+             * matters and never WHICH byte; this says which. Bytes past the
+             * given ones are left as they were. */
+            {
+                static char *spec = (char *)-1;
+                if (spec == (char *)-1) spec = getenv("PAD_NB_CREPLY");
+                if (spec && *spec && nb_req_len > 2) {
+                    char *q = spec;
+                    while (*q) {
+                        unsigned c = 0, k = 0;
+                        while (ishex(*q)) c = c * 16 + hexval(*q++);
+                        if (*q == ':') q++;
+                        while (ishex(q[0]) && ishex(q[1])) {
+                            if (c == nb_req[2] && k < (unsigned)plen)
+                                p[k] = (unsigned char)(hexval(q[0]) * 16 + hexval(q[1]));
+                            k++;
+                            q += 2;
+                        }
+                        while (*q && *q != ',') q++;
+                        while (*q == ',') q++;
+                    }
+                }
+            }
             for (i = 0; i + 2 < n; i++) sum += p[i];
             p[n - 2] = (unsigned char)((0u - sum) & 0xff);
             p[n - 1] = 0;
@@ -12928,6 +13174,7 @@ long shim_write(int fd, const void *b, unsigned long n)
         sw_find_maybe();
         led_publish(nb_req, nb_req_len);
         coil_publish(nb_req, nb_req_len);
+        motor_note(nb_req, nb_req_len);
         lcd_publish(nb_req, nb_req_len);        /* item 83: VILLAIN VISION */
         coil_probe(nb_req, nb_req_len);
         nb_trace();

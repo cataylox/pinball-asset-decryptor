@@ -131,6 +131,9 @@ struct padsw_shm {
      *   i  swinit.py                 f  a virtual-playfield click
      *   g  longplay.sh's gameplay    r  swreplay.py re-delivering a log
      *   b  ballfeed.py, answering the game's own trough eject
+     *   m  hwshim.c itself: a node board's MOTOR reaching an end stop
+     *      (PAD-237). Not a script - it writes the merge directly, so it
+     *      never appears in held[] or scr_held[], only in mrg[] and [sw]
      *   ?  nobody said
      *
      * THE ONE HONEST LIMIT: the shim attributes per MERGE, not per write. Two
