@@ -622,7 +622,17 @@ def test_image_info(tmp_path):
         assert w.call("extract.open_image_info") is False
         assert "File not found" in _titles(w)
         w.call("ui.set", "extract", "input", str(f))
+        # PAD-173: for the PICKED image the ⓘ now goes to Select card, where
+        # the same report already is, instead of collecting it again here.
         assert w.call("extract.open_image_info") is True
+        assert w.state("shell")["tab"] == "card"
+        assert w.state("extract")["info"] is None
+        # The window itself still serves everything else (a card in a reader,
+        # an Original that is not the picked card), so its own lifetime is
+        # tested through the call its remaining callers make.
+        svc = w.window.service("extract")
+        w.run(lambda: (setattr(svc, "_info_path", str(f)),
+                       svc._info_refresh()))
         _settle(w)
         info = w.state("extract")["info"]
         assert info["open"] and not info["loading"]
@@ -858,9 +868,11 @@ def test_page_info_windows_are_not_modal():
     win = body("FloatWin")
     assert 'aria-modal="false"' in win and "scrim" not in win
     assert "badge-i" not in src and "IBadge" not in src
-    # import + the card and project badges (the Select card tab shows the
-    # Image Info in place, under the card, so its picker has none)
-    assert src.count("InfoBadge") >= 3
+    # The import and the PROJECT badge, and no more: the card's own ⓘ went
+    # when Select card started showing that report under the card (PAD-173),
+    # so this page has one badge, for the project folder's stats.
+    assert src.count("InfoBadge") == 2
+    assert "open_image_info" not in src
 
 
 # ----------------------------------------------------- capture extras

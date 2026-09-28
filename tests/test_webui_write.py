@@ -541,15 +541,26 @@ def test_card_diagnostics_dialog(tmp_path, monkeypatch):
 def test_image_info_window(tmp_path):
     orig = tmp_path / "godzilla.img"
     orig.write_bytes(b"\0" * 512)
+    other = tmp_path / "somewhere-else.img"
+    other.write_bytes(b"\0" * 512)
     with web_app(tmp_path, mfr="stern") as w:
         w.call("ui.set", "extract", "input", str(orig))
+        # PAD-173: the Original mirrors the picked card, and Select card
+        # already shows that card's report - so the ⓘ goes there instead of
+        # collecting the same thing again in a window.
+        assert w.call("write.image_info") is True
+        assert w.state("shell")["tab"] == "card"
+        assert w.state("write")["info"] is None
+        # An Original that is NOT the picked card has nowhere else to be
+        # shown, and keeps the window.
+        w.run(lambda: w.window.write_upd_var.set(str(other)))
         assert w.call("write.image_info") is True
         assert wait_for(w, lambda: (w.state("write")["info"] or {})
                         .get("sections"))
         info = w.state("write")["info"]
-        assert info["path"] == os.path.normpath(str(orig))
+        assert info["path"] == os.path.normpath(str(other))
         text = w.call("write.image_info_copy")
-        assert "godzilla.img" in text
+        assert "somewhere-else.img" in text
         w.call("write.image_info_close")
         assert w.state("write")["info"] is None
 
