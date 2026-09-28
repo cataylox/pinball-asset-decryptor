@@ -2013,7 +2013,12 @@ HELP_CONTENT = {
          "reel that spins and settles, a picture file of your own, or "
          "nothing. It has its own music and confirm sound too. Press "
          "Select under the preview to see what the machine draws when the "
-         "card is chosen: the build the roll landed on, named."),
+         "card is chosen: the build the roll landed on, named. Its Games "
+         "box changes WHICH games it holds without removing the row: a "
+         "card with games of its own takes Add files… (several at "
+         "once) or Add folder…, and moves or removes them; one over "
+         "images already on the card ticks the ones it uses. It always "
+         "keeps at least two, and the change asks for a rebuild."),
         ("The tab, top to bottom",
          "One column, and it never rearranges itself under the window: the "
          "card path first, with From SD card…, Browse… and New card beside "
