@@ -81,9 +81,8 @@ boot sweep below.
   the car will wait for one that never comes, as they would have before.
 - **The drop target** on the same title: `DROP RESET` then `DROP TRIP` (node 9
   coils 8 and 6) fire in bursts of five pairs every ~3.3 s from Start, because
-  nothing moves `DROP TARGET OPTO`. Not the screech - but the same kind of
-  unanswered device. It stopped when a ball was held at the car's front
-  opto, so the game ties the two together somehow. Its own ticket.
+  nothing moves `DROP TARGET OPTO`. Answered in PAD-248 - see "The drop
+  target (PAD-248)" below.
 - **The motor's own status bits.** Bit 0 of byte 2 is CAR FRONT OPTO; no other
   byte of the 52 reply was seen to matter, and no busy or fault bit was
   looked for. If a title's board motor ever needs one, `PAD_NB_CREPLY` is the
@@ -129,3 +128,60 @@ eight with stop switches:
 
 Payload of cmd 53 / 54, from the two titles: motor, speed, accel, then a LE16
 (200 on john_wick = its DECEL (MS) adjustment; 1000 on the jetpack).
+
+## The drop target (PAD-248)
+
+john_wick_le 1.01.0, `motorcheck.sh` 40 s from Start with the car model on
+(its `c40i=` field now splits node 9's coil fires by index: 06 = DROP TRIP,
+08 = DROP RESET):
+
+| run | DROP fires |
+|---|---|
+| nothing held | 139 (06:69, 08:70) |
+| a ball held at CAR FRONT OPTO (77) | 138 |
+| DROP TARGET OPTO (81) held made | 0 |
+
+The burst on the wire: RESET, TRIP 100 ms later, five pairs 250 ms apart, a
+1.8 s pause, again. A game wanting the target UP has no reason to fire TRIP
+after every RESET, and the opto held made satisfies it, so the game is
+dropping the target and waiting for the opto to read MADE = down.
+
+The first RESET goes out 34 ms after the Start press: it is the game's own
+start-of-game drop, not a response to anything else in the rig.
+
+PAD-237's own sweeps disagree with each other: its `model` sweep read 140
+fires with nothing held and 0 with a ball at CAR FRONT OPTO (the ticket's
+"it stopped when a ball was held"), its `final` sweep the reverse - 0 with
+nothing held although a game started (BALL 1 on screen), 140 with the ball.
+Here, on the same card and model, three sweeps fired every time with or
+without the ball. So the car is not what decides it, and why those runs were
+not asked is NOT known; each rig slot keeps its own NVRAM, and a game that
+has given up on a device it logged as failing is the candidate, not a
+finding. None of that changes the answer: whenever the game drops the
+target, the opto now says so.
+
+`MOTOR_SETTLE` (seconds to wait after attract before Start, default 8) was
+added on the way: a first sweep of three rigs at once pressed Start while
+john_wick_le still showed its STANDARD GAME MODE card, no game started, and
+every count read 0. 45 starts a game every time.
+
+**The model** is `ballmodel.DropTarget`, run by the ball feeder (it already
+polls the coil counters at 50 Hz and writes switches): TRIP -> the switch goes
+to its down level `PAD_DROP_MS` (default 30) later, RESET -> the other level.
+A bank is matched by NAME (`ballmodel.DROP_BANKS`: DROP TRIP, DROP RESET,
+DROP TARGET OPTO), so only john_wick_le has one today. `PAD_DROP_TARGET=0`
+turns it off, `PAD_DROP_DOWN=0` flips the polarity.
+
+| run (model on unless said) | DROP fires |
+|---|---|
+| 40 s | 2 (one RESET, one TRIP; the feeder closes 81) |
+| 40 s, `PAD_DROP_DOWN=0` | 139 |
+| 40 s, a ball held at CAR FRONT OPTO | 2 |
+| 120 s | 2 |
+| 120 s, `PAD_DROP_TARGET=0` | 380 |
+
+Not done: other titles' trip/reset banks (deadpool's LIL DP 3 BANK, james
+bond 60th's 3 BANK INLINE) have their own switch names and were not seen to
+loop; they join DROP_BANKS when one is measured. The RESET half (target back
+up) is answered but was not provoked on the rig - nothing in 120 s of play
+asked for it.

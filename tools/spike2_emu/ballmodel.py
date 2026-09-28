@@ -284,6 +284,59 @@ class Van:
         return Plan(steps)
 
 
+#: ★ PAD-248: A DROP TARGET WITH A TRIP COIL AND A RESET COIL, read by one switch (John Wick LE: DROP TRIP,
+#: DROP RESET, DROP TARGET OPTO). MEASURED on the rig, 40 s from Start: with nothing moving the opto the game
+#: fires RESET then TRIP 100 ms later, five pairs 250 ms apart, a 1.8 s pause, again - 139 fires - and with
+#: the opto held MADE, none. So the game is dropping the target and waiting for the opto to say DOWN; TRIP
+#: after every RESET is what a game wanting it UP would never do. DOWN_LEVEL is that switch's level with the
+#: target down (PAD_DROP_DOWN flips it, for the measurement). The names are the only thing that makes a title
+#: a drop-target title, as with the van: a bank whose switches do not carry these names is not answered.
+DROP_BANKS = (
+    # (trip coil, reset coil, switch)
+    ("DROP TRIP", "DROP RESET", "DROP TARGET OPTO"),
+)
+DROP_DOWN_LEVEL = 0 if (os.environ.get("PAD_DROP_DOWN") or "1") == "0" else 1
+#: how long the target takes to fall or come up after its coil fires - well inside the 100 ms the game leaves
+#: between RESET and TRIP
+DROP_MOVE_S = float(os.environ.get("PAD_DROP_MS") or 30) / 1000.0
+
+
+class DropTarget:
+    """One drop target: TRIP knocks it down, RESET brings it up, and its switch says which. Like Van, the
+    state is the merged array's - a person clicking the switch moves the target as far as this is concerned."""
+
+    def __init__(self, trip, reset, switch, name, down_level=None):
+        self.trip = trip            # (node, index)
+        self.reset = reset
+        self.switch = switch        # switch id
+        self.name = name
+        self.down_level = DROP_DOWN_LEVEL if down_level is None else down_level
+
+    @classmethod
+    def from_names(cls, by_name, coil_address):
+        """Every DROP_BANKS bank this title has: {SWITCH NAME: id} and a name -> (node, index) or None lookup."""
+        out = []
+        for trip, reset, sw in DROP_BANKS:
+            t, r, i = coil_address(trip), coil_address(reset), by_name.get(sw)
+            if t is not None and r is not None and i is not None:
+                out.append(cls(t, r, i, sw))
+        return out
+
+    def down(self, mrg):
+        return bool(mrg[self.switch]) == bool(self.down_level)
+
+    def plan_fire(self, coil, mrg):
+        """`coil` ("trip" or "reset") fired: the target moves, unless it is already there (then no plan)."""
+        want_down = coil == "trip"
+        if self.down(mrg) == want_down:
+            return None
+        level = self.down_level if want_down else 1 - self.down_level
+        return Plan([("wait", DROP_MOVE_S, "the target moving"),
+                     ("set", self.switch, level, "%s (%d) %s (%s: the target is %s)"
+                      % (self.name, self.switch, "closed" if level else "opened",
+                         "DROP TRIP" if want_down else "DROP RESET", "down" if want_down else "up"))])
+
+
 def plan_eject(tr, mrg, lane_id=None, lane_made=False,
                flight_s=LANE_FLIGHT_S):
     """The game fired the trough eject. Answer it.

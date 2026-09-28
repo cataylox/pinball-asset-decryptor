@@ -11,8 +11,10 @@
 #
 # c53/c54 are the motor's move commands - the count that was 35/31 while
 # nothing answered john_wick_le's car and every send was a tyre screech, and
-# is 0 now. c40 is coil fires on the same node, which on john_wick_le is the
-# drop target cycling (see docs/plans/node_board_motor.md). It always passes
+# is 0 now. c40 is coil fires on the same node and c40i the same split by coil
+# index - on john_wick_le 06/08 are the drop target's TRIP/RESET, 139 in 40 s
+# with nothing answering it and 2 with the feeder's model (PAD-248,
+# docs/plans/node_board_motor.md). It always passes
 # when the run starts; the counts are the result. Knobs the sweeps varied
 # (PAD_NB_CREPLY, PAD_NB_CFILL, PAD_NB_MOTOR, PAD_MOTOR_MS) are passed in the
 # list's ENV and echoed on the verdict line so a results.tsv reads alone.
@@ -56,7 +58,11 @@ while :; do
         exit 1
     fi
 done
-sleep 8                               # let attract settle before touching it
+# Let attract settle before touching it. MOTOR_SETTLE (default 8 s) is a knob
+# because "attract" in status.sh is the first picture, and on a slow boot (a
+# card staged cold, three rigs at once) john_wick_le was still putting up its
+# STANDARD GAME MODE card 40 s later and ignored the Start press (PAD-248).
+sleep "${MOTOR_SETTLE:-8}"
 for kv in ${MOTOR_HOLD:-}; do
     python3 "$RIG/swhold.py" "${kv%%:*}" "${kv##*:}" > /dev/null
 done
@@ -67,6 +73,10 @@ S=$(tail -n +"$L0" "$GZ" | grep -a "^\[nbts\].*node=$NODE ")
 c53=$(grep -c 'cmd=53 ' <<<"$S")
 c54=$(grep -c 'cmd=54 ' <<<"$S")
 c40=$(grep -c 'cmd=40 ' <<<"$S")
+# ...and per coil index (byte 3 of the frame, `88 0b 40 <IDX> ...`), which on
+# john_wick_le tells DROP TRIP (06) from DROP RESET (08) - PAD-248.
+c40i=$(grep 'cmd=40 ' <<<"$S" | awk '{print substr($NF, 7, 2)}' | sort | uniq -c |
+       awk '{printf "%s%s:%s", (n++ ? "," : ""), $2, $1}')
 bash "$RIG/glshot.sh" "$PAD_LOGDIR/motorcheck.$KEY.png" > /dev/null 2>&1
 # The model's own account, into this build's log (rigbatch keeps the job's
 # output per build; the rig's game log is the next build's by the time anyone
@@ -74,10 +84,11 @@ bash "$RIG/glshot.sh" "$PAD_LOGDIR/motorcheck.$KEY.png" > /dev/null 2>&1
 grep -a '^\[motor\]' "$GZ" | head -30
 grep -E 'cmd=5[34] ' <<<"$S" | head -5
 grep -E 'cmd=5[34] ' <<<"$S" | tail -3
+grep -a -i 'drop t' "$PAD_LOGDIR/padball.log" 2>/dev/null | head -20     # PAD-248
 stop
 kill "$WPID" 2>/dev/null
 env=""
-for v in MOTOR_HOLD PAD_NB_CREPLY PAD_NB_CFILL PAD_NB_MOTOR PAD_MOTOR_MS; do
+for v in MOTOR_HOLD MOTOR_SETTLE PAD_NB_CREPLY PAD_NB_CFILL PAD_NB_MOTOR PAD_MOTOR_MS PAD_DROP_TARGET PAD_DROP_DOWN; do
     [ -n "${!v:-}" ] && env="$env $v=${!v}"
 done
-echo "VERDICT $KEY pass c53=$c53 c54=$c54 c40=$c40$env"
+echo "VERDICT $KEY pass c53=$c53 c54=$c54 c40=$c40 c40i=${c40i:--}$env"

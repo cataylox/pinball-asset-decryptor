@@ -535,6 +535,7 @@ def _feeder(ballfeed, tr, lane=62):
     f.van_stocked = True
     f.extra = f.extra_max = 0
     f.homebound = []
+    f.drops = []
     return f
 
 
@@ -939,3 +940,54 @@ def test_the_van_starts_with_its_resting_balls_once_the_trough_is_full(
     m = _block(padsw, *FULL)
     f.poll(m, _led(coilmap), 1.0)
     assert f.van_stocked and f.van.count(m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]) == ballmodel.VAN_STOCK
+
+
+# --- PAD-248: a drop target with a trip and a reset coil --------------------
+
+#: john_wick_le's, off its built tables: DROP TARGET OPTO is switch 81, DROP TRIP node 9 index 6, DROP RESET
+#: node 9 index 8
+JW_DROP = {"DROP TRIP": (9, 6), "DROP RESET": (9, 8)}
+
+
+def test_only_a_title_with_the_coils_and_the_switch_has_a_drop_target(ballmodel):
+    assert ballmodel.DropTarget.from_names({"DROP TARGET OPTO": 81}, JW_DROP.get)
+    assert ballmodel.DropTarget.from_names({"DROP TARGET OPTO": 81}, {"DROP TRIP": (9, 6)}.get) == []
+    assert ballmodel.DropTarget.from_names({"SHOOTER LANE": 69}, JW_DROP.get) == []
+    t, = ballmodel.DropTarget.from_names({"DROP TARGET OPTO": 81}, JW_DROP.get)
+    assert (t.trip, t.reset, t.switch) == ((9, 6), (9, 8), 81)
+
+
+def test_trip_makes_the_opto_and_reset_opens_it(ballmodel):
+    """Measured: the game fires RESET then TRIP and is satisfied once the opto reads MADE - so made is down."""
+    t, = ballmodel.DropTarget.from_names({"DROP TARGET OPTO": 81}, JW_DROP.get)
+    assert t.down_level == 1
+    assert t.plan_fire("trip", mrg_with()).switches() == [(81, 1)]
+    assert t.plan_fire("reset", mrg_with(81)).switches() == [(81, 0)]
+    assert t.plan_fire("trip", mrg_with(81)) is None             # already down
+    assert t.plan_fire("reset", mrg_with()) is None              # already up
+    flipped = ballmodel.DropTarget((9, 6), (9, 8), 81, "X", down_level=0)
+    assert flipped.plan_fire("trip", mrg_with(81)).switches() == [(81, 0)]
+
+
+def test_the_feeder_answers_the_games_reset_trip_burst(tmp_path, monkeypatch, tr, ballmodel, coilmap):
+    """The burst the rig measured: RESET, TRIP 100 ms later. Answered, the target ends down (opto made);
+    a later RESET brings it up. Nothing answers before the counters are seeded."""
+    ballfeed, padsw = _sw(tmp_path, monkeypatch)
+    f = _van_feeder(ballfeed, ballmodel, tr, monkeypatch, padsw)
+    f.van = None
+    monkeypatch.setattr(ballmodel, "DROP_MOVE_S", 0.0)
+    f.drops = ballmodel.DropTarget.from_names({"DROP TARGET OPTO": 81}, JW_DROP.get)
+    m = _block(padsw, *FULL)
+    d = _led(coilmap)
+    _fire(coilmap, d, 9, 6)                     # a run already going: seeds, moves nothing
+    f.poll(m, d, 1.0)
+    assert m[padsw.OFF_MRG + 81] == 0
+    _fire(coilmap, d, 9, 8)                     # RESET: already up
+    f.poll(m, d, 2.0)
+    assert m[padsw.OFF_MRG + 81] == 0
+    _fire(coilmap, d, 9, 6)                     # TRIP
+    f.poll(m, d, 2.1)
+    assert m[padsw.OFF_MRG + 81] == 1
+    _fire(coilmap, d, 9, 8)                     # RESET
+    f.poll(m, d, 3.0)
+    assert m[padsw.OFF_MRG + 81] == 0
