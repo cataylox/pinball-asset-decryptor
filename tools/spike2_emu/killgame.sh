@@ -280,8 +280,30 @@ sleep 1
 # next run cannot start at all, and the error names a transport nobody in this
 # rig has ever configured. If a mount here will not go, report it; do not reach
 # for kill.
-for m in "$PAD_CARDS/"*/; do
-    mountpoint -q "$m" 2>/dev/null || continue
+#
+# FROM /proc/self/mounts, NOT A GLOB OVER $PAD_CARDS (item 96). A card an
+# ordinary user mounted has no allow_other - cardmount.sh adds it for root
+# only, and /etc/fuse.conf leaves user_allow_other off - so FUSE refuses
+# everyone else, root included: the glob's `*/` could not stat the mountpoint,
+# matched nothing, and the whole pass was skipped, leaving "still running: 2"
+# and a WSL restart. The kernel's own list names every mount whatever its
+# permissions, and it is the source cardmount.sh's stale-mount test already
+# trusts. The path field is octal-escaped: a space is \040, a tab \011, a
+# backslash \134 (unescaped last, so an escaped backslash cannot start a
+# second escape). Only mounts DIRECTLY under the card folder, as the glob had.
+card_mounts() {
+    local p
+    p=$(readlink -f "$PAD_CARDS" 2>/dev/null) || p=$PAD_CARDS
+    awk -v p="${p%/}/" '{
+        m = $2
+        gsub(/\\040/, " ", m); gsub(/\\011/, "\t", m); gsub(/\\134/, "\\", m)
+        if (index(m, p) == 1) {
+            r = substr(m, length(p) + 1)
+            if (r != "" && r !~ /\//) print m
+        }
+    }' "${1:-/proc/self/mounts}" | sort -u
+}
+while IFS= read -r m; do
     if fusermount -u "$m" 2>/dev/null || fusermount3 -u "$m" 2>/dev/null \
        || umount "$m" 2>/dev/null; then
         rmdir "$m" 2>/dev/null
@@ -290,7 +312,7 @@ for m in "$PAD_CARDS/"*/; do
         echo "COULD NOT UNMOUNT $m - leave it mounted rather than killing fuse2fs;" >&2
         echo "  a killed daemon wedges the mountpoint and the next run cannot start." >&2
     fi
-done
+done < <(card_mounts)
 sleep 1
 
 # The board's run record (riglock.sh list, the app, the triage dashboard) says

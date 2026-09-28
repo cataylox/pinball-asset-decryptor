@@ -125,7 +125,7 @@ def test_the_unshare_wrapper_is_still_killed_and_still_later():
     kill = _code(_read("killgame.sh"))
     wrapper = kill.index("pkill -9 -f '^unshare (-r )?-m -p -f'")
     assert kill.index("bash -s $ROOT") < wrapper
-    assert wrapper < kill.index('for m in "$PAD_CARDS/"*/')
+    assert wrapper < kill.index("done < <(card_mounts)")
 
 
 def test_a_run_with_no_menu_tears_down_exactly_as_it_did():
