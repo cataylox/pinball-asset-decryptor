@@ -535,6 +535,7 @@ def _feeder(ballfeed, tr, lane=62):
     f.van_stocked = True
     f.extra = f.extra_max = 0
     f.homebound = []
+    f.drops = []
     return f
 
 
@@ -939,3 +940,96 @@ def test_the_van_starts_with_its_resting_balls_once_the_trough_is_full(
     m = _block(padsw, *FULL)
     f.poll(m, _led(coilmap), 1.0)
     assert f.van_stocked and f.van.count(m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]) == ballmodel.VAN_STOCK
+
+
+# --- PAD-248: drop target banks --------------------------------------------
+
+#: john_wick_le's, off its built tables: DROP TARGET OPTO is switch 81, DROP TRIP node 9 index 6, DROP RESET
+#: node 9 index 8
+JW_DROP = {"DROP TRIP": (9, 6), "DROP RESET": (9, 8)}
+
+
+def test_a_bank_needs_its_coils_and_every_switch(ballmodel):
+    B = ballmodel.DropBank
+    assert B.from_names({"DROP TARGET OPTO": 81}, JW_DROP.get)
+    assert B.from_names({"DROP TARGET OPTO": 81}, {"DROP TRIP": (9, 6)}.get) == []   # no reset coil
+    assert B.from_names({"DROP TARGET OPTO": 81}, {"DROP RESET": (9, 8)}.get) == []  # the named trip is missing
+    assert B.from_names({"SHOOTER LANE": 69}, JW_DROP.get) == []
+    t, = B.from_names({"DROP TARGET OPTO": 81}, JW_DROP.get)
+    assert (t.trip, t.reset, t.switches) == ((9, 6), (9, 8), [81])
+
+
+def test_one_coil_name_on_two_titles_matches_only_with_its_own_switches(ballmodel):
+    """"3 BANK DROP" is jaws_le's reset coil and metallica's - with different switches."""
+    coil = {"3 BANK DROP": (9, 1)}.get
+    jaws, = ballmodel.DropBank.from_names({"3 BANK BOT": 69, "3 BANK MID": 70, "3 BANK TOP": 71}, coil)
+    assert jaws.switches == [69, 70, 71] and jaws.trip is None
+    met, = ballmodel.DropBank.from_names({"DROP TGT- BOT": 48, "DROP TGT- MID": 49, "DROP TGT- TOP": 50}, coil)
+    assert met.switches == [48, 49, 50]
+    assert ballmodel.DropBank.from_names({"3 BANK BOT": 69, "3 BANK MID": 70}, coil) == []   # one missing
+
+
+def test_trip_makes_the_switches_and_reset_opens_them(ballmodel):
+    """Measured: john_wick_le fires RESET then TRIP and is satisfied once the opto reads MADE - so made is
+    down. A reset moves only the targets that are down."""
+    t, = ballmodel.DropBank.from_names({"DROP TARGET OPTO": 81}, JW_DROP.get)
+    assert t.down_level == 1
+    assert t.plan_fire("trip", mrg_with()).switches() == [(81, 1)]
+    assert t.plan_fire("reset", mrg_with(81)).switches() == [(81, 0)]
+    assert t.plan_fire("trip", mrg_with(81)) is None             # already down
+    assert t.plan_fire("reset", mrg_with()) is None              # already up
+    bank = ballmodel.DropBank(None, (9, 1), [69, 70, 71], ["B", "M", "T"])
+    assert bank.plan_fire("reset", mrg_with(69, 71)).switches() == [(69, 0), (71, 0)]
+    flipped = ballmodel.DropBank((9, 6), (9, 8), [81], ["X"], down_level=0)
+    assert flipped.plan_fire("trip", mrg_with(81)).switches() == [(81, 0)]
+
+
+def test_the_feeder_answers_the_games_reset_trip_burst(tmp_path, monkeypatch, tr, ballmodel, coilmap):
+    """The burst the rig measured: RESET, TRIP 100 ms later. Answered, the target ends down (opto made);
+    a later RESET brings it up. Nothing answers before the counters are seeded."""
+    ballfeed, padsw = _sw(tmp_path, monkeypatch)
+    f = _van_feeder(ballfeed, ballmodel, tr, monkeypatch, padsw)
+    f.van = None
+    monkeypatch.setattr(ballmodel, "DROP_MOVE_S", 0.0)
+    f.drops = ballmodel.DropBank.from_names({"DROP TARGET OPTO": 81}, JW_DROP.get)
+    m = _block(padsw, *FULL)
+    d = _led(coilmap)
+    _fire(coilmap, d, 9, 6)                     # a run already going: seeds, moves nothing
+    f.poll(m, d, 1.0)
+    assert m[padsw.OFF_MRG + 81] == 0
+    _fire(coilmap, d, 9, 8)                     # RESET: already up
+    f.poll(m, d, 2.0)
+    assert m[padsw.OFF_MRG + 81] == 0
+    _fire(coilmap, d, 9, 6)                     # TRIP
+    f.poll(m, d, 2.1)
+    assert m[padsw.OFF_MRG + 81] == 1
+    _fire(coilmap, d, 9, 8)                     # RESET
+    f.poll(m, d, 3.0)
+    assert m[padsw.OFF_MRG + 81] == 0
+
+
+def test_every_listed_bank_is_well_formed(ballmodel):
+    """Every DROP_BANKS row is well formed: names upper-case and trimmed (the feeder compares them that way,
+    so a lower-case one could never match) and no switch listed twice."""
+    for trip, reset, names in ballmodel.DROP_BANKS:
+        assert reset and names and len(set(names)) == len(names)
+        assert all(n == n.upper().strip() for n in names + ((trip,) if trip else ()) + (reset,))
+
+
+def test_coilcount_names_the_fires_busiest_first():
+    """motorcheck.sh's coils= field (PAD-248): cmd 40 fire frames by (node, index), names from the table,
+    everything else in the trace ignored."""
+    import coilcount
+    lines = ["[nbts] t=62143 node=9 cmd=40 len=14 890b4008ff060000000000001f00",
+             "[nbts] t=62243 node=9 cmd=40 len=14 890b4006ff060000000000002100",
+             "[nbts] t=62493 node=9 cmd=40 len=14 890b4008ff060000000000001f00",
+             "[nbts] t=62500 node=9 cmd=53 len=10 89075300fa14c8004700",
+             "[nbts] t=62600 node=8 cmd=40 len=14 880b4001ff000000000000002e00",
+             "[sw] 62109 ms +36l"]
+    c = coilcount.count(lines)
+    assert c == {(9, 8): 2, (9, 6): 1, (8, 1): 1}
+    names = {(9, 8): "DROP RESET", (9, 6): "DROP TRIP"}
+    assert coilcount.text(c, names) == "DROP_RESET=2,n8i1=1,DROP_TRIP=1"
+    assert coilcount.text(c, names, least=2) == "DROP_RESET=2"
+    assert coilcount.text({}, names) == "-"
+

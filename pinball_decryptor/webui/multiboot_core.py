@@ -1168,8 +1168,74 @@ def suggest_title(path, platform="stern"):
     """``turtles_pro-1_59_0.1987-upscaled.8G.sdcard.raw`` ->
     ``('turtles_pro-1_59_0', '1987-upscaled')``: the menu title and subtitle
     a fresh row starts with.  A suggestion, not a fact - the user renames.
-    A JJP ISO's name is the whole title (``CHAKAs LOTLJ V1.0 GNR LE 3.03``)."""
+    A JJP ISO's name is the whole title (``CHAKAs LOTLJ V1.0 GNR LE 3.03``).
+    A base card + edits folder (PAD-241) is the base's title with the
+    folder's name under it: the edits are what tell the song sets apart."""
+    sp = split_edits(path)
+    if sp:
+        return (backend_for(platform).suggest_title(sp[0])[0],
+                os.path.basename(os.path.normpath(sp[1])))
     return backend_for(platform).suggest_title(path)
+
+
+# ---------------------------------------------------------------------------
+# a base card + edits folder as an image (PAD-241)
+# ---------------------------------------------------------------------------
+
+#: What joins the two halves of such a source, in a row's path and on the
+#: tool's command line (tools/spike2_emu/editsource.py JOIN).
+EDITS_JOIN = "+"
+_editsource_mod = []
+
+
+def editsource():
+    """tools/spike2_emu/editsource.py - the one definition of the pair, its
+    split and its refusals, loaded from the rig's own directory so the tab
+    and mkmulticard can never disagree about what a pair is."""
+    if not _editsource_mod:
+        import importlib.util
+        # the package's own copy first: every installer ships tools/spike2_emu
+        # beside the package (as mode_project finds its ports), and the rig
+        # directory can be a different checkout
+        here = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)))), "tools", "spike2_emu", "editsource.py")
+        if not os.path.isfile(here):
+            here = os.path.join(rig_dir(), "editsource.py")
+        spec = importlib.util.spec_from_file_location("pad_editsource", here)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _editsource_mod.append(mod)
+    return _editsource_mod[0]
+
+
+def split_edits(path):
+    """``(base, edits)`` when *path* is a base card + edits folder, else None."""
+    p = (path or "").strip().strip('"')
+    if not p or EDITS_JOIN not in p:
+        return None
+    try:
+        return editsource().split(p)
+    except Exception:                                    # noqa: BLE001
+        return None
+
+
+def source_exists(path):
+    """A row's source is here to read: a card file, or a base card + edits
+    folder whose halves are both here."""
+    p = (path or "").strip().strip('"')
+    return bool(p) and (os.path.isfile(p) or split_edits(p) is not None)
+
+
+def member_title(path):
+    """A random card's game's name: its title - or, for a base card + edits,
+    the edits folder's name, since every set over one card shares its title."""
+    t, sub = suggest_title(path)
+    return sub if split_edits(path) else t
+
+
+def is_edits_row(row):
+    """A plain row, or a random card's game, that is a base card + edits."""
+    return any(split_edits(q) for q in row_paths(row))
 
 
 # ---------------------------------------------------------------------------
@@ -1185,6 +1251,9 @@ def wsl(path):
     path into something a tool will read, which is why the container mapping
     belongs here and not in each caller.
     """
+    sp = split_edits(path)
+    if sp:
+        return wsl(sp[0]) + EDITS_JOIN + wsl(sp[1])
     if _mac.enabled():
         return _mac.container_path(path) if path else path
     return _rig.wsl_path(path)
@@ -1195,6 +1264,13 @@ def host_path(path):
     ``D:/x`` on Windows, unchanged on a Linux desktop (and unchanged for a
     path that is not under /mnt/<drive>, a WSL home for one)."""
     p = (path or "").strip().replace("\\", "/")
+    # A BASE CARD + EDITS FOLDER comes back one half at a time: both are
+    # tool paths, and only the whole of each is one (PAD-241)
+    at = p.rfind(EDITS_JOIN + "/")
+    if at > 0:
+        pair = host_path(p[:at]) + EDITS_JOIN + host_path(p[at + 1:])
+        if split_edits(pair):
+            return pair
     if sys.platform == "win32":
         m = re.match(r"^/mnt/([a-zA-Z])(?=/|$)", p)
         if m:
@@ -2049,7 +2125,8 @@ def form_compact(form):
     holds once.  mkmulticard refuses parts/multi with a group outright; the tab
     ticks the box and disables it, so the reason is visible before the press
     rather than in a refusal after it (David, 2026-09-09)."""
-    return bool(form.compact) or any(is_group(r) for r in form.images)
+    return bool(form.compact) or any(is_group(r) or is_edits_row(r)
+                                     for r in form.images)
 
 
 def _media_image_args(form):
@@ -3920,7 +3997,7 @@ def rows_from_inspect(info):
             warnings.append("Image %d: this card does not record which %s "
                             "it was built from (%s)."
                             % (i, what, row.device or "no device"))
-        elif im.get("source_exists") is False or not os.path.isfile(row.path):
+        elif im.get("source_exists") is False or not source_exists(row.path):
             warnings.append("Image %d: %s is not on this machine - the menu "
                             "can still be changed, but the card cannot be "
                             "rebuilt here." % (i, row.path))
@@ -4452,7 +4529,7 @@ def status_checks(rows, path_state, loaded_card, menu=(), rebuild=(),
                          else "Image %d" % i)
                 if not q:
                     why = "%s has no file." % where
-                elif not loaded_card and not os.path.isfile(q):
+                elif not loaded_card and not source_exists(q):
                     why = "%s is not on this machine: %s" % (where, q)
                 elif keeping:
                     continue
@@ -5134,7 +5211,7 @@ def _cell_image(row):
         # its members.  Saying "(no source recorded)" about it read as a fault
         # (David, 2026-09-11), when the answer is simply the list of games.
         names = [os.path.basename(q) or "?" for q in row_paths(row)]
-        missing = sum(1 for q in row_paths(row) if not q or not os.path.isfile(q))
+        missing = sum(1 for q in row_paths(row) if not source_exists(q))
         shown = ", ".join(names[:3]) + (", …" if len(names) > 3 else "")
         return "rolls between %d game%s: %s%s" % (
             len(names), "" if len(names) == 1 else "s", shown,
@@ -5143,8 +5220,11 @@ def _cell_image(row):
     if not p:
         return "(no source recorded%s)" % (
             " - " + row.device if row.device else "")
-    if not os.path.isfile(p):
+    if not source_exists(p):
         return p + "   [not on this machine]"
+    sp = split_edits(p)
+    if sp:
+        return "%s  + edits in %s" % (sp[0], sp[1])
     return p
 
 
@@ -5462,7 +5542,7 @@ def list_title(row, index=0):
         # A GROUP ROW SAYS SO IN THE LIST.  Nothing else in this table can
         # tell one from a plain image, and "why does this card have no file"
         # is the first thing a person would otherwise ask.
-        missing = [q for q in row_paths(row) if not q or not os.path.isfile(q)]
+        missing = [q for q in row_paths(row) if not source_exists(q)]
         cell = "%s  (random, %d sets)" % (title or "image %d" % index,
                                           len(row.members))
         if missing:
@@ -5473,7 +5553,7 @@ def list_title(row, index=0):
         title = suggest_title(path)[0] if path else "image %d" % index
     if not path:
         return "%s  [no source recorded]" % title
-    if not os.path.isfile(path):
+    if not source_exists(path):
         return "%s  [not on this machine]" % title
     return title
 
@@ -7070,6 +7150,11 @@ class MultibootPanel:
         "card are near-identical, so on the older layouts each one would cost "
         "a full copy of the image. Stored once, forty song sets fit a 32 GB "
         "card. Remove the random group to turn this off.")
+    COMPACT_TIP_EDITS = (
+        "Compact build, and a base card + edits folder needs it: that image has "
+        "no games partition of its own to copy, only the base card's files with "
+        "the edited ones in their place - which the compact build writes file "
+        "by file. Remove it to turn this off.")
 
     def _compact_changed(self):
         """The compact tick moved: the size is a different question now
@@ -7378,7 +7463,7 @@ class MultibootPanel:
         # it for one said "not on this machine" about a list that was
         # entirely there.
         missing = [r for r in self._rows
-                   if not all(q and os.path.isfile(q) for q in row_paths(r))]
+                   if not all(source_exists(q) for q in row_paths(r))]
         if missing:
             return "missing", ("The images have to be on this machine to be measured."
                                if len(missing) < len(self._rows) else "")
@@ -7978,9 +8063,11 @@ class MultibootPanel:
     #: ``(label, method name)``.  Pure, so a test can ask what the row would
     #: show without popping a menu.
     ADD_ROW_CHOICES = (("Add image…", "_add_image"),
+                       ("Add base card + edits folder…", "_add_edits_image"),
                        ("Add random over the images above…", "_add_random_over_existing"),
                        ("Add random group…", "_add_group"),
-                       ("Add random group from folder…", "_add_group_folder"))
+                       ("Add random group from folder…", "_add_group_folder"),
+                       ("Add random group from edits folders…", "_add_group_edits"))
 
     def add_row_choices(self):
         """The add row's choices, as ``(label, method, enabled, why)``.
@@ -8024,6 +8111,89 @@ class MultibootPanel:
             filetypes=list(self._backend.image_types))
         if path:
             self.add_image(path)
+
+    # -- a base card + edits folder (PAD-241) --------------------------------
+    # A SONG SET WITHOUT A CARD OF ITS OWN.  Each one used to be built with
+    # Write, kept as a whole 8 GB .raw and added here; the Emulate tab's Try it
+    # already writes the lighter form - the edited files and a manifest naming
+    # the card they came from - and the compact build can take that over the
+    # stock card directly.
+
+    def _check_edits(self, base, edits):
+        """The pair's refusal in a sentence, or "" when it can be used."""
+        es = editsource()
+        try:
+            es.check(base, edits)
+        except es.EditsError as e:
+            return str(e)
+        return ""
+
+    def add_edits_image(self, base, edits):
+        """Append a base card + edits folder as one image.  Refused, with the
+        tool's own reason, when the folder was not made from that card."""
+        base = (base or "").strip().strip('"')
+        edits = (edits or "").strip().strip('"')
+        if not base or not edits:
+            return
+        if not self._rows:
+            self._error("Add the primary (stock) image first: the first image "
+                        "is copied whole, so it cannot be a base card + edits.")
+            return
+        why = self._check_edits(base, edits)
+        if why:
+            self._error(why)
+            return
+        self.add_image(editsource().join(base, edits))
+        self._sync_compact_lock()
+
+    def _pick_edits_base(self):
+        return filedialog.askopenfilename(
+            title="Pick the card image the edits were made from",
+            filetypes=list(self._backend.image_types))
+
+    def _add_edits_image(self):
+        base = self._pick_edits_base()
+        if not base:
+            return
+        edits = filedialog.askdirectory(
+            title="Pick the edits folder (the one the Emulate tab's Try it "
+                  "writes, holding overrides.json)")
+        if edits:
+            self.add_edits_image(base, edits)
+
+    def add_group_from_edits(self, base, folder):
+        """One random card of every edits folder directly inside *folder*
+        (each holding an ``overrides.json``), each over *base* - forty song
+        sets from one stock card and forty small folders.  A folder that was
+        not made from *base* stops the whole add, naming it."""
+        base = (base or "").strip().strip('"')
+        try:
+            names = sorted(n for n in os.listdir(folder) if os.path.isfile(
+                os.path.join(folder, n, editsource().MANIFEST)))
+        except OSError as e:
+            self._error("Cannot read %s: %s" % (folder, e))
+            return
+        if not names:
+            self._error("No edits folders in %s (each one holds an %s)."
+                        % (folder, editsource().MANIFEST))
+            return
+        for n in names:
+            why = self._check_edits(base, os.path.join(folder, n))
+            if why:
+                self._error(why)
+                return
+        self.add_group([editsource().join(base, os.path.join(folder, n))
+                        for n in names],
+                       title=os.path.basename(os.path.normpath(folder)).upper())
+
+    def _add_group_edits(self):
+        base = self._pick_edits_base()
+        if not base:
+            return
+        folder = filedialog.askdirectory(
+            title="Pick the folder whose sub-folders are the edits sets")
+        if folder:
+            self.add_group_from_edits(base, folder)
 
     def add_group(self, paths, title="", subtitle=""):
         """Append a GROUP card: one row the menu draws, several games behind it,
@@ -8071,7 +8241,7 @@ class MultibootPanel:
                 % (len(already), len(paths),
                    ", ".join(os.path.basename(q) for q in already[:3])))
             return
-        members = [MemberRow(path=q, title=suggest_title(q)[0]) for q in paths]
+        members = [MemberRow(path=q, title=member_title(q)) for q in paths]
         self._rows.append(set_group_media(
             ImageRow(path="", title=title or "RANDOM", subtitle=subtitle,
                      members=members, keep=keep, roll=ROLL_DEFAULT),
@@ -8193,7 +8363,7 @@ class MultibootPanel:
                         % (trees, MAX_TREES))
             return 0
         self._group_members_changed(i, row, list(row.members) + [
-            MemberRow(path=q, title=suggest_title(q)[0]) for q in new])
+            MemberRow(path=q, title=member_title(q)) for q in new])
         return len(new)
 
     def group_add_member_folder(self, folder):
@@ -8315,7 +8485,7 @@ class MultibootPanel:
         chk = getattr(self, "_compact_chk", None)
         if chk is None:
             return
-        locked = any(is_group(r) for r in self._rows)
+        locked = any(is_group(r) or is_edits_row(r) for r in self._rows)
         try:
             if locked:
                 self._compact_var.set(True)
@@ -8326,7 +8496,8 @@ class MultibootPanel:
             return
         tip = getattr(self, "_compact_tip", None)
         if tip is not None:
-            tip.text = self.COMPACT_TIP_GROUP if locked else self.COMPACT_TIP
+            tip.text = (self.COMPACT_TIP_GROUP if any(is_group(r) for r in self._rows)
+                        else self.COMPACT_TIP_EDITS if locked else self.COMPACT_TIP)
 
     def remove_image(self, i):
         """Remove row *i*, AND every random card's claim on the game it took
@@ -9481,7 +9652,7 @@ class MultibootPanel:
         # print a refusal into the Log nobody asked it to.  ``key[0]`` is
         # every GAME the card will carry, a random card's members included
         # (PAD-189), not one path per row.
-        if len(key[0]) < 1 or not all(p and os.path.isfile(p) for p in key[0]):
+        if len(key[0]) < 1 or not all(source_exists(p) for p in key[0]):
             return False
         form = self.form()
         # ...and, for a loaded card that carries a record, what an update
@@ -10128,7 +10299,7 @@ class MultibootPanel:
                             "this machine. Point the card at a picture file, "
                             "or make the change where the game is."
                             % (i, mi + 1, mp or "its image"))
-            elif prepare and not os.path.isfile((row.path or "").strip()):
+            elif prepare and not source_exists(row.path):
                 for what, spec in (("art", art_spec(row)),
                                    ("animation", anim_spec(row))):
                     if spec == "auto" or spec.startswith("auto@"):

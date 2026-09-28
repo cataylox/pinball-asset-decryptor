@@ -889,7 +889,8 @@ class WebMultibootPanel(_Base):
 
     def _pub_size(self, out):
         view = self._size_view
-        locked = any(mt.is_group(r) for r in self._rows)
+        grouped = any(mt.is_group(r) for r in self._rows)
+        locked = grouped or any(mt.is_edits_row(r) for r in self._rows)
         size = {"tip": self.SIZE_TIP}
         if not view or not view.get("known"):
             state, text = self._size_state()
@@ -925,7 +926,8 @@ class WebMultibootPanel(_Base):
                 tip=self.SIZE_TIP + "\n\n" + "\n".join(lines)
                 + ("\n\n" + view["why"] if view.get("why") else ""))
         out.update(size=size, compact_locked=locked,
-                   compact_tip=self.COMPACT_TIP_GROUP if locked
+                   compact_tip=self.COMPACT_TIP_GROUP if grouped
+                   else self.COMPACT_TIP_EDITS if locked
                    else self.COMPACT_TIP)
 
     def _pub_summary(self, out):

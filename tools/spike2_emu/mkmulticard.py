@@ -758,6 +758,7 @@ class Geometry:
 
     @classmethod
     def from_file(cls, path):
+        path = source_file(path)                 # a base card + edits folder: the base's table
         size = os.path.getsize(path)
         with open(path, "rb") as f:
             def read_sector(lba):
@@ -1011,6 +1012,7 @@ def parse_device(dev):
 def ext_used_bytes(path, offset):
     """(used bytes, total bytes) of the ext2/3/4 filesystem at `offset` in `path`, from its
     superblock alone (64-bit counts honoured).  Refused when there is no superblock there."""
+    path = source_file(path)
     with open(path, "rb") as f:
         f.seek(offset + 1024)
         sb = f.read(1024)
@@ -1050,7 +1052,7 @@ def multi_size_sectors(used_bytes):
     return size // SECTOR
 
 
-def resolve_layout(layout, n_extra, groups=None):
+def resolve_layout(layout, n_extra, groups=None, edits=0):
     """'auto' -> parts for one extra (or none), multi for two or more, store when a
     group exists.
 
@@ -1063,12 +1065,19 @@ def resolve_layout(layout, n_extra, groups=None):
     if layout not in LAYOUTS:
         raise Refused("--layout %r: choose one of %s" % (layout, "/".join(LAYOUTS)))
     n_members = sum(len(g["members"]) for g in (groups or []))
+    # A BASE CARD + EDITS FOLDER (PAD-241) has no games partition of its own to copy: its tree
+    # exists only as the base's with the edited files in place, which the store writes file
+    # by file and parts/multi (a partition copied verbatim, or rdump'd off one) cannot
+    if edits and layout in ("parts", "multi"):
+        raise Refused("--layout %s copies each image's games partition whole, and %d of these images are a "
+                      "base card + edits folder, which has none: build them with --layout store"
+                      % (layout, edits))
     if groups and layout in ("parts", "multi"):
         raise Refused("--layout %s cannot hold a group: its %d member(s) would each cost a full copy "
                       "of the image. The compact build (--layout store) stores what they share once."
                       % (layout, n_members))
     if layout == "auto":
-        if groups:
+        if groups or edits:
             return "store"
         return "multi" if n_extra >= 2 else "parts"
     return layout
@@ -1252,10 +1261,7 @@ class SourceChunks:
 
     def _reader(self, i):
         if i not in self._open:
-            _v, _s, ext4, _a = _stern_plugins()
-            f = open(self.paths[i], "rb")
-            part = source_part(self.paths[i])
-            r = ext4.Ext4Reader(f, part.start * SECTOR, part.count * SECTOR)
+            f, r = open_source(self.paths[i])
             tree = self.mans[i].tree
             if not tree.inodes:
                 for rel, kind, ino, _node in r.iter_tree(2):
@@ -1312,7 +1318,13 @@ def make_plan(primary, extras, layout="auto", multi_sectors=None, multi_src=None
     multi layout's p7 to the END of that Stern image size instead of its content-sized default,
     so later updates and added images have room without a re-layout; refused when the content
     does not fit the class.  The store layout (item 95) is sized by :func:`make_store_plan`."""
-    lay = resolve_layout(layout, len(extras), groups)
+    if edits_set(primary) is not None:
+        raise Refused("the primary (image 0) is copied onto the card partition by partition, so it must be a "
+                      "whole card image; %s is a base card + edits folder - put it after the primary"
+                      % _editsource().describe(primary))
+    for x in extras:
+        refuse_broken_pair(x)
+    lay = resolve_layout(layout, len(extras), groups, edits=count_edits(extras))
     if lay == "store":
         return make_store_plan(primary, extras, size_class, store_sectors, multi_subdirs, cache_dir, progress,
                                work_sectors=work_sectors)
@@ -2391,7 +2403,11 @@ def media_budget_refusal(media):
 
 
 def default_title(path):
-    """'turtles_pro-1_59_0.Release.8G.sdcard.raw' -> 'turtles_pro-1_59_0.Release'."""
+    """'turtles_pro-1_59_0.Release.8G.sdcard.raw' -> 'turtles_pro-1_59_0.Release'.  A base card +
+    edits folder (PAD-241) is named after the folder: the edits are what tell it apart."""
+    sp = _editsource().split(path) if path else None
+    if sp:
+        return os.path.basename(os.path.normpath(sp[1]))
     b = os.path.basename(path or "image")
     b = re.sub(r"\.(raw|img|bin|iso)$", "", b, flags=re.I)
     b = re.sub(r"\.\d+G\.sdcard$", "", b, flags=re.I)
@@ -2432,7 +2448,11 @@ def check_library_path(path):
 def check_output_path(path, inputs, force=False, must_exist=False):
     """Refuse an output the tool must never write.  Raises Refused with the reason."""
     n = _norm(check_library_path(path))
+    halves = []
     for inp in inputs:
+        sp = _editsource().split(inp) if inp else None
+        halves += list(sp) if sp else [inp]
+    for inp in halves:
         if not inp:
             continue
         same = _norm(inp) == n
@@ -2993,7 +3013,7 @@ def carries_modes(mode_set):
 def plan_mode_sets(sources):
     """[{name: (bytes, mode)}] per image, read off each SOURCE card's rootfs.  Image 0's is
     read too (to report it), though its set is already where its card put it."""
-    return [read_mode_set(p) if p and os.path.isfile(p) else {} for p in sources]
+    return [read_mode_set(source_file(p)) if p and os.path.isfile(source_file(p)) else {} for p in sources]
 
 
 def stage_mode_sets(mode_sets, stage):
@@ -3250,8 +3270,8 @@ def machine_volume_for(path, part, subdir=None):
     try:
         if part is None:
             raise Refused("no games partition located")
-        with open(path, "rb") as f:
-            r = ext4.Ext4Reader(f, part.start * SECTOR, part.count * SECTOR)
+        f, r = open_source(path, part)
+        with f:
             root = tree_root_inode(r, subdir)
             title, _gpath, _gino, gnode = tree_game(r, root)
             elf = r.read_file_bytes(gnode)
@@ -3570,6 +3590,81 @@ def _treesync():
         sys.path.insert(0, here)
     import treesync
     return treesync
+
+
+def _editsource():
+    """editsource.py beside this file (PAD-241: a base card + edits folder as an image)."""
+    _treesync()                                 # puts this directory on sys.path
+    import editsource
+    return editsource
+
+
+def edits_set(path):
+    """The checked EditsSet when `path` is a base card + edits folder (PAD-241), else None.
+    Every reason the pair cannot be used comes out as a Refused naming it."""
+    es_mod = _editsource()
+    try:
+        return es_mod.load(path)
+    except es_mod.EditsError as e:
+        raise Refused(str(e))
+
+
+def open_source(path, part=None):
+    """(file, reader) over a source's games partition: an Ext4Reader for a card, and for a
+    base card + edits folder (PAD-241) the base's reader with the edited files' bytes in
+    place (editsource.EditsReader).  `part` defaults to the source's p3.  The caller closes
+    the file."""
+    es = edits_set(path)
+    base = es.base if es is not None else path
+    if part is None:
+        part = source_part(base)
+    _v, _s, ext4, _a = _stern_plugins()
+    f = open(base, "rb")
+    try:
+        r = ext4.Ext4Reader(f, part.start * SECTOR, part.count * SECTOR)
+        if es is not None:
+            es_mod = _editsource()
+            try:
+                r = es_mod.EditsReader(r, es)
+            except es_mod.EditsError as e:
+                raise Refused(str(e))
+    except BaseException:
+        f.close()
+        raise
+    return f, r
+
+
+def refuse_broken_pair(spec):
+    """Refuse a source SPELLED as a base card + edits folder (a '+' and no file by that name)
+    whose halves are not both there, saying which - rather than the bare "no such file" the
+    table read would give for a name nobody has on disk."""
+    es_mod = _editsource()
+    if not es_mod.looks_like(spec) or es_mod.split(spec) is not None:
+        return
+    base, _sep, edits = spec.rpartition(es_mod.JOIN)
+    if not os.path.isfile(base):
+        raise Refused("%s: no such card image, and not a base card + edits folder either (no card at %s)"
+                      % (spec, base))
+    raise Refused("%s: %s is not an edits folder (it holds no %s - point at the folder the Emulate tab's "
+                  "Try it writes)" % (spec, edits, es_mod.MANIFEST))
+
+
+def count_edits(paths):
+    """How many of these sources are a base card + edits folder (PAD-241); each one is
+    checked on the way, so a pair that cannot be used is refused here, by name."""
+    return sum(1 for p in paths or () if edits_set(p) is not None)
+
+
+def source_file(path):
+    """The card FILE a source's tables and untouched bytes come from: the path itself, or a
+    base card + edits folder's base (PAD-241)."""
+    return _editsource().base_of(path)
+
+
+def source_exists(path):
+    """A source that can be read: a card file, or a base card + edits folder whose halves
+    are both there."""
+    return bool(path) and (os.path.isfile(path) or _editsource().split(path) is not None)
 
 
 def read_trees(card, ref=None):
@@ -4144,8 +4239,27 @@ def games_free(card, plan):
 
 
 def source_tree(path, cache_dir=None, progress=None):
-    """(SourceManifest, 'cached'|'hashed') of a SOURCE card's games tree (its p3 root)."""
+    """(SourceManifest, 'cached'|'hashed') of a SOURCE card's games tree (its p3 root).
+
+    A base card + edits folder (PAD-241) is the BASE's manifest - cached like any card's -
+    with the edited files re-described from the folder: only they are hashed, and their
+    digests are cached too (plan and build are separate runs of this tool)."""
     ts = _treesync()
+    es = edits_set(path)
+    if es is not None:
+        base_man, how = source_tree(es.base, cache_dir, progress)
+        try:
+            dcache = ts.cache_dir_for_write(cache_dir)
+        except OSError:
+            dcache = None
+        f, r = open_source(path)
+        try:
+            tree = _editsource().overlay_manifest(base_man.tree, r, es, ts.TreeManifest, ts.FileRec,
+                                                  cache_dir=dcache)
+        finally:
+            f.close()
+        return ts.SourceManifest(tree, ts.source_stamp(path), base_man.uuid, base_man.sub,
+                                 used_bytes=base_man.used_bytes), how
     part = source_part(path)
     return ts.source_manifest(path, part.start * SECTOR, part.count * SECTOR, root_ino=2, cache_dir=cache_dir,
                               progress=progress)
@@ -4437,14 +4551,13 @@ def build_store(plan, out, trees):
                 ops.mkdir(sub, 0o755, 0, 0)
             changes = ts.diff_tree(None, tree)
             deltas = (plan.store_deltas[i] if plan.store_deltas and i < len(plan.store_deltas) else None) or {}
-            with open(srcs[i], "rb") as f:
-                spart = source_part(srcs[i])
-                r = ext4.Ext4Reader(f, spart.start * SECTOR, spart.count * SECTOR)
+            f, r = open_source(srcs[i])
+            with f:
                 if not tree.inodes:                              # a cached manifest: find the inodes
                     for rel, kind, ino, _node in r.iter_tree(2):
                         if kind == "file":
                             tree.inodes[rel] = ino
-                PROGRESS.step("writing image %d (%s) into the store" % (i, os.path.basename(srcs[i])),
+                PROGRESS.step("writing image %d (%s) into the store" % (i, _editsource().describe(srcs[i])),
                               sum(c.size for c in changes if c.op == "write"))
                 stats = ts.apply_changes(ops, sub, changes, tree, ts.ReaderSource(r, tree), PROGRESS, store=True,
                                          deltas=deltas)
@@ -4846,7 +4959,7 @@ def trees_report(card, plan, rec, warnings):
     images = []
     for im in rec.images:
         changed = None
-        if im.stamp and im.stamp.get("path") and os.path.isfile(im.stamp["path"]):
+        if im.stamp and im.stamp.get("path") and source_exists(im.stamp["path"]):
             changed = not ts.stamps_equal(ts.source_stamp(im.stamp["path"]), im.stamp)
         images.append(collections.OrderedDict([
             ("index", im.index), ("device", im.device), ("files", len(im.tree.files)),
@@ -5020,7 +5133,7 @@ def _update_locked(a, ts, card, dry):
                       % (len(plan.trees), len(sources)))
     u = {"card": card, "layout": plan.layout, "dirty": dirty, "unrecorded": unrecorded, "sources": [], "files": [],
          "grow": None, "inject": False, "size": 0, "peak": 0, "free_after": 0, "fits": True, "notes": []}
-    missing = [p for p in sources if not os.path.isfile(p)]
+    missing = [p for p in sources if not source_exists(p)]
     if missing:
         for i, p in enumerate(sources):
             if p in missing:
@@ -5142,7 +5255,7 @@ def _update_locked(a, ts, card, dry):
     report_versions(versions, a.allow_version_mismatch)
     # PAD-226: the images' own modes follow the new list - when every source is here to read
     # them; otherwise the card's sets are left exactly as they are, and that is said
-    if all(p and os.path.isfile(p) for p in sources):
+    if all(source_exists(p) for p in sources):
         mode_sets = plan_mode_sets(sources)
         report_modes(mode_sets)
     else:
@@ -5356,11 +5469,8 @@ def _update_locked(a, ts, card, dry):
                 act = by_index[i]
                 prefix = "" if i == 0 else (act.new_sub or "")
                 tree, st, uuid, old_im = new_trees[i]
-                src_reader_ctx = open(sources[i], "rb")
+                src_reader_ctx, r = open_source(sources[i])
                 try:
-                    _v, _s, ext4, _a = _stern_plugins()
-                    spart = source_part(sources[i])
-                    r = ext4.Ext4Reader(src_reader_ctx, spart.start * SECTOR, spart.count * SECTOR)
                     if not tree.inodes:                              # a cached manifest: find the inodes
                         for rel, kind, ino, _node in r.iter_tree(2):
                             if kind == "file":
@@ -6455,9 +6565,8 @@ def read_tree(card, part, subdir=None):
       hex   the title directory's node firmware version - a different number (1.33.0 on TMNT
             1.59), never the game code version, so it is reported but never used as one.
     """
-    _v, _s, ext4, _adj = _stern_plugins()
-    with open(card, "rb") as f:
-        r = ext4.Ext4Reader(f, part.start * SECTOR, part.count * SECTOR)
+    f, r = open_source(card, part)               # a base card + edits folder reads its edits (PAD-241)
+    with f:
         root = tree_root_inode(r, subdir)
         title, gpath, _gino, gnode = tree_game(r, root)
         elf = r.read_file_bytes(gnode)                    # one read: the version AND the state
@@ -9024,7 +9133,7 @@ def main(argv=None):
     try:
         if a.cmd == "plan":
             meter = None
-            if resolve_layout(a.layout, len(a.extra)) == "store":
+            if resolve_layout(a.layout, len(a.extra), a.groups, edits=count_edits(a.extra)) == "store":
                 # the store plan HASHES every image (the first time; the cache answers after):
                 # the meter's lines are what the app's size strip shows meanwhile
                 PROGRESS.start(measure_total([a.primary] + list(a.extra)), "measuring")
@@ -9095,8 +9204,8 @@ def main(argv=None):
                 _stern_plugins()                                  # refuse up front, not after the copy
             for x, g in zip(plan.extras, plan.extra_geoms):
                 t2, s2, c2 = g.part(2)
-                same = md5_range(x, s2 * SECTOR, c2 * SECTOR) == md5_range(plan.primary, plan.prims[1].src_start * SECTOR, plan.prims[1].count * SECTOR)
-                say("extra %s rootfs (p2) == primary rootfs: %s" % (os.path.basename(x), "YES" if same else
+                same = md5_range(source_file(x), s2 * SECTOR, c2 * SECTOR) == md5_range(plan.primary, plan.prims[1].src_start * SECTOR, plan.prims[1].count * SECTOR)
+                say("extra %s rootfs (p2) == primary rootfs: %s" % (_editsource().describe(x), "YES" if same else
                     "NO - only its games partition is carried; its rootfs changes are NOT on this card"))
             t0 = time.monotonic()
             tmp = None
