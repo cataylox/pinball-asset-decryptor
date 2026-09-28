@@ -2355,7 +2355,9 @@ _IMAGE_INFO_SECTIONS = [
      "asset counts and the partition layout. Useful for telling firmware "
      "versions apart, comparing two releases, and reporting problems. Its "
      "Copy Report button puts a plain-text version on the clipboard, ready "
-     "to paste into a bug report."),
+     "to paste into a bug report. When the image is the card picked on the "
+     "Select card tab, the button takes you there instead, because the same "
+     "details already sit under the card on that tab."),
     ("Where its details come from",
      "Only from the image itself and its filename — or, for a card opened "
      "from the Extract tab's card row, from the card in the reader (there is "
