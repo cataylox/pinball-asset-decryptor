@@ -304,6 +304,7 @@ class TextScenesService(TreeEditMixin):
         self._rebuild = None
         self._tmp = None
         self._raise_n = 0
+        self._auto_tried = None
         self._tree_init()
         self._reset_state()
 
@@ -440,6 +441,29 @@ class TextScenesService(TreeEditMixin):
         self._text_changes = None
         self.set(hint=HINT if self._scenes else HINT_EMPTY)
         self._refresh_list(preselect, focus_text)
+        self._auto_trees()
+
+    def _auto_trees(self):
+        """PAD-251: a project extracted before the scene editor has previews but no
+        ``scene_tree.json``, and the window would quietly show the old preview.  When the
+        Extract tab's card is there, the trees are read off it now, in the background (the
+        same few seconds as Rebuild previews); the editor takes over when they land."""
+        if self._rebuild is not None or not self._scenes:
+            return
+        tex = os.path.join(self.assets_dir, "images", "scene_textures")
+        if os.path.isfile(os.path.join(tex, "scene_tree.json")):
+            return
+        if not os.path.isfile(os.path.join(tex, "radium_images.txt")):
+            return
+        card = self.card_image_path()
+        if not card or not os.path.isfile(card):
+            self.set(rebuild_msg="To edit the scenes, set the Extract tab's Input to this "
+                                 "project's card image and press Rebuild previews.")
+            return
+        if self._auto_tried == (self.assets_dir, card):
+            return                  # read once already (it failed: its message is showing)
+        self._auto_tried = (self.assets_dir, card)
+        self.rebuild(quiet=True)
 
     def _sorted_dirs(self):
         key = _SORT_KEYS.get(self._sort_col, _SORT_KEYS["#0"])
@@ -1556,9 +1580,11 @@ class TextScenesService(TreeEditMixin):
             return ""
 
     @rpc
-    def rebuild(self):
+    def rebuild(self, quiet=False):
         """Rebuild previews…: re-read the scene layouts off the card image
-        (a few seconds, one file rewritten); while it runs it cancels."""
+        (a few seconds, one file rewritten); while it runs it cancels.
+        *quiet* (the window's own first run, :meth:`_auto_trees`) says what happened in the
+        window instead of a message box."""
         if self._rebuild is not None:
             self._rebuild["cancel"] = True
             self.set(rebuild_msg="Stopping…")
@@ -1571,8 +1597,9 @@ class TextScenesService(TreeEditMixin):
                 "folder was extracted from — the scene layouts are read back "
                 "off the card.")
             return False
-        state = self._rebuild = {"cancel": False}
-        self.set(rebuilding=True, rebuild_msg="Reading the card…")
+        state = self._rebuild = {"cancel": False, "quiet": bool(quiet)}
+        self.set(rebuilding=True, rebuild_msg="Reading the scenes off the card for the "
+                                              "editor…" if quiet else "Reading the card…")
         assets = self.assets_dir
 
         def progress(cur, total, _d=""):
@@ -1612,6 +1639,10 @@ class TextScenesService(TreeEditMixin):
         if err is not None or not n:
             why = next((m for m, lvl in msgs if lvl == "warning"), None)
             self.set(rebuild_msg="Could not rebuild.")
+            if state.get("quiet"):
+                self.set(rebuild_msg="The scenes could not be read off the Extract tab's "
+                                     "card: " + (why or str(err or "") or "no scenes found"))
+                return
             compat.messagebox.showwarning(
                 "Rebuild previews", why or str(err or "")
                 or "No scene layouts could be read from that card image.")

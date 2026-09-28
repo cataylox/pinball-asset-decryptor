@@ -178,3 +178,42 @@ def test_a_scene_without_a_tree_keeps_the_old_preview(tmp_path):
         w.drain()
         assert not w.state("text_scenes").get("tree")
         w.call("text_scenes.close")
+
+
+def test_a_project_without_trees_gets_them_read_off_the_card(tmp_path, monkeypatch):
+    """A project extracted before the editor has previews but no scene_tree.json: the window
+    reads the trees off the Extract tab's card by itself (no card: it says how), instead of
+    quietly showing the old preview."""
+    from pinball_decryptor.plugins.stern import engine
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    man = _seed(folder)
+    tree_path = folder / "images" / "scene_textures" / "scene_tree.json"
+    os.remove(str(tree_path))
+    card = tmp_path / "card.raw"
+    card.write_bytes(b"\0" * 16)
+    calls = []
+
+    def fake_rebuild(image, assets, log=None, progress=None, cancel=None, **kw):
+        calls.append(image)
+        tree_path.write_text(json.dumps({CARD: man}), encoding="utf-8")
+        return 1
+
+    monkeypatch.setattr(engine, "rebuild_scene_layouts_from_card", fake_rebuild)
+    with web_app(tmp_path, mfr="stern") as w:
+        def _set(path):
+            w.window.write_assets_var.set(str(folder))
+            w.window.extract_input_var.set(path)
+        w.run(_set, "")
+        text = w.window.service("text")
+        assert w.run(text.open_scene_browser, str(folder)) is True
+        assert "Extract tab's Input" in w.state("text_scenes")["rebuild_msg"]
+        assert calls == []
+        w.call("text_scenes.close")
+
+        w.run(_set, str(card))
+        assert w.run(text.open_scene_browser, str(folder)) is True
+        assert _wait(w, lambda: calls == [str(card)] and not w.state("text_scenes")["rebuilding"])
+        w.call("text_scenes.select", "/g/scene1")
+        assert _wait(w, lambda: w.state("text_scenes").get("tree") is True)
+        w.call("text_scenes.close")

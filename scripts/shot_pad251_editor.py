@@ -46,7 +46,9 @@ def _serve(repo, scratch, project):
     with open(settings, "w", encoding="utf-8") as f:
         json.dump({"disclaimer_accepted": True, "last_manufacturer": "stern",
                    "manufacturers": {"stern": {"extract_output": project,
-                                               "write_assets": project}}}, f)
+                                               "write_assets": project,
+                                               "extract_input": os.environ.get(
+                                                   "PAD251_CARD", "")}}}, f)
     import site
     return webui_shot.start_server(
         settings, scratch, app_cmd=[sys.executable, launcher],
