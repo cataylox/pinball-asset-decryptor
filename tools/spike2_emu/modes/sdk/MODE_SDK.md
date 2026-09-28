@@ -1237,17 +1237,23 @@ A refusal (no game in play, a tilt, a port without the call) never stops the mod
 says `BALL SAVE: 10 s - the game refused, so none`. During one of the game's own multiballs the call
 only lengthens that multiball's save (the framework keeps the longer of the two).
 
-**What is measured (emulator-proven 2026-09-27, the app's rig, muted: `C:\tmp\pad_generic\bs\bs_e2e.sh`,
-one scripted game a build, driven by `bs_batch.sh`).** A mode file with `ball_save 10` and a 40 s clock,
-started by its trigger file once the game's own start-of-ball save had run out (a playfield switch pressed
-every 10 s for 30 s): `ball save: 10 s with 1 ball(s) in play: the game is saving`; a drain 3 s later was
-served back with no end of ball (still BALL 1 on the display, the mode still running), two shots scored on
-the saved ball, and a drain after the save ended the ball (`END (ball ended)`). The control, the same run
-with the `ball_save` line taken out, ended the ball on the first drain. Not measured: a machine; a mode's
-ball save beside the game's own multiball; two players.
+**What is measured (emulator-proven 2026-09-27 on 30 of the 36 shipped builds, rig slots, muted:
+`C:\tmp\pad_generic\bs\bs_job.sh` under `rigbatch.sh`, one scripted game a build and a CONTROL run of the
+same build with the `ball_save` line taken out).** A mode file with `ball_save 10`, started by its trigger
+file once the game's own start-of-ball save had run out (every playfield switch of the title pressed once,
+then a few of them every ~3 s for 60 s, since Stern timers pause after ~6 s with no playfield switch):
+`ball save: 10 s with 1 ball(s) in play: the game is saving`; a drain 3 s later was served back with no end
+of ball (still BALL 1, the mode still running), shots scored on the saved ball, and a drain after the save
+ended the ball (`END (ball ended)`). The control ended the ball on its first drain. A build counts only
+when both hold.
 
-`mode_project.BALL_SAVE_PROVEN` lists the builds where it was seen in the emulator, and the tab greys
-Ball save on any other build.
+Not proven, so greyed: Godzilla LE 1.16, Iron Maiden LE 1.16 and TMNT LE 1.59 (the save came back as asked,
+but a drain 40 s after it was given back too, so on those builds, at least in the rig, the save outlasts
+what was asked); Venom LE 1.07 (its control's first drain never ended the ball); Elvira 1.13 and Deadpool LE
+1.14 (no game started in the rig). Not measured anywhere: a machine; a mode's ball save beside the game's
+own multiball; two players.
+
+`mode_project.BALL_SAVE_PROVEN` lists the proven builds, and the tab greys Ball save on any other build.
 
 ## Ports: why your mode runs on any game
 
