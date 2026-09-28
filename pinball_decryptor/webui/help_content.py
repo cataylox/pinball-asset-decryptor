@@ -2027,8 +2027,9 @@ HELP_CONTENT = {
         ("A base card plus an edits folder",
          "A song set does not need a whole 8 GB card of its own. Add "
          "image or random… also offers Add base card + edits "
-         "folder…: the stock card plus the folder Try it wrote, and "
-         "only the edited files go on the card, with everything else read "
+         "folder…: the stock card plus a folder of the files a song "
+         "set changes, and only those files go on the card, with everything "
+         "else read "
          "from the base. Add random group from edits folders… takes one "
          "stock card and a folder of those sets - the jukebox card. Both "
          "check the pair before the row goes in and say why when they "
