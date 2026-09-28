@@ -3109,7 +3109,12 @@ def test_a_member_change_is_a_rebuild_not_a_menu_edit(tmp_path):
     assert diff_forms(before, after)[1] == []
     after.images[2].members = after.images[2].members[:2]
     _menu, rebuild = diff_forms(before, after)
-    assert rebuild, "dropping a member must ask for a build"
+    assert rebuild == ["the games in random card 2 changed"],         "dropping a member must ask for a build, and say which card"
+    # reordering its games is a rebuild too: they go on the card in order
+    moved, _ = _group_form(tmp_path)
+    moved.images[2].members = moved.images[2].members[::-1]
+    assert diff_forms(before, moved)[1] == [
+        "the games in random card 2 changed"]
     # ...and a title change on the same row is still only a menu edit
     same, _ = _group_form(tmp_path)
     same.images[2].title = "JUKEBOX 2"

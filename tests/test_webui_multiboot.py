@@ -545,6 +545,96 @@ def test_edit_random_card_how_it_picks(tmp_path):
         assert _panel(w)._rows[2].roll == "shuffle"
 
 
+def test_edit_random_card_changes_its_games(tmp_path):
+    """PAD-239: a random card's games are added, dropped and reordered from
+    Edit image…, and the change is a rebuild."""
+    import copy
+    from pinball_decryptor.webui import multiboot_core as mc
+    a = _raw(tmp_path, "a_pro-1_59_0.Release.8G.sdcard.raw")
+    songs = tmp_path / "songs"
+    songs.mkdir()
+    s1, s2, s3 = (_raw(songs, n) for n in ("s1.raw", "s2.raw", "s3.raw"))
+    more = tmp_path / "more"
+    more.mkdir()
+    s4 = _raw(more, "s4.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _add(w, a)
+        w.answers.append([s1, s2])
+        w.call("multiboot.add_choice", "_add_group")
+        panel = _panel(w)
+        before = copy.deepcopy(panel.form())
+        w.call("multiboot.cell_clicked", 1)
+        s = _st(w)
+        m = s["ed"]["members"]
+        assert not m["keep"] and [g["path"] for g in m["games"]] == [s1, s2]
+        assert "building the card again" in m["note"]
+        # Add files…: one new game in; the one already there is not doubled
+        w.answers.append([s2, s3])
+        assert w.call("multiboot.member_add") is True
+        asked = w.asked[-1]
+        assert asked["mode"] == "open" and asked["multiple"]
+        s = _st(w)
+        assert [g["path"] for g in s["ed"]["members"]["games"]] == [s1, s2, s3]
+        assert s["ed"]["title"] == "Edit random card 1 — 3 games"
+        # ...and a game already on the card as its own image is refused
+        w.answers.append([a])
+        assert w.call("multiboot.member_add") is False
+        assert len(panel._rows[1].members) == 3
+        # Add folder…: every .raw in it
+        w.answers.append(str(more))
+        assert w.call("multiboot.member_add_folder") is True
+        # reorder, then drop
+        assert w.call("multiboot.member_move", 3, -1) is True
+        assert w.call("multiboot.member_move", 0, -1) is False
+        assert w.call("multiboot.member_remove", 0) is True
+        assert mc.row_paths(panel._rows[1]) == [s2, s4, s3]
+        # Cancel puts the games back the way they were
+        w.call("multiboot.edit_cancel")
+        assert mc.row_paths(panel._rows[1]) == [s1, s2]
+        # OK keeps them; the last two cannot be removed
+        w.call("multiboot.edit", 1)
+        assert w.call("multiboot.member_remove", 0) is False
+        w.answers.append([s3])
+        w.call("multiboot.member_add")
+        w.call("multiboot.member_move", 2, -1)
+        w.call("multiboot.edit_ok")
+        s = _st(w)
+        assert s["dlg"] is None and s["ed"] is None
+        assert mc.row_paths(panel._rows[1]) == [s1, s3, s2]
+        assert mc.validate_form(panel.form()) == []
+        menu, rebuild = mc.diff_forms(before, panel.form())
+        assert rebuild == ["the games in random card 1 changed"]
+        assert menu == []
+
+
+def test_edit_random_card_over_the_cards_images_ticks_them(tmp_path):
+    """PAD-239: a random card over images already on the card ticks which of
+    them it rolls between, in card order; it cannot be reordered."""
+    from pinball_decryptor.webui import multiboot_core as mc
+    paths = [_raw(tmp_path, "%s_pro-1_59_0.Release.8G.sdcard.raw" % n)
+             for n in "abc"]
+    with web_app(tmp_path, mfr="stern") as w:
+        for p in paths:
+            _add(w, p)
+        w.call("multiboot.add_choice", "_add_random_over_existing")
+        panel = _panel(w)
+        w.call("multiboot.cell_clicked", 3)
+        m = _st(w)["ed"]["members"]
+        assert m["keep"] and [c["on"] for c in m["choices"]] == [True] * 3
+        assert w.call("multiboot.member_keep", paths[1], False) is True
+        assert mc.row_paths(panel._rows[3]) == [paths[0], paths[2]]
+        # two left: the last two stay
+        assert w.call("multiboot.member_keep", paths[0], False) is False
+        assert w.call("multiboot.member_move", 0, 1) is False
+        # ticked back, it goes where the card has it
+        assert w.call("multiboot.member_keep", paths[1], True) is True
+        assert mc.row_paths(panel._rows[3]) == paths
+        m = _st(w)["ed"]["members"]
+        assert [c["on"] for c in m["choices"]] == [True] * 3
+        w.call("multiboot.edit_ok")
+        assert mc.validate_form(panel.form()) == []
+
+
 def test_picture_browse_picks_the_option(tmp_path):
     a = _raw(tmp_path, "a_pro-1_59_0.Release.8G.sdcard.raw")
     pic = tmp_path / "logo.png"

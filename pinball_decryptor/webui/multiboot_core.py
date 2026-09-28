@@ -4160,8 +4160,19 @@ def diff_forms(before, after):
                                              "" if len(b_keys) == 1 else "s",
                                              len(a_keys)))
     elif b_keys != a_keys:
-        rebuild.append("reordered" if sorted(b_keys) == sorted(a_keys)
-                       else "an image was replaced")
+        # A RANDOM CARD WHOSE GAMES CHANGED (PAD-239) is still the same card
+        # in the same place; "an image was replaced" would send somebody
+        # looking for a row they did not touch.
+        regrouped = [i for i, (b, a) in enumerate(zip(before.images,
+                                                      after.images))
+                     if b_keys[i] != a_keys[i] and is_group(b) and is_group(a)]
+        if regrouped and all(b_keys[i] == a_keys[i] or i in regrouped
+                             for i in range(len(a_keys))):
+            rebuild.extend("the games in random card %d changed" % i
+                           for i in regrouped)
+        else:
+            rebuild.append("reordered" if sorted(b_keys) == sorted(a_keys)
+                           else "an image was replaced")
     if bool(before.compact) != bool(after.compact):
         # the card's layout is not a menu field: only a build changes it
         rebuild.append("compact layout %s" % ("on" if after.compact else "off"))
@@ -5946,6 +5957,15 @@ class ImageEditorDialog(_PageDialog):
                  "every game once before any of them comes round again, and "
                  "picks up where it left off. It never gives you the one it "
                  "just booted either, so the tick is greyed on for it.")
+
+    #: Under the Members box (PAD-239).  A change here is a REBUILD, not a
+    #: menu edit: the games are what the card carries.
+    MEMBERS_NOTE = ("These games go on the card in this order, and the card "
+                    "boots one of them. Changing them means building the "
+                    "card again; updating the menu alone cannot.")
+    MEMBERS_KEEP_NOTE = ("Tick the images on this card that this one rolls "
+                         "between. They keep their own cards in the menu "
+                         "too. Changing them means building the card again.")
 
     #: What the two file rows browse for.
     FILETYPES = {"picture": [("Pictures", "*.png *.jpg *.jpeg")],
@@ -8117,6 +8137,175 @@ class MultibootPanel:
             title="Pick a folder of card images for one random card")
         if folder:
             self.add_group_from_folder(folder)
+
+    # -- a random card's games, from Edit image… (PAD-239) -----------------
+    # THE MIDDLE OF A GROUP'S LIFE.  A group could be added and removed whole,
+    # and the only way to change its games was to do both (item 110).  These
+    # are the Members section of the dialog.  Each one gives the row a NEW
+    # list rather than editing the old one: the dialog's Cancel puts back a
+    # shallow copy of the row, which shares the list it was copied from.
+
+    def _dialog_group(self):
+        """``(index, row)`` of the random card the open Edit image… is
+        editing, or ``(None, None)``."""
+        i = getattr(self._image_dialog, "_index", None)
+        if i is None or not 0 <= i < len(self._rows) \
+                or not is_group(self._rows[i]):
+            return None, None
+        return i, self._rows[i]
+
+    def group_add_members(self, paths):
+        """Add *paths* to the open random card's games -> how many went in.
+        A game already in it is left where it is; a game on another row of
+        the card is refused, as Add group… refuses it."""
+        i, row = self._dialog_group()
+        if row is None or row.keep:
+            return 0
+        paths = [(q or "").strip().strip('"') for q in (paths or [])]
+        have = {_norm(m.path or "") for m in row.members}
+        new, seen = [], set()
+        for q in paths:
+            if q and _norm(q) not in have and _norm(q) not in seen:
+                seen.add(_norm(q))
+                new.append(q)
+        if not new:
+            if paths:
+                self._ok("Those games are already in this random card.")
+            return 0
+        elsewhere = {}
+        for ri, r in enumerate(self._rows):
+            if ri == i or (is_group(r) and r.keep):
+                continue
+            for q in row_paths(r):
+                elsewhere.setdefault(_norm(q), ri)
+        taken = [q for q in new if _norm(q) in elsewhere]
+        if taken:
+            self._error(
+                "%d of these games are already on the card as image%s %s (%s). "
+                "A game is on a card once: remove it there first."
+                % (len(taken), "" if len(taken) == 1 else "s",
+                   ", ".join(str(elsewhere[_norm(q)]) for q in taken[:3]),
+                   ", ".join(os.path.basename(q) for q in taken[:3])))
+            return 0
+        trees = len(form_trees(self.form())) + len(new)
+        if trees > MAX_TREES:
+            self._error("That would be %d games; at most %d fit one card."
+                        % (trees, MAX_TREES))
+            return 0
+        self._group_members_changed(i, row, list(row.members) + [
+            MemberRow(path=q, title=suggest_title(q)[0]) for q in new])
+        return len(new)
+
+    def group_add_member_folder(self, folder):
+        """Every ``*.raw`` in *folder*, sorted, into the open random card -
+        Add group from folder…'s rule."""
+        try:
+            names = sorted(n for n in os.listdir(folder)
+                           if n.lower().endswith((".raw", ".img")))
+        except OSError as e:
+            self._error("Cannot read %s: %s" % (folder, e))
+            return 0
+        if not names:
+            self._error("No .raw card images in %s." % folder)
+            return 0
+        return self.group_add_members([os.path.join(folder, n)
+                                       for n in names])
+
+    def group_remove_member(self, mi):
+        """Drop game *mi* from the open random card.  A random card needs
+        two games to roll between, so the last two stay: remove the row."""
+        i, row = self._dialog_group()
+        if row is None or not 0 <= mi < len(row.members):
+            return False
+        if len(row.members) <= 2:
+            self._error("A random card needs at least two games to choose "
+                        "between. To get rid of it, remove the whole row.")
+            return False
+        self._group_members_changed(
+            i, row, [m for k, m in enumerate(row.members) if k != mi])
+        return True
+
+    def group_move_member(self, mi, delta):
+        """Move game *mi* of the open random card up (-1) or down (+1).  Its
+        games go on the card in this order.  A card that keeps its games'
+        own cards has no order of its own: the rows above set it."""
+        i, row = self._dialog_group()
+        if row is None or row.keep:
+            return False
+        to = mi + delta
+        if not (0 <= mi < len(row.members) and 0 <= to < len(row.members)):
+            return False
+        members = list(row.members)
+        members[mi], members[to] = members[to], members[mi]
+        self._group_members_changed(i, row, members)
+        return True
+
+    def group_keep_choices(self):
+        """For a random card over images already on the card: every plain
+        image it could roll between, ``[(path, title, in_it), ...]`` in
+        card order."""
+        _i, row = self._dialog_group()
+        if row is None or not row.keep:
+            return []
+        have = {_norm(m.path or "") for m in row.members}
+        out, seen = [], set()
+        for r in self._rows:
+            if is_group(r):
+                continue
+            p = (r.path or "").strip().strip(chr(34))
+            if not p or _norm(p) in seen:
+                continue
+            seen.add(_norm(p))
+            out.append((p, (r.title or "").strip()
+                        or os.path.basename(p), _norm(p) in have))
+        return out
+
+    def group_keep_set(self, path, on):
+        """Tick or untick one of the card's images in the open random card
+        that rolls between them.  Its games stay in card order."""
+        i, row = self._dialog_group()
+        if row is None or not row.keep:
+            return False
+        key = _norm((path or "").strip().strip('"'))
+        was = {_norm(m.path or ""): m for m in row.members}
+        if bool(on) == (key in was):
+            return False
+        if not on and len(row.members) <= 2:
+            self._error("A random card needs at least two games to choose "
+                        "between. To get rid of it, remove the whole row.")
+            return False
+        members = []
+        for r in self._rows:
+            if is_group(r):
+                continue
+            p = (r.path or "").strip().strip(chr(34))
+            k = _norm(p) if p else ""
+            if not k or any(_norm(m.path or "") == k for m in members):
+                continue
+            if k in was and k != key:
+                members.append(was[k])
+            elif k == key and on:
+                members.append(MemberRow(path=p, title=(r.title or "").strip(),
+                                         version=r.version))
+        self._group_members_changed(i, row, members)
+        return True
+
+    def _group_members_changed(self, i, row, members):
+        """Row *i* <- *members*, and everything that shows the row follows:
+        its line in the table, the edit status (a member change is a
+        rebuild, :func:`_row_key`), the preview and the dialog."""
+        row.members = members
+        table = getattr(self, "_table", None)
+        if table is not None:
+            table.set_row(i, self._values(i, row))
+        self._update_edit_status()
+        self._update_row_label()
+        self._sync_image_preview()
+        self.schedule_preview()
+        hook = getattr(self._image_dialog, "sync_members", None)
+        if hook is not None:
+            hook()
+        self._ok("")
 
     def _sync_compact_lock(self):
         """A group forces the compact build, so the tick goes on and greys out
