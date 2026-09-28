@@ -82,19 +82,20 @@ function Divider({ k, horizontal, measure, split, setSplit, save, dir = 1, label
     onDblClick=${reset} onKeyDown=${key}><span></span></div>`;
 }
 
-// The page head's buttons (Save preview…, Save all previews…, Rebuild previews…).
+// The page head's buttons (Export picture…, Export all pictures…, Re-read from card…): none of
+// them is needed to keep an edit (edits are kept as they are made; Write puts them on the card).
 export function ScenesActions() {
   const s = useNs("text_scenes");
   if (!s.alive) return null;
   const tips = s.tips || {};
   return html`
     ${s.rebuild_msg ? html`<span class="small muted scenes-msg-head">${s.rebuild_msg}</span>` : null}
-    <${Button} disabled=${!s.can_save && !s.exporting} title=${tips.save}
-      onClick=${() => call("text_scenes.save_preview")}>${s.exporting ? "Cancel" : "Save preview…"}<//>
+    <${Button} kind="ghost" icon="download" disabled=${!s.can_save && !s.exporting} title=${tips.save}
+      onClick=${() => call("text_scenes.save_preview")}>${s.exporting ? "Cancel" : "Export picture…"}<//>
     <${Button} kind="ghost" title=${tips.save_all} disabled=${!(s.scenes || []).length && !s.bulk}
-      onClick=${() => call("text_scenes.save_all")}>${s.bulk ? "Cancel" : "Save all previews…"}<//>
+      onClick=${() => call("text_scenes.save_all")}>${s.bulk ? "Cancel" : "Export all pictures…"}<//>
     <${Button} kind="ghost" icon=${s.rebuilding ? "x" : "refresh"} title=${tips.rebuild}
-      onClick=${() => call("text_scenes.rebuild")}>${s.rebuilding ? "Cancel" : "Rebuild previews…"}<//>`;
+      onClick=${() => call("text_scenes.rebuild")}>${s.rebuilding ? "Cancel" : "Re-read from card…"}<//>`;
 }
 
 export function ScenesPage() {
@@ -704,9 +705,22 @@ function TreeActions({ t }) {
     <span class="tree-actions-sep"></span>
     <${Button} size="sm" kind="ghost" icon="undo" disabled=${!t.edits} title="Undo the last edit in this scene (Ctrl+Z)"
       onClick=${() => call("text_scenes.tree_undo")}>Undo<//>
-    <${Button} size="sm" kind="ghost" disabled=${!t.edits} title="Put this scene back the way the game shipped it"
-      onClick=${() => call("text_scenes.tree_clear")}>As shipped<//>
-    ${t.edits ? html`<span class="small muted nw" title="Write puts them on the card">${t.edits} edit${t.edits === 1 ? "" : "s"}, not built yet</span>` : null}
+    <${Button} size="sm" kind="ghost" iconRight="down" disabled=${!t.edits && !t.all_edits}
+      title="Put this scene (or every scene) back: as the last Write left it, or as the game shipped it"
+      onClick=${(e) => openMenu(e.currentTarget, [
+        { label: "Back to the last Write (this scene)", icon: "undo", disabled: t.built !== "changed",
+          title: t.built === "none" ? "No Write has been made from this project folder yet."
+            : t.built === "same" ? "Nothing in this scene has changed since the last Write."
+            : "Drop every edit made to this scene since the last Write put it on a card.",
+          onClick: () => call("text_scenes.tree_revert_built") },
+        { label: "As shipped (this scene)", icon: "refresh", disabled: !t.edits,
+          title: "Put this scene back the way the game shipped it.", onClick: () => call("text_scenes.tree_clear") },
+        { sep: true },
+        { label: "As shipped (every scene)…", icon: "trash", disabled: !t.all_edits,
+          title: "Put every scene in this project back the way the game shipped it.",
+          onClick: () => call("text_scenes.tree_clear_all") },
+      ])}>Reset<//>
+    ${t.edits ? html`<span class="small muted nw" title="Edits are kept as you make them; there is nothing to save. Write puts them on the card.">${t.edits} edit${t.edits === 1 ? "" : "s"} kept, Write puts ${t.edits === 1 ? "it" : "them"} on the card</span>` : null}
     ${adding ? html`<${Modal} title="Add a line of text" onClose=${() => setAdding(false)}
         footer=${html`<${Button} onClick=${() => setAdding(false)}>Cancel<//><${Button} kind="primary"
           disabled=${!words.trim()} onClick=${() => { setAdding(false); call("text_scenes.tree_add_text", words); }}>Add<//>`}>

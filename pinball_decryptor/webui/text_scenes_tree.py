@@ -279,7 +279,9 @@ class TreeEditMixin:
             "moment": "f:%d" % frame, "moments": moments, "states": states,
             "hits": hits, "layers": layers, "sel": sel,
             "props": self._tree_props(card, man, sel, ops) if sel is not None else None,
-            "edits": len(ops), "notes": list(notes), "rev": self._trev})
+            "edits": len(ops), "notes": list(notes), "rev": self._trev,
+            "all_edits": scene_edit.count(self.assets_dir),
+            "built": _built_state(scene_edit.built_ops(self.assets_dir, card), ops)})
 
     def _tree_props(self, card, man, nid, ops):
         from ..plugins.stern import scene_edit
@@ -534,6 +536,49 @@ class TreeEditMixin:
         return True
 
     @rpc
+    def tree_revert_built(self):
+        """Back to what the last Write put on the card, for this scene."""
+        from ..plugins.stern import scene_edit
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        built = scene_edit.built_ops(self.assets_dir, card)
+        if built is None:
+            compat.messagebox.showinfo(
+                "Scene edits", "No Write has been made from this project folder since the scene "
+                "editor arrived, so there is no last Write to go back to. \"As shipped\" puts "
+                "the scene back the way the game shipped it.")
+            return False
+        if built == self._tree_ops(card):
+            return False
+        if not compat.messagebox.askyesno(
+                "Scene edits", "Put this scene back the way the last Write put it on the card? "
+                "Every edit made to it since then is dropped."):
+            return False
+        scene_edit.restore_built(self.assets_dir, card)
+        self._tsel = None
+        self._tree_refresh()
+        return True
+
+    @rpc
+    def tree_clear_all(self):
+        """Every scene back the way the game shipped it."""
+        from ..plugins.stern import scene_edit
+        edits = scene_edit.load(self.assets_dir)
+        n = sum(len(v) for v in edits.values())
+        if not n:
+            return False
+        if not compat.messagebox.askyesno(
+                "Scene edits", "Put EVERY scene back the way the game shipped it? That drops "
+                "all %d edit(s) in %d scene(s): moves, resizes, tints, layer changes and added "
+                "pictures and text." % (n, len(edits))):
+            return False
+        scene_edit.clear(self.assets_dir)
+        self._tsel = None
+        self._tree_refresh()
+        return True
+
+    @rpc
     def tree_clear(self):
         from ..plugins.stern import scene_edit
         card, _man = self._tree_card()
@@ -643,6 +688,14 @@ class TreeEditMixin:
             "op": "add_text", "parent": parent, "index": 1 << 20, "id": nid,
             "name": "PAD_Text", "text": text, "x": x - rect[0], "y": y - rect[1],
             "like": like_id})
+
+
+def _built_state(built, ops):
+    """What "Back to the last Write" can do for a scene: ``none`` (no Write recorded),
+    ``same`` (nothing changed since it) or ``changed``."""
+    if built is None:
+        return "none"
+    return "same" if built == ops else "changed"
 
 
 def _walk_man(man):

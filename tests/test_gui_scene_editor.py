@@ -258,3 +258,36 @@ def test_an_edit_keeps_the_picture_while_it_redraws_and_a_pick_gets_its_layers(t
         assert _wait(w, lambda: w.state("text_scenes")["tree_img_rev"] == _tv(w)["rev"])
         assert sum(op["dx"] for op in _ops(folder) if op["op"] == "move") == 17.0
         w.call("text_scenes.close")
+
+
+def test_reset_back_to_the_last_write_or_as_shipped_for_every_scene(tmp_path):
+    """The Reset menu under the preview: back to what the last Write put on the card (this
+    scene), as shipped (this scene), as shipped (every scene); each asks first."""
+    from pinball_decryptor.plugins.stern import scene_edit
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        art = next(h for h in _tv(w)["hits"] if h["name"] == "Art")["id"]
+        assert _tv(w)["built"] == "none"
+        assert w.call("text_scenes.tree_revert_built") is False          # no Write yet: says so
+        assert w.asked[-1]["title"] == "Scene edits"
+        assert w.call("text_scenes.tree_move", art, 10, 0)
+        w.run(scene_edit.mark_built, str(folder))                         # what a Write records
+        assert w.call("text_scenes.tree_select", art)
+        assert _tv(w)["built"] == "same"
+        assert w.call("text_scenes.tree_move", art, 0, 25)
+        assert w.call("text_scenes.tree_tint", art, "#ff0000", 100)
+        assert _tv(w)["built"] == "changed" and _tv(w)["all_edits"] == 2   # the moves fold into one
+        w.answers.append("no")
+        assert w.call("text_scenes.tree_revert_built") is False
+        w.answers.append("yes")
+        assert w.call("text_scenes.tree_revert_built") is True
+        assert _ops(folder) == [{"op": "move", "node": art, "dx": 10.0, "dy": 0.0}]
+        assert _tv(w)["built"] == "same"
+        w.answers.append("yes")
+        assert w.call("text_scenes.tree_clear_all") is True
+        assert _ops(folder) == [] and _tv(w)["all_edits"] == 0 and _tv(w)["built"] == "changed"
+        assert w.call("text_scenes.tree_clear_all") is False              # nothing left to drop
+        w.call("text_scenes.close")

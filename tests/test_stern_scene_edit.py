@@ -177,3 +177,23 @@ def test_stretches_fold_into_one_op(tmp_path):
     X.add(a, CARD, {"op": "scale", "node": 5, "s": 1.0, "sy": 3.0, "px": 0, "py": 0})
     assert X.ops_for(a, CARD) == [{"op": "scale", "node": 5, "s": 2.0, "sy": 6.0,
                                    "px": 0, "py": 0}]
+
+
+def test_the_last_write_is_a_state_a_scene_can_go_back_to(tmp_path):
+    """DragonRR: undo is not enough after many edits on many scenes; he wants "the last saved
+    state" as well as factory.  Edits are kept as they are made, so the saved state is what
+    the last successful Write built: mark_built records it, restore_built puts one scene back."""
+    from pinball_decryptor.plugins.stern import scene_edit as E
+    a = str(tmp_path)
+    assert E.mark_built(a) is False and E.built_ops(a, "c1") is None   # nothing yet
+    E.add(a, "c1", {"op": "move", "node": 1, "dx": 5, "dy": 0})
+    E.add(a, "c2", {"op": "visible", "node": 2, "on": False})
+    assert E.mark_built(a) is True
+    E.add(a, "c1", {"op": "tint", "node": 1, "mul": [1, 0, 0, 1]})
+    E.add(a, "c2", {"op": "move", "node": 3, "dx": 1, "dy": 1})
+    assert E.restore_built(a, "c1") is True
+    assert E.ops_for(a, "c1") == [{"op": "move", "node": 1, "dx": 5, "dy": 0}]
+    assert len(E.ops_for(a, "c2")) == 2                                 # other scenes untouched
+    assert E.built_ops(a, "c3") == [] and E.restore_built(a, "c3") is True
+    E.clear(a)
+    assert E.mark_built(a) is True and E.built_ops(a, "c1") == []       # an empty Write counts

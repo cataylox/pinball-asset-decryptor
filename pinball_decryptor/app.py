@@ -2266,6 +2266,7 @@ class App:
         self._save_settings()
 
         self._active_mode = "write"
+        self._scene_edits_run = assets_dir      # PAD-251: its scene edits, once it succeeds
         self._cancel_requested = False
         self.window.set_running(True, mode="write")
         self.window.reset_steps(mode="write")
@@ -2434,6 +2435,7 @@ class App:
         self._save_settings()
 
         self._active_mode = "write"
+        self._scene_edits_run = assets_dir      # PAD-251: its scene edits, once it succeeds
         self._current_run_is_direct_ssd = True
         self._cancel_requested = False
         self.window.set_running(True, mode="write")
@@ -4565,6 +4567,17 @@ class App:
             if note is not None:
                 note(in_path, out_path)
         self._last_extract_io = None
+        # PAD-251: a Write that built this project's scene edits is "the last saved state" the
+        # Scenes tab can go back to (edits are kept as they are made; there is no Save)
+        built_from = getattr(self, "_scene_edits_run", None)
+        self._scene_edits_run = None
+        if success and not self._cancel_requested and built_from and not is_extract:
+            try:
+                from .plugins.stern import scene_edit as _scene_edit
+                if os.path.isdir(os.path.join(built_from, *_scene_edit.RELDIR)):
+                    _scene_edit.mark_built(built_from)
+            except Exception:                                   # noqa: BLE001
+                pass
         self.window.set_running(False, mode=self._active_mode)
         if self._cancel_requested:
             # User cancelled — don't dress it up as a failure with a scary

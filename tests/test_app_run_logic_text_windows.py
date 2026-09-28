@@ -248,7 +248,7 @@ def test_scene_browser_caption_is_one_line_with_the_rest_on_its_button(
 
 
 def test_scene_browser_saves_an_animated_scene_as_mp4(tmp_path, monkeypatch):
-    """"Save preview…" exports a scene that moves as an MP4 (a tester: "it
+    """"Export picture…" exports a scene that moves as an MP4 (a tester: "it
     would be cool to have the option to export the rendered scenes as MP4").
 
     The two things worth pinning: MP4 is what an animated scene offers and
@@ -409,7 +409,7 @@ def test_scene_browser_steps_through_screens(tmp_path):
 
 
 def test_scene_browser_rebuild_previews_action(tmp_path):
-    """"Rebuild previews…" re-reads the layouts off the card without a full
+    """"Re-read from card…" re-reads the layouts off the card without a full
     re-extract (which would overwrite the atlas PNGs and glyph slices, wiping
     a font import).  The threaded read is covered in the engine tests; what
     matters here is that it takes the card from the Extract tab, refuses
@@ -435,7 +435,7 @@ def test_scene_browser_rebuild_previews_action(tmp_path):
         n = len(w.asked)
         assert w.call("text_scenes.rebuild") is False
         assert len(w.asked) == n + 1
-        assert w.asked[-1]["title"] == "Rebuild previews"
+        assert w.asked[-1]["title"] == "Re-read from card"
         assert svc._rebuild is None
 
         # a path that isn't a file is the same case (a stale saved setting)

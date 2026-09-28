@@ -55,17 +55,20 @@ TIPS = {
     "list": "Scene names come from the scene's own sprite names plus the "
             "8-character scene id — the same shorthand the Images tab's "
             "\"Group by scene\" and the Replace Text Scene column use.",
-    "save": "Write the scene out full size — the canvas here is a thumbnail "
-            "of a 1360x768 frame.\n\nA still scene saves as a PNG. One that "
+    "save": "A picture of this scene for you to keep or share (not needed for your "
+            "edits: they are kept as you make them, and Write puts them on the card).\n\n"
+            "The scene is written out full size, a 1360x768 frame. A still scene saves as a PNG. One that "
             "moves offers MP4 or GIF: the MP4 is the whole scene at its own "
             "frame rate, re-rendered for the export, and needs ffmpeg "
             "installed. The GIF is what is playing in the preview.",
-    "save_all": "Write one PNG per scene into a folder you pick — every "
+    "save_all": "Pictures of the scenes for you to keep or share (not needed for your "
+                "edits). One PNG per scene into a folder you pick — every "
                 "scene the list is showing, so a Search narrows the batch."
                 "\n\nAn animated scene is saved as its first frame; use "
-                "\"Save preview…\" on that scene for the whole thing as MP4.",
-    "rebuild": "Re-read the scene layouts from the card image on the Extract "
-               "tab, so an improved preview reaches this project folder."
+                "\"Export picture…\" on that scene for the whole thing as MP4.",
+    "rebuild": "Re-read the scenes from the card image on the Extract "
+               "tab, so an improved preview reaches this project folder. Your scene edits are "
+               "kept: this is not a reset (Reset, under the preview, is)."
                "\n\nTakes a few seconds and rewrites only the layout file — "
                "your images, glyph slices and font imports are left alone "
                "(a full re-extract would overwrite them).",
@@ -449,7 +452,7 @@ class TextScenesService(TreeEditMixin):
         """PAD-251: a project extracted before the scene editor has previews but no
         ``scene_tree.json``, and the window would quietly show the old preview.  When the
         Extract tab's card is there, the trees are read off it now, in the background (the
-        same few seconds as Rebuild previews); the editor takes over when they land."""
+        same few seconds as Re-read from card); the editor takes over when they land."""
         if self._rebuild is not None or not self._scenes:
             return
         tex = os.path.join(self.assets_dir, "images", "scene_textures")
@@ -460,7 +463,7 @@ class TextScenesService(TreeEditMixin):
         card = self.card_image_path()
         if not card or not os.path.isfile(card):
             self.set(rebuild_msg="To edit the scenes, set the Extract tab's Input to this "
-                                 "project's card image and press Rebuild previews.")
+                                 "project's card image and press Re-read from card.")
             return
         if self._auto_tried == (self.assets_dir, card):
             return                  # read once already (it failed: its message is showing)
@@ -835,7 +838,7 @@ class TextScenesService(TreeEditMixin):
             compat.messagebox.showinfo(
                 title,
                 "This line isn't in the recorded scene layout, so there is "
-                "nothing to move it from.\n\nRun \"Rebuild previews…\" (or "
+                "nothing to move it from.\n\nRun \"Re-read from card…\" (or "
                 "re-extract with Images enabled) and try again.")
             return None
         return card
@@ -1281,7 +1284,7 @@ class TextScenesService(TreeEditMixin):
         self._frames_full = frames
         n_all = scene_render.frame_count(layout, 0, group)
         if len(frames) > 1 and n_all > len(frames):
-            note += (" Playing the first %d of them — \"Save preview…\" writes"
+            note += (" Playing the first %d of them — \"Export picture…\" writes"
                      " all %d to MP4." % (len(frames), n_all))
         self._set_caption(note, lead=lead)
         self.set(frames=paths, canvas_msg="" if paths else
@@ -1345,7 +1348,7 @@ class TextScenesService(TreeEditMixin):
         return True
 
     # ------------------------------------------------------------------
-    # Save preview… / Save all previews… / Rebuild previews…
+    # Export picture… / Export all pictures… / Re-read from card…
     # ------------------------------------------------------------------
     @rpc
     def save_preview(self):
@@ -1472,7 +1475,7 @@ class TextScenesService(TreeEditMixin):
             return True
         dirs = [d for d in self._listed if d in self._scenes]
         if not dirs:
-            compat.messagebox.showinfo("Save all previews",
+            compat.messagebox.showinfo("Export all pictures",
                                        "No scenes are listed to save.")
             return False
         out = self.window.ask_folder(
@@ -1564,7 +1567,7 @@ class TextScenesService(TreeEditMixin):
         self.set(bulk=False)
         if err is not None:
             self._set_caption("Could not save the previews.")
-            compat.messagebox.showerror("Save all previews", str(err))
+            compat.messagebox.showerror("Export all pictures", str(err))
             return
         tail = ("" if not skipped
                 else "  %d scene%s could not be drawn." % (
@@ -1588,7 +1591,7 @@ class TextScenesService(TreeEditMixin):
 
     @rpc
     def rebuild(self, quiet=False):
-        """Rebuild previews…: re-read the scene layouts off the card image
+        """Re-read from card…: re-read the scene layouts off the card image
         (a few seconds, one file rewritten); while it runs it cancels.
         *quiet* (the window's own first run, :meth:`_auto_trees`) says what happened in the
         window instead of a message box."""
@@ -1599,7 +1602,7 @@ class TextScenesService(TreeEditMixin):
         card = self.card_image_path()
         if not card or not os.path.isfile(card):
             compat.messagebox.showinfo(
-                "Rebuild previews",
+                "Re-read from card",
                 "Set the Extract tab's Input to the card image this project "
                 "folder was extracted from — the scene layouts are read back "
                 "off the card.")
@@ -1669,7 +1672,7 @@ class TextScenesService(TreeEditMixin):
                                      "card: " + (why or str(err or "") or "no scenes found"))
                 return
             compat.messagebox.showwarning(
-                "Rebuild previews", why or str(err or "")
+                "Re-read from card", why or str(err or "")
                 or "No scene layouts could be read from that card image.")
             return
         self.set(rebuild_msg="" if state.get("quiet") else "Rebuilt %d scene layout(s)." % n)
