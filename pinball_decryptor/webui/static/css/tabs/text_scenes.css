@@ -8,9 +8,20 @@
 .scenes-card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 12px; container-type: inline-size; }
 .scenes-opening { gap: 10px; padding: 24px 4px; }
 .scenes-msg-head { max-width: 420px; }
-.scenes-body { display: grid; grid-template-columns: minmax(230px, min(340px, 25%)) minmax(0, 1fr) 304px; gap: 12px; flex: 1 1 auto; min-height: 0; }
-.scenes-body.wide { grid-template-columns: minmax(0, 1fr) 304px; }
-.scenes-body.wide .scenes-left { display: none; }
+/* --sc-left / --sc-right: where the user dragged the dividers (unset: these proportions) */
+.scenes-body { display: grid; grid-template-columns: var(--sc-left, minmax(230px, min(340px, 25%))) 14px minmax(0, 1fr) 14px var(--sc-right, 304px);
+  gap: 0; flex: 1 1 auto; min-height: 0; }
+.scenes-body.wide { grid-template-columns: minmax(0, 1fr) 14px var(--sc-right, 304px); }
+.scenes-body.wide .scenes-left, .scenes-body.wide .sc-split-left { display: none; }
+/* the dividers: a thin line that lights up under the pointer */
+.sc-split { position: relative; display: flex; align-items: center; justify-content: center; touch-action: none; outline: none; }
+.sc-split.v { cursor: col-resize; }
+.sc-split.h { cursor: row-resize; flex: 0 0 10px; margin: -5px 0; z-index: 1; }
+.sc-split > span { display: block; background: var(--line); border-radius: 2px; transition: background .12s; }
+.sc-split.v > span { width: 2px; height: 100%; }
+.sc-split.h > span { height: 2px; width: 100%; }
+.sc-split:hover > span, .sc-split:focus-visible > span, .sc-split:active > span { background: var(--accent); }
+.sc-split.v:hover > span, .sc-split.v:focus-visible > span { width: 3px; }
 .scenes-left { display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; }
 .scenes-search { gap: 6px; flex-wrap: nowrap; }
 .scenes-search > .field { flex: 1 1 auto; min-width: 0; }
@@ -109,12 +120,13 @@
 
 /* a narrow window: the scene list goes across the top, the preview and inspector under it */
 @container (max-width: 1060px) {
-  .scenes-body { grid-template-columns: minmax(0, 1fr) 280px; grid-template-rows: 210px minmax(0, 1fr); }
+  .scenes-body, .scenes-body.wide { grid-template-columns: minmax(0, 1fr) 280px; grid-template-rows: 210px minmax(0, 1fr); gap: 12px; }
+  .scenes-body .sc-split.v { display: none; }
   .scenes-body > .scenes-left { grid-column: 1 / -1; }
   .scenes-body.wide { grid-template-rows: minmax(0, 1fr); }
 }
 @container (max-width: 700px) {
-  .scenes-body, .scenes-body.wide { grid-template-columns: minmax(0, 1fr); grid-template-rows: 210px 360px auto; }
+  .scenes-body, .scenes-body.wide { grid-template-columns: minmax(0, 1fr); grid-template-rows: 210px 360px auto; gap: 12px; }
   .scenes-inspector > .scenes-top { min-height: 280px; }
 }
 /* a short window (or a narrow one): the page scrolls instead of squeezing the preview and the

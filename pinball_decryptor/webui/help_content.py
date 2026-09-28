@@ -433,7 +433,12 @@ HELP_CONTENT = {
          "are baked in, so Tint is the way to recolour it. A project extracted before the "
          "editor existed has its scenes read off the Extract tab's card the first time the "
          "Scenes tab opens (about ten seconds, once). While you edit, the picture you see "
-         "stays up and a small \"Updating\" tag shows while the change is drawn."),
+         "stays up and a small \"Updating\" tag shows while the change is drawn. Drag the "
+         "dividers between the scene list, the preview and the panel on the right (and the one "
+         "above Layers) to share the room the way you like; the app remembers them, and a "
+         "double-click puts one back. Lines of W's (or AAA) are the game's own placeholders "
+         "for text it fills in while it runs, such as high score initials: the game writes the "
+         "player's letters there, so they are as wide as the widest name can be."),
         ("Size limits",
          "On most games patching is size-neutral: a same-or-smaller "
          "replacement fits as-is, a larger one is re-encoded down to the "
