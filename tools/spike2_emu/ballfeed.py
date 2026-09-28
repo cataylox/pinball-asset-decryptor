@@ -271,8 +271,8 @@ class Feeder:
         self.van_upper = coilmap.address(coils, ballmodel.VAN_COIL_UPPER) if self.van else None
         if self.van_lower is None or self.van_upper is None:
             self.van = None
-        # PAD-248: drop targets with a trip and a reset coil (ballmodel.DROP_BANKS); PAD_DROP_TARGET=0 off
-        self.drops = [] if _num("PAD_DROP_TARGET", 1) == 0 else ballmodel.DropTarget.from_names(
+        # PAD-248: drop target banks (ballmodel.DROP_BANKS); PAD_DROP_TARGET=0 off
+        self.drops = [] if _num("PAD_DROP_TARGET", 1) == 0 else ballmodel.DropBank.from_names(
             {(r.get("name") or "").upper().strip(): r["id"] for r in rows},
             lambda n: coilmap.address(coils, n))
         #: how many of the van's balls went in during attract: those roll home when the van lets them
@@ -369,8 +369,10 @@ class Feeder:
                        % ((",".join(str(i) for i in self.van.stack), self.van.enter)
                           + self.van_lower + self.van_upper))
         for t in self.drops:
-            out.append("drop target: %s (%d, %s when down), TRIP node %d index %d, RESET node %d index %d"
-                       % ((t.name, t.switch, "made" if t.down_level else "open") + t.trip + t.reset))
+            out.append("drop bank: %s (made when %s), %sRESET node %d index %d"
+                       % (", ".join("%s=%d" % (n, i) for n, i in zip(t.names, t.switches)),
+                          "down" if t.down_level else "up",
+                          "TRIP node %d index %d, " % t.trip if t.trip else "", t.reset[0], t.reset[1]))
         return out
 
     def usable(self):
@@ -531,7 +533,7 @@ class Feeder:
                 if fired:
                     plan = t.plan_fire(coil, m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID])
                     if plan:
-                        self.run_plan(m, plan, "drop target:")
+                        self.run_plan(m, plan, "drop bank:")
         self._van_home(m, now)
         self._way_home(m, now, claim)
         return fed

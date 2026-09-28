@@ -284,57 +284,96 @@ class Van:
         return Plan(steps)
 
 
-#: ★ PAD-248: A DROP TARGET WITH A TRIP COIL AND A RESET COIL, read by one switch (John Wick LE: DROP TRIP,
-#: DROP RESET, DROP TARGET OPTO). MEASURED on the rig, 40 s from Start: with nothing moving the opto the game
-#: fires RESET then TRIP 100 ms later, five pairs 250 ms apart, a 1.8 s pause, again - 139 fires - and with
-#: the opto held MADE, none. So the game is dropping the target and waiting for the opto to say DOWN; TRIP
-#: after every RESET is what a game wanting it UP would never do. DOWN_LEVEL is that switch's level with the
-#: target down (PAD_DROP_DOWN flips it, for the measurement). The names are the only thing that makes a title
-#: a drop-target title, as with the van: a bank whose switches do not carry these names is not answered.
+#: ★ PAD-248: DROP TARGET BANKS. A RESET coil brings a bank's targets up; some banks also have a TRIP coil that
+#: drops them all; each target has a switch. The game fires the coil and waits for the switches, and nothing
+#: in the rig moved them. MEASURED FIRST on john_wick_le (DROP TRIP, DROP RESET, DROP TARGET OPTO), 40 s from
+#: Start: the game fires RESET then TRIP 100 ms later, five pairs 250 ms apart, a 1.8 s pause, again - 139
+#: fires - and with the opto held MADE, none. So MADE IS DOWN: TRIP after every RESET is what a game wanting
+#: the target up would never do. Every other bank was checked the same way - hold its switches made at Start
+#: and see the game fire its RESET until they open (docs/plans/node_board_motor.md, "Every title's banks").
+#: PAD_DROP_DOWN=0 flips the level for a measurement.
+#:
+#: MATCHED BY NAME, like the van: a bank is answered when the title has its reset coil, its trip coil (if it
+#: names one) and EVERY switch - so a same-named coil on another title ("3 BANK DROP": jaws_le, metallica)
+#: only matches with its own switches. Names are compared upper-cased and trimmed.
 DROP_BANKS = (
-    # (trip coil, reset coil, switch)
-    ("DROP TRIP", "DROP RESET", "DROP TARGET OPTO"),
+    # (trip coil or None, reset coil, the bank's switches)                    title
+    ("DROP TRIP", "DROP RESET", ("DROP TARGET OPTO",)),                      # john_wick_le
+    ("LIL DP 3 BANK DROP TRIP", "LIL DP 3 BANK DROP RESET",                  # deadpool_le
+     ("L. LIL DP DROP", "MID LIL DP DROP", "R. LIL DP DROP")),
+    ("LIL DP 3 BANK DROP TRIP", "LIL DP 3 BANK DROP RESET",                  # deadpool_pro
+     ("LEFT LIL DEADPOOL DROP", "MIDDLE LIL DEADPOOL DROP", "RIGHT LIL DEADPOOL DROP")),
+    (None, "LEFT 4 BANK DROP RESET",                                         # deadpool_le
+     ("(D)EAD DROP TARGET", "D(E)AD DROP TARGET", "DE(A)D DROP TARGET", "DEA(D) DROP TARGET")),
+    (None, "RIGHT 4 BANK DROP RESET",                                        # deadpool_le
+     ("(P)OOL DROP TARGET", "P(O)OL DROP TARGET", "PO(O)L DROP TARGET", "POO(L) DROP TARGET")),
+    ("3 BANK INLINE TRIP", "3 BANK INLINE RESET",                            # james_bond_60th_le
+     ("INLINE DROP 1", "INLINE DROP 2", "INLINE DROP 3")),
+    (None, "LEFT 4 BANK DROP",                                               # james_bond_60th_le
+     ("LEFT 4 BANK 'B'", "LEFT 4 BANK 'O'", "LEFT 4 BANK 'N'", "LEFT 4 BANK 'D'")),
+    (None, "CENTER 3 BANK DROP",                                             # james_bond_60th_le
+     ("CENTER 3 BANK LEFT", "CENTER 3 BANK CENTER", "CENTER 3 BANK RIGHT")),
+    (None, "CENTER 3 BANK DROP TARGET",                                      # james_bond_le
+     ("CENTER 3 BANK DROP LEFT OPTO", "CENTER 3 BANK DROP CENTER OPTO", "CENTER 3 BANK DROP RIGHT OPTO")),
+    (None, "3 BANK DROP", ("3 BANK BOT", "3 BANK MID", "3 BANK TOP")),         # jaws_le
+    (None, "3 BANK DROP", ("DROP TGT- BOT", "DROP TGT- MID", "DROP TGT- TOP")),  # metallica_spike
+    (None, "3-BANK DROP RESET",                                              # jurassic_park_the_pin
+     ("3-BANK DROP TGT LEFT", "3-BANK DROP TGT CENTER", "3-BANK DROP TGT RIGHT")),
+    (None, "4 BANK DROP TARGET",                                             # king_kong_le
+     ("4 BANK DROP 1-TOP", "4 BANK DROP 2", "4 BANK DROP 3", "4 BANK DROP 4-BOT")),
+    (None, "DROP TARGET RESET", ("3 BANK DROP-Z", "3 BANK DROP-E", "3 BANK DROP-P")),  # led_zeppelin_le
+    (None, "5 BANK DROP RESET",                                              # star_wars_le
+     ("(F)ORCE DROP TARGET", "F(O)RCE DROP TARGET", "FO(R)CE DROP TARGET", "FOR(C)E DROP TARGET",
+      "FORC(E) DROP TARGET")),
+    (None, "LEFT 3 BANK DROP", ("LT 3 BANK DROP LT", "LT 3 BANK DROP CNTR", "LT 3 BANK DROP RT")),  # beatles
+    (None, "RIGHT 4 BANK DROP",                                              # beatles
+     ("RT 4 BANK DROP LEFT", "RT 4 BANK DROP LT CTR", "RT 4BANK DROP R-CNTR", "RT 4 BANK DROP RIGHT")),
+    (None, "CENTER 4 BANK DROP",                                             # beatles
+     ("CNTR 4 BANK DROP LT", "CNTR 4 BANK DROP LT CNTR", "CNTR 4BANK DROP R-CNTR", "CNTR 4 BANK DROP RT")),
 )
 DROP_DOWN_LEVEL = 0 if (os.environ.get("PAD_DROP_DOWN") or "1") == "0" else 1
-#: how long the target takes to fall or come up after its coil fires - well inside the 100 ms the game leaves
-#: between RESET and TRIP
+#: how long the targets take to fall or come up after the coil fires - well inside the 100 ms john_wick_le
+#: leaves between RESET and TRIP
 DROP_MOVE_S = float(os.environ.get("PAD_DROP_MS") or 30) / 1000.0
 
 
-class DropTarget:
-    """One drop target: TRIP knocks it down, RESET brings it up, and its switch says which. Like Van, the
-    state is the merged array's - a person clicking the switch moves the target as far as this is concerned."""
+class DropBank:
+    """One bank: TRIP knocks every target down, RESET brings every one up, the switches say which. Like Van,
+    the state is the merged array's - a person clicking a target down is a target down as far as this is
+    concerned, and the game's next RESET brings it back up."""
 
-    def __init__(self, trip, reset, switch, name, down_level=None):
-        self.trip = trip            # (node, index)
+    def __init__(self, trip, reset, switches, names, down_level=None):
+        self.trip = trip            # (node, index), or None for a bank with no trip coil
         self.reset = reset
-        self.switch = switch        # switch id
-        self.name = name
+        self.switches = list(switches)
+        self.names = list(names)
         self.down_level = DROP_DOWN_LEVEL if down_level is None else down_level
 
     @classmethod
     def from_names(cls, by_name, coil_address):
-        """Every DROP_BANKS bank this title has: {SWITCH NAME: id} and a name -> (node, index) or None lookup."""
+        """Every DROP_BANKS bank this title has, from {SWITCH NAME: id} and name -> (node, index) or None."""
         out = []
-        for trip, reset, sw in DROP_BANKS:
-            t, r, i = coil_address(trip), coil_address(reset), by_name.get(sw)
-            if t is not None and r is not None and i is not None:
-                out.append(cls(t, r, i, sw))
+        for trip, reset, names in DROP_BANKS:
+            t = coil_address(trip) if trip else None
+            r = coil_address(reset)
+            ids = [by_name.get(n) for n in names]
+            if r is not None and (trip is None or t is not None) and None not in ids:
+                out.append(cls(t, r, ids, names))
         return out
 
-    def down(self, mrg):
-        return bool(mrg[self.switch]) == bool(self.down_level)
-
     def plan_fire(self, coil, mrg):
-        """`coil` ("trip" or "reset") fired: the target moves, unless it is already there (then no plan)."""
+        """`coil` ("trip" or "reset") fired: every target not already there moves (None when none has to)."""
         want_down = coil == "trip"
-        if self.down(mrg) == want_down:
-            return None
         level = self.down_level if want_down else 1 - self.down_level
-        return Plan([("wait", DROP_MOVE_S, "the target moving"),
-                     ("set", self.switch, level, "%s (%d) %s (%s: the target is %s)"
-                      % (self.name, self.switch, "closed" if level else "opened",
-                         "DROP TRIP" if want_down else "DROP RESET", "down" if want_down else "up"))])
+        move = [(i, n) for i, n in zip(self.switches, self.names) if bool(mrg[i]) != bool(level)]
+        if not move:
+            return None
+        steps = [("wait", DROP_MOVE_S, "the targets moving")]
+        for i, n in move:
+            steps.append(("set", i, level, "%s (%d) %s (%s: the target is %s)"
+                          % (n, i, "closed" if level else "opened", "TRIP" if want_down else "RESET",
+                             "down" if want_down else "up")))
+        return Plan(steps)
 
 
 def plan_eject(tr, mrg, lane_id=None, lane_made=False,

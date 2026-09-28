@@ -165,7 +165,7 @@ added on the way: a first sweep of three rigs at once pressed Start while
 john_wick_le still showed its STANDARD GAME MODE card, no game started, and
 every count read 0. 45 starts a game every time.
 
-**The model** is `ballmodel.DropTarget`, run by the ball feeder (it already
+**The model** is `ballmodel.DropTarget` (pass 2: `DropBank`), run by the ball feeder (it already
 polls the coil counters at 50 Hz and writes switches): TRIP -> the switch goes
 to its down level `PAD_DROP_MS` (default 30) later, RESET -> the other level.
 A bank is matched by NAME (`ballmodel.DROP_BANKS`: DROP TRIP, DROP RESET,
@@ -180,8 +180,54 @@ turns it off, `PAD_DROP_DOWN=0` flips the polarity.
 | 120 s | 2 |
 | 120 s, `PAD_DROP_TARGET=0` | 380 |
 
-Not done: other titles' trip/reset banks (deadpool's LIL DP 3 BANK, james
-bond 60th's 3 BANK INLINE) have their own switch names and were not seen to
-loop; they join DROP_BANKS when one is measured. The RESET half (target back
-up) is answered but was not provoked on the rig - nothing in 120 s of play
-asked for it.
+## Every title's banks (PAD-248, pass 2)
+
+David: "do the other titles too". The model became `ballmodel.DropBank`: an
+optional TRIP coil, a RESET coil and every switch of the bank, TRIP making
+them all and RESET opening them all. `DROP_BANKS` lists 18 banks on 12
+titles by name (a bank is answered only when the title has its coils AND
+every switch, so "3 BANK DROP" on jaws_le and on metallica each match only
+their own switches). No title without a bank resolves one (godzilla_pro: 0).
+
+From Start with nothing held, no title but john_wick_le retries a drop coil
+(11-title sweep, `coils=` field). So the proof is the other half: hold every
+bank switch made (targets down) at Start. With nothing answering, the game
+fires RESET until they open; with the model, once.
+
+| title | bank(s) | RESET fires in 40 s, model off -> on |
+|---|---|---|
+| james_bond_le 1.06 | CENTER 3 BANK (optos) | 60 -> 1 |
+| jaws_le 1.02 | 3 BANK | 45 -> 1 |
+| star_wars_le 1.30 | FORCE 5 bank | 12 -> 1 |
+| king_kong_le 0.97 | 4 BANK | 9 -> 2 |
+| james_bond_60th_le 1.11 | INLINE (trip), LEFT 4 BANK 'BOND', CENTER 3 BANK | 5, 5, 5 -> 1, 1, 1 (c40i) |
+| beatles 1.29 | LEFT 3, RIGHT 4, CENTER 4 | 3, 3, 3 -> under 3 each |
+| deadpool_pro 1.16 | LIL DP 3 BANK (trip) | 3 -> 0 |
+| metallica_spike 1.03 | 3 BANK | 3 -> under 3 |
+| led_zeppelin_le 1.22 | 3 BANK DROP Z-E-P | 150 -> not measured |
+| john_wick_le 1.01 | DROP TARGET OPTO (trip) | 139 -> 2 (pass 1) |
+
+(`coilcount.py` prints coils fired 3 or more times, so "under 3" is a
+coil that dropped out of the list; `c40i` counts node 9 exactly.)
+
+**Not proven on the rig, and why:**
+
+- led_zeppelin_le with the model on, and jurassic_park_the_pin either way:
+  the runs landed on rig slots whose NVRAM had never finished Stern's Guided
+  Setup, and sat on its language menu ignoring Start (`started=no`). The
+  slot where both titles had started (rig 1) was taken by another ticket.
+- deadpool_le: no rig slot ever got it to take Start, with or without the
+  model and the holds (`deadpool_le.bare`) - an existing rig fault with this
+  title, not this change. Its LIL DP bank is the same coils as deadpool_pro's
+  (proven); which of its two 4-bank reset coils is DEAD and which is POOL
+  (LEFT = DEAD, RIGHT = POOL here) is a reading of the names, not a
+  measurement.
+
+`motorcheck.sh` now says whether the game started (`started=` - the feeder
+serving a ball; Start pressed up to three times) and, when it did not, prints
+the feeder's last lines and the switch edges.
+
+**Seen on the way, not this ticket:** beatles and james_bond_60th_le fire
+their TROUGH eject 22 times in 40 s from Start (`coils=TROUGH=22`), and
+jurassic_park_the_pin an unnamed node 8 index 1 coil as often (the eject
+index on most titles); deadpool_le never takes Start on any rig.
