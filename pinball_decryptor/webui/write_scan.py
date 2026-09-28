@@ -264,6 +264,13 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
             relaid = {}
         for _path, per_text in relaid.items():
             for text, edit in per_text.items():
+                if text_layout.picture_rel(text) is not None:
+                    # a scene picture moved / resized (PAD-251)
+                    rows.append(("%s  —  %s" % (text_layout.row_label(text),
+                                                text_layout.describe(edit)),
+                                 "image", "Pending (picture layout)",
+                                 "pending"))
+                    continue
                 rows.append(("%s  —  %s" % (text, text_layout.describe(edit)),
                              "text", "Pending (text layout)", "pending"))
     rows.extend(mode_rows(mfr, assets_path, direct=direct))

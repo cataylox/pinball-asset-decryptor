@@ -68,7 +68,14 @@ export function ScenesWindow() {
         { label: "Open in the Fonts window", onClick: () => call("text_scenes.activate", it.id) },
       ];
     } else if (it.id.startsWith("img::")) {
-      items = [{ label: "Show on the Images tab", onClick: () => call("text_scenes.activate", it.id) }];
+      // a picture the scene places can be moved / resized (PAD-251)
+      items = [
+        it.placed ? { label: "Move…", onClick: () => startLayout(it.key, "move") } : null,
+        it.placed ? { label: "Size…", onClick: () => startLayout(it.key, "size") } : null,
+        it.has_layout ? { label: "Back to the original layout", onClick: () => call("text_scenes.reset_layout", it.key) } : null,
+        it.placed ? { sep: true } : null,
+        { label: "Show on the Images tab", onClick: () => call("text_scenes.activate", it.id) },
+      ];
     } else if (it.id.startsWith("vid::")) {
       items = [{ label: "Show on the Video tab", onClick: () => call("text_scenes.activate", it.id) }];
     }
@@ -233,7 +240,8 @@ function LayoutEditor({ d }) {
     <span class="grow"></span>
     <${Button} size="sm" kind="primary" onClick=${apply}>Apply<//>
     <${Button} size="sm" onClick=${cancel}>Cancel<//>
-    <span class="small muted scenes-edit-n">${move ? "Negative moves the line left / up."
+    <span class="small muted scenes-edit-n">${move ? (d.picture ? "Negative moves the picture left / up." : "Negative moves the line left / up.")
+      : d.picture ? "Grows or shrinks about its centre, in this scene only."
       : "Every line this scene draws with the same font at this size changes with it."}</span>
   </section>`;
 }

@@ -806,6 +806,24 @@ HELP_CONTENT = {
          "so the box, alignment and size can be judged against the new "
          "text rather than the stock one; the row reads \"shows: …\" and "
          "\"(not built yet)\" while it is pending."),
+        ("Picture layout (move, size)",
+         "Right-click a picture in the Contents list's Images group for "
+         "\"Move…\" and \"Size…\" when the scene places it (the row says "
+         "\"right-click to move / resize\"). A picture's place and size "
+         "are the transform the scene keeps for it, so these are the same "
+         "per-scene, in-place, size-neutral edits as a text line's: a move "
+         "shifts it by the pixels you type, and a size is a percentage "
+         "that grows or shrinks it about its centre, tilt and all. Every "
+         "copy of that picture the scene draws moves with it, and the "
+         "preview follows as you type. Enlarging only scales the picture "
+         "the scene already has; for a sharper big one, replace it on the "
+         "Images tab with a larger PNG and tick \"Keep this picture's own "
+         "size\". The edit is recorded per project, keyed to the card it "
+         "was extracted from: writing it onto a card of another code "
+         "version, where the picture is not in the same place, leaves it "
+         "alone and says so in the log. The game can still move a picture "
+         "from its own code while it runs (a sliding panel, say), and "
+         "those moves are made from the new place."),
         ("Size limits",
          "Patching is size-neutral: the encoded replacement must fit the "
          "original slot's byte budget — a small enough image drops "

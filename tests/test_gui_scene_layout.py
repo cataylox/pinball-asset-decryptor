@@ -341,3 +341,89 @@ def test_text_tab_edit_shows_in_the_scenes_window(tmp_path, monkeypatch):
         # a refused edit would have surfaced as a warning box
         assert not [a for a in w.asked if a.get("icon") == "warning"]
         w.call("text_scenes.close")
+
+
+PIC = "scene_textures/radimg_banner_40x20_0000abcd.png"
+
+
+def _seed_picture(folder):
+    """A picture the scene places: its PNG, its radium_images.txt row (which
+    lists it in the Scenes window as images/<rel>) and a sprite drawing it."""
+    from PIL import Image
+    from pinball_decryptor.plugins.stern import scene_render
+    tex = folder / "images" / "scene_textures"
+    Image.new("RGBA", (40, 20), (255, 0, 0, 255)).save(
+        str(folder / "images" / PIC))
+    with open(str(tex / "radium_images.txt"), "a", encoding="utf-8") as f:
+        f.write("%s\t%s\t999\t800\t40\t20\t5\n" % (PIC, CARD))
+    path = str(folder / scene_render.SCENE_LAYOUT_MANIFEST)
+    with open(path, encoding="utf-8") as f:
+        layout = json.load(f)
+    layout[CARD]["sprites"] = [{"name": "Banner", "x": 50, "y": 40,
+                                "image": PIC}]
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(layout, f)
+
+
+def _pic_row(w):
+    contents = w.state("text_scenes")["contents"] or {}
+    for group in contents.get("groups") or ():
+        for item in group["items"]:
+            if (item.get("id") or "") == "img::images/" + PIC:
+                return item
+    return None
+
+
+def test_scene_browser_moves_and_resizes_a_picture(tmp_path):
+    """PAD-251: a picture the scene places gets Move… / Size… on its row,
+    recorded in the same layout manifest as a ``picture:`` row."""
+    pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    from pinball_decryptor.plugins.stern import text_layout
+    from pinball_decryptor.webui import write_scan
+
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    key = text_layout.picture_key(PIC)
+    with web_app(tmp_path, mfr="stern") as w:
+        from tests.test_stern_fontrender import _make_extract
+        _make_extract(folder)
+        _seed_scene(folder)
+        _seed_picture(folder)
+        _set_folder(w, str(folder))
+        text = w.window.service("text")
+        assert w.run(text.open_scene_browser, str(folder)) is True
+        sb = text.scenes
+        w.call("text_scenes.select", "/g/scene1")
+        row = _pic_row(w)
+        assert row["placed"] and row["key"] == key and not row["has_layout"]
+        assert "right-click to move / resize" in row["info"]
+
+        dlg = w.call("text_scenes.layout_start", key, "move")
+        assert dlg["title"].startswith("Move \"radimg_banner")
+        w.call("text_scenes.layout_preview", {"dx": "30", "dy": "-5"})
+        assert w.run(sb._pending_layouts, CARD)[key]["dx"] == 30.0
+        assert w.call("text_scenes.layout_done", {"dx": "30", "dy": "-5"})
+        dlg = w.call("text_scenes.layout_start", key, "size")
+        assert dlg["picture"] == [40, 20]
+        assert "40 x 20 px → 60 x 30 px" in w.call(
+            "text_scenes.layout_preview", {"size": "150"})
+        w.call("text_scenes.layout_done", {"size": "150"})
+        stored = text_layout.load(str(folder))[CARD][key]
+        assert (stored["dx"], stored["dy"], stored["size"]) == (30.0, -5.0,
+                                                                150)
+        row = _pic_row(w)
+        assert row["has_layout"] and "moved +30,-5" in row["info"]
+        assert "not built yet" in row["info"]
+
+        rows = w.run(lambda: write_scan.pending_rows(
+            w.window, w.window.current_mfr, str(folder), grow_on=True,
+            direct=False))
+        rows = [r for r in rows if r[2] == "Pending (picture layout)"]
+        assert rows and "picture radimg_banner_40x20_0000abcd.png" in \
+            rows[0][0]
+
+        assert w.call("text_scenes.reset_layout", key) is True
+        assert text_layout.load(str(folder)) == {}
+        assert not _pic_row(w)["has_layout"]
+        w.call("text_scenes.close")

@@ -1349,6 +1349,193 @@ def text_layout_patches(data, images, tables, edits, log=None):
     return patches, n_lines, notes
 
 
+# ---------------------------------------------------------------------------
+# picture layout (PAD-251): move / resize a picture the scene draws
+# ---------------------------------------------------------------------------
+
+# Where the translation and the 2x2 (scale / rotation) sit in a track's
+# 64-byte column-major matrix, counted in floats (``scene_write.matrix``).
+_M_TX, _M_TY = 12, 13
+_M_LINEAR = (0, 1, 4, 5)
+# The floats a 2-D node transform always holds: no z, no perspective.
+_M_FIXED = {2: 0.0, 3: 0.0, 6: 0.0, 7: 0.0, 8: 0.0, 9: 0.0, 10: 1.0,
+            11: 0.0, 14: 0.0, 15: 1.0}
+_MAX_TRACK_KEY = 1 << 16
+
+
+def _node_matrices(data, lo, hi):
+    """``[(file offset, [16 floats])]`` of every whole track matrix in
+    ``[lo, hi)``.
+
+    :func:`_instance_tracks` anchors on the ``1.0, 0.0`` pair at float 10 and
+    reads only x/y, which is enough to place a sprite but not to rewrite one:
+    that pair also turns up in data that is no matrix at all (measured on
+    Godzilla's Battle Select, two of every three hits in a portrait's node).
+    A matrix is accepted here only when all sixteen floats are a 2-D transform
+    (no z, no perspective, w = 1) and the u32 before it is a small track key,
+    so a write can never land on bytes that only look like one."""
+    out = []
+    j = lo
+    while True:
+        j = data.find(_TRACK_SIG, j, hi)
+        if j < 0:
+            return out
+        m_at = j - 40
+        if m_at - 4 >= lo and m_at + 64 <= hi:
+            try:
+                key, = struct.unpack_from("<I", data, m_at - 4)
+                m = list(struct.unpack_from("<16f", data, m_at))
+            except struct.error:
+                m = None
+            if (m is not None and key < _MAX_TRACK_KEY
+                    and all(m[i] == v for i, v in _M_FIXED.items())
+                    and _sane_floats(m)):
+                out.append((m_at, m))
+        j += 1
+
+
+def _instance_image_at(data, seg, seg_end, refs):
+    """:func:`_instance_image`, but also WHERE the triple sits:
+    ``(data_off, w, h, file offset)`` or ``None``."""
+    if not refs:
+        return None
+    for j in range(seg, max(seg, seg_end - 11)):
+        try:
+            w, h, hh = struct.unpack_from("<3I", data, j)
+        except struct.error:
+            return None
+        got = refs.get(hh)
+        if got and ((w, h) == (got[0], got[1]) or (w, h) == (got[2], got[3])):
+            return got[4], w, h, j
+    return None
+
+
+def picture_layout_offsets(data, images, tables=None):
+    """``{data_off: [{"node", "w", "h", "tracks": [(matrix offset, floats)]}]}``
+    -- where each picture's LAYOUT lives in this scene.
+
+    A picture is drawn by one or more sprite nodes (Godzilla's Battle Select
+    draws a kaiju's name banner from four), each naming it by the same
+    ``[w][h][handle]`` triple the preview resolves it with.  The node's place,
+    size and tilt are its track matrices, which come BEFORE that triple in the
+    node's record; every whole matrix there is listed (an animated node has one
+    per key), so a move or resize applies to all of them.  Only pictures that
+    are art are listed, never a font's atlas.
+
+    Never raises: an unreadable scene yields ``{}``."""
+    out = {}
+    try:
+        start = _tail_start(images, tables)
+        if start <= 0 or start >= len(data):
+            return out
+        found = _find_stage(data, start)
+        if found is None:
+            return out
+        _stage, after_stage = found
+        atlas_offs = _glyph_atlas_offs(tables)
+        refs = {h: v for h, v in _image_refs(data, images).items()
+                if v[4] not in atlas_offs}
+        if not refs:
+            return out
+        names = _find_names(data, after_stage, len(data))
+        bounds = [o for o, _n in names]
+        seen = set()
+        for noff, name in names:
+            if noff in seen:
+                continue
+            seen.add(noff)
+            seg = noff + 8 + len(name)
+            bi = bisect.bisect_right(bounds, noff)
+            seg_end = bounds[bi] if bi < len(bounds) else len(data)
+            hit = _instance_image_at(data, seg, seg_end, refs)
+            if hit is None:
+                continue
+            off, w, h, at = hit
+            tracks = _node_matrices(data, seg, at)
+            if not tracks:
+                continue
+            out.setdefault(off, []).append(
+                {"node": noff, "w": w, "h": h, "tracks": tracks})
+    except Exception:
+        return {}
+    return out
+
+
+def _picture_matrix(m, w, h, dx, dy, factor):
+    """One track matrix moved by *dx, dy* and scaled by *factor* about the
+    picture's centre.  The picture is drawn from the node's origin (its top
+    left: a picture given a wider texture grows to the right on the machine,
+    PAD-154), so scaling the 2x2 alone would grow it right and down; the
+    translation is pulled back by the half-size change, through the node's own
+    2x2 so a tilted banner stays centred too."""
+    m = list(m)
+    if factor is not None:
+        a, b, c, d = (m[i] for i in _M_LINEAR)
+        hx, hy = w / 2.0, h / 2.0
+        m[_M_TX] += (1.0 - factor) * (a * hx + c * hy)
+        m[_M_TY] += (1.0 - factor) * (b * hx + d * hy)
+        for i in _M_LINEAR:
+            m[i] *= factor
+    m[_M_TX] += dx
+    m[_M_TY] += dy
+    return m
+
+
+def picture_layout_patches(data, images, edits, tables=None, log=None):
+    """Size-neutral writes that apply *edits* -- ``{data_off: {"dx", "dy",
+    "size"}}`` for ONE scene -- to its ``scene.radium``.
+
+    Returns ``(patches, n_pictures, notes)`` in :func:`text_layout_patches`'
+    shape: ``patches = [(file offset, 64 bytes)]``, one whole matrix each, so
+    the file never changes size.  Every node that draws the picture gets the
+    same move and resize (``size`` = percent, about the picture's centre).
+    A picture no node in the scene places is a note and no patch.
+
+    Never raises: a malformed scene yields ``([], 0, [])``."""
+    patches, notes = [], []
+    n_pics = 0
+
+    def note(msg):
+        notes.append(msg)
+        if log is not None:
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    try:
+        if not edits:
+            return patches, 0, notes
+        offs = picture_layout_offsets(data, images, tables)
+        for data_off, edit in sorted(edits.items()):
+            try:
+                edit = edit or {}
+                nodes = offs.get(data_off)
+                if not nodes:
+                    note("the picture at %s is not placed by any node in "
+                         "this scene; left alone" % data_off)
+                    continue
+                dx = _offset(edit.get("dx"))
+                dy = _offset(edit.get("dy"))
+                factor = _size_factor(edit.get("size"))
+                touched = False
+                for nd in nodes:
+                    for m_at, m in nd["tracks"]:
+                        new = _picture_matrix(m, nd["w"], nd["h"], dx, dy,
+                                              factor)
+                        touched |= _put(patches, data, m_at,
+                                        struct.pack("<16f", *new))
+                if touched:
+                    n_pics += 1
+            except Exception:
+                note("the picture at %s: this scene's layout could not be "
+                     "patched; left alone" % data_off)
+                continue
+    except Exception:
+        return [], 0, []
+    return patches, n_pics, notes
+
+
 def _glyph_atlas_offs(tables):
     """Every inline image a glyph table draws from — i.e. the FONT ATLAS pages.
 
