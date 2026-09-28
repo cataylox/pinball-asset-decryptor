@@ -2024,6 +2024,17 @@ HELP_CONTENT = {
          "different set every power-up. A random card over images that "
          "keep their own cards is \u201csurprise me\u201d beside the very builds "
          "it rolls between."),
+        ("A base card plus an edits folder",
+         "A song set does not need a whole 8 GB card of its own. Add "
+         "image or random… also offers Add base card + edits "
+         "folder…: the stock card plus the folder Try it wrote, and "
+         "only the edited files go on the card, with everything else read "
+         "from the base. Add random group from edits folders… takes one "
+         "stock card and a folder of those sets - the jukebox card. Both "
+         "check the pair before the row goes in and say why when they "
+         "refuse it (a set edited from a different card, from another "
+         "version of the app, half-built, or changed since), and both "
+         "lock Compact build on."),
         ("How a random card picks, and what it looks like",
          "Edit image\u2026 on a random row asks two questions an ordinary "
          "image does not. HOW IT PICKS: truly random (100% random, so it "
