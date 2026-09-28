@@ -775,6 +775,8 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
             except Exception:
                 continue
             rgba = list(d.get("rgba") or (1, 1, 1, 1))
+            if d.get("styled"):
+                rgba = [1.0, 1.0, 1.0, rgba[3]]          # the game ignores it (see scene_eval)
             pick = (colors or {}).get(d["text"])
             if pick:
                 rgba = [c / 255.0 for c in pick[:3]] + [rgba[3]]

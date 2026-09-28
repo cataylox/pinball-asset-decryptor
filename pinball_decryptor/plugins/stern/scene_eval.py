@@ -100,7 +100,11 @@ def manifest(scene, tex2rel=None, font_of=None, asset2rel=None):
                    "font_name": b["fonts"][0][0] if b["fonts"] else "",
                    "font": key_px[0] if key_px else "", "font_px": key_px[1] if key_px else 0,
                    "ascent": round(size.get("ascent", 0.0), 3),
-                   "line": round(size.get("line", 0.0), 3)}
+                   "line": round(size.get("line", 0.0), 3),
+                   # a styled game-font VARIANT (GameFont_Primary ...) draws its atlas's own
+                   # colours: the Text's rgba is ignored (emulator, every flag combination);
+                   # the node's colour track still tints it
+                   "styled": bool(size.get("variant"))}
         elif k == "Shape":
             out = {"kind": k, "rect": [round(v, 3) for v in b["rect"]],
                    "fill": obj(b["bitmap"])}
@@ -272,7 +276,7 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
                             align=o["align"], rgba=o["rgba"], font=o.get("font", ""),
                             font_px=o.get("font_px", 0), font_name=o.get("font_name", ""),
                             spacing=o.get("spacing", [0, 0]), ascent=o.get("ascent", 0),
-                            line=o.get("line", 0)))
+                            line=o.get("line", 0), styled=o.get("styled", False)))
         elif k == "Video":
             out.append(dict(common, kind="video", name=o["name"], w=o["w"], h=o["h"]))
         elif k == "Spine":

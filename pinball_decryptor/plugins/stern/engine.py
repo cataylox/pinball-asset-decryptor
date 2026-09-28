@@ -3866,7 +3866,8 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
     return writes, n_strings, overlays, fw_overlay, grown
 
 
-def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log):
+def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log,
+                         tree_ops=None):
     """Re-serialise every scene in *grown_radium* and stage the result whole
     under *grow_dir*.  An entry is ``{card_path: (node, {original:
     replacement}[, {data_off: (width, height, block bytes)}])}``: the longer
@@ -3879,9 +3880,14 @@ def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log):
     scene is grown, so the staged file carries everything and the ``.sidx``
     digest comes from the file rather than from an overlay.  Returns
     ``(jobs, grown_files)``: the ``(card_rel, staged)`` grow jobs and
-    ``{i_block: staged}`` for the manifest refresh."""
+    ``{i_block: staged}`` for the manifest refresh.
+
+    *tree_ops* ``{card_path: (ops, names, assets_dir)}`` (PAD-251, the Scenes window's
+    moves, resizes, layers and added pictures/text) are applied LAST, to the scene read back as
+    a tree (:mod:`scene_edit`), so they compose with longer text and resized pictures."""
     from . import radium_grow
     jobs, grown_files = [], {}
+    tree_ops = tree_ops or {}
     for i, (card_path, entry) in enumerate(sorted(grown_radium.items())):
         node, edits = entry[0], entry[1]
         images = entry[2] if len(entry) > 2 else {}
@@ -3891,17 +3897,23 @@ def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log):
         if ov:
             for off, b in ov[1].items():
                 buf[off:off + len(b)] = b
-        try:
-            got = radium_grow.regrow(bytes(buf), texts=edits or None,
-                                     images=images or None)
-        except ValueError as e:
-            log("Scene %s couldn't be re-serialised (%s); it is left "
-                "unchanged." % (card_path, e), "warning")
-            if ov:
-                radium_overlays[ib] = ov
-            continue
+        if edits or images:
+            try:
+                got = radium_grow.regrow(bytes(buf), texts=edits or None,
+                                         images=images or None)
+            except ValueError as e:
+                log("Scene %s couldn't be re-serialised (%s); it is left "
+                    "unchanged." % (card_path, e), "warning")
+                if ov:
+                    radium_overlays[ib] = ov
+                continue
+        else:
+            got = {"data": bytes(buf), "texts": {}, "images": {}}
         new, occ = got["data"], got["texts"]
-        if not occ and not got["images"]:
+        n_tree = 0
+        if card_path in tree_ops:
+            new, n_tree = _apply_tree_ops(new, card_path, *tree_ops[card_path], log=log)
+        if not occ and not got["images"] and not n_tree:
             log("Display text in %s: none of the longer lines were found when "
                 "re-serialising; the scene is left unchanged." % card_path,
                 "warning")
@@ -3913,6 +3925,10 @@ def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log):
             f.write(new)
         jobs.append((card_path.lstrip("/"), staged))
         grown_files[ib] = staged
+        if n_tree:
+            log("Scene %s: %d edit(s) from the Scenes window written; the scene is %d -> %d "
+                "bytes and is written whole. Proven in the PC emulator; not yet on a machine."
+                % (card_path, n_tree, len(buf), len(new)), "info")
         if occ:
             log("Display text in %s: re-serialised %d line(s) at their new "
                 "length (%d occurrence(s)); the scene grows %d -> %d bytes and "
@@ -3931,6 +3947,103 @@ def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log):
                 "resized image this way is proven in the PC emulator only."
                 % (card_path, off, w, h, refs, len(buf), len(new)), "warning")
     return jobs, grown_files
+
+
+def _apply_tree_ops(data, card_path, ops, names, assets_dir, log):
+    """*data* (a scene) with the Scenes window's tree edits applied: ``(bytes, n applied)``.
+    A scene that does not read as a tree, or an edit whose node this card does not have, is
+    logged and left alone."""
+    from . import scene_edit as _scene_edit
+    from . import scene_tree as _scene_tree
+    try:
+        sc = _scene_tree.parse(data)
+    except _scene_tree.SceneTreeError as e:
+        log("Scene %s: its edits from the Scenes window were not written - the scene on this "
+            "card does not read as a scene tree (%s)." % (card_path, e), "warning")
+        return data, 0
+    n, notes = _scene_edit.apply_scene(sc, ops, assets_dir, names)
+    for note in notes:
+        log("Scene %s: %s." % (card_path, note), "warning")
+    if not n:
+        return data, 0
+    return _scene_tree.serialize(sc), n
+
+
+def _scene_tree_plan(reader, assets_dir, log, cancel, dest_is_device, radium_overlays):
+    """PAD-251: the Scenes window's edits (``scene_edits.json``) per scene, split by how they
+    reach the card.  Returns ``(writes, n_edits, whole)``:
+
+    * a scene whose edited bytes are the SAME LENGTH (moves, resizes, hides, a re-layer) is
+      patched in place - ``writes`` + its overlay merged into *radium_overlays* - which also
+      works straight to an SD card;
+    * any other (an added picture or line of text) is written whole: ``whole`` =
+      ``{card_path: (node, (ops, names, assets_dir))}`` for :func:`_stage_grown_radiums`; an
+      image build only, so a direct-SD write says so and leaves the scene alone."""
+    from . import scene_edit as _scene_edit
+    edits = _scene_edit.load(assets_dir)
+    if not edits:
+        return [], 0, {}
+    trees = _load_scene_trees(assets_dir)
+    nodes = _resolve_card_nodes(reader, list(edits.keys()), cancel)
+    writes, whole, n_total = [], {}, 0
+    for card_path, ops in sorted(edits.items()):
+        if cancel():
+            break
+        node = nodes.get(card_path)
+        if node is None:
+            log("Scene %s isn't on this card; its %d edit(s) from the Scenes window were "
+                "skipped." % (card_path, len(ops)), "warning")
+            continue
+        names = _scene_edit.names_of(trees[card_path]) if card_path in trees else {}
+        ib = bytes(node["i_block"])
+        stock = reader.read_file_bytes(node)
+        buf = bytearray(stock)
+        ov = radium_overlays.get(ib)
+        if ov:
+            for off, b in ov[1].items():
+                buf[off:off + len(b)] = b
+        new, n = _apply_tree_ops(bytes(buf), card_path, ops, names, assets_dir, log)
+        if not n:
+            continue
+        n_total += n
+        if len(new) == len(buf):
+            patch = {}
+            i = 0
+            while i < len(new):
+                if new[i] != buf[i]:
+                    j = i
+                    while j < len(new) and new[j] != buf[j]:
+                        j += 1
+                    patch[i] = new[i:j]
+                    i = j
+                else:
+                    i += 1
+            for off, payload in patch.items():
+                rest = payload
+                for disk, cnt in reader.disk_ranges(node, off, len(payload)):
+                    writes.append((disk, rest[:cnt]))
+                    rest = rest[cnt:]
+            radium_overlays.setdefault(ib, (node, {}))[1].update(patch)
+            log("Scene %s: %d edit(s) from the Scenes window, %d byte run(s) rewritten in "
+                "place." % (card_path, n, len(patch)), "info")
+        elif dest_is_device:
+            n_total -= n
+            log("Scene %s: its edits from the Scenes window add to the scene, which needs an "
+                "image build (Write to an image file); a direct SD-card write leaves it "
+                "alone." % card_path, "warning")
+        else:
+            whole[card_path] = (node, (ops, names, assets_dir))
+    return writes, n_total, whole
+
+
+def _load_scene_trees(assets_dir):
+    import json
+    try:
+        with open(os.path.join(assets_dir, *_TEXTURE_DIR, _SCENE_TREE_MANIFEST),
+                  encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
 
 
 def _drop_writes_in(writes, reader, node):
@@ -6075,6 +6188,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     # and size are scene bytes too (the rect, the align word, the scene's own
     # glyph table), so this is a third size-neutral radium patch.
     layout_edits = _changed_radium_text_layouts(assets_dir)
+    # PAD-251: the Scenes window's tree edits (move, resize, layer, hide, add)
+    from . import scene_edit as _scene_edit
+    tree_edits = _scene_edit.load(assets_dir)
     # The game's own modes (item 145): staged timers / awards of the modes the
     # game shipped with - word patches in the game ELF, and the table's
     # operator-setting defaults (a battle timer) in the same ELF.
@@ -6082,7 +6198,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     if (not stock_mode_edits and not audio_edits and not music_edits
             and not video_edits and not image_edits and not texture_edits
             and not radimg_edits and not text_edits and not color_edits
-            and not layout_edits and not boot_edits):
+            and not layout_edits and not boot_edits and not tree_edits):
         # nothing staged, but the card this is built from may hold our words
         stock_mode_edits = _stock_mode_words_to_restore(disk_f, parts,
                                                         assets_dir)
@@ -6213,6 +6329,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
             and not text_edits and not color_edits and not layout_edits
+            and not tree_edits
             and not boot_edits and not mode_list and not code_list
             and not stock_mode_edits):
         raise NothingToWrite(
@@ -6329,6 +6446,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         log("Found %d recoloured text line(s) across %d radium scene(s) to "
             "write." % (sum(len(v) for v in color_edits.values()),
                         len(color_edits)), "info")
+    if tree_edits:
+        log("Found %d edit(s) from the Scenes window across %d scene(s) to write."
+            % (sum(len(v) for v in tree_edits.values()), len(tree_edits)), "info")
     if layout_edits:
         log("Found %d re-laid-out text line(s) or picture(s) (moved / "
             "re-aligned / resized) across %d radium scene(s) to write."
@@ -7126,20 +7246,33 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # so their in-place edits (all at stock offsets) fold into the grown
         # bytes; the grown scene is then written whole and its in-place
         # writes are dropped.
+        tree_writes, n_tree, tree_whole = [], 0, {}
+        if tree_edits:
+            if progress:
+                progress(91, 100, "Preparing the scene edits...")
+            tree_writes, n_tree, tree_whole = _scene_tree_plan(
+                reader, assets_dir, log, cancel, dest_is_device, radium_overlays)
+            if cancel():
+                return None, None, None, None, None
         radium_grow_jobs, grown_files = [], {}
         grown_radium = {cp: (node, texts, {}) for cp, (node, texts)
                         in ((grown_text or {}).get("radium") or {}).items()}
         for cp, (node, imgs) in grown_images.items():
             grown_radium.setdefault(cp, (node, {}, {}))[2].update(imgs)
+        for cp, (node, _plan) in tree_whole.items():
+            grown_radium.setdefault(cp, (node, {}, {}))
         if grown_radium:
+            grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             radium_grow_jobs, grown_files = _stage_grown_radiums(
-                reader, grown_radium, radium_overlays, grow_work, log)
+                reader, grown_radium, radium_overlays, grow_work, log,
+                tree_ops={cp: plan for cp, (_n, plan) in tree_whole.items()})
             for _gnode, *_gedits in grown_radium.values():
                 if bytes(_gnode["i_block"]) not in grown_files:
                     continue
                 text_writes = _drop_writes_in(text_writes, reader, _gnode)
                 color_writes = _drop_writes_in(color_writes, reader, _gnode)
                 layout_writes = _drop_writes_in(layout_writes, reader, _gnode)
+                tree_writes = _drop_writes_in(tree_writes, reader, _gnode)
                 radimg_writes = _drop_writes_in(radimg_writes, reader, _gnode)
         # A grown sound bank rides the same mechanism: a whole-file copy with
         # its manifest record's size rewritten alongside its digests.
@@ -7307,7 +7440,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # Display-text writes are already (disk_offset, bytes) (the radium-text
         # helper resolved them through disk_ranges itself).
         writes = (list(text_writes) + list(color_writes) + list(layout_writes)
-                  + list(radimg_writes))
+                  + list(radimg_writes) + list(tree_writes))
         writes += stock_mode_writes          # the game's own modes (item 145)
         # A grown sound bank is longer than the file on the card, so it can't be
         # patched in place: every re-encoded body is composed into the staged
@@ -7515,7 +7648,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # than the letters.
         counts = (len(audio_patches) + len(music_patches),
                   len(video_patches) + len(video_grow_jobs),
-                  len(image_patches) + len(texture_patches) + n_radimg
+                  len(image_patches) + len(texture_patches) + n_radimg + n_tree
                   + n_boot,
                   n_text + n_color + n_layout)
         # the game's own modes ride along without changing the tuple's shape
