@@ -458,25 +458,6 @@ def _layout_edit(layout_edits, text):
     return e["dx"], e["dy"], align, scale
 
 
-def _picture_edit(layout_edits, rel):
-    """The pending layout edit for the picture *rel* as ``(dx, dy, scale)``,
-    or ``None`` when it has none (PAD-251: a picture's row is keyed
-    :func:`text_layout.picture_key`)."""
-    if not layout_edits or not rel:
-        return None
-    from . import text_layout as tl
-    edit = layout_edits.get(tl.picture_key(rel))
-    if not edit:
-        return None
-    try:
-        e = tl.normalize(edit)
-    except Exception:
-        return None
-    if tl.is_neutral(e):
-        return None
-    return e["dx"], e["dy"], (e["size"] / 100.0) if e["size"] else 1.0
-
-
 def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
                   colors=None, state=0, group=None, layout_edits=None,
                   text_edits=None):
@@ -494,8 +475,7 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
     says, with its glyph metrics scaled by ``size / 100`` — the same three
     things the Write path patches into the radium.  Unlike a colour, a layout
     edit applies to the OUTLINE pass too: the border has to move and grow
-    with its fill or the pair comes apart.  A PICTURE's row in the same dict
-    (keyed ``picture:<image rel>``) moves it and scales it about its centre.
+    with its fill or the pair comes apart.
 
     *text_edits* is ``{display string: replacement}`` of pending Replace Text
     edits that reach this scene (its own radium rows, and game-program rows
@@ -539,21 +519,7 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
             img = Image.open(path).convert("RGBA")
         except (OSError, ValueError):
             continue
-        x, y = sp.get("x", 0), sp.get("y", 0)
-        # A picture moved / resized but not built yet (PAD-251): shifted by
-        # dx, dy and scaled about its centre, as the Write path patches it.
-        pic = _picture_edit(layout_edits, rel)
-        if pic is not None:
-            dx, dy, scale = pic
-            if scale != 1.0:
-                iw, ih = img.size
-                nw, nh = max(1, int(round(iw * scale))), max(
-                    1, int(round(ih * scale)))
-                img = img.resize((nw, nh), Image.LANCZOS)
-                x -= (nw - iw) / 2.0
-                y -= (nh - ih) / 2.0
-            x, y = x + dx, y + dy
-        _add(canvas, img, x, y)
+        _add(canvas, img, sp.get("x", 0), sp.get("y", 0))
         drew = True
 
     texts = _pick(layout.get("texts") or (), state, group)

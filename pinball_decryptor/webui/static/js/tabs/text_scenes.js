@@ -3,7 +3,7 @@
 // Python: webui/text_scenes.py (ns "text_scenes").  The shell renders it over
 // every tab; it shows itself while text_scenes.open is true.
 
-import { html, useState, useEffect, useRef, Button, Field, Select, Table, Modal, openMenu, InfoBadge,
+import { html, useState, useEffect, useRef, Button, Field, Select, Seg, Table, Modal, openMenu, InfoBadge,
          Icon, tip, call, mediaUrl, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { ToolWindow } from "./text_fonts.js";
@@ -32,6 +32,7 @@ let sceneWidths = null;         // dragged column widths, kept for the session
 export function ScenesWindow() {
   const s = useNs("text_scenes");
   const [color, setColor] = useState(null);     // {text, start, stock, title}
+  const [wide, setWide] = useState(false);      // the scene editor without the scene list
   useEffect(() => { if (!s.open) setColor(null); }, [s.open]);
   if (!s.open) return null;
   const tips = s.tips || {};
@@ -68,14 +69,7 @@ export function ScenesWindow() {
         { label: "Open in the Fonts window", onClick: () => call("text_scenes.activate", it.id) },
       ];
     } else if (it.id.startsWith("img::")) {
-      // a picture the scene places can be moved / resized (PAD-251)
-      items = [
-        it.placed ? { label: "Move…", onClick: () => startLayout(it.key, "move") } : null,
-        it.placed ? { label: "Size…", onClick: () => startLayout(it.key, "size") } : null,
-        it.has_layout ? { label: "Back to the original layout", onClick: () => call("text_scenes.reset_layout", it.key) } : null,
-        it.placed ? { sep: true } : null,
-        { label: "Show on the Images tab", onClick: () => call("text_scenes.activate", it.id) },
-      ];
+      items = [{ label: "Show on the Images tab", onClick: () => call("text_scenes.activate", it.id) }];
     } else if (it.id.startsWith("vid::")) {
       items = [{ label: "Show on the Video tab", onClick: () => call("text_scenes.activate", it.id) }];
     }
@@ -86,7 +80,7 @@ export function ScenesWindow() {
       raiseN=${s.raise_n} onClose=${close} onAside=${() => call("text_scenes.hide")} holdEsc=${!!color}
       footer=${html`<${Button} onClick=${close}>Close<//>`}>
     <p class="small muted" style="margin:0">${s.hint}</p>
-    <div class="scenes-body">
+    <div class=${cx("scenes-body", wide && s.tree && s.tree_view && "wide")}>
       <div class="scenes-left" ...${tip(tips.list)}>
         <${Field} sm value=${s.search} placeholder="Search" onChange=${(v) => call("text_scenes.set_search", v)}
           delay=${200} prefix=${html`<${Icon} name="search" />`} />
@@ -97,10 +91,11 @@ export function ScenesWindow() {
           resizable widths=${sceneWidths} onResize=${(w) => { sceneWidths = w; }} />
       </div>
       <div class="scenes-right">
-        <${Contents} s=${s} onMenu=${itemMenu} />
-        <div class="scenes-preview">
-          <${Preview} s=${s} tip=${tips.preview} />
+        ${s.tree && s.tree_view ? null : html`<${Contents} s=${s} onMenu=${itemMenu} />`}
+        <div class=${cx("scenes-preview", s.tree && s.tree_view && "tree")}>
+          ${s.tree && s.tree_view ? html`<${TreeCanvas} s=${s} />` : html`<${Preview} s=${s} tip=${tips.preview} />`}
           <div class="scenes-side">
+            ${s.tree && s.tree_view ? html`<${TreeSide} t=${s.tree_view} wide=${wide} setWide=${setWide} />` : null}
             <span class="eyebrow">Scene preview</span>
             <${Button} size="sm" disabled=${!s.can_save && !s.exporting} title=${tips.save}
               onClick=${() => call("text_scenes.save_preview")}>${shotLabel}<//>
@@ -133,7 +128,8 @@ export function ScenesWindow() {
           <span class="small muted ellip">${s.caption}</span>
           ${s.caption_full ? html`<${InfoBadge} text=${s.caption_full} />` : null}
         </div>
-        <div class="row scenes-bottom">
+        ${s.tree && s.tree_view ? html`<${TreeTop} s=${s} onMenu=${itemMenu} />` : null}
+        <div class=${cx("row scenes-bottom", s.tree && s.tree_view && "hidden")}>
           <div class="thumb scenes-thumb">${s.thumb ? html`<img src=${mediaUrl(s.thumb)} alt="" />` : null}</div>
           <span class="small muted mono scenes-detail">${s.detail}</span>
         </div>
@@ -240,8 +236,218 @@ function LayoutEditor({ d }) {
     <span class="grow"></span>
     <${Button} size="sm" kind="primary" onClick=${apply}>Apply<//>
     <${Button} size="sm" onClick=${cancel}>Cancel<//>
-    <span class="small muted scenes-edit-n">${move ? (d.picture ? "Negative moves the picture left / up." : "Negative moves the line left / up.")
-      : d.picture ? "Grows or shrinks about its centre, in this scene only."
+    <span class="small muted scenes-edit-n">${move ? "Negative moves the line left / up."
       : "Every line this scene draws with the same font at this size changes with it."}</span>
   </section>`;
+}
+
+
+// ---------------------------------------------------------------------------------------------
+// PAD-251: the scene EDITOR (webui/text_scenes_tree.py).  The scene is drawn from its tree, as
+// the machine draws it; every picture and line of text on the canvas can be picked, dragged,
+// resized from a corner, nudged with the arrow keys, tinted, hidden, re-layered or removed.
+// ---------------------------------------------------------------------------------------------
+function inPoly(pts, x, y) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i], [xj, yj] = pts[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function TreeTop({ s, onMenu }) {
+  const [view, setView] = useState("layers");
+  return html`<div class="scenes-top">
+    <${Seg} value=${view} onChange=${setView}
+      options=${[{ value: "layers", label: "Layers" }, { value: "contents", label: "Contents" }]} />
+    ${view === "layers" ? html`<${TreeLayers} t=${s.tree_view} />` : html`<${Contents} s=${s} onMenu=${onMenu} />`}
+  </div>`;
+}
+
+function TreeLayers({ t }) {
+  const listRef = useRef(null);
+  useEffect(() => {
+    if (t.sel == null || !listRef.current) return;
+    const el = listRef.current.querySelector(`[data-node="${t.sel}"]`);
+    if (el) el.scrollIntoView({ block: "nearest" });
+  }, [t.sel]);
+  return html`<div class="scenes-contents tree-layers" ref=${listRef} role="tree" aria-label="Layers">
+    <div class="sc-head"><span class="eyebrow">Layers — last drawn on top</span></div>
+    ${(t.layers || []).map((l) => html`<div key=${l.id} data-node=${l.id}
+        class=${cx("sc-item", "ly-item", t.sel === l.id && "sel", !l.drawn && "ly-off")}
+        style=${`padding-left:${10 + l.depth * 14}px`}
+        onClick=${() => call("text_scenes.tree_select", l.id)}>
+      <button type="button" class="ly-eye" title=${l.hidden ? "Hidden — show it again" : "Hide it"}
+        onClick=${(e) => { e.stopPropagation(); call("text_scenes.tree_visible", l.id, l.hidden); }}>
+        <${Icon} name=${l.hidden ? "eye-off" : "eye"} /></button>
+      <span class="sc-t ellip" title=${l.name}>${l.name}${l.added ? " (added)" : ""}</span>
+      <span class="sc-i small muted ellip" title=${l.edits || l.kind}>${l.edits || l.kind}</span>
+    </div>`)}
+  </div>`;
+}
+
+function TreeCanvas({ s }) {
+  const t = s.tree_view;
+  const img = (s.frames || [])[0];
+  const W = t.stage[0], H = t.stage[1];
+  const box = useRef(null);
+  const [drag, setDrag] = useState(null);
+  const [hover, setHover] = useState(null);
+  const p = t.props;
+  const toStage = (e) => {
+    const r = box.current.getBoundingClientRect();
+    return [((e.clientX - r.left) * W) / r.width, ((e.clientY - r.top) * H) / r.height];
+  };
+  const pick = (x, y) => {
+    const hits = t.hits || [];
+    for (let i = hits.length - 1; i >= 0; i--) if (inPoly(hits[i].pts, x, y)) return hits[i];
+    return null;
+  };
+  const selBox = p && p.x != null ? { x: p.x, y: p.y, w: p.w, h: p.h } : null;
+  const corner = (x, y) => {
+    if (!selBox) return null;
+    const r = box.current.getBoundingClientRect();
+    const tol = (10 * W) / r.width;
+    for (const [cx0, cy0] of [[selBox.x, selBox.y], [selBox.x + selBox.w, selBox.y],
+      [selBox.x, selBox.y + selBox.h], [selBox.x + selBox.w, selBox.y + selBox.h]]) {
+      if (Math.abs(x - cx0) < tol && Math.abs(y - cy0) < tol) return true;
+    }
+    return false;
+  };
+  const down = (e) => {
+    if (e.button !== 0) return;
+    const [x, y] = toStage(e);
+    box.current.setPointerCapture(e.pointerId);
+    if (corner(x, y)) {
+      const cx0 = selBox.x + selBox.w / 2, cy0 = selBox.y + selBox.h / 2;
+      setDrag({ mode: "scale", id: p.id, cx: cx0, cy: cy0, d0: Math.hypot(x - cx0, y - cy0) || 1, f: 1 });
+      return;
+    }
+    const h = pick(x, y);
+    if (!h) { call("text_scenes.tree_select", null); setDrag(null); return; }
+    if (!p || h.id !== p.id) call("text_scenes.tree_select", h.id);
+    setDrag({ mode: "move", id: h.id, x0: x, y0: y, dx: 0, dy: 0 });
+  };
+  const move = (e) => {
+    const [x, y] = toStage(e);
+    if (!drag) { const h = pick(x, y); setHover(h ? h.id : null); return; }
+    if (drag.mode === "move") setDrag({ ...drag, dx: x - drag.x0, dy: y - drag.y0 });
+    else setDrag({ ...drag, f: Math.max(0.05, Math.hypot(x - drag.cx, y - drag.cy) / drag.d0) });
+  };
+  const up = () => {
+    const d = drag;
+    setDrag(null);
+    if (!d) return;
+    if (d.mode === "move" && Math.abs(d.dx) + Math.abs(d.dy) >= 1)
+      call("text_scenes.tree_move", d.id, Math.round(d.dx), Math.round(d.dy));
+    if (d.mode === "scale" && Math.abs(d.f - 1) > 0.01) call("text_scenes.tree_scale", d.id, d.f);
+  };
+  const key = (e) => {
+    if (!p) return;
+    const step = e.shiftKey ? 10 : 1;
+    const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+    if (moves[e.key]) { e.preventDefault(); call("text_scenes.tree_move", p.id, ...moves[e.key]); }
+    else if (e.key === "Delete") { e.preventDefault(); call("text_scenes.tree_remove", p.id); }
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); call("text_scenes.tree_undo"); }
+  };
+  let tf = "";
+  if (drag && drag.mode === "move") tf = `translate(${drag.dx} ${drag.dy})`;
+  if (drag && drag.mode === "scale")
+    tf = `translate(${drag.cx} ${drag.cy}) scale(${drag.f}) translate(${-drag.cx} ${-drag.cy})`;
+  const hov = hover != null && (!p || hover !== p.id) ? (t.hits || []).filter((h) => h.id === hover) : [];
+  const selPolys = p ? (t.hits || []).filter((h) => h.id === p.id) : [];
+  return html`<div class="scenes-canvas tree-canvas" ref=${box} tabIndex="0" onKeyDown=${key}
+      style=${`background:${s.bg_rgb || "#101014"};aspect-ratio:${W} / ${H}`}
+      onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerLeave=${() => setHover(null)}>
+    ${img ? html`<img src=${mediaUrl(img)} alt="" draggable="false" />` : html`<span class="scenes-msg">${s.canvas_msg}</span>`}
+    <svg viewBox=${`0 0 ${W} ${H}`} preserveAspectRatio="none" class="tree-svg">
+      ${hov.map((h, i) => html`<polygon key=${"h" + i} points=${h.pts.map((q) => q.join(",")).join(" ")} class="tree-hover" />`)}
+      <g transform=${tf}>
+        ${selPolys.map((h, i) => html`<polygon key=${"s" + i} points=${h.pts.map((q) => q.join(",")).join(" ")} class="tree-sel" />`)}
+        ${selBox ? html`<rect x=${selBox.x} y=${selBox.y} width=${selBox.w} height=${selBox.h} class="tree-box" />` : null}
+        ${selBox ? [[selBox.x, selBox.y], [selBox.x + selBox.w, selBox.y], [selBox.x, selBox.y + selBox.h],
+          [selBox.x + selBox.w, selBox.y + selBox.h]].map(([hx, hy], i) =>
+          html`<rect key=${"k" + i} x=${hx - 7} y=${hy - 7} width="14" height="14" class="tree-handle" />`) : null}
+      </g>
+    </svg>
+  </div>`;
+}
+
+function TreeSide({ t, wide, setWide }) {
+  const p = t.props;
+  const [adding, setAdding] = useState(false);
+  const [words, setWords] = useState("");
+  const [tint, setTint] = useState(p ? p.tint : "#ffffff");
+  useEffect(() => { if (p) setTint(p.tint); }, [p && p.id, p && p.tint]);
+  const num = (label, value, onCommit, title) => html`<label class="tree-num" ...${tip(title)}>
+    <span class="lbl">${label}</span>
+    <div class="field sm"><input type="number" value=${value ?? ""} onChange=${(e) => onCommit(e.target.value)} /></div>
+  </label>`;
+  return html`<div class="tree-side">
+    <${Button} size="xs" icon=${wide ? "right" : "left"} onClick=${() => setWide(!wide)}
+      title="More room for the preview while you edit">${wide ? "Show the scene list" : "Hide the scene list"}<//>
+    <span class="eyebrow">Moment</span>
+    <${Select} sm value=${t.moment} options=${t.moments} onChange=${(v) => call("text_scenes.tree_moment", v)}
+      title="Which moment of the scene's timeline to show: where it rests, or one of its own labels." />
+    <div class="scenes-ctl">
+      <span class="lbl">Frame</span>
+      <div class="field sm" style="width:84px"><input type="number" min="1" max=${t.frames} value=${t.frame}
+        onChange=${(e) => call("text_scenes.tree_moment", "f:" + e.target.value)} /></div>
+      <span class="small muted">of ${t.frames}</span>
+    </div>
+    ${(t.states || []).length ? html`<details class="tree-states">
+      <summary class="small">States the game picks (${t.states.length})</summary>
+      ${t.states.map((st) => html`<label key=${st.node} class="tree-state" title=${st.path}>
+        <span class="small ellip">${st.name}</span>
+        <${Select} sm value=${st.value} options=${st.options} onChange=${(v) => call("text_scenes.tree_state", st.node, v)} />
+      </label>`)}
+    </details>` : null}
+    <span class="eyebrow">Selected</span>
+    ${p ? html`<div class="tree-props">
+      <div class="small ellip" title=${p.name}><b>${p.name}</b> <span class="muted">${p.kind}${p.added ? ", added" : ""}</span></div>
+      ${p.x != null ? html`<div class="tree-row">
+        ${num("X", p.x, (v) => call("text_scenes.tree_move", p.id, Number(v) - p.x, 0), "Left edge on the glass (px)")}
+        ${num("Y", p.y, (v) => call("text_scenes.tree_move", p.id, 0, Number(v) - p.y), "Top edge on the glass (px)")}
+      </div>` : html`<div class="small muted">Not on the glass at this moment.</div>`}
+      <div class="tree-row">
+        ${num("Size %", p.scale, (v) => call("text_scenes.tree_set_scale", p.id, v), "100 = the size the game ships")}
+        <span class="small muted">${p.w != null ? `${p.w} x ${p.h} px` : ""}</span>
+      </div>
+      <div class="tree-row">
+        <span class="lbl">Tint</span>
+        <input type="color" class="tree-color" value=${tint} onInput=${(e) => setTint(e.target.value)}
+          onChange=${(e) => call("text_scenes.tree_tint", p.id, e.target.value, p.alpha)} aria-label="Tint" />
+        ${num("Opacity %", p.alpha, (v) => call("text_scenes.tree_tint", p.id, tint, v), "100 = as shipped")}
+      </div>
+      <div class="tree-row">
+        <${Button} size="xs" onClick=${() => call("text_scenes.tree_visible", p.id, p.hidden)}>${p.hidden ? "Show" : "Hide"}<//>
+        <${Button} size="xs" title="Draw it above the next layer" onClick=${() => call("text_scenes.tree_order", p.id, "up")}>Forward<//>
+        <${Button} size="xs" title="Draw it below the layer before it" onClick=${() => call("text_scenes.tree_order", p.id, "down")}>Back<//>
+        <span class="small muted">layer ${p.layer}/${p.layers}</span>
+      </div>
+      <div class="tree-row">
+        <${Button} size="xs" onClick=${() => call("text_scenes.tree_order", p.id, "front")}>To front<//>
+        <${Button} size="xs" onClick=${() => call("text_scenes.tree_order", p.id, "back")}>To back<//>
+        <${Button} size="xs" onClick=${() => call("text_scenes.tree_reset", p.id)}>${p.added ? "Remove" : "As shipped"}<//>
+      </div>
+    </div>` : html`<div class="small muted">Click a picture or a line of text in the preview, or a row in Layers.</div>`}
+    <span class="eyebrow">Add</span>
+    <div class="tree-row">
+      <${Button} size="xs" icon="plus" onClick=${() => call("text_scenes.tree_add_picture")}>Picture…<//>
+      <${Button} size="xs" icon="plus" onClick=${() => { setWords(""); setAdding(true); }}>Text…<//>
+    </div>
+    <div class="tree-row">
+      <${Button} size="xs" disabled=${!t.edits} onClick=${() => call("text_scenes.tree_undo")}>Undo<//>
+      <${Button} size="xs" disabled=${!t.edits} onClick=${() => call("text_scenes.tree_clear")}>As shipped (whole scene)<//>
+      <span class="small muted">${t.edits ? `${t.edits} edit(s), not built yet` : ""}</span>
+    </div>
+    ${(t.notes || []).length ? html`<div class="small warn-ink">${t.notes.join("; ")}</div>` : null}
+    ${adding ? html`<${Modal} title="Add a line of text" onClose=${() => setAdding(false)}
+        footer=${html`<${Button} onClick=${() => setAdding(false)}>Cancel<//><${Button} kind="primary"
+          disabled=${!words.trim()} onClick=${() => { setAdding(false); call("text_scenes.tree_add_text", words); }}>Add<//>`}>
+      <p class="small muted" style="margin-top:0">Written in the font and size of the selected line (or the scene's first one), in the middle of the screen: drag it where you want it.</p>
+      <${Field} value=${words} onChange=${setWords} placeholder="Words" />
+    <//>` : null}
+  </div>`;
 }

@@ -1,0 +1,562 @@
+"""The Scenes window's scene EDITOR (PAD-251): a scene drawn from its tree, edited on the canvas.
+
+When the project has a scene's tree (``scene_tree.json``, written by Extract and Rebuild
+previews) the window draws that scene as the machine does (:mod:`plugins.stern.scene_eval`,
+:func:`scene_render.render_tree`) at one MOMENT - a frame of its timeline, and the state the
+game's code would seek each labelled sprite to - and lets the user select any picture or line
+of text on the canvas and move, resize, tint, hide, re-layer or remove it, or add a picture or
+a line of text.  Every edit is an operation in ``scene_edits.json`` (:mod:`scene_edit`), drawn
+at once and written to the card by the Write.
+
+The page's half is ``TreeCanvas`` / ``TreeSide`` / ``TreeLayers`` in
+``static/js/tabs/text_scenes.js``; this mixin is :class:`TextScenesService`'s.
+"""
+
+import json
+import logging
+import os
+import threading
+
+from . import compat
+from .rpc import rpc
+
+log = logging.getLogger(__name__)
+
+_TREE_DISPLAY = (1360, 768)          # the canvas image is drawn full size: it is edited on
+_ORDER = ("up", "down", "front", "back")
+
+
+class TreeEditMixin:
+    """Mixed into ``TextScenesService``; uses its ``assets_dir``, ``_sel``, ``set``,
+    ``ctx``, ``_tmpdir``, ``_bg``, ``_fonts``, ``_pending_texts``, ``_folder_state_written``."""
+
+    # ------------------------------------------------------------------
+    # data
+    # ------------------------------------------------------------------
+    def _tree_init(self):
+        self._trees = None           # {card path: manifest} (lazy)
+        self._tframe = {}            # card -> root frame shown
+        self._tpins = {}             # card -> {node id: frame}
+        self._tsel = None            # selected node id
+        self._tdraws = []            # the draw list of the last render
+        self._tworlds = {}
+        self._tparents = {}
+        self._tman = None
+        self._ttoken = 0
+
+    def _tree_reset(self):
+        self._trees = None
+
+    def _load_trees(self):
+        if self._trees is None:
+            path = os.path.join(self.assets_dir, "images", "scene_textures",
+                                "scene_tree.json")
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    self._trees = json.load(f)
+            except (OSError, ValueError):
+                self._trees = {}
+        return self._trees
+
+    def _tree_card(self, scene_dir=None):
+        """``(card path, stock manifest)`` of the scene in *scene_dir* (default: selected)."""
+        want = (scene_dir or self._sel or "").replace("\\", "/").rstrip("/")
+        if not want:
+            return None, None
+        for card, man in self._load_trees().items():
+            if card.replace("\\", "/").rsplit("/", 1)[0] == want:
+                return card, man
+        return None, None
+
+    def _tree_ops(self, card):
+        from ..plugins.stern import scene_edit
+        return scene_edit.ops_for(self.assets_dir, card)
+
+    def _tree_edited(self, card, man):
+        from ..plugins.stern import scene_edit
+        edited, notes = scene_edit.apply_manifest(man, self._tree_ops(card))
+        return edited, notes
+
+    def _tree_frame(self, card, man):
+        from ..plugins.stern import scene_eval
+        if card not in self._tframe:
+            self._tframe[card] = scene_eval.default_frame(man)
+        return self._tframe[card]
+
+    # ------------------------------------------------------------------
+    # drawing
+    # ------------------------------------------------------------------
+    def _tree_available(self, scene_dir):
+        return self._tree_card(scene_dir)[0] is not None
+
+    def _render_tree_preview(self, scene_dir):
+        from ..plugins.stern import scene_eval, scene_render
+        card, stock = self._tree_card(scene_dir)
+        self._ttoken += 1
+        token = self._ttoken
+        man, notes = self._tree_edited(card, stock)
+        frame = self._tree_frame(card, stock)
+        pins = dict(self._tpins.get(card) or {})
+        worlds = {}
+        draws = scene_eval.draw_list(man, frame, pins=pins, worlds=worlds)
+        self._tdraws, self._tworlds, self._tman = draws, worlds, man
+        self._tparents = {n["id"]: (par["id"] if par else None)
+                          for n, par, _d in _walk_man(man)}
+        bg = self._bg
+        text_edits = self._pending_texts(card, None)
+        colors = self._pending_colors(card)
+        tmp = self._tmpdir()
+        self.set(tree=True, canvas_msg="drawing…", can_save=False, frames=[],
+                 animated=False, screens=[])
+        self._tree_publish(card, man, frame, notes)
+
+        def work():
+            img = None
+            try:
+                if self._fonts is None:
+                    from ..plugins.stern import fontrender as fr
+                    self._fonts = fr.load_fonts(self.assets_dir)
+                img = scene_render.render_tree(self.assets_dir, man, frame, pins=pins,
+                                               fonts=self._fonts, background=bg,
+                                               colors=colors, text_edits=text_edits,
+                                               draws=draws)
+            except Exception:                        # noqa: BLE001
+                log.exception("scene tree render")
+            path = ""
+            if img is not None:
+                path = os.path.join(tmp, "t%d.png" % token)
+                try:
+                    img.save(path, compress_level=1)
+                except OSError:
+                    path = ""
+            self.ctx.loop.post(self._tree_show, token, img, path)
+
+        threading.Thread(target=work, daemon=True, name="scene-tree").start()
+
+    def _tree_show(self, token, img, path):
+        if token != self._ttoken or not self._alive:
+            return
+        self._preview_full = img
+        self._frames_full = [img] if img is not None else []
+        self.set(frames=[path] if path else [], can_save=img is not None,
+                 canvas_msg="" if path else "nothing could be drawn")
+        for name in os.listdir(self._tmpdir()):
+            if name.startswith("t") and name != os.path.basename(path or ""):
+                try:
+                    os.remove(os.path.join(self._tmpdir(), name))
+                except OSError:
+                    pass
+
+    def _tree_publish(self, card, man, frame, notes=()):
+        """Everything the page shows about the scene's tree: the moment, the states, the
+        outlines to pick from, the layers and the selection."""
+        from ..plugins.stern import scene_edit, scene_eval
+        w, h = int(man["stage"][0]), int(man["stage"][1])
+        hits = []
+        for d in self._tdraws:
+            if d["mul"][3] <= 0.01 or d["kind"] not in ("bitmap", "text", "flip"):
+                continue
+            hits.append({"id": d["node"], "name": d["path"][-1], "kind": d["kind"],
+                         "path": " › ".join(d["path"]),
+                         "pts": [[round(x, 1), round(y, 1)] for x, y in
+                                 scene_eval.outline(d)]})
+        moments = [{"value": "f:%d" % scene_eval.default_frame(man),
+                    "label": "Resting (frame %d)" % scene_eval.default_frame(man)}]
+        for name, f in sorted(man["root"]["labels"], key=lambda x: x[1]):
+            moments.append({"value": "f:%d" % f, "label": "%s (frame %d)" % (name, f)})
+        pins = self._tpins.get(card) or {}
+        states = []
+        for nid, path, labels, frames in scene_eval.seekable(man):
+            opts = [{"value": "", "label": "As it rests"}]
+            opts += [{"value": str(f), "label": "%s (%d)" % (n, f)}
+                     for n, f in sorted(labels, key=lambda x: x[1])]
+            states.append({"node": nid, "name": path[-1], "path": " › ".join(path),
+                           "value": str(pins[nid]) if nid in pins else "", "options": opts})
+        ops = self._tree_ops(card)
+        edited_nodes = {}
+        for op in ops:
+            key = op.get("node", op.get("id"))
+            edited_nodes.setdefault(key, []).append(scene_edit.describe(op))
+        drawn = {d["node"] for d in self._tdraws}
+        layers = []
+        index = scene_edit._man_index(man)
+        for n, _parent, depth in _walk_man(man):
+            kind = _kind_of(man, n)
+            layers.append({"id": n["id"], "name": n["name"], "depth": depth, "kind": kind,
+                           "drawn": n["id"] in drawn or n["id"] in self._tworlds,
+                           "added": bool(n.get("added")),
+                           "hidden": any(op["op"] == "visible" and op.get("node") == n["id"]
+                                         for op in ops),
+                           "edits": "; ".join(edited_nodes.get(n["id"], []))})
+        sel = self._tsel if self._tsel in index else None
+        self._tsel = sel
+        self.set(tree=True, tree_view={
+            "card": card, "stage": [w, h], "frame": frame,
+            "frames": int(man["root"].get("frames") or 1),
+            "moment": "f:%d" % frame, "moments": moments, "states": states,
+            "hits": hits, "layers": layers, "sel": sel,
+            "props": self._tree_props(card, man, sel, ops) if sel is not None else None,
+            "edits": len(ops), "notes": list(notes)})
+
+    def _tree_props(self, card, man, nid, ops):
+        from ..plugins.stern import scene_edit
+        index = scene_edit._man_index(man)
+        n, sibs = index[nid]
+        scale = 1.0
+        mul = [1.0, 1.0, 1.0, 1.0]
+        for op in ops:
+            if op.get("node") != nid:
+                continue
+            if op["op"] == "scale":
+                scale *= op["s"]
+            elif op["op"] == "tint":
+                mul = [mul[i] * op["mul"][i] for i in range(4)]
+        box = self._tree_box(nid)
+        return {"id": nid, "name": n["name"], "kind": _kind_of(man, n),
+                "added": bool(n.get("added")),
+                "x": round(box[0]) if box else None, "y": round(box[1]) if box else None,
+                "w": round(box[2] - box[0]) if box else None,
+                "h": round(box[3] - box[1]) if box else None,
+                "scale": round(scale * 100),
+                "tint": "#%02x%02x%02x" % tuple(int(round(min(1, c) * 255)) for c in mul[:3]),
+                "alpha": round(mul[3] * 100),
+                "hidden": any(op["op"] == "visible" and op.get("node") == nid for op in ops),
+                "layer": sibs.index(n) + 1, "layers": len(sibs),
+                "drawn": nid in self._tworlds}
+
+    def _tree_box(self, nid):
+        """The glass box ``(x0, y0, x1, y1)`` of everything node *nid* draws now."""
+        from ..plugins.stern import scene_eval
+        pts = []
+        for d in self._tdraws:
+            p, hops = d["node"], 0
+            while p is not None and p != nid and hops < 256:
+                p, hops = self._tparents.get(p), hops + 1
+            if p == nid:
+                pts += scene_eval.outline(d)
+        if not pts:
+            return None
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    def _tree_refresh(self):
+        self._folder_state_written()
+        if self._sel:
+            self._render_tree_preview(self._sel)
+
+    # ------------------------------------------------------------------
+    # the moment and the states
+    # ------------------------------------------------------------------
+    @rpc
+    def tree_moment(self, value):
+        card, man = self._tree_card()
+        if card is None:
+            return False
+        try:
+            f = int(str(value).split(":", 1)[-1])
+        except ValueError:
+            return False
+        frames = int(man["root"].get("frames") or 1)
+        self._tframe[card] = max(1, min(frames, f))
+        self._render_tree_preview(self._sel)
+        return True
+
+    @rpc
+    def tree_state(self, node, frame):
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        pins = self._tpins.setdefault(card, {})
+        if frame in ("", None):
+            pins.pop(int(node), None)
+        else:
+            pins[int(node)] = int(frame)
+        self._render_tree_preview(self._sel)
+        return True
+
+    @rpc
+    def tree_select(self, node=None):
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        self._tsel = int(node) if node not in (None, "") else None
+        self._tree_publish(card, self._tman, self._tree_frame(card, _man))
+        return True
+
+    # ------------------------------------------------------------------
+    # edits
+    # ------------------------------------------------------------------
+    def _tree_add(self, op):
+        from ..plugins.stern import scene_edit
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        try:
+            scene_edit.add(self.assets_dir, card, op)
+        except OSError as e:
+            compat.messagebox.showerror("Scene edit", str(e))
+            return False
+        self._tree_refresh()
+        return True
+
+    @rpc
+    def tree_move(self, node, dx, dy):
+        """A drag of (dx, dy) glass pixels, in the node's own units."""
+        from ..plugins.stern import scene_eval
+        node = int(node)
+        parent = (self._tworlds.get(node) or (scene_eval.IDENTITY,))[0]
+        lx, ly = scene_eval.to_parent(parent, float(dx), float(dy))
+        if abs(lx) < 1e-6 and abs(ly) < 1e-6:
+            return False
+        return self._tree_add({"op": "move", "node": node, "dx": round(lx, 3),
+                               "dy": round(ly, 3)})
+
+    @rpc
+    def tree_scale(self, node, factor):
+        """Resize by *factor* about the middle of what the node draws."""
+        from ..plugins.stern import scene_eval
+        node = int(node)
+        factor = float(factor)
+        if factor <= 0.01 or abs(factor - 1.0) < 1e-4:
+            return False
+        box = self._tree_box(node)
+        world = (self._tworlds.get(node) or (None, scene_eval.IDENTITY))[1]
+        px = py = 0.0
+        if box is not None:
+            inv = scene_eval.invert(world)
+            if inv is not None:
+                px, py = scene_eval.apply(inv, (box[0] + box[2]) / 2.0,
+                                          (box[1] + box[3]) / 2.0)
+        return self._tree_add({"op": "scale", "node": node, "s": round(factor, 6),
+                               "px": round(px, 3), "py": round(py, 3)})
+
+    @rpc
+    def tree_set_scale(self, node, pct):
+        card, man = self._tree_card()
+        if card is None:
+            return False
+        cur = self._tree_props(card, self._tman, int(node), self._tree_ops(card))["scale"]
+        try:
+            pct = float(pct)
+        except (TypeError, ValueError):
+            return False
+        if pct <= 1 or cur <= 0:
+            return False
+        return self.tree_scale(node, pct / float(cur))
+
+    @rpc
+    def tree_tint(self, node, hex_color, alpha=100):
+        """Tint (the node's colour track) to *hex_color* at *alpha* %, replacing its tint."""
+        from ..plugins.stern import scene_edit
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        node = int(node)
+        try:
+            hx = str(hex_color).lstrip("#")
+            rgb = [int(hx[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
+            a = max(0.0, min(1.0, float(alpha) / 100.0))
+        except (ValueError, IndexError):
+            return False
+        scene_edit.drop(self.assets_dir, card, node, "tint")
+        if rgb == [1.0, 1.0, 1.0] and a >= 0.999:
+            self._tree_refresh()
+            return True
+        return self._tree_add({"op": "tint", "node": node,
+                               "mul": [round(c, 4) for c in rgb] + [round(a, 4)]})
+
+    @rpc
+    def tree_visible(self, node, on):
+        from ..plugins.stern import scene_edit
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        node = int(node)
+        if on:
+            scene_edit.drop(self.assets_dir, card, node, "visible")
+            self._tree_refresh()
+            return True
+        return self._tree_add({"op": "visible", "node": node, "on": False})
+
+    @rpc
+    def tree_order(self, node, where):
+        from ..plugins.stern import scene_edit
+        if where not in _ORDER:
+            return False
+        node = int(node)
+        got = scene_edit._man_index(self._tman).get(node)
+        if got is None:
+            return False
+        n, sibs = got
+        cur = sibs.index(n)
+        to = {"up": cur + 1, "down": cur - 1, "front": len(sibs) - 1, "back": 0}[where]
+        to = max(0, min(len(sibs) - 1, to))
+        if to == cur:
+            return False
+        return self._tree_add({"op": "order", "node": node, "index": to})
+
+    @rpc
+    def tree_reset(self, node):
+        from ..plugins.stern import scene_edit
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        scene_edit.reset_node(self.assets_dir, card, int(node))
+        self._tree_refresh()
+        return True
+
+    @rpc
+    def tree_remove(self, node):
+        """An ADDED node is removed; the game's own is hidden (its code finds it by name)."""
+        node = int(node)
+        got = [n for n, _p, _d in _walk_man(self._tman) if n["id"] == node]
+        if got and got[0].get("added"):
+            return self.tree_reset(node)
+        return self.tree_visible(node, False)
+
+    @rpc
+    def tree_undo(self):
+        from ..plugins.stern import scene_edit
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        scene_edit.undo(self.assets_dir, card)
+        self._tree_refresh()
+        return True
+
+    @rpc
+    def tree_clear(self):
+        from ..plugins.stern import scene_edit
+        card, _man = self._tree_card()
+        if card is None or not self._tree_ops(card):
+            return False
+        if not compat.messagebox.askyesno(
+                "Scene edits", "Put this scene back the way the game shipped it? Every move, "
+                "resize, tint, layer change and added picture or text in it is dropped."):
+            return False
+        scene_edit.clear(self.assets_dir, card)
+        self._tsel = None
+        self._tree_refresh()
+        return True
+
+    def _tree_parent_for_add(self):
+        """``(parent node id or None, the parent's glass affine)`` for something added now:
+        inside the selected group, or beside the selected element, or on the root."""
+        from ..plugins.stern import scene_eval
+        man = self._tman
+        sel = self._tsel
+        if sel is not None:
+            n = next((n for n, _p, _d in _walk_man(man) if n["id"] == sel), None)
+            if n is not None and _kind_of(man, n) in ("Sprite", "StreamingFlipbook"):
+                return sel, (self._tworlds.get(sel) or (None, scene_eval.IDENTITY))[1]
+            for m, parent, _d in _walk_man(man):
+                if m["id"] == sel and parent is not None:
+                    return parent["id"], (self._tworlds.get(sel) or (scene_eval.IDENTITY,))[0]
+        return None, scene_eval.IDENTITY
+
+    def _new_node_place(self, w, h):
+        """Local (x, y) that puts a w x h thing in the middle of the glass."""
+        from ..plugins.stern import scene_eval
+        parent, pw = self._tree_parent_for_add()
+        sw, sh = self._tman["stage"][:2]
+        inv = scene_eval.invert(pw) or scene_eval.IDENTITY
+        x, y = scene_eval.apply(inv, (sw - w) / 2.0, (sh - h) / 2.0)
+        return parent, round(x, 2), round(y, 2)
+
+    @rpc
+    def tree_add_picture(self):
+        from ..plugins.stern import scene_edit
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        src = self.window.ask_open("scene_add_picture", "Add a picture to this scene",
+                                   filetypes=[("Pictures", "*.png *.jpg *.jpeg *.webp"),
+                                              ("All files", "*.*")])
+        if not src:
+            return False
+        try:
+            from PIL import Image
+            img = Image.open(src).convert("RGBA")
+        except Exception as e:                       # noqa: BLE001
+            compat.messagebox.showerror("Add picture", "That file isn't a picture PAD can "
+                                        "read (%s)." % e)
+            return False
+        if img.size[0] > 2048 or img.size[1] > 2048:
+            img.thumbnail((2048, 2048))
+        stem = "".join(c if c.isalnum() or c in "-_" else "_"
+                       for c in os.path.splitext(os.path.basename(src))[0])[:40] or "picture"
+        rel_dir = os.path.join("scene_textures", "added")
+        out_dir = os.path.join(self.assets_dir, "images", rel_dir)
+        os.makedirs(out_dir, exist_ok=True)
+        i = 1
+        while os.path.exists(os.path.join(out_dir, "%s_%d.png" % (stem, i))):
+            i += 1
+        name = "%s_%d.png" % (stem, i)
+        img.save(os.path.join(out_dir, name))
+        ops = self._tree_ops(card)
+        nid = scene_edit.new_id(self._tman, ops)
+        w, h = img.size
+        parent, x, y = self._new_node_place(w, h)
+        self._tsel = nid
+        return self._tree_add({
+            "op": "add_picture", "parent": parent, "index": 1 << 20, "id": nid,
+            "name": "PAD_%s" % stem, "image": "scene_textures/added/" + name,
+            "w": w, "h": h, "x": x, "y": y})
+
+    @rpc
+    def tree_add_text(self, text, like=None):
+        from ..plugins.stern import scene_edit
+        card, _man = self._tree_card()
+        text = (text or "").strip()
+        if card is None or not text:
+            return False
+        texts = [d for d in self._tdraws if d["kind"] == "text"]
+        like_id = None
+        if like not in (None, ""):
+            like_id = int(like)
+        elif self._tsel is not None and any(d["node"] == self._tsel for d in texts):
+            like_id = self._tsel
+        elif texts:
+            like_id = texts[0]["node"]
+        if like_id is None:
+            compat.messagebox.showinfo(
+                "Add text", "This scene draws no text of its own at this moment, so there is "
+                "no font in it to write with. Pick a moment where some text shows.")
+            return False
+        src = next(d for d in texts if d["node"] == like_id) if any(
+            d["node"] == like_id for d in texts) else None
+        rect = (src or {}).get("rect") or (0, 0, 400, 60)
+        ops = self._tree_ops(card)
+        nid = scene_edit.new_id(self._tman, ops)
+        parent, x, y = self._new_node_place(rect[2] - rect[0], rect[3] - rect[1])
+        self._tsel = nid
+        return self._tree_add({
+            "op": "add_text", "parent": parent, "index": 1 << 20, "id": nid,
+            "name": "PAD_Text", "text": text, "x": x - rect[0], "y": y - rect[1],
+            "like": like_id})
+
+
+def _walk_man(man):
+    """``(node, parent node or None, depth)`` over a manifest's staged nodes, draw order."""
+    out = []
+    seen = set()
+
+    def run(kids, parent, depth):
+        for n in kids:
+            out.append((n, parent, depth))
+            for _s, oid in n["comps"]:
+                o = man["objects"].get(str(oid)) or {}
+                if o.get("kids") is not None and oid not in seen:
+                    seen.add(oid)
+                    run(o["kids"], n, depth + 1)
+
+    run(man["root"]["kids"], None, 0)
+    return out
+
+
+def _kind_of(man, n):
+    kinds = [(man["objects"].get(str(oid)) or {}).get("kind") for _s, oid in n["comps"]]
+    kinds = [k for k in kinds if k]
+    return kinds[0] if kinds else "Group"
+
+

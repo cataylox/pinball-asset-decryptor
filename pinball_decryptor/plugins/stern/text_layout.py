@@ -18,13 +18,6 @@ unchanged), ``align`` is one of ``left``/``center``/``right`` (empty =
 unchanged) and ``size`` is an integer percent of the size the scene bakes
 (empty or 100 = unchanged).  A row every one of whose fields is neutral is
 not an edit and is never written.
-
-A PICTURE the scene draws is laid out in the same file (PAD-251): its row's
-string column is ``picture:<image rel>`` (the PNG under ``images/`` that the
-Scenes window lists, e.g. ``picture:scene_textures/radimg_530x726_7d50e4f5.png``),
-``dx``/``dy`` move it and ``size`` scales it about its centre; ``align`` means
-nothing for a picture and stays blank.  A picture's layout is its node's
-transform, so it is the same kind of size-neutral scene rewrite as a line's.
 """
 
 import os
@@ -43,32 +36,6 @@ ALIGN_VALUES = ("left", "center", "right")
 _ALIGN_ALIASES = {"centre": "center", "middle": "center", "l": "left",
                   "c": "center", "r": "right"}
 FIELDS = ("dx", "dy", "align", "size")
-
-#: String-column prefix of a picture's row (see the module docstring).
-PICTURE_PREFIX = "picture:"
-
-
-def picture_key(rel):
-    """The string-column key of the picture whose PNG is *rel* (relative to
-    ``images/``, forward slashes)."""
-    return PICTURE_PREFIX + (rel or "").replace("\\", "/")
-
-
-def picture_rel(key):
-    """The image rel a :func:`picture_key` names, or ``None`` for a line of
-    text."""
-    if isinstance(key, str) and key.startswith(PICTURE_PREFIX):
-        return key[len(PICTURE_PREFIX):] or None
-    return None
-
-
-def row_label(key):
-    """How a row's string reads in a list: the line itself, or ``picture
-    <file name>`` for a picture."""
-    rel = picture_rel(key)
-    if rel is None:
-        return key
-    return "picture " + rel.rsplit("/", 1)[-1]
 
 
 def manifest_path(assets_dir):

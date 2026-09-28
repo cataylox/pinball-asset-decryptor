@@ -23,6 +23,7 @@ import threading
 
 from . import compat
 from .rpc import rpc
+from .text_scenes_tree import TreeEditMixin
 
 log = logging.getLogger(__name__)
 
@@ -43,8 +44,9 @@ HINT = ("Every scene on the card, with the images, fonts and on-screen text "
         "it is built from. Double-click an item to jump to it on the "
         "matching tab — this window steps aside so you can see where you "
         "landed, and its button at the bottom of the app brings it back. "
-        "Right-click an item to recolour, move or resize a line of text, "
-        "move or resize a picture, or blank a font out of the picture.")
+        "Click a picture or a line of text in the preview to move, resize, tint, hide or "
+        "re-layer it; right-click an item to recolour a line of text or blank a font out "
+        "of the picture.")
 HINT_EMPTY = ("No scene manifests found in this project folder. Run Extract "
               "(with Images and Text enabled) on a Stern Spike 2 card image "
               "first.")
@@ -269,7 +271,7 @@ def glyph_atlas_rel(assets, rel):
     return None
 
 
-class TextScenesService:
+class TextScenesService(TreeEditMixin):
     ns = "text_scenes"
 
     def __init__(self, tab):
@@ -302,6 +304,7 @@ class TextScenesService:
         self._rebuild = None
         self._tmp = None
         self._raise_n = 0
+        self._tree_init()
         self._reset_state()
 
     # ------------------------------------------------------------------
@@ -326,7 +329,8 @@ class TextScenesService:
                  fps_choice=_FPS_FROM_FILE, fps_choices=list(_FPS_CHOICES),
                  bg=self._bg, bgs=self._bg_names(), bg_rgb=self._bg_rgb(),
                  exporting=False, bulk=False, rebuilding=False,
-                 rebuild_msg="", layout_dialog=None, tips=TIPS)
+                 rebuild_msg="", layout_dialog=None, tips=TIPS,
+                 tree=False, tree_view=None)
 
     def is_open(self):
         return self._alive
@@ -431,6 +435,7 @@ class TextScenesService:
         except Exception:                            # noqa: BLE001
             self._scenes = {}
         self._layouts = scene_render.load_layouts(self.assets_dir)
+        self._tree_reset()
         self._fonts = None
         self._text_changes = None
         self.set(hint=HINT if self._scenes else HINT_EMPTY)
@@ -510,6 +515,7 @@ class TextScenesService:
         if d != self._sel:
             self._focus_want = None
             self._drop_live_edit()
+            self._tsel = None
         self._sel = d
         self._on_select()
         return True
@@ -540,25 +546,12 @@ class TextScenesService:
             return
         sc = self._scenes[sel]
         groups = []
-        card, lay = scene_render.layout_for_scene_dir(self._layouts, sel)
-        layouts = self._pending_layouts(card)
-        placed = self._placed_pictures(lay)
-        pics = []
-        for _off, rel in sc["images"]:
-            # the layout names a picture relative to images/ (PAD-251)
-            pic = rel[len("images/"):] if rel.startswith("images/") else rel
-            key = text_layout.picture_key(pic)
-            ly = layouts.get(key)
-            info = "double-click: show on Images tab"
-            if ly:
-                info = "%s (not built yet)" % text_layout.describe(ly)
-            elif pic in placed:
-                info += " · right-click to move / resize"
-            pics.append({"id": "img::" + rel, "text": os.path.basename(rel),
-                         "info": info, "placed": pic in placed,
-                         "has_layout": bool(ly), "key": key})
         groups.append({"key": "img", "title": "Images (%d)"
-                       % len(sc["images"]), "open": True, "items": pics})
+                       % len(sc["images"]), "open": True, "items": [
+                           {"id": "img::" + rel,
+                            "text": os.path.basename(rel),
+                            "info": "double-click: show on Images tab"}
+                           for _off, rel in sc["images"]]})
         fonts = [{"id": "font::" + table, "text": "%s (%dpx)"
                   % (name or table, px),
                   "info": "double-click: open in Fonts window"}
@@ -571,6 +564,8 @@ class TextScenesService:
         groups.append({"key": "font", "title": "Fonts (%d)"
                        % len(sc["fonts"]), "open": True, "items": fonts})
         stock, picked = self._scene_text_colors(sel)
+        card, lay = scene_render.layout_for_scene_dir(self._layouts, sel)
+        layouts = self._pending_layouts(card)
         texts = self._pending_texts(card, lay)
         facts = self._scene_text_facts(sel)
         items = []
@@ -804,44 +799,12 @@ class TextScenesService:
     # ------------------------------------------------------------------
     # text layout (move / align / size)
     # ------------------------------------------------------------------
-    @staticmethod
-    def _placed_pictures(layout):
-        """The image rels the scene's layout draws as pictures (a frame
-        sequence counts every frame): the ones Move… / Size… can reach."""
-        out = set()
-        for sp in (layout or {}).get("sprites") or ():
-            if sp.get("image"):
-                out.add(sp["image"])
-            out.update(f for f in sp.get("frames") or () if f)
-        return out
-
-    def _picture_size(self, rel):
-        """``(w, h)`` of a picture's PNG in the project, or ``(0, 0)``."""
-        try:
-            from PIL import Image
-            with Image.open(os.path.join(self.assets_dir, "images",
-                                         *rel.split("/"))) as im:
-                return im.size
-        except Exception:                            # noqa: BLE001
-            return 0, 0
-
     def _layout_target(self, text, title):
-        from ..plugins.stern import scene_render, text_layout
+        from ..plugins.stern import scene_render
         if not self._sel:
             return None
-        card, lay = scene_render.layout_for_scene_dir(self._layouts,
-                                                      self._sel)
-        rel = text_layout.picture_rel(text)
-        if rel is not None:
-            if card is None or rel not in self._placed_pictures(lay):
-                compat.messagebox.showinfo(
-                    title,
-                    "This picture isn't placed in the recorded scene layout, "
-                    "so there is nothing to move it from.\n\nRun \"Rebuild "
-                    "previews…\" (or re-extract with Images enabled) and try "
-                    "again.")
-                return None
-            return card
+        card, _lay = scene_render.layout_for_scene_dir(self._layouts,
+                                                       self._sel)
         if card is None or text not in self._scene_text_facts(self._sel):
             compat.messagebox.showinfo(
                 title,
@@ -894,29 +857,19 @@ class TextScenesService:
         """Move… / Font size…: open the dialog's values, or None after
         saying why the line can't be laid out."""
         from ..plugins.stern import text_layout
-        rel = text_layout.picture_rel(text)
-        title = ("Move" if kind == "move"
-                 else "Size" if rel is not None else "Font size")
+        title = "Move" if kind == "move" else "Font size"
         card = self._layout_target(text, title)
         if card is None:
             return None
-        if rel is not None:
-            px, pic = 0, list(self._picture_size(rel))
-            short = os.path.basename(rel)
-        else:
-            px = self._scene_text_facts(self._sel).get(text, (0, None))[0]
-            pic = None
-            short = text
+        px = self._scene_text_facts(self._sel).get(text, (0, None))[0]
         edit = self._pending_layouts(card).get(text) or \
             text_layout.normalize({})
         edit = text_layout.normalize(edit)
-        short = short if len(short) <= 40 else short[:39] + "…"
+        short = text if len(text) <= 40 else text[:39] + "…"
         dlg = {"text": text, "kind": kind, "card": card, "px": int(px or 0),
-               "picture": pic,
                "dx": _fmt_num(edit.get("dx")), "dy": _fmt_num(edit.get("dy")),
                "size": int(edit.get("size") or 100),
                "title": ("Move \"%s\"" if kind == "move"
-                         else "Size for \"%s\"" if rel is not None
                          else "Font size for \"%s\"") % short}
         self.set(layout_dialog=dlg)
         return dlg
@@ -959,14 +912,6 @@ class TextScenesService:
         if dlg["kind"] != "size":
             return ""
         pct = edit.get("size") or 100
-        pic = dlg.get("picture")
-        if pic is not None:
-            w, h = pic
-            if w and h:
-                return "%d x %d px → %d x %d px" % (
-                    w, h, int(round(w * pct / 100.0)),
-                    int(round(h * pct / 100.0)))
-            return "%d %% of the size this scene draws it at" % pct
         if dlg["px"]:
             return "%d px → %d px" % (dlg["px"],
                                       int(round(dlg["px"] * pct / 100.0)))
@@ -1203,6 +1148,15 @@ class TextScenesService:
         token = self._token
         self._frames_full = []
         self._preview_full = None
+        if self._tree_available(scene_dir):
+            # PAD-251: drawn from the scene's tree, as the machine draws it, and editable
+            self._preview_dir = scene_dir
+            self._set_caption(
+                "Drawn from the scene itself, as the machine draws it. Click a picture or a "
+                "line of text to select it; drag to move, drag a corner to resize.")
+            self._render_tree_preview(scene_dir)
+            return
+        self.set(tree=False, tree_view=None)
         card, layout = scene_render.layout_for_scene_dir(self._layouts,
                                                          scene_dir)
         new_scene = scene_dir != self._preview_dir

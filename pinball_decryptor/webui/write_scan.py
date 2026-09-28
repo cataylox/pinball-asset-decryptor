@@ -264,15 +264,17 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
             relaid = {}
         for _path, per_text in relaid.items():
             for text, edit in per_text.items():
-                if text_layout.picture_rel(text) is not None:
-                    # a scene picture moved / resized (PAD-251)
-                    rows.append(("%s  —  %s" % (text_layout.row_label(text),
-                                                text_layout.describe(edit)),
-                                 "image", "Pending (picture layout)",
-                                 "pending"))
-                    continue
                 rows.append(("%s  —  %s" % (text, text_layout.describe(edit)),
                              "text", "Pending (text layout)", "pending"))
+        try:
+            from ..plugins.stern import scene_edit
+            tree_edits = scene_edit.load(assets_path)
+        except Exception:                               # noqa: BLE001
+            tree_edits = {}
+        for path, ops in sorted(tree_edits.items()):
+            scene = path.rstrip("/").rsplit("/", 2)[-2][:8] if "/" in path else path
+            rows.append(("scene %s  —  %d edit(s) from the Scenes window" % (scene, len(ops)),
+                         "image", "Pending (scene edit)", "pending"))
     rows.extend(mode_rows(mfr, assets_path, direct=direct))
     rows.extend(stock_mode_rows(mfr, assets_path))
     return rows
@@ -409,6 +411,12 @@ def fingerprint(window, assets_path, epoch, grow_on):
         parts.append(sorted(
             (p, sorted((t, sorted(e.items())) for t, e in per.items()))
             for p, per in text_layout.load(assets_path).items()))
+    except Exception:                                   # noqa: BLE001
+        parts.append(None)
+    try:
+        from ..plugins.stern import scene_edit
+        parts.append(sorted((p, [sorted(op.items()) for op in ops])
+                            for p, ops in scene_edit.load(assets_path).items()))
     except Exception:                                   # noqa: BLE001
         parts.append(None)
     parts.append(_modes_fingerprint(assets_path))

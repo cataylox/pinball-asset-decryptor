@@ -207,7 +207,8 @@ def first_visible(node):
     return 1
 
 
-def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=None):
+def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=None,
+              worlds=None):
     """Every picture and line of text *man* draws at root frame *frame* (default:
     :func:`default_frame`), in draw order.  *pins* ``{node id: frame}`` seeks a nested sprite
     (what the game's code does with labels); *hidden* node ids are not drawn (what code
@@ -216,7 +217,11 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
     Each draw is a dict: ``kind`` (``bitmap`` / ``text`` / ``flip`` / ``video`` / ``spine``),
     ``node`` (id), ``path`` (names from the root), ``m`` (affine on the glass), ``mul`` /
     ``add`` (tint), and the element's own fields (``image``, ``w``, ``h`` for pictures;
-    ``text``, ``rect``, ``align``, ``rgba``, ``font``, ``font_px``, ``spacing`` for text)."""
+    ``text``, ``rect``, ``align``, ``rgba``, ``font``, ``font_px``, ``spacing`` for text).
+
+    *worlds*, when a dict, receives ``{node id: (parent affine, node affine)}`` for every node
+    drawn at that moment - what an editor needs to turn a drag on the glass into the node's own
+    units (:func:`to_parent`)."""
     if frame is None:
         frame = default_frame(man)
     pins = pins or {}
@@ -232,6 +237,8 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
                 continue
             w = compose(world, transform_at(n, f))
             t = compose_tint(tint, tint_at(n, f))
+            if worlds is not None:
+                worlds[n["id"]] = (world, w)
             here = path + [n["name"]]
             for start, oid in n["comps"]:
                 o = objects.get(str(oid))
@@ -322,6 +329,39 @@ def settled_frame(man, o, world=None):
         if n > best_n:
             best, best_n = f, n
     return best
+
+
+def invert(m):
+    a, b, c, d, tx, ty = m
+    det = a * d - b * c
+    if abs(det) < 1e-12:
+        return None
+    ia, ib, ic, id_ = d / det, -b / det, -c / det, a / det
+    return (ia, ib, ic, id_, -(ia * tx + ic * ty), -(ib * tx + id_ * ty))
+
+
+def apply(m, x, y):
+    a, b, c, d, tx, ty = m
+    return a * x + c * y + tx, b * x + d * y + ty
+
+
+def to_parent(parent, dx, dy):
+    """A move of (dx, dy) on the glass in the units of a node whose parent is drawn by
+    *parent*: the parent's linear part inverted (its translation cancels)."""
+    inv = invert(parent)
+    if inv is None:
+        return dx, dy
+    a, b, c, d, _tx, _ty = inv
+    return a * dx + c * dy, b * dx + d * dy
+
+
+def outline(d):
+    """The four corners of draw *d* on the glass (a picture's box, a text's rect)."""
+    if d["kind"] == "text":
+        L, T, R, B = (list(d.get("rect") or (0, 0, 0, 0)) + [0] * 4)[:4]
+    else:
+        L, T, R, B = 0.0, 0.0, float(d.get("w") or 0), float(d.get("h") or 0)
+    return [apply(d["m"], x, y) for x, y in ((L, T), (R, T), (R, B), (L, B))]
 
 
 def label_frames(man):

@@ -409,6 +409,27 @@ HELP_CONTENT = {
          "some other way (a file copied over it by hand, or a build from "
          "before the app kept a saved original) keeps what it has — "
          "\"Revert all changes…\" on the Write tab is what restores those."),
+        ("Scene editor (move, resize, tint, layers, add)",
+         "When the project has a scene's tree (Extract or \"Rebuild previews…\" "
+         "records it), the Scenes window draws that scene the way the machine does - "
+         "every picture and line of text in its own place, size, tilt and fade, at one "
+         "MOMENT of its timeline - and you edit it right there. Click something in the "
+         "preview (or its row under Layers) to select it; drag it to move it, drag a "
+         "corner to resize it about its middle, or use the arrow keys to nudge it (Shift "
+         "for 10 px). The panel beside the preview sets its position and size exactly, "
+         "tints it (a colour and an opacity), hides it, and moves it forward or back "
+         "among the layers beside it - later layers draw on top. \"Picture…\" and "
+         "\"Text…\" add something new (text is written in the font and size of the "
+         "selected line). \"Moment\" picks where in the scene's own timeline to look, "
+         "and \"States the game picks\" shows each state the game's code can switch a "
+         "part of the scene to (Battle Select's kaiju, a tile's Locked or city) - the "
+         "file holds them all, the game chooses. Every edit is kept in the project and "
+         "listed on the Write tab; the Write puts them on the card (moves, resizes, "
+         "tints, hides and layer changes even straight to an SD card; an added picture "
+         "or line of text makes the scene bigger, which needs an image build). The "
+         "game's own parts are hidden rather than deleted, because its code finds them "
+         "by name. Colour: these games draw most text in a styled font whose colours "
+         "are baked in, so Tint is the way to recolour it."),
         ("Size limits",
          "On most games patching is size-neutral: a same-or-smaller "
          "replacement fits as-is, a larger one is re-encoded down to the "
@@ -806,24 +827,6 @@ HELP_CONTENT = {
          "so the box, alignment and size can be judged against the new "
          "text rather than the stock one; the row reads \"shows: …\" and "
          "\"(not built yet)\" while it is pending."),
-        ("Picture layout (move, size)",
-         "Right-click a picture in the Contents list's Images group for "
-         "\"Move…\" and \"Size…\" when the scene places it (the row says "
-         "\"right-click to move / resize\"). A picture's place and size "
-         "are the transform the scene keeps for it, so these are the same "
-         "per-scene, in-place, size-neutral edits as a text line's: a move "
-         "shifts it by the pixels you type, and a size is a percentage "
-         "that grows or shrinks it about its centre, tilt and all. Every "
-         "copy of that picture the scene draws moves with it, and the "
-         "preview follows as you type. Enlarging only scales the picture "
-         "the scene already has; for a sharper big one, replace it on the "
-         "Images tab with a larger PNG and tick \"Keep this picture's own "
-         "size\". The edit is recorded per project, keyed to the card it "
-         "was extracted from: writing it onto a card of another code "
-         "version, where the picture is not in the same place, leaves it "
-         "alone and says so in the log. The game can still move a picture "
-         "from its own code while it runs (a sliding panel, say), and "
-         "those moves are made from the new place."),
         ("Size limits",
          "Patching is size-neutral: the encoded replacement must fit the "
          "original slot's byte budget — a small enough image drops "

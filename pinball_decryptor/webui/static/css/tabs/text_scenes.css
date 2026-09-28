@@ -39,6 +39,38 @@
 .scenes-ly-f { width: 88px; flex: 0 0 88px; }
 .scenes-edit-n { flex: 1 0 100%; }
 
+/* PAD-251: the scene editor */
+.scenes-top { display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; min-height: 140px; }
+.scenes-top > .scenes-contents { flex: 1 1 auto; min-height: 100px; }
+.scenes-preview.tree { align-items: flex-start; }
+.scenes-preview.tree .scenes-canvas { max-width: none; flex: 1 1 560px; height: auto; align-self: flex-start; }
+.scenes-preview.tree .scenes-side { flex: 0 0 290px; max-height: 440px; overflow: auto; padding-right: 4px; }
+.scenes-bottom.hidden { display: none; }
+.scenes-body.wide { grid-template-columns: minmax(0, 1fr); }
+.scenes-body.wide .scenes-left { display: none; }
+.scenes-body.wide .scenes-preview.tree .scenes-side { max-height: 560px; }
+.tree-canvas { position: relative; cursor: default; touch-action: none; outline: none; }
+.tree-canvas:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.tree-canvas img { position: absolute; inset: 0; user-select: none; pointer-events: none; }
+.tree-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.tree-hover { fill: rgba(255, 255, 255, 0.06); stroke: rgba(255, 255, 255, 0.7); stroke-width: 2; stroke-dasharray: 8 6; vector-effect: non-scaling-stroke; }
+.tree-sel { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.tree-box { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }
+.tree-handle { fill: var(--accent); stroke: #000; stroke-width: 1; vector-effect: non-scaling-stroke; cursor: nwse-resize; }
+.tree-side { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.tree-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tree-num { display: flex; align-items: center; gap: 4px; }
+.tree-num .field { width: 76px; }
+.tree-num .lbl { width: auto; }
+.tree-color { width: 40px; height: 28px; border: 1px solid var(--line-2); border-radius: 5px; background: transparent; padding: 1px; cursor: pointer; }
+.tree-props { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: var(--panel-2); width: 100%; box-sizing: border-box; }
+.tree-states summary { cursor: pointer; }
+.tree-state { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 6px; align-items: center; margin: 3px 0; }
+.ly-item { grid-template-columns: 20px minmax(0, 1.2fr) minmax(0, 1fr); cursor: pointer; }
+.ly-off { opacity: .5; }
+.ly-eye { all: unset; cursor: pointer; display: inline-flex; color: var(--ink-3); }
+.ly-eye:hover { color: var(--ink); }
+
 /* a narrow window (the app's, or this one sized down): one column */
 @container (max-width: 1000px) {
   .scenes-body { grid-template-columns: minmax(0, 1fr); overflow: auto; }

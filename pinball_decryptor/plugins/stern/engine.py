@@ -4152,12 +4152,9 @@ def _radium_layout_writes(reader, assets_dir, log, cancel):
     recolour's.  The byte-level work is :func:`scene_layout.text_layout_patches`;
     this is the card side: find the scene, map file offsets to disk, and say
     in the log what happened to each line (a resize reaches every line drawn
-    with that face in that scene, and the user has to be told so).
-
-    The same file lays out the scene's PICTURES (PAD-251,
-    :func:`_picture_layout_patches`): a picture's place and size are its
-    node's transform matrices, another size-neutral rewrite of the scene."""
+    with that face in that scene, and the user has to be told so)."""
     from . import radium as _radium
+    from . import scene_layout as _scene_layout
     from . import text_layout as _tl
 
     edits = _changed_radium_text_layouts(assets_dir)
@@ -4180,138 +4177,41 @@ def _radium_layout_writes(reader, assets_dir, log, cancel):
         data = reader.read_file_bytes(node)
         imgs = parse_radium_images(data)
         tables = _radium.parse_glyph_tables(data, imgs) if imgs else []
-        # A scene's rows are lines of text and (PAD-251) pictures: both are
-        # size-neutral rewrites of the same file, so they share the overlay.
-        per_pic = {k: v for k, v in per_text.items()
-                   if _tl.picture_rel(k) is not None}
-        per_text = {k: v for k, v in per_text.items() if k not in per_pic}
-        patches = []
-        if per_pic:
-            p_patches, n_pic = _picture_layout_patches(
-                assets_dir, card_path, data, imgs, tables, per_pic, log)
-            patches += p_patches
-            n_lines += n_pic
-        if per_text:
-            t_patches, n_hit = _text_layout_patches(
-                card_path, data, imgs, tables, per_text, log)
-            patches += t_patches
-            n_lines += n_hit
+        found = _scene_layout.text_layout_offsets(data, imgs, tables)
+        if not found:
+            # text_layout_patches says nothing per string when the scene
+            # itself can't be read; this is the one warning the user gets.
+            log("Text layout in %s: no text could be read in this scene on the "
+                "card, so its %d layout edit(s) were left alone."
+                % (card_path, len(per_text)), "warning")
+            continue
+        patches, n_hit, notes = _scene_layout.text_layout_patches(
+            data, imgs, tables, per_text, log=None)
+        for note in notes:
+            # A resize that reaches other lines is news, not a fault; a string
+            # that is gone, an ambiguous face or a size conflict is a warning.
+            lvl = ("info" if _scene_layout.COLLATERAL_NOTE_MARK in note
+                   else "warning")
+            log("Text layout in %s: %s" % (card_path, note), lvl)
         for off, payload in patches:
             buf = payload
             for disk, n in reader.disk_ranges(node, off, len(payload)):
                 writes.append((disk, buf[:n]))
                 buf = buf[n:]
             overlays.setdefault(ib, (node, {}))[1][off] = payload
-    return writes, n_lines, overlays
-
-
-def _text_layout_patches(card_path, data, imgs, tables, per_text, log):
-    """The text half of :func:`_radium_layout_writes` for one scene:
-    ``(patches, lines re-laid-out)``, with the log lines said."""
-    from . import scene_layout as _scene_layout
-    from . import text_layout as _tl
-
-    found = _scene_layout.text_layout_offsets(data, imgs, tables)
-    if not found:
-        # text_layout_patches says nothing per string when the scene
-        # itself can't be read; this is the one warning the user gets.
-        log("Text layout in %s: no text could be read in this scene on the "
-            "card, so its %d layout edit(s) were left alone."
-            % (card_path, len(per_text)), "warning")
-        return [], 0
-    patches, n_hit, notes = _scene_layout.text_layout_patches(
-        data, imgs, tables, per_text, log=None)
-    for note in notes:
-        # A resize that reaches other lines is news, not a fault; a string
-        # that is gone, an ambiguous face or a size conflict is a warning.
-        lvl = ("info" if _scene_layout.COLLATERAL_NOTE_MARK in note
-               else "warning")
-        log("Text layout in %s: %s" % (card_path, note), lvl)
-    if not n_hit:
-        if not notes:
-            log("Text layout in %s: the scene on the card already draws "
-                "its %d line(s) the way the edit asks, so nothing was "
-                "written for it." % (card_path, len(per_text)), "info")
-        return patches, 0
-    what = "; ".join("\"%s\" %s" % (text, _tl.describe(edit) or "unchanged")
-                     for text, edit in sorted(per_text.items()))
-    log("Text layout in %s: %d of %d line(s) re-laid-out (%s); %d byte "
-        "run(s) rewritten in place." % (card_path, n_hit, len(per_text),
-                                        what, len(patches)), "info")
-    return patches, n_hit
-
-
-def _radium_image_offsets(assets_dir, card_path):
-    """``{image rel: data_off}`` of the pictures ``radium_images.txt`` records
-    in the scene *card_path* (the offsets of the card the project was
-    extracted from)."""
-    manifest = os.path.join(assets_dir, *_TEXTURE_DIR) + os.sep + \
-        _RADIUM_IMAGE_MANIFEST
-    out = {}
-    try:
-        with open(manifest, "r", encoding="utf-8") as f:
-            for line in f:
-                cols = line.rstrip("\r\n").split("\t")
-                if len(cols) < 3 or line.startswith("#") \
-                        or cols[1] != card_path:
-                    continue
-                try:
-                    out.setdefault(cols[0], int(cols[2]))
-                except ValueError:
-                    continue
-    except OSError:
-        return {}
-    return out
-
-
-def _picture_layout_patches(assets_dir, card_path, data, imgs, tables,
-                            per_pic, log):
-    """The picture half of :func:`_radium_layout_writes` for one scene
-    (PAD-251): ``(patches, pictures re-laid-out)``.
-
-    A row names its picture by the PNG the extract wrote; the extract's
-    ``radium_images.txt`` says where that picture's block sat in this scene.
-    The card being written must still hold a picture there (a card from
-    another code version, or one whose scene an earlier build re-serialised,
-    may not), or the row is left alone with a warning rather than moving
-    whatever sits at that offset now."""
-    from . import scene_layout as _scene_layout
-    from . import text_layout as _tl
-
-    where = _radium_image_offsets(assets_dir, card_path)
-    on_card = {im["data_off"] for im in imgs or ()}
-    edits, names = {}, {}
-    for key, edit in sorted(per_pic.items()):
-        rel = _tl.picture_rel(key)
-        off = where.get(rel)
-        label = _tl.row_label(key)
-        if off is None or off not in on_card:
-            log("Picture layout in %s: %s isn't where the extract saw it in "
-                "this scene on the card (a different code version, or a scene "
-                "an earlier build rewrote), so it was left alone."
-                % (card_path, label), "warning")
+        if not n_hit:
+            if not notes:
+                log("Text layout in %s: the scene on the card already draws "
+                    "its %d line(s) the way the edit asks, so nothing was "
+                    "written for it." % (card_path, len(per_text)), "info")
             continue
-        edits[off] = edit
-        names[off] = (label, edit)
-    if not edits:
-        return [], 0
-    patches, n_hit, notes = _scene_layout.picture_layout_patches(
-        data, imgs, edits, tables)
-    for note in notes:
-        for off, (label, _e) in names.items():
-            note = note.replace("the picture at %d " % off, label + " ")
-        log("Picture layout in %s: %s" % (card_path, note), "warning")
-    if n_hit:
-        what = "; ".join("%s %s" % (label, _tl.describe(edit) or "unchanged")
-                         for label, edit in sorted(names.values()))
-        log("Picture layout in %s: %d of %d picture(s) moved / resized (%s); "
-            "%d transform(s) rewritten in place."
-            % (card_path, n_hit, len(per_pic), what, len(patches)), "info")
-    elif not notes:
-        log("Picture layout in %s: the scene on the card already draws its "
-            "%d picture(s) the way the edit asks, so nothing was written for "
-            "it." % (card_path, len(per_pic)), "info")
-    return patches, n_hit
+        n_lines += n_hit
+        what = "; ".join("\"%s\" %s" % (text, _tl.describe(edit) or "unchanged")
+                         for text, edit in sorted(per_text.items()))
+        log("Text layout in %s: %d of %d line(s) re-laid-out (%s); %d byte "
+            "run(s) rewritten in place." % (card_path, n_hit, len(per_text),
+                                            what, len(patches)), "info")
+    return writes, n_lines, overlays
 
 
 def _hex_rgb(rgb):
@@ -6450,8 +6350,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         log("Found %d edit(s) from the Scenes window across %d scene(s) to write."
             % (sum(len(v) for v in tree_edits.values()), len(tree_edits)), "info")
     if layout_edits:
-        log("Found %d re-laid-out text line(s) or picture(s) (moved / "
-            "re-aligned / resized) across %d radium scene(s) to write."
+        log("Found %d re-laid-out text line(s) (moved / re-aligned / resized) "
+            "across %d radium scene(s) to write."
             % (sum(len(v) for v in layout_edits.values()),
                len(layout_edits)), "info")
 
