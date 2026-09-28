@@ -705,11 +705,31 @@ class EmulateTab(TabService):
             text = rig.OVR_NO_ASSETS
         else:
             text = rig.OVR_ON
+        if assets and os.path.isdir(assets):
+            text += " " + self._ovr_carries(assets)
         # The whole paragraph, as Tk showed it: the ON text names the cost
         # (Start re-encodes first) and that a Replace-tab pick is written
         # into the project folder at Start, and neither may hide behind a
         # hover (must survive #4).
         self.set(assets=assets, ovr_hint=text, ovr_refused=False)
+
+    def _ovr_carries(self, assets):
+        """PAD-251: say that scene edits (and modes, when the mode maker is on) ride along."""
+        n = scenes = 0
+        try:
+            from ...plugins.stern import scene_edit
+            edits = scene_edit.load(assets)
+            n, scenes = sum(len(v) for v in edits.values()), len(edits)
+        except Exception:                                # noqa: BLE001
+            pass
+        modes_on = False
+        fn = getattr(self.window, "modes_preview_on", None)
+        if callable(fn):
+            try:
+                modes_on = bool(fn())
+            except Exception:                            # noqa: BLE001
+                modes_on = False
+        return rig.ovr_carries(n, scenes, modes_on)
 
     def _overrides_wanted(self):
         if not self.emulate_overrides_var.get() or self._assets_var is None:

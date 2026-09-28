@@ -823,10 +823,35 @@ def test_overrides_hint_follows_the_box_and_folder(tmp_path):
         # the WHOLE Tk paragraph is on the page, not its first sentence: it
         # names the wait and that a Replace-tab pick is written into the
         # project folder at Start (must survive #4)
-        assert s["ovr_hint"] == rig.OVR_ON
+        assert s["ovr_hint"].startswith(rig.OVR_ON)
+        assert "the scene edits made on the Scenes tab" in s["ovr_hint"]     # PAD-251
         assert "ovr_short" not in s
         assert "Start prepares them first" in s["ovr_hint"]
         assert "Start applies it to your project folder" in s["ovr_hint"]
+
+
+def test_overrides_hint_says_scene_edits_ride_along(tmp_path, monkeypatch):
+    """PAD-251 (DragonRR): "You don't state whether Emulate will take the new scene
+    information".  The opt-in says it carries the Scenes tab's edits, counts this project's,
+    and names modes only while the mode maker's preview is on (the clean surface)."""
+    from pinball_decryptor.plugins.stern import scene_edit
+    with web_app(tmp_path, mfr="stern") as w:
+        from pinball_decryptor.webui import emulate_rig as rig
+        svc = _svc(w)
+        assets = _own_assets(w, svc)
+        scene_edit.add(str(tmp_path), "/g/a/scene.radium", {"op": "move", "node": 1, "dx": 4, "dy": 0})
+        scene_edit.add(str(tmp_path), "/g/a/scene.radium", {"op": "visible", "node": 2, "on": False})
+        scene_edit.add(str(tmp_path), "/g/b/scene.radium", {"op": "visible", "node": 3, "on": False})
+        monkeypatch.setattr(type(w.window), "modes_preview_on", lambda self, mfr=None: False)
+        w.run(lambda: assets.set(str(tmp_path)))
+        hint = w.state(NS)["ovr_hint"]
+        assert hint.startswith(rig.OVR_OFF)
+        assert "This project has 3 scene edits in 2 scenes." in hint
+        assert "modes" not in hint
+        monkeypatch.setattr(type(w.window), "modes_preview_on", lambda self, mfr=None: True)
+        w.call("ui.set", NS, "overrides", True)
+        hint = w.state(NS)["ovr_hint"]
+        assert hint.startswith(rig.OVR_ON) and "this project's modes" in hint
 
 
 def test_overrides_refuse_without_a_baseline(tmp_path, monkeypatch):

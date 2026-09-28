@@ -183,6 +183,23 @@ OVR_ON = ("Your edits are patched into copies of just the card files they "
           "here: Start applies it to your project folder exactly as a "
           "build would, so you do not have to build a card image first.")
 
+#: PAD-251: what the opt-in carries, said outright (DragonRR could not tell whether his scene
+#: edits reached the emulator).  The mode maker's part is only named while its preview is on.
+OVR_CARRIES = ("It carries everything a Write would put on the card: replaced files, text, "
+               "and the scene edits made on the Scenes tab{modes}.")
+OVR_CARRIES_MODES = ", and this project's modes"
+
+
+def ovr_carries(scene_edits=0, scenes=0, modes_on=False):
+    """The line under the opt-in naming what Start applies, with this project's scene edit
+    count when it has any."""
+    text = OVR_CARRIES.format(modes=OVR_CARRIES_MODES if modes_on else "")
+    if scene_edits:
+        text += " This project has %d scene edit%s in %d scene%s." % (
+            scene_edits, "" if scene_edits == 1 else "s", scenes, "" if scenes == 1 else "s")
+    return text
+
+
 OVR_NO_ASSETS = ("There is no assets folder set. Extract the card on the "
                  "Extract tab (or point the Write tab at an existing "
                  "extract) and the edits in it can be run here.")
