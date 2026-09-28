@@ -439,7 +439,12 @@ HELP_CONTENT = {
          "double-click puts one back. There is nothing to save: every edit is kept the "
          "moment you make it, and Write puts it on the card (\"Export picture…\" only makes a "
          "picture for you). Reset, under the preview, puts a scene back the way the last Write "
-         "left it or the way the game shipped it, or every scene at once. Lines of W's (or AAA) are the game's own placeholders "
+         "left it or the way the game shipped it, or every scene at once. With the Emulate "
+         "tab running this project's edits (\"Apply my replaced assets on top\"), an edit is "
+         "handed to the running game on the fly: a scene the game loads each time it shows "
+         "it (most mode and message screens) changes the next time it comes up, and the tag "
+         "under the preview says so; one the game loads when it starts (the score display, "
+         "Battle Select) changes after a restart. Lines of W's (or AAA) are the game's own placeholders "
          "for text it fills in while it runs, such as high score initials: the game writes the "
          "player's letters there, so they are as wide as the widest name can be."),
         ("Size limits",

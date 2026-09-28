@@ -197,3 +197,42 @@ def test_the_last_write_is_a_state_a_scene_can_go_back_to(tmp_path):
     assert E.built_ops(a, "c3") == [] and E.restore_built(a, "c3") is True
     E.clear(a)
     assert E.mark_built(a) is True and E.built_ops(a, "c1") == []       # an empty Write counts
+
+
+
+def test_a_running_game_gets_its_scene_rebuilt_from_the_sets_base(tmp_path):
+    """PAD-251 "on the fly": write_overrides keeps each tree-edited scene as it was before its
+    tree edits BESIDE the set; scene_live_bytes rebuilds that one scene with the project's
+    CURRENT edits, from the base (or the set's own copy), and says None for a scene the set
+    does not hold (nothing is bound over it in the running game)."""
+    import json
+    from pinball_decryptor.plugins.stern import engine, scene_eval, scene_tree
+    from pinball_decryptor.plugins.stern import scene_edit as E
+    from tests.test_stern_scene_tree import scene
+    card = "/g/demand_loaded/s1/scene.radium"
+    data = scene()
+    sc = scene_tree.parse(data)
+    assets = tmp_path / "proj"
+    tex = assets / "images" / "scene_textures"
+    tex.mkdir(parents=True)
+    man = scene_eval.manifest(sc, {})
+    (tex / "scene_tree.json").write_text(json.dumps({card: man}), encoding="utf-8")
+    node = next(n["id"] for n, _p in [(n, None) for n in man["root"]["kids"]])
+    out = tmp_path / "spike2_overrides"
+    engine._write_scene_bases(str(out), {card: data})
+    assert (tmp_path / "spike2_overrides-scenes" / "g" / "demand_loaded" / "s1"
+            / "scene.radium").read_bytes() == data
+    # not in the set: nothing to hand over
+    assert engine.scene_live_bytes(str(out), str(assets), card) is None
+    in_set = out / "g" / "demand_loaded" / "s1" / "scene.radium"
+    in_set.parent.mkdir(parents=True)
+    in_set.write_bytes(b"what the set was built with")
+    # no edits now: the base itself
+    assert engine.scene_live_bytes(str(out), str(assets), card) == data
+    E.add(str(assets), card, {"op": "move", "node": node, "dx": 12, "dy": 0})
+    got = engine.scene_live_bytes(str(out), str(assets), card)
+    want, n = engine._apply_tree_ops(data, card, E.ops_for(str(assets), card),
+                                     E.names_of(man), str(assets), lambda *a, **k: None)
+    assert n == 1 and got == want and got != data
+    assert engine.scene_loads_on_demand(card)
+    assert not engine.scene_loads_on_demand("/godzilla_le/assets/lcd/auto_loaded/x/scene.radium")

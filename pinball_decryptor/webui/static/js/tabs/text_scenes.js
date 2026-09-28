@@ -216,6 +216,9 @@ export function ScenesPage() {
             title=${wide ? "Show the scene list" : "Hide the scene list: more room for the preview"} onClick=${() => setWide(!wide)} />
           ${s.preparing ? html`<span class="grow"></span>`
             : editor ? html`<${TreeActions} t=${s.tree_view} /><span class="grow"></span>
+              ${s.tree_live ? html`<span class=${cx("chip sm tree-live-chip", s.tree_live.kind === "live" ? "ok" : "warn")}
+                title=${s.tree_live.text}><span class="dot"></span>${s.tree_live.kind === "live" ? "Live in the emulator"
+                  : s.tree_live.kind === "failed" ? "Emulator not reached" : "Restart the game to see it"}</span>` : null}
               <${InfoBadge} text=${s.caption_full || s.caption} />`
             : html`<span class="small muted ellip grow">${s.caption}</span>
               ${s.caption_full ? html`<${InfoBadge} text=${s.caption_full} />` : null}`}

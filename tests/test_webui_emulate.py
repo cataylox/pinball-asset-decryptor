@@ -1274,3 +1274,33 @@ def test_shutdown_takes_a_run_down(tmp_path, monkeypatch):
         w.run(lambda: setattr(svc, "_started_here", True))
         w.run(w.window.emulate_shutdown)
         assert any("killgame.sh" in " ".join(c) for c in rec.calls)
+
+
+
+def test_a_scene_edit_is_handed_to_the_running_game(tmp_path, monkeypatch):
+    """PAD-251: the game running over a project's edits takes a scene live
+    (tools/spike2_emu/livescene.sh); another project's, or a stopped one, does not."""
+    import subprocess
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        assert svc.live_scene_target(str(tmp_path)) is None
+        out = str(tmp_path / "set")
+        assert svc._live_ready(str(tmp_path), out, ["PAD_OVERRIDE_DIR=x"]) == ["PAD_OVERRIDE_DIR=x"]
+        assert svc.live_scene_target(str(tmp_path)) is None            # nothing up yet
+        svc._last_up = True
+        assert svc.live_scene_target(str(tmp_path)) == out
+        assert svc.live_scene_target(str(tmp_path / "other")) is None
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, calls[-1][-2].endswith("x.radium") and 3 or 0,
+                                               b"", b"")
+        monkeypatch.setattr(svc, "_run", fake_run)
+        monkeypatch.setattr(svc, "_cmd", lambda script, *a, env=(): [script, *a])
+        assert svc.push_live_scene("/g/demand_loaded/a/scene.radium", b"new") == "sent"
+        assert calls[-1][0] == "livescene.sh" and calls[-1][1] == "/g/demand_loaded/a/scene.radium"
+        assert svc.push_live_scene("/g/x.radium", b"new") == "not_in_set"
+        svc._live_ready(str(tmp_path), out, None)                       # a refused set
+        assert svc.live_scene_target(str(tmp_path)) is None
+        svc._last_up = False

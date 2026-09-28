@@ -1350,3 +1350,24 @@ def test_run_game_clears_and_publishes_the_video_host_flag_once():
     assert body.count('> "$R/dump/vidoverride"') == 1
 
 
+
+
+# ---------------------------------------------------------------- PAD-251 live scenes
+def test_livescene_writes_into_the_staged_file_in_place_and_marks_it():
+    """A scene edit reaches a RUNNING game by writing into the staged file the game reads
+    through its bind mount - IN PLACE (a new inode would leave the mount on the old one) -
+    and the file is listed so the next Start does not trust the stage for it."""
+    body = (RIG / "livescene.sh").read_text(encoding="utf-8", errors="replace")
+    assert "\r" not in body
+    assert 'cat "$SRC" > "$DST"' in body
+    assert "mv " not in body.split("set -u", 1)[1]
+    assert "LIVE=${PAD_SLOTDIR:-$PAD_HOME}/override.live" in body
+    assert "exit 3" in body and '[ -f "$DST" ]' in body
+
+
+def test_overrides_sh_puts_live_files_back_before_it_trusts_the_stage():
+    body = (RIG / "overrides.sh").read_text(encoding="utf-8", errors="replace")
+    live = body.index("LIVE=${PAD_SLOTDIR:-$PAD_HOME}/override.live")
+    assert live < body.index('WANT=$(signature "$SRC")') < body.index("if stage_delta; then")
+    block = body[live:body.index('WANT=$(signature "$SRC")')]
+    assert 'cp -L "$SRC/$rel" "$STAGE/$rel"' in block and 'rm -f "$LIVE"' in block

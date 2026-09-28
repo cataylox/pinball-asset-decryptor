@@ -50,6 +50,9 @@ class TreeEditMixin:
         self._trunning = False       # the render worker is up
         self._trev = 0               # bumped by every edit: the page knows when an image is new
         self._tshown_card = None     # the scene whose picture the canvas shows
+        self._tlive = {}             # card -> (push result, "HH:MM:SS") handed to a running game
+        self._tlive_job = None
+        self._tlive_lock = threading.Lock()
 
     def _tree_reset(self):
         self._trees = None
@@ -273,6 +276,7 @@ class TreeEditMixin:
                            "edits": "; ".join(edited_nodes.get(n["id"], []))})
         sel = self._tsel if self._tsel in index else None
         self._tsel = sel
+        self.set(tree_live=self._live_note(card))
         self.set(tree=True, tree_view={
             "card": card, "stage": [w, h], "frame": frame,
             "frames": int(man["root"].get("frames") or 1),
@@ -330,6 +334,94 @@ class TreeEditMixin:
         self._folder_state_written()
         if self._sel:
             self._render_tree_preview(self._sel)
+            self._live_kick()
+
+    # ------------------------------------------------------------------
+    # the running emulator ("on the fly", PAD-251)
+    # ------------------------------------------------------------------
+    def _live_target(self):
+        emu = None
+        try:
+            emu = self.window.service("emulate")
+        except Exception:                            # noqa: BLE001
+            emu = None
+        fn = getattr(emu, "live_scene_target", None)
+        if not callable(fn):
+            return None, None
+        try:
+            return emu, fn(self.assets_dir)
+        except Exception:                            # noqa: BLE001
+            return None, None
+
+    def _live_note(self, card):
+        """What an edit to *card* does to the game running in the Emulate tab now, or None
+        when no game runs this project's edits."""
+        from ..plugins.stern import engine
+        _emu, out = self._live_target()
+        if out is None or not card:
+            return None
+        restart = "Stop, then Start, on the Emulate tab"
+        if not engine.scene_loads_on_demand(card):
+            return {"kind": "boot", "text": "The running game loaded this scene when it started, "
+                    "so your edits show after a restart (%s)." % restart}
+        if not os.path.isfile(engine._override_path(out, card)):
+            return {"kind": "later", "text": "The running game started before this scene had "
+                    "edits, so they show after a restart (%s)." % restart}
+        got = self._tlive.get(card)
+        if got and got[0] == "failed":
+            return {"kind": "failed", "text": "The running game could not be reached (the log "
+                    "says why); your edits show after a restart (%s)." % restart}
+        if got and got[0] == "sent":
+            return {"kind": "live", "text": "Live: sent to the running game at %s. It shows "
+                    "the next time this scene comes up." % got[1]}
+        return {"kind": "live", "text": "Live: edits here reach the running game, which shows "
+                "them the next time this scene comes up."}
+
+    def _live_publish(self):
+        card = self._tree_card()[0] if self._sel else None
+        self.set(tree_live=self._live_note(card))
+
+    def _live_kick(self):
+        """After an edit: hand the running game this scene, once the edits pause."""
+        if self._tlive_job is not None:
+            try:
+                self.ctx.loop.after_cancel(self._tlive_job)
+            except Exception:                        # noqa: BLE001
+                pass
+            self._tlive_job = None
+        card = self._tree_card()[0] if self._sel else None
+        note = self._live_note(card)
+        self.set(tree_live=note)
+        if not note or note["kind"] not in ("live", "failed"):
+            return
+        self._tlive_job = self.ctx.loop.after(350, self._live_send, card)
+
+    def _live_send(self, card):
+        import time
+        from ..plugins.stern import engine
+        self._tlive_job = None
+        emu, out = self._live_target()
+        if out is None:
+            self._live_publish()
+            return
+        assets = self.assets_dir
+
+        def work():
+            with self._tlive_lock:
+                try:
+                    data = engine.scene_live_bytes(out, assets, card)
+                    res = "not_in_set" if data is None else emu.push_live_scene(card, data)
+                except Exception:                    # noqa: BLE001
+                    log.exception("live scene")
+                    res = "failed"
+            self.ctx.loop.post(self._live_done, card, res, time.strftime("%H:%M:%S"))
+
+        threading.Thread(target=work, daemon=True, name="scene-live").start()
+
+    def _live_done(self, card, res, when):
+        self._tlive[card] = (res, when)
+        if self._alive:
+            self._live_publish()
 
     # ------------------------------------------------------------------
     # the moment and the states

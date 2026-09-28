@@ -335,7 +335,7 @@ class TextScenesService(TreeEditMixin):
                  exporting=False, bulk=False, rebuilding=False,
                  rebuild_msg="", layout_dialog=None, tips=TIPS,
                  tree=False, tree_view=None, tree_layers=None, tree_busy=False,
-                 tree_loading=False, tree_img_rev=0, preparing=None)
+                 tree_loading=False, tree_img_rev=0, preparing=None, tree_live=None)
 
     def is_open(self):
         return self._alive

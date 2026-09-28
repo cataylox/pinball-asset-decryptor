@@ -291,3 +291,45 @@ def test_reset_back_to_the_last_write_or_as_shipped_for_every_scene(tmp_path):
         assert _ops(folder) == [] and _tv(w)["all_edits"] == 0 and _tv(w)["built"] == "changed"
         assert w.call("text_scenes.tree_clear_all") is False              # nothing left to drop
         w.call("text_scenes.close")
+
+
+
+def test_an_edit_reaches_a_running_emulator_on_the_fly(tmp_path, monkeypatch):
+    """PAD-251 (DragonRR: "Can scenes also have that cool on the fly feature?"): with the
+    Emulate tab running this project's edits, an edit to a scene the game loads on demand is
+    rebuilt and handed to the running game; a scene loaded at start says to restart."""
+    from pinball_decryptor.plugins.stern import engine
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    out = tmp_path / "set"
+    in_set = out / "g" / "scene1" / "scene.radium"
+    in_set.parent.mkdir(parents=True)
+    from tests.test_stern_scene_tree import scene
+    in_set.write_bytes(scene())
+    pushed = []
+    with web_app(tmp_path, mfr="stern") as w:
+        emu = w.window.service("emulate")
+        monkeypatch.setattr(emu, "live_scene_target", lambda assets: str(out))
+        monkeypatch.setattr(emu, "push_live_scene",
+                            lambda card, data: pushed.append((card, data)) or "sent")
+        monkeypatch.setattr(engine, "scene_loads_on_demand", lambda card: True)
+        _open(w, folder)
+        assert w.state("text_scenes")["tree_live"]["kind"] == "live"
+        art = next(h for h in _tv(w)["hits"] if h["name"] == "Art")["id"]
+        assert w.call("text_scenes.tree_move", art, 15, 0)
+        assert _wait(w, lambda: pushed)
+        assert pushed[0][0] == CARD and pushed[0][1] != scene()
+        assert _wait(w, lambda: "sent to the running game" in
+                     (w.state("text_scenes")["tree_live"] or {}).get("text", ""))
+        monkeypatch.setattr(engine, "scene_loads_on_demand", lambda card: False)
+        assert w.call("text_scenes.tree_move", art, 1, 0)
+        assert w.state("text_scenes")["tree_live"]["kind"] == "boot"
+        assert "after a restart" in w.state("text_scenes")["tree_live"]["text"]
+        n = len(pushed)
+        w.drain()
+        assert len(pushed) == n                                     # nothing handed over
+        monkeypatch.setattr(emu, "live_scene_target", lambda assets: None)
+        assert w.call("text_scenes.tree_move", art, 1, 0)
+        assert w.state("text_scenes")["tree_live"] is None
+        w.call("text_scenes.close")
