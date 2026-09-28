@@ -69,3 +69,39 @@ def test_multiball_is_greyed_until_proven_and_the_fields_round_trip(tmp_path, pr
         assert w.state("modes")["form"]["mb_on_shot"] == "Action button"
         w.call("ui.set", "modes", "f:mb_on_shot", "(when it starts)")
         assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("multiball_on_shot") == "")
+
+
+def test_ball_save_is_greyed_until_proven_and_its_fields_round_trip(tmp_path, preview_on):
+    """PAD-225: a ball save when the mode starts, with no multiball - its own section on the Mode page."""
+    proj = _card_project(tmp_path / "gz", GODZILLA_CARD)
+    proven = "godzilla_pro-1.15" in MP.BALL_SAVE_PROVEN
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj)
+        slug = w.call("modes.new")
+        st = w.state("modes")
+        assert st["dis"]["ball_save"] is (not proven)
+        if not proven:
+            assert st["reasons"]["ball_save"].startswith(
+                "Not on this game: The app has found how Godzilla Pro 1.15 saves a ball")
+        assert st["spin"]["start_save_s"] == [1, 60]
+        f = st["form"]
+        assert f["start_save"] is False and f["start_save_s"] == "10"
+
+        path = proj / "modes" / slug / "mode.json"
+        w.call("ui.set", "modes", "f:start_save", True)
+        w.call("ui.set", "modes", "f:start_save_s", "15")
+        assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("start_ball_save") == 15)
+        st = w.state("modes")
+        if proven:
+            assert st["status"] == "Ready to build."
+        else:
+            assert st["fix_pages"] == ["mode"]
+            assert "A ball save of the mode's own is not on Godzilla Pro 1.15 yet" in st["status"]
+
+        w.call("modes.new")
+        w.call("modes.select", slug, "form")
+        f = w.state("modes")["form"]
+        assert f["start_save"] is True and f["start_save_s"] == "15"
+        # unticked: no ball save in the file, and the seconds shown go back to 10 on the next open
+        w.call("ui.set", "modes", "f:start_save", False)
+        assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("start_ball_save") == 0)

@@ -39,6 +39,7 @@ const T = {
   multiball: "When the mode starts (or on the shot Balls come names), the game serves balls from the trough until this many are in play, through the game's own ball code, with a ball save of its own. The mode ends when one ball is left (and when its time runs out, if it has a clock). The shots that score are its jackpots; the game's own multiball screens and music stay off, so the mode's screen, clip, sounds and lights are what the player sees and hears.",
   balls: "How many balls are in play together, 2 to 6. A machine with fewer balls serves what it has.",
   ballSave: "For this many seconds after the balls are served, a drained ball is served back.",
+  startSave: "When the mode starts, the game's own ball saver is on for this many seconds: a ball that drains in that time is served back, and the ball does not end. A multiball uses its own ball save instead.",
   addBall: "A shot that puts one more ball in play while the multiball runs, up to that many times. It still scores if it is also a scoring shot.",
   mbOn: "When the game serves the balls. On a shot (the Action button, say), the mode's clock is the time the player has to hit it: time up ends the mode with no multiball. Once the balls come, the clock stops and one ball left ends it. Light the shots that score lights that shot too.",
   lit: "While the mode runs, the insert in front of every shot that scores (and every shot with its own points) shows this colour and pattern, over the game's own light shows; every other insert keeps doing what the game wants. They go back to the game the moment the mode ends. Blink and Pulse repeat about twice a second and every 1.6 s; Chase lights one of them at a time.",
@@ -312,6 +313,7 @@ function ModePage({ s, f, off, dis, rs }) {
   const afterOff = off || !f.after_mode || f.after_mode === AFTER_NONE;
   const mbOff = off || dis.multiball;
   const mbIn = mbOff || !f.multiball;
+  const bsOff = off || dis.ball_save || f.multiball;
   const balls = (prof.ball_shots || ["(none)"]).map((x) => ({ value: x, label: x }));
   const ballOpts = f.add_ball_shot && !balls.some((o) => o.value === f.add_ball_shot) ? [{ value: f.add_ball_shot, label: f.add_ball_shot }, ...balls] : balls;
   const mbOnOpts = withValue((prof.mb_on_shots || ["(when it starts)"]).map((x) => ({ value: x, label: x })), f.mb_on_shot);
@@ -375,6 +377,13 @@ function ModePage({ s, f, off, dis, rs }) {
       <//>
       <${Sec} title="The game's own modes" reason=${rs.stack}>
         <${Check} label="Can run during the game's own modes" checked=${f.stack} disabled=${off || dis.stack} title=${T.stack} ns="modes" k="f:stack" />
+      <//>
+      <${Sec} title="Ball save" reason=${rs.ball_save}>
+        <div class="row wrap">
+          <${Check} label="A ball save when it starts, for" checked=${f.start_save} disabled=${bsOff} title=${T.startSave} ns="modes" k="f:start_save" />
+          <${Num} k="start_save_s" value=${f.start_save_s} disabled=${bsOff || !f.start_save} width=${64} title=${T.startSave} /><span class="dim">seconds</span>
+        </div>
+        ${f.multiball && !dis.ball_save ? html`<div class="small muted">A multiball has its own ball save, below.</div>` : null}
       <//>
       <${Sec} title="Multiball" reason=${rs.multiball}>
         <${Check} label="A multiball: the game serves more balls" checked=${f.multiball} disabled=${mbOff} title=${T.multiball} ns="modes" k="f:multiball" />

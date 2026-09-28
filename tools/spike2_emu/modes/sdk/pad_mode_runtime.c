@@ -2974,6 +2974,20 @@ int pm_multiball_start(unsigned balls, unsigned ballsave_s)
     return r ? 1 : 0;
 }
 
+int pm_ball_save(unsigned seconds)
+{
+    unsigned r, arg3;
+    int now = pm_balls_in_play();
+    if (!multiball_ok() || !pm_in_game() || !seconds) return 0;
+    if (seconds > 120) seconds = 120;
+    if (now < 1) now = 1;                   /* a ball on its way to the plunger counts as the one in play */
+    arg3 = (unsigned)pm_port_value("multiball_arg3", 0xbb);
+    r = ((unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned))(unsigned long)fn("multiball_serve"))
+            ((unsigned)now, 0, seconds * 62u, arg3, 0, 0);
+    say("ball save: %u s with %d ball(s) in play: the game %s", seconds, now, r ? "is saving" : "refused");
+    return r ? 1 : 0;
+}
+
 int pm_multiball_add(unsigned n, unsigned ballsave_s)
 {
     int now = pm_balls_in_play();
