@@ -1422,6 +1422,9 @@ class EmulateTab(TabService):
         if self._stopping:
             return
         self._loading = True
+        # the restored guest replaces the rig's run, and is this app's to stop
+        # on quit (shutdown_sync)
+        self._started_here = True
         self._set("state", "Loading save…")
         self.log("[emulate] loading slot '%s'" % slot)
 
@@ -1946,7 +1949,10 @@ class EmulateTab(TabService):
                   % runtime.DISTRO)
 
     def _launch_env(self, src):
-        env = ["PAD_AUDIO_DUMP=30", "PAD_AUDIO_CTL=" + audio_ctl_file()] + \
+        # PAD_AUDIO=1: a rig is silent unless it is asked (PAD-253), and this
+        # tab's run is the one that has a window and a Volume / Mute.
+        env = ["PAD_AUDIO=1", "PAD_AUDIO_DUMP=30",
+               "PAD_AUDIO_CTL=" + audio_ctl_file()] + \
             list(src) + self._machine_env()
         if self._launch_slot:
             env.append("PAD_SELECT=0")
@@ -2173,6 +2179,11 @@ class EmulateTab(TabService):
             finally:
                 self._proc = None
                 self._copying = None
+                # a launch that ended before the rig ever said "up" started
+                # nothing: a later run on this rig is somebody else's, and
+                # quitting must leave it alone (shutdown_sync)
+                if not self._last_up:
+                    self._started_here = False
                 self._post(self._paint_run_btn)
                 over()
 
@@ -2441,9 +2452,16 @@ class EmulateTab(TabService):
         self._setup_check()
 
     def shutdown_sync(self):
-        """App quit: take the emulator down with the app (blocking,
-        bounded), a terminal-started run too."""
-        if not (self._proc is not None or self._last_up):
+        """App quit: take down the run THIS app started (blocking, bounded),
+        and nothing else.
+
+        It used to stop whatever the status poll saw on the rig - "a
+        terminal-started run too" - and on rig 0 that is also a session's
+        hidden run, which an app from main has no lease to be refused by
+        (PAD-253, David: "when i close the dev pad app, it should not kill
+        all rigs, only the emulation window it spawns (if done) itself").
+        Its own playfield window closes either way."""
+        if not (self._launched() or self._started_here):
             self._close_playfield(grace=3)
             return
         if not rig.rig_available():

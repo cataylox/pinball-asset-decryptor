@@ -214,6 +214,7 @@ class EmulateJJPTab(RigTabMixin, TabService):
 
         self._busy = True
         self._go_busy = True
+        self._started_here = True
         self._wrong_key = False       # a new attempt clears the last verdict
         self._set_go("Starting…", False)
 
@@ -230,7 +231,9 @@ class EmulateJJPTab(RigTabMixin, TabService):
                 rc, saw_wrong_key = self._run_launch(
                     jjp.rig_cmd_root(
                         "watch.sh", *args,
-                        env=["PAD_AUDIO_CTL=" + self._audio_ctl_file()]),
+                        # PAD_AUDIO=1: a rig is silent unless asked (PAD-253)
+                        env=["PAD_AUDIO=1",
+                             "PAD_AUDIO_CTL=" + self._audio_ctl_file()]),
                     timeout=1800)
                 if saw_wrong_key or rc == 7:
                     self._mark_wrong_key()
@@ -300,6 +303,7 @@ class EmulateJJPTab(RigTabMixin, TabService):
             return
         self._busy = True
         self._go_busy = True
+        self._started_here = False
         self._set_go("Stopping…", False)
 
         def work():
@@ -522,7 +526,10 @@ class EmulateJJPTab(RigTabMixin, TabService):
 
     def _apply(self, info):
         self._info = info
+        was_up = self._last_up
         self._last_up = int(info.get("game_procs") or 0) > 0
+        if was_up and not self._last_up:
+            self._started_here = False      # our run ended; the next is not
         label, hint = jjp.state_text(info)
         if self._wrong_key and not self._last_up:
             label, hint = self._key_verdict
@@ -603,7 +610,12 @@ class EmulateJJPTab(RigTabMixin, TabService):
         self._cancel_poll()
         if rig_off() or not jjp.rig_available() or sys.platform != "win32":
             return
-        if not (self._last_up or self._info.get("cuse_daemons", "0") != "0"):
+        # only the run this app started (PAD-253): quitting must not end a
+        # session's run it merely saw on the rig
+        if not self._started_here:
+            return
+        if not (self._last_up or self._busy
+                or self._info.get("cuse_daemons", "0") != "0"):
             return
         try:
             subprocess.run(jjp.rig_cmd_root("stop.sh"), timeout=120,

@@ -584,6 +584,12 @@ def test_app_quit_stops_a_run_this_session_never_showed(rig, tmp_path,
                             lambda *a, **k: ["root"] + list(a))
         monkeypatch.setattr(subprocess, "run",
                             lambda cmd, **k: stops.append(cmd))
+        # a run this app did not start is left alone (PAD-253)...
+        w.run(w.window.emulate_shutdown)
+        assert stops == []
+        # ...and the one it did is stopped, shown or not
+        svc._stopped = False
+        w.run(lambda: setattr(svc, "_started_here", True))
         w.run(w.window.emulate_shutdown)
         assert stops == [["root", "stop.sh"]]
 

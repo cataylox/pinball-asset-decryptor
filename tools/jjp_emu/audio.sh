@@ -27,12 +27,14 @@ mountpoint -q "$JJP_JAIL" || { echo "audio.sh: jail not mounted; run jail.sh" >&
 # muted run has no stream to hold, and a sounding one starts its own.
 pkill -f 'jjpvol\.py' 2>/dev/null
 
-# 0. MUTED, when asked.  PAD_AUDIO=0 is the Spike 2 rig's knob and the rule
+# 0. MUTED unless asked.  PAD_AUDIO=1 is the Spike 2 rig's knob and the rule
 #    every run here follows unless somebody wants sound (David works beside
-#    the runs): ALSA's default becomes the null device, so the game plays
-#    into nothing, and the pulse cookie is not handed in.  The rest of this
-#    script is skipped - there is no path to prove.
-if [ "${PAD_AUDIO:-1}" = "0" ]; then
+#    the runs; PAD-253: "we should NEVER unmute audio from rigs") - the app's
+#    Emulate JJP tab asks, a session's run does not: ALSA's default becomes
+#    the null device, so the game plays into nothing, and the pulse cookie is
+#    not handed in.  The rest of this script is skipped - there is no path to
+#    prove.
+if [ "${PAD_AUDIO:-0}" = "0" ]; then
     cat > "$JJP_JAIL/etc/asound.conf" <<'ASOUND'
 # Written by tools/jjp_emu/audio.sh with PAD_AUDIO=0 - the game is MUTED:
 # every ALSA client plays into the null device.
@@ -44,7 +46,7 @@ ctl.!default {
 }
 ASOUND
     rm -f "$JJP_JAIL$JJPEDIR/$(jjp_title)/allegro5.cfg"
-    echo "audio: muted (PAD_AUDIO=0) - ALSA default is the null device"
+    echo "audio: muted (PAD_AUDIO=1 to hear it) - ALSA default is the null device"
     exit 0
 fi
 

@@ -72,7 +72,7 @@ tables once the game is up. Stop ends the waiter with the matrix.
 knob and file (`audio_ctl.json`). The tab hands the file to `watch.sh` as
 `PAD_AUDIO_CTL`; `audio.sh` starts `jjpvol.py`, which holds every PulseAudio
 stream the game and the menu open at that level (pactl run inside the jail),
-live, until the jail goes or `stop.sh` ends it. A muted rig (`PAD_AUDIO=0`) or
+live, until the jail goes or `stop.sh` ends it. A muted rig (no `PAD_AUDIO=1`: every run the tab did not start, PAD-253) or
 a PulseAudio that does not answer has no stream to hold and starts none. `JJP_SELECT=0` in the
 environment skips the menu (image 0), `JJP_SELECT=1` insists on it. To drive
 the menu from a script, poke the cabinet bytes in the shared block the CUSE

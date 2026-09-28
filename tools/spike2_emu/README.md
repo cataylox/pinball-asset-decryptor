@@ -203,23 +203,24 @@ In the rig, `run_game.sh` pulls the card's media out of its rootfs with
 instead (art and sounds without rebuilding a card). Every media failure
 inside the selector is non-fatal: the menu still draws, the card still boots.
 
-**Hearing the selector in the rig: `PAD_AUDIO=1`.** David's default runs
-are muted (`PAD_AUDIO=0`, no player, `PAD_AUDIO_PLAY` unset - the selector
-logs `audio: none`); with `PAD_AUDIO=1` the selector inherits
+**Hearing the selector in the rig: `PAD_AUDIO=1`.** A rig is silent unless
+it is asked (PAD-253: `watch.sh` defaults `PAD_AUDIO=0` - no player,
+`PAD_AUDIO_PLAY` unset, the selector logs `audio: none` - and only the app's
+Emulate tab passes `PAD_AUDIO=1`). A HIDDEN run (`PAD_HIDDEN=1`) is silent
+whatever it is asked: nobody is looking at it, so nobody is to hear it. With
+`PAD_AUDIO=1` on a visible run the selector inherits
 `PAD_AUDIO_PLAY`/`PAD_AUDIO_FMT` from `watch.sh`, writes `44100 2` to the
 format file, streams into the FIFO and closes it before the game starts, so
 `~/padaudio.log` shows `guest reports 44100 Hz x 2 ch` before `[select]
 chose`. To run such an E2E with SILENT speakers, mute the Windows player
 rather than the run: `padplay.py` re-reads the JSON named by
-`PAD_AUDIO_CTL` every 250 ms (`{"gain": 0.0-1.0, "muted": true|false}` -
-the app's Emulate-tab knob writes it as
-`%APPDATA%\pinball_decryptor\audio_ctl.json`, `_write_audio_ctl` in
-`pinball_decryptor/gui/emulate_tab.py`), so
-`PAD_AUDIO=1 PAD_AUDIO_CTL=/mnt/c/Users/<you>/AppData/Roaming/pinball_decryptor/audio_ctl.json`
-with `{"gain": 1.0, "muted": true}` in that file plays everything into the
-FIFO chain and nothing out of the speakers (the `[padplay] fed/played`
-counters and the `[select]`/`audio:` lines are the oracle); flip `muted` to
-`false` in the file to hear it, no restart needed.
+`PAD_AUDIO_CTL` every 250 ms (`{"gain": 0.0-1.0, "muted": true|false}`), so
+point it at a PRIVATE file holding `{"gain": 1.0, "muted": true}` - never
+at `%APPDATA%\pinball_decryptor\audio_ctl.json`, which is the app's own
+Volume / Mute and David's: a session that writes `"muted": false` there
+un-mutes every run the app plays. The FIFO chain runs and nothing comes out
+of the speakers (the `[padplay] fed/played` counters and the
+`[select]`/`audio:` lines are the oracle).
 
 ### Same game code version on every image
 

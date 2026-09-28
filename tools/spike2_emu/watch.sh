@@ -259,7 +259,7 @@ LCD_GUEST=/dump/padlcd
 SW_GUEST=/dump/padsw
 # Audio: the guest writes PCM into a FIFO, a native ffmpeg drains it into WSLg's
 # PulseAudio. Same host-path/guest-path split as the GL ring and the keyboard.
-# PAD_AUDIO=0 turns it off.
+# Off unless PAD_AUDIO=1 (the app's Emulate tab), and never on a hidden run.
 AUD_HOST=$ROOT/dump/audio.fifo
 AUD_GUEST=/dump/audio.fifo
 AUD_FMT_HOST=$ROOT/dump/audio.fmt
@@ -1649,9 +1649,27 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
     export PAD_VID=0
 fi
 
+# ★ A RIG IS SILENT UNLESS THE APP ASKED FOR SOUND (PAD-253). David,
+# 2026-09-28: "there are rigs running and i hear their audio. we should NEVER
+# unmute audio from rigs especially because the windows don't even open up."
+# Sessions' runs are hidden and many, and every one of them used to play into
+# the room, because this defaulted to on. Now only the app's Emulate tab opts
+# in (PAD_AUDIO=1, beside its Volume / Mute); a terminal or a session wanting
+# to hear a run says PAD_AUDIO=1 itself. A HIDDEN run is silent whatever it
+# was asked - nobody is looking at it, so nobody should be hearing it.
+# (bootcheck.sh / motorcheck.sh were already silent this way.) A session that
+# must measure the player chain runs VISIBLE with PAD_AUDIO=1 and a private
+# muted PAD_AUDIO_CTL - README.md, "Hearing the selector in the rig".
+PAD_AUDIO=${PAD_AUDIO:-0}
+if [ "$PAD_HIDDEN" = 1 ] && [ "$PAD_AUDIO" != 0 ]; then
+    echo "[watch] hidden run: no sound either (PAD_AUDIO=$PAD_AUDIO ignored)"
+    PAD_AUDIO=0
+fi
+export PAD_AUDIO
+
 # Audio player first, so the FIFO exists before the game's first frame. It is
 # started with its own session and killed in teardown like everything else.
-if [ "${PAD_AUDIO:-1}" != 0 ]; then
+if [ "$PAD_AUDIO" != 0 ]; then
     setsid_as_user bash "$S/playaudio.sh" "$AUD_HOST" "$AUD_RATE" 2 "$AUD_FMT_HOST" \
         > "$PAD_LOGDIR/padaudio.log" 2>&1 &
     AUDPG=$!

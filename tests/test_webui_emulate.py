@@ -796,6 +796,8 @@ def test_boot_selector_the_card_decides_a_hand_overrides(tmp_path):
         w.run(svc._select_apply, "x-1.raw", "yes", "again", (1, 2))
         assert w.state(NS)["select"] is False       # the hand wins
         assert "PAD_SELECT=0" in w.run(svc._launch_env, ["PAD_CARD=x"])
+        # the tab's run is the one a rig makes sound for (PAD-253)
+        assert "PAD_AUDIO=1" in w.run(svc._launch_env, ["PAD_CARD=x"])
         # a new card forgets the verdict and the touch
         w.run(lambda: w.window.emulate_card_var.set("y-1.raw"))
         assert svc._select_touched is False
@@ -1238,6 +1240,12 @@ def test_shutdown_takes_a_run_down(tmp_path, monkeypatch):
         rec = _patch(svc, monkeypatch)
         w.run(w.window.emulate_shutdown)
         assert rec.calls == []
+        # a run on the rig this app did not start - a session's hidden run
+        # on rig 0 - is not the app's to end (PAD-253)
         w.run(lambda: setattr(svc, "_last_up", True))
+        w.run(w.window.emulate_shutdown)
+        assert rec.calls == []
+        # the one it started is
+        w.run(lambda: setattr(svc, "_started_here", True))
         w.run(w.window.emulate_shutdown)
         assert any("killgame.sh" in " ".join(c) for c in rec.calls)
