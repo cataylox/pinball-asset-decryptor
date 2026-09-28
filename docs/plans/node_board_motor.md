@@ -91,4 +91,41 @@ boot sweep below.
 
 ## Other titles
 
-(filled from the library sweep)
+Whole library, `rigbatch.sh` over the 33-build list with bootcheck plus the
+`[motor]` config lines (2026-09-27): **33/33 boot to attract**. At least 13
+titles configure a board motor (a fast boot can be stopped before cmd 51, so
+"none" below is not proof of none - john_wick itself read none at 20 s):
+
+| title | motors (cmd 53 stop / cmd 54 stop) |
+|---|---|
+| batman 1.13 | node 9: m1 13/8, m2 2/4 |
+| deadpool_le 1.14, deadpool_pro 1.16, star_wars_elg 1.10 | node 12: m0 none/none |
+| star_wars_le 1.30 | node 12 m0, node 9 m0: none/none |
+| elvira3 1.13 | node 9: m0 9/3, m1 -/12, m2 -/0, m3 -/24 |
+| iron_maiden_le 1.16 | node 9: m0 24/25, m1 1/0 |
+| james_bond_le 1.06 | node 9: m0 1/- (the JETPACK: home opto 1, encoder optos 2 and 3) |
+| jaws_le 1.02 | node 9: m0 38/32 |
+| jurassic_park_le 1.16 | node 9: m0 4/6 |
+| mando_le 1.44 | node 9: m0 0/1 |
+| sword_of_rage_le 1.18 | node 9: m0 none/none |
+| uncanny_xmen_le 0.98 | node 12: m0 4/6 |
+
+Then `motorcheck.sh`, model on vs `PAD_NB_MOTOR=0`, 40 s from Start, on the
+eight with stop switches:
+
+- batman, iron_maiden, jaws, jurassic_park, mando, uncanny_xmen: 0 moves
+  either way - nothing looped from Start, nothing changed.
+- elvira3: the game sends motors 1-3 to their stops in attract; all three
+  arrive in 600 ms and are never sent again.
+- **james_bond_le: off = 20586 x cmd 53 in 40 s** (about 500 a second - a
+  flood nobody had noticed because nothing plays a sound for it); **on = 136**,
+  a pair every ~0.7 s. Improved, not answered: the JETPACK is an ENCODER
+  motor (`53 00 28 20 e8 03` - speed 40, accel 32, and 1000 as a LE16 where
+  john_wick sends 200) and the game wants pulses on its encoder optos while it
+  moves, which this model does not make. Its own ticket, with jaws_le's
+  SHARK POSITION 1..7 (the original item's generalisation; jaws showed no
+  loop from Start, but its stops are inputs 38 and 32, past the byte 2 this
+  reply is known to carry).
+
+Payload of cmd 53 / 54, from the two titles: motor, speed, accel, then a LE16
+(200 on john_wick = its DECEL (MS) adjustment; 1000 on the jetpack).

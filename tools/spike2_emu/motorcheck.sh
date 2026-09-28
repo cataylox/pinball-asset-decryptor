@@ -68,6 +68,12 @@ c53=$(grep -c 'cmd=53 ' <<<"$S")
 c54=$(grep -c 'cmd=54 ' <<<"$S")
 c40=$(grep -c 'cmd=40 ' <<<"$S")
 bash "$RIG/glshot.sh" "$PAD_LOGDIR/motorcheck.$KEY.png" > /dev/null 2>&1
+# The model's own account, into this build's log (rigbatch keeps the job's
+# output per build; the rig's game log is the next build's by the time anyone
+# reads it). The move frames themselves, first and last few, for the timing.
+grep -a '^\[motor\]' "$GZ" | head -30
+grep -E 'cmd=5[34] ' <<<"$S" | head -5
+grep -E 'cmd=5[34] ' <<<"$S" | tail -3
 stop
 kill "$WPID" 2>/dev/null
 env=""
