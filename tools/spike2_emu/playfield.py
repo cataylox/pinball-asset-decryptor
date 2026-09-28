@@ -67,7 +67,7 @@ toward an artwork pixel sampled at build time). Both scales
 have a floor on purpose - a lamp at 5% duty is ON, and must not render as a
 ghost. The HUE is still brightness-lifted so a dim insert keeps its colour.
 
-THE RATE IS 60 fps AND IT IS MEASURED, not assumed: the status bar shows the
+THE RATE IS 60 fps AND IT IS MEASURED, not assumed: the side panel's Live data rows show the
 achieved rate, and PAD_PF_LOG=<path> writes a line a second breaking it into
 transport and drawing. It was 15 fps before that was measured, while nominally
 being a 20 Hz loop; 30 until 2026-08-07, when David asked why not 60 - the
@@ -408,7 +408,7 @@ PRESS_MS = 150
 #: draw is change-gated, so 60 costs ~25% of one core in blocking reads and
 #: buys the tween below its full smoothness. The loop is PACED, not slept -
 #: see Field.tick - and the rate it ACHIEVES is measured and printed in the
-#: status bar. An unmeasured frame rate is how this window sat at an unknown
+#: side panel's Live data rows. An unmeasured frame rate is how this window sat at an unknown
 #: rate for weeks.
 TARGET_FPS = 60
 FRAME_MS = 1000.0 / TARGET_FPS
@@ -1098,6 +1098,58 @@ def load_switch_list():
         # item 73 made this call unconditional, so it minded on import.
         return []
     return trough.load_list(os.path.join(TDIR, "switch_list.txt"))
+
+
+def inventory(switch_list=None, positioned=None, leds=None, fixtures=None,
+              coils=None):
+    """THE TITLE'S INVENTORY, BOTH VIEWS: how many switches, lamps and coils
+    the title has (PAD-238, from the PAD-81 list), as [label, count, note]
+    rows for the side panel's "Game hardware" section - never on the playfield
+    itself, which David wants kept clear.
+
+    From the TABLES, never the wire, so it is there from the first frame -
+    boot is exactly when someone asks "did this title's tables load?". Both
+    views call this so one fact has one spelling. The optional arguments are
+    what the Field view PLACES on its artwork; the schematic places nothing
+    and passes none.
+
+    ★ A ZERO IS NOT A COUNT. An empty switch_list.txt is a first run (the game
+    publishes it a few seconds in: "not known yet"); an empty device table
+    (`0 records`, 13 of the 32 titles here) names no lamps and no coils, and
+    no run will change that ("no table"). Neither prints 0 - and on a
+    schematic title the LED grid, whose roster is the WIRE's (item 50), is the
+    other lamp number, so the table's is never passed off as the grid's.
+    """
+    def row(label, n, none, placed=None, *how):
+        if not n:
+            return [label, none, ""]
+        notes = []
+        if placed is not None and placed != n:
+            notes.append("%d on the artwork" % placed)
+        notes += [h for h in how if h]
+        return [label, str(n), ", ".join(notes)]
+
+    def count(xs):
+        return None if xs is None else len(xs)
+
+    if switch_list is None:
+        switch_list = load_switch_list()
+    # every LED row, ANY image and resolved or not: load_led_names() drops a
+    # lamp whose board is unknown (Bond's backbox group), which is still a
+    # lamp the title has. The TOPPERS are most of it on a title that has
+    # them (378 of godzilla_le's 515), so they are said, or the total reads
+    # as a mistake next to 83 inserts.
+    lamp_rows = [r for r in DEV_ROWS if r["kind"] == "led"]
+    topper = sum(1 for r in lamp_rows if "topper" in r["image"].lower())
+    all_coils = len(coilmap.load(os.path.join(TDIR or "", "device_xy.txt")))
+    return [
+        row("Switches", len(switch_list) or count(positioned),
+            "not known yet", count(positioned)),
+        row("Lamps", len(lamp_rows), "no table", count(leds),
+            "%d inserts" % len(fixtures) if fixtures else None,
+            "%d on toppers" % topper if topper else None),
+        row("Coils", all_coils, "no table", count(coils)),
+    ]
 
 
 def read_merged():
@@ -3016,11 +3068,18 @@ class Field(LedRing):
             self.sw.set_rows(load_switch_list())
         self._sw_next = time.monotonic() + SWITCH_POLL_S
         self.status = ""
+        self.live = []
+        self._count()
+
+    def _count(self):
+        self.info = inventory(positioned=self.switches, leds=self.leds,
+                              fixtures=self.fixtures, coils=self.coils)
 
     # ---- what the page draws ------------------------------------------------
     def spec(self):
         return {
             "kind": "field",
+            "info": self.info,
             "art": "art" if self.art else None,
             "base": list(self.base or (313, 710)),
             "fixtures": [[F["fid"], round(F["x"], 2), round(F["y"], 2)]
@@ -3063,6 +3122,7 @@ class Field(LedRing):
             self.sw.set_rows(load_switch_list())
         self.sw_rows = list(rows)
         self.make_trough()
+        self._count()
         return True
 
     def make_trough(self):
@@ -3271,14 +3331,17 @@ class Field(LedRing):
         self.last = d
         if emu_gone(self, raw is not None):
             return None
-        state_msg = self.ctl.state_status()
+        # the status line carries only what the last press said; the rates
+        # and counts are the side panel's "Live data" rows (PAD-238), [label,
+        # value, note, alarm]
+        status = self.ctl.state_status() or ""
         if d is None:
-            status = (state_msg
-                      or ("emulator up, no LED writes decoded yet"
-                          " (normal through boot and Tech Alerts:"
-                          " the attract light show is the first)"
-                          if raw is not None else
-                          "no emulator (dump/padled not readable)"))
+            live = ([["Emulator", "up, no LED writes decoded yet",
+                      "normal through boot and Tech Alerts: the attract"
+                      " light show is the first", False]]
+                    if raw is not None else
+                    [["Emulator", "not running", "dump/padled not readable",
+                      True]])
         else:
             decoded = struct.unpack_from("<I", d, LED_DECODED_OFF)[0]
             skipped = struct.unpack_from("<I", d, LED_SKIPPED_OFF)[0]
@@ -3300,29 +3363,32 @@ class Field(LedRing):
             self.animate_fixtures(t0, fx)
             if fx:
                 frame["fx"] = fx
-            coils = ""
+            live = [["Inserts lit", "%d of %d" % (lit, len(self.fixtures)),
+                     "", False],
+                    ["LED rate", "%.1f Hz" % _rate(self._draw_ev, t0), "",
+                     False],
+                    ["Data rate", "%.1f Hz" % _rate(self._data_ev, t0),
+                     "%d writes%s" % (decoded, ", %d dropped" % skipped
+                                      if skipped else ""), False]]
             if len(d) >= PADLED_READ and struct.unpack_from("<I", d, 4)[0] >= 2:
                 cf = {}
                 self._tick_coils(d, time.monotonic() * 1000.0, cf)
                 if cf:
                     frame["coil"] = cf
-                coils = "   %d coils addressed" % struct.unpack_from(
-                    "<I", d, COIL_GEN_OFF + 4)[0]
+                live.append(["Coils addressed", str(struct.unpack_from(
+                    "<I", d, COIL_GEN_OFF + 4)[0]), "", False])
                 if self.door_open():
-                    coils += "   COIN DOOR OPEN: 48V off, no coil can fire"
-            drops = ", %d dropped" % skipped if skipped else ""
+                    live.append(["Coin door", "OPEN",
+                                 "48V off, no coil can fire", True])
             if not self.sw.positions:
-                coils += "   no trough switches identified"
-            draw_hz = _rate(self._draw_ev, t0)
-            data_hz = _rate(self._data_ev, t0)
-            status = (state_msg
-                      or " %d of %d inserts lit   LED %.1f Hz   data %.1f Hz"
-                         " (%d writes%s)%s   poll %.0f fps"
-                         % (lit, len(self.fixtures), draw_hz, data_hz,
-                            decoded, drops, coils, self.fps))
+                live.append(["Trough", "no switches identified", "", True])
+            live.append(["Poll", "%.0f fps" % self.fps, "", False])
         if status != self.status:
             self.status = status
             frame["status"] = status
+        if live != self.live:
+            self.live = live
+            frame["live"] = live
         self._log(t0, (time.perf_counter() - t0) * 1000.0)
         return frame
 
@@ -3374,12 +3440,12 @@ class Schematic:
         # addresses this rig has (SwitchWatch.addressable()).
         dead = sum(1 for sw in switches
                    if not (0 <= sw["id"] < padsw.MAX_ID))
-        note = ("  - click a row to close that switch" if not dead else
-                "  - %d of them cannot be read or clicked on this build "
+        note = (" - click a row to close that switch" if not dead else
+                " - %d of them cannot be read or clicked on this build "
                 "(their ids are past the %d this rig addresses)"
                 % (dead, padsw.MAX_ID))
-        self.bar = "%s: %d switches, no playfield artwork in this title%s" % (
-            GAME, len(switches), note)
+        self.bar = "no playfield artwork in this title%s" % note
+        self.info = inventory(switch_list=switches)
         self.sw = SwitchWatch(switches,
                               every=round(1000.0 / POLL_MS / max(1.0, SW_HZ)))
         self._dot_drawn = {}
@@ -3408,9 +3474,11 @@ class Schematic:
         self.led_lit, self.led_total = 0, 0
         self._grid_gen = 0
         self.status = ""
+        self.live = []
 
     def spec(self):
-        return {"kind": "schematic", "bar": self.bar, "entries": self.entries,
+        return {"kind": "schematic", "bar": self.bar, "info": self.info,
+                "entries": self.entries,
                 "grid": self.leds.spec(),
                 "trough": self.trough.spec() if (
                     self.trough is not None and self.trough.clickable)
@@ -3444,7 +3512,7 @@ class Schematic:
             return None
         frame = {}
         self.ctl.poll_switches(self, frame)
-        state_msg = self.ctl.state_status()
+        status = self.ctl.state_status() or ""
         # ★ THE MAGIC IS NOT THE TEST FOR "IS THERE AN EMULATOR" (item 50):
         # readable-and-unstamped is a run with no LED data, not no run.
         if d:
@@ -3454,27 +3522,33 @@ class Schematic:
                 frame["layout"] = True
             if changes:
                 frame["grid"] = changes
+        trough = (["Balls", self.sw.balls.text(), "", False]
+                  if self.sw.positions else
+                  ["Trough", "no switches identified", "", True])
         if not d:
-            status = state_msg or "no emulator (dump/padled not readable)"
+            live = [["Emulator", "not running", "dump/padled not readable",
+                     True]]
         elif struct.unpack_from("<I", d, 0)[0] != PADLED_MAGIC:
-            status = (state_msg
-                      or " emulator up   NO LED DATA on this title: the shim"
-                         " has decoded no LED writes at all   %s"
-                         % (self.sw.balls.text() if self.sw.positions
-                            else "no trough switches identified"))
+            live = [["Emulator", "up", "", False],
+                    ["LED data", "none on this title",
+                     "the shim has decoded no LED writes at all", True],
+                    trough]
         else:
-            status = (state_msg
-                      or " emulator up   %d of %d LEDs lit   %d LED writes"
-                         " decoded   %d coils addressed   %s"
-                         % (self.led_lit, self.led_total,
-                            struct.unpack_from("<I", d, 12)[0],
-                            struct.unpack_from("<I", d, COIL_GEN_OFF + 4)[0]
-                            if len(d) >= PADLED_READ else 0,
-                            self.sw.balls.text() if self.sw.positions
-                            else "no trough switches identified"))
+            live = [["Emulator", "up", "", False],
+                    ["LEDs lit", "%d of %d" % (self.led_lit, self.led_total),
+                     "", False],
+                    ["LED writes", str(struct.unpack_from("<I", d, 12)[0]),
+                     "decoded", False],
+                    ["Coils addressed",
+                     str(struct.unpack_from("<I", d, COIL_GEN_OFF + 4)[0]
+                         if len(d) >= PADLED_READ else 0), "", False],
+                    trough]
         if status != self.status:
             self.status = status
             frame["status"] = status
+        if live != self.live:
+            self.live = live
+            frame["live"] = live
         return frame
 
 
@@ -4022,6 +4096,7 @@ class Playfield:
                 st["view"] = self.view.spec()
                 st["dyn"] = self.view.dyn()
                 st["status"] = self.view.status
+                st["live"] = self.view.live
             return st
 
     def file(self, name):

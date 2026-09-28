@@ -193,3 +193,20 @@ select.sel { height: 28px; border-radius: 6px; border: 1px solid var(--line-2); 
 .lcd-strip .f { width: 60px; height: 45px; display: block; object-fit: fill; }
 .lcd-strip .i { font: 10px var(--mono); color: #666; }
 .lcd-strip .i.cur { color: var(--key); }
+
+/* ---------------------------------------------------------------- info accordion */
+/* PAD-238: the title's totals and the live rates, folded at the head of the
+   side panel so the playfield itself stays clear */
+.pf-info { display: flex; flex-direction: column; gap: 2px; }
+.kp-acc { border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.kp-acc > summary { list-style: none; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; cursor: pointer; font: 600 11px var(--mono); color: var(--key); letter-spacing: .06em; }
+.kp-acc > summary::-webkit-details-marker { display: none; }
+.kp-acc > summary::before { content: ""; width: 0; height: 0; border-left: 6px solid var(--ink-3); border-top: 4px solid transparent; border-bottom: 4px solid transparent; margin-right: 2px; transition: transform .12s; }
+.kp-acc[open] > summary::before { transform: rotate(90deg); }
+.kp-acc > summary:hover { background: rgba(255,255,255,.04); }
+.kp-kv { display: flex; flex-direction: column; gap: 1px; padding: 2px 8px 8px; }
+.kp-kv .r { display: grid; grid-template-columns: 1fr auto; column-gap: 8px; font: 12px var(--mono); line-height: 18px; }
+.kp-kv .k { color: var(--ink-3); }
+.kp-kv .v { color: #d8d8d8; text-align: right; }
+.kp-kv .n { grid-column: 1 / -1; font-size: 11px; color: #8a93a2; line-height: 15px; margin-bottom: 2px; }
+.kp-kv .r.alarm .v { color: var(--warn); }

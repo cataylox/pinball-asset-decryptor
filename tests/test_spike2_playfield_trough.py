@@ -257,6 +257,7 @@ def test_made_state_travels_apart_from_the_markers():
     pf = pytest.importorskip("playfield")
     ns = types.SimpleNamespace(
         art=None, base=(313, 710), fixtures=[], coils=[], coil_drawn={},
+        info=[],
         sw_rows=[dict(id=53, x=250, y=357, name="Right Scoop")],
         trough=None, _dot_drawn={53: True})
     spec = pf.Field.spec(ns)
