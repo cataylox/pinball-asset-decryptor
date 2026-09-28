@@ -5687,6 +5687,46 @@ def mke2fs_games_tree(tree, img, sectors, owners, what, label=None, budget=0):
     return len(cmds) // 2
 
 
+#: Where a games tree goes when the scratch folder cannot hold one (PAD-254): the Linux side's
+#: own disk, which always takes a symlink.  /var/tmp, not /tmp - a tree is gigabytes and /tmp
+#: can be a tmpfs.
+LINUX_SCRATCH = "/var/tmp"
+
+
+def holds_symlinks(d):
+    """True when the directory `d` can hold a symlink.  A games tree is full of them (the .sidx
+    link in spk/index, the game/conagent/data links the machine boots through) and an exFAT or
+    FAT drive mounted into Linux refuses every one: rdump stops at the first with 'Operation
+    not permitted while creating symlink'."""
+    probe = os.path.join(d, ".mkmulticard-link-probe-%d" % os.getpid())
+    try:
+        os.symlink("target", probe)
+    except OSError:
+        return False
+    try:
+        return os.path.islink(probe)
+    finally:
+        try:
+            os.unlink(probe)
+        except OSError:
+            pass
+
+
+def tree_scratch(workdir, prefix):
+    """A fresh directory for a games tree: in `workdir` when that can hold symlinks, else on the
+    Linux side (said out loud, since that is where the gigabytes go for a while)."""
+    base = workdir or tempfile.gettempdir()
+    if not holds_symlinks(base):
+        say("%s cannot hold symlinks (an exFAT or FAT drive?); the games tree is staged under %s instead"
+            % (base, LINUX_SCRATCH))
+        base = LINUX_SCRATCH
+    d = tempfile.mkdtemp(prefix=prefix, dir=base)
+    # mkdtemp makes it 0700 and mke2fs -d gives the new filesystem's root the tree's mode;
+    # the games partition's root is 0755, as the plain mkdir this replaced made it
+    os.chmod(d, 0o755)
+    return d
+
+
 def build_multi_partition(plan, workdir=None):
     """Build the multi layout's p7 image: every extra's games partition rdump'd into
     <tmp>/tree/imgK (symlinks survive - measured), mke2fs -d of that tree with the stock p3's
@@ -5695,20 +5735,26 @@ def build_multi_partition(plan, workdir=None):
     need_tools("debugfs", "e2fsck", "mke2fs")
     mp = plan.multi_part
     tmp = tempfile.mkdtemp(prefix="mkmulticard.multi.", dir=workdir)
-    tree = os.path.join(tmp, "tree")
-    os.mkdir(tree)
+    # the TREE may not live beside the image: it is full of symlinks, and a scratch folder on an
+    # exFAT drive refuses them (PAD-254); the p7 image is one plain file and stays in `tmp`
+    tree = tree_scratch(workdir, "mkmulticard.tree.")
     owners = {}
     t0 = time.monotonic()
-    for sub, x, g in zip(plan.multi_subdirs, plan.extras, plan.extra_geoms):
-        _t, st, _cnt = g.part(3)
-        ref = fs_ref(x, st * SECTOR)
-        dest = os.path.join(tree, sub)
-        os.mkdir(dest)
-        title, _n = dump_games_tree(ref, "/", dest, owners, prefix=sub + "/", what=default_title(x))
-        say("  %s: title %s, %d entries copied in %.0f s" % (sub, "/".join(title), len(owners), time.monotonic() - t0))
-    img = os.path.join(tmp, "p7.img")
-    fixes = mke2fs_games_tree(tree, img, mp.count, owners, "writing the games into p%d" % mp.num,
-                              label=MULTI_LABEL, budget=plan.multi_used or 0)
+    try:
+        for sub, x, g in zip(plan.multi_subdirs, plan.extras, plan.extra_geoms):
+            _t, st, _cnt = g.part(3)
+            ref = fs_ref(x, st * SECTOR)
+            dest = os.path.join(tree, sub)
+            os.mkdir(dest)
+            title, _n = dump_games_tree(ref, "/", dest, owners, prefix=sub + "/", what=default_title(x))
+            say("  %s: title %s, %d entries copied in %.0f s" % (sub, "/".join(title), len(owners), time.monotonic() - t0))
+        img = os.path.join(tmp, "p7.img")
+        fixes = mke2fs_games_tree(tree, img, mp.count, owners, "writing the games into p%d" % mp.num,
+                                  label=MULTI_LABEL, budget=plan.multi_used or 0)
+    except BaseException:
+        shutil.rmtree(tree, ignore_errors=True)
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
     say("p7 image built: %d ownership fixes, e2fsck clean, %.0f s" % (fixes, time.monotonic() - t0))
     return img, tmp
 
@@ -5900,14 +5946,13 @@ def extract_image(card, index, out, workdir=None, force=False, clean=True, plan=
     _t3, s3, c3 = G.part(3)
     dev = device_name(part.num, sub)
     subtree = bool(sub) or plan.layout == "store"
-    tmp = None
+    tmp = tree = None
     t0 = time.monotonic()
     try:
         if subtree:
             need_tools("debugfs", "e2fsck", "mke2fs")
             tmp = tempfile.mkdtemp(prefix="mkmulticard.extract.", dir=workdir)
-            tree = os.path.join(tmp, "tree")
-            os.mkdir(tree)
+            tree = tree_scratch(workdir, "mkmulticard.tree.")     # symlinks: not on exFAT (PAD-254)
             ref = fs_ref(card, part.start * SECTOR)
             root = "/" + sub if sub else "/"
             skip = tree_skip(plan, sub)
@@ -5942,6 +5987,8 @@ def extract_image(card, index, out, workdir=None, force=False, clean=True, plan=
     finally:
         if tmp:
             shutil.rmtree(tmp, ignore_errors=True)
+        if tree:
+            shutil.rmtree(tree, ignore_errors=True)
     # the proof: the shape of a source (p1..p4 with p4 the container, p5 and p6 and nothing
     # after them, p1/p2 the card's own), the table as planned, the tree as it was
     Gout = Geometry.from_file(out)
