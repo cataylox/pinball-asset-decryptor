@@ -363,6 +363,11 @@ BALL_SAVE_PROVEN = frozenset({
     "metallica_spike-1.03",             # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
     "munsters_le-1.28",                 # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
     "star_wars_le-1.30",                # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "stranger_things_le-1.12",          # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "sword_of_rage_le-1.18",            # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "turtles_pro-1.58",                 # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "turtles_pro-1.59",                 # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "uncanny_xmen_le-0.98",             # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
 })
 
 
