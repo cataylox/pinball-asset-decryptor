@@ -231,6 +231,7 @@ class EmulateSpike1Tab(RigTabMixin, TabService):
             return
         self._busy = True
         self._go_busy = True
+        self._started_here = True
         self._set_go("Starting…", False)
         # If a game still has to be extracted, the first stretch is the
         # extract phase - light the footer's first chip for it.
@@ -292,6 +293,7 @@ class EmulateSpike1Tab(RigTabMixin, TabService):
             return
         self._busy = True
         self._go_busy = True
+        self._started_here = False
         self._set_go("Stopping…", False)
 
         def work():
@@ -1222,7 +1224,10 @@ class EmulateSpike1Tab(RigTabMixin, TabService):
 
     def _apply(self, info):
         self._info = info
+        was_up = self._last_up
         self._last_up = int(info.get("game_procs") or 0) > 0
+        if was_up and not self._last_up:
+            self._started_here = False      # our run ended; the next is not
         label, hint = s1.state_text(info)
         if self._busy and self._extracting:
             label = "Extracting the game…"
@@ -1310,7 +1315,12 @@ class EmulateSpike1Tab(RigTabMixin, TabService):
         self._stop_log_tail()
         if rig_off() or not s1.rig_available() or sys.platform != "win32":
             return
-        if not (self._last_up or self._info.get("responder") == "1"):
+        # only the run this app started (PAD-253): quitting must not end a
+        # session's run it merely saw on the rig
+        if not self._started_here:
+            return
+        if not (self._last_up or self._busy
+                or self._info.get("responder") == "1"):
             return
         try:
             subprocess.run(s1.rig_cmd_root("stop.sh"), timeout=120,

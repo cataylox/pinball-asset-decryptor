@@ -480,3 +480,42 @@ def test_the_board_says_a_run_is_hidden():
     rec = text[text.index("pad_board_run() {"):]
     rec = rec[:rec.index("\n}\n")]
     assert '"hidden":%s' in rec and '"game":"%s"' in rec
+
+
+# ---- a rig is silent unless asked, and a hidden one always (PAD-253) -------
+
+def _sound_gate():
+    """watch.sh's own lines that decide PAD_AUDIO, cut out verbatim."""
+    text = src("watch.sh")
+    start = text.index("PAD_AUDIO=${PAD_AUDIO:-0}")
+    end = text.index("export PAD_AUDIO\n", start) + len("export PAD_AUDIO\n")
+    return text[start:end]
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+@pytest.mark.parametrize("hidden,asked,heard", [
+    ("0", None, "0"),       # a session's run, visible: silent unless asked
+    ("0", "1", "1"),        # the app's Emulate tab asks
+    ("1", None, "0"),       # hidden: silent...
+    ("1", "1", "0"),        # ...whatever it was asked
+])
+def test_a_rig_makes_sound_only_when_asked_and_seen(tmp_path, hidden, asked,
+                                                    heard):
+    script = tmp_path / "gate.sh"
+    script.write_text(("PAD_HIDDEN=%s\n" % hidden)
+                      + ("PAD_AUDIO=%s\n" % asked if asked else "unset PAD_AUDIO\n")
+                      + _sound_gate() + 'echo "AUDIO=$PAD_AUDIO"\n',
+                      encoding="utf8", newline="\n")
+    out = subprocess.run([BASH, script.name], cwd=str(tmp_path),
+                         capture_output=True, text=True, timeout=30)
+    assert out.stdout.strip().splitlines()[-1] == "AUDIO=" + heard
+
+
+def test_the_player_follows_the_gate():
+    """The gate is decided before the audio player is started, and the
+    player's condition is the gated value, not a default of its own."""
+    text = src("watch.sh")
+    gate = line_of(text, "PAD_AUDIO=${PAD_AUDIO:-0}")
+    player = line_of(text, 'if [ "$PAD_AUDIO" != 0 ]; then')
+    assert gate < player < line_of(text, 'bash "$S/playaudio.sh"')
+    assert "${PAD_AUDIO:-1}" not in text

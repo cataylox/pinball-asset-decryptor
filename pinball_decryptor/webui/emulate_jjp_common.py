@@ -77,6 +77,10 @@ class RigTabMixin:
         #: restart only greys Start, as the Tk button was
         self._go_busy = False
         self._last_up = False
+        #: this app pressed Start for the rig's run (or is starting it), so
+        #: quitting stops it; a run it merely sees is somebody else's and is
+        #: left alone (PAD-253)
+        self._started_here = False
         self._info = {}
         self._vol_quiet = False
         vol0, mute0 = load_audio_ctl()
