@@ -87,54 +87,67 @@ export function ScenesPage() {
     openMenu({ x: e.clientX, y: e.clientY }, items);
   };
   const editor = !!(s.tree && s.tree_view);
+  const stage = editor ? s.tree_view.stage : [1360, 768];
+  // The page is one screen tall: the scene list, the preview (as big as the room lets it be,
+  // width AND height) and the inspector side by side, each scrolling on its own.
   return html`<section class="card scenes-card">
-    <p class="small muted" style="margin:0">${s.hint}</p>
-    <div class=${cx("scenes-body", wide && editor && "wide")}>
-      <div class="scenes-left" ...${tip(tips.list)}>
-        <${Field} sm value=${s.search} placeholder="Search" onChange=${(v) => call("text_scenes.set_search", v)}
-          delay=${200} prefix=${html`<${Icon} name="search" />`} />
-        <${Table} cls="scenes-list" columns=${SCENE_COLS} rows=${s.scenes || []} rowKey=${(r) => r.d}
-          selected=${s.sel} onSelect=${(r) => call("text_scenes.select", r.d)} rowHeight=${30}
-          sort=${{ key: (s.sort || {}).col, desc: (s.sort || {}).rev }}
-          onSort=${(k) => call("text_scenes.sort_by", k)}
-          resizable widths=${sceneWidths} onResize=${(w) => { sceneWidths = w; }} />
+    <div class=${cx("scenes-body", wide && "wide")}>
+      <div class="scenes-left">
+        <div class="row scenes-search">
+          <${Field} sm value=${s.search} placeholder="Search" onChange=${(v) => call("text_scenes.set_search", v)}
+            delay=${200} prefix=${html`<${Icon} name="search" />`} />
+          <${InfoBadge} text=${s.hint} />
+        </div>
+        ${(s.scenes || []).length ? null : html`<p class="small muted" style="margin:0">${s.hint}</p>`}
+        <div class="scenes-list-wrap" ...${tip(tips.list)}>
+          <${Table} cls="scenes-list" columns=${SCENE_COLS} rows=${s.scenes || []} rowKey=${(r) => r.d}
+            selected=${s.sel} onSelect=${(r) => call("text_scenes.select", r.d)} rowHeight=${30}
+            sort=${{ key: (s.sort || {}).col, desc: (s.sort || {}).rev }}
+            onSort=${(k) => call("text_scenes.sort_by", k)}
+            resizable widths=${sceneWidths} onResize=${(w) => { sceneWidths = w; }} />
+        </div>
       </div>
-      <div class="scenes-right">
-        ${editor || s.preparing ? null : html`<${Contents} s=${s} onMenu=${itemMenu} />`}
-        ${s.preparing ? html`<${Preparing} p=${s.preparing} />` : html`
-        <div class=${cx("scenes-preview", editor && "tree")}>
-          ${editor ? html`<${TreeCanvas} s=${s} />` : html`<${Preview} s=${s} tip=${tips.preview} />`}
-          <div class="scenes-side">
-            ${editor ? html`<${TreeSide} t=${s.tree_view} wide=${wide} setWide=${setWide} />` : null}
-            ${(s.screens || []).length ? html`<div class="scenes-ctl">
-              <span class="lbl">Screen</span>
-              <${Select} sm value=${s.screen} options=${s.screens} onChange=${(v) => call("text_scenes.set_screen", v)} />
-              <${Button} size="xs" kind="ghost" icon="left" label="Previous screen" onClick=${() => call("text_scenes.step_screen", -1)} />
-              <${Button} size="xs" kind="ghost" icon="right" label="Next screen" onClick=${() => call("text_scenes.step_screen", 1)} />
-              <${InfoBadge} text=${tips.screen} />
-            </div>` : null}
-            ${s.animated ? html`<div class="scenes-ctl">
-              <span class="lbl">Speed</span>
-              <${Select} sm value=${s.fps_choice} options=${s.fps_choices || []} onChange=${(v) => call("text_scenes.set_fps", v)} />
-              <${InfoBadge} text=${tips.speed} />
-            </div>` : null}
-            <div class="scenes-ctl">
-              <span class="lbl">Behind</span>
-              <${Select} sm value=${s.bg} options=${s.bgs || []} onChange=${(v) => call("text_scenes.set_bg", v)} />
-              <${InfoBadge} text=${tips.behind} />
-            </div>
+      <div class="scenes-center">
+        <div class="scenes-stage" style=${`--ar:${stage[0] / stage[1]}`}>
+          ${s.preparing ? html`<${Preparing} p=${s.preparing} />`
+            : editor ? html`<${TreeCanvas} s=${s} />` : html`<${Preview} s=${s} tip=${tips.preview} />`}
+        </div>
+        <div class="scenes-stagebar">
+          <${Button} size="sm" kind="ghost" icon=${wide ? "right" : "left"} label=${wide ? "Show the scene list" : "Hide the scene list"}
+            title=${wide ? "Show the scene list" : "Hide the scene list: more room for the preview"} onClick=${() => setWide(!wide)} />
+          ${s.preparing ? html`<span class="grow"></span>`
+            : editor ? html`<${TreeActions} t=${s.tree_view} /><span class="grow"></span>
+              <${InfoBadge} text=${s.caption_full || s.caption} />`
+            : html`<span class="small muted ellip grow">${s.caption}</span>
+              ${s.caption_full ? html`<${InfoBadge} text=${s.caption_full} />` : null}`}
+          ${(s.screens || []).length ? html`<div class="scenes-ctl">
+            <span class="lbl">Screen</span>
+            <${Select} sm value=${s.screen} options=${s.screens} onChange=${(v) => call("text_scenes.set_screen", v)} />
+            <${Button} size="xs" kind="ghost" icon="left" label="Previous screen" onClick=${() => call("text_scenes.step_screen", -1)} />
+            <${Button} size="xs" kind="ghost" icon="right" label="Next screen" onClick=${() => call("text_scenes.step_screen", 1)} />
+            <${InfoBadge} text=${tips.screen} />
+          </div>` : null}
+          ${s.animated ? html`<div class="scenes-ctl">
+            <span class="lbl">Speed</span>
+            <${Select} sm value=${s.fps_choice} options=${s.fps_choices || []} onChange=${(v) => call("text_scenes.set_fps", v)} />
+            <${InfoBadge} text=${tips.speed} />
+          </div>` : null}
+          <div class="scenes-ctl">
+            <span class="lbl">Behind</span>
+            <${Select} sm value=${s.bg} options=${s.bgs || []} onChange=${(v) => call("text_scenes.set_bg", v)} />
+            <${InfoBadge} text=${tips.behind} />
           </div>
-        </div>`}
+        </div>
         ${layout ? html`<${LayoutEditor} key=${layout.kind + "\u0000" + layout.text} d=${layout} />` : null}
-        ${s.preparing ? null : html`<div class="row scenes-caption">
-          <span class="small muted ellip">${s.caption}</span>
-          ${s.caption_full ? html`<${InfoBadge} text=${s.caption_full} />` : null}
-        </div>`}
-        ${editor ? html`<${TreeTop} s=${s} onMenu=${itemMenu} />` : null}
-        <div class=${cx("row scenes-bottom", (editor || s.preparing) && "hidden")}>
+        ${editor || s.preparing ? null : html`<div class="row scenes-bottom">
           <div class="thumb scenes-thumb">${s.thumb ? html`<img src=${mediaUrl(s.thumb)} alt="" />` : null}</div>
           <span class="small muted mono scenes-detail">${s.detail}</span>
-        </div>
+        </div>`}
+      </div>
+      <div class="scenes-inspector">
+        ${editor ? html`<div class="insp-top"><${TreeSide} t=${s.tree_view} /></div>
+          <${TreeTop} s=${s} onMenu=${itemMenu} />`
+          : s.preparing ? null : html`<${Contents} s=${s} onMenu=${itemMenu} />`}
       </div>
     </div>
   </section>
@@ -514,10 +527,8 @@ function TreeCanvas({ s }) {
   </div>`;
 }
 
-function TreeSide({ t, wide, setWide }) {
+function TreeSide({ t }) {
   const p = t.props;
-  const [adding, setAdding] = useState(false);
-  const [words, setWords] = useState("");
   const [tint, setTint] = useState(p ? p.tint : "#ffffff");
   useEffect(() => { if (p) setTint(p.tint); }, [p && p.id, p && p.tint]);
   const num = (label, value, onCommit, title) => html`<label class="tree-num" ...${tip(title)}>
@@ -525,8 +536,6 @@ function TreeSide({ t, wide, setWide }) {
     <div class="field sm"><input type="number" value=${value ?? ""} onChange=${(e) => onCommit(e.target.value)} /></div>
   </label>`;
   return html`<div class="tree-side">
-    <${Button} size="xs" icon=${wide ? "right" : "left"} onClick=${() => setWide(!wide)}
-      title="More room for the preview while you edit">${wide ? "Show the scene list" : "Hide the scene list"}<//>
     <span class="eyebrow">Moment</span>
     <${Select} sm value=${t.moment} options=${t.moments} onChange=${(v) => call("text_scenes.tree_moment", v)}
       title="Which moment of the scene's timeline to show: where it rests, or one of its own labels." />
@@ -576,17 +585,26 @@ function TreeSide({ t, wide, setWide }) {
         <${Button} size="xs" onClick=${() => call("text_scenes.tree_reset", p.id)}>${p.added ? "Remove" : "As shipped"}<//>
       </div>
     </div>` : html`<div class="small muted">Click a picture or a line of text in the preview, or a row in Layers.</div>`}
-    <span class="eyebrow">Add</span>
-    <div class="tree-row">
-      <${Button} size="xs" icon="plus" onClick=${() => call("text_scenes.tree_add_picture")}>Picture…<//>
-      <${Button} size="xs" icon="plus" onClick=${() => { setWords(""); setAdding(true); }}>Text…<//>
-    </div>
-    <div class="tree-row">
-      <${Button} size="xs" disabled=${!t.edits} onClick=${() => call("text_scenes.tree_undo")}>Undo<//>
-      <${Button} size="xs" disabled=${!t.edits} onClick=${() => call("text_scenes.tree_clear")}>As shipped (whole scene)<//>
-      <span class="small muted">${t.edits ? `${t.edits} edit(s), not built yet` : ""}</span>
-    </div>
     ${(t.notes || []).length ? html`<div class="small warn-ink">${t.notes.join("; ")}</div>` : null}
+  </div>`;
+}
+
+// The whole scene's actions, in the bar under the preview: add a picture or a line of text,
+// undo, put the scene back as shipped.
+function TreeActions({ t }) {
+  const [adding, setAdding] = useState(false);
+  const [words, setWords] = useState("");
+  return html`<div class="row tree-actions">
+    <${Button} size="sm" kind="ghost" icon="plus" title="Add a picture of your own (PNG, JPG or WEBP) to this scene"
+      onClick=${() => call("text_scenes.tree_add_picture")}>Picture…<//>
+    <${Button} size="sm" kind="ghost" icon="plus" title="Add a line of text to this scene"
+      onClick=${() => { setWords(""); setAdding(true); }}>Text…<//>
+    <span class="tree-actions-sep"></span>
+    <${Button} size="sm" kind="ghost" icon="undo" disabled=${!t.edits} title="Undo the last edit in this scene (Ctrl+Z)"
+      onClick=${() => call("text_scenes.tree_undo")}>Undo<//>
+    <${Button} size="sm" kind="ghost" disabled=${!t.edits} title="Put this scene back the way the game shipped it"
+      onClick=${() => call("text_scenes.tree_clear")}>As shipped<//>
+    ${t.edits ? html`<span class="small muted nw" title="Write puts them on the card">${t.edits} edit${t.edits === 1 ? "" : "s"}, not built yet</span>` : null}
     ${adding ? html`<${Modal} title="Add a line of text" onClose=${() => setAdding(false)}
         footer=${html`<${Button} onClick=${() => setAdding(false)}>Cancel<//><${Button} kind="primary"
           disabled=${!words.trim()} onClick=${() => { setAdding(false); call("text_scenes.tree_add_text", words); }}>Add<//>`}>
