@@ -592,6 +592,52 @@ class MultibootTab(TabService):
             panel._ed_media.set(kind)
         return True
 
+    # -- the random card's games (PAD-239) --------------------------------
+    @rpc
+    def member_add(self):
+        """Add files…: several .raw files at once."""
+        panel = self._live()
+        if panel._dialog_group()[1] is None:
+            return False
+        paths = mbp._FILEDIALOG.askopenfilenames(
+            title="Pick the card images to add to this random card",
+            filetypes=[("Card images", "*.raw *.img"), ("All files", "*.*")])
+        if not paths or panel._dialog_group()[1] is None:
+            return False
+        return self._members_done(panel.group_add_members(list(paths)) > 0)
+
+    @rpc
+    def member_add_folder(self):
+        """Add folder…: every .raw in it, sorted."""
+        panel = self._live()
+        if panel._dialog_group()[1] is None:
+            return False
+        folder = mbp._FILEDIALOG.askdirectory(
+            title="Pick a folder of card images to add to this random card")
+        if not folder or panel._dialog_group()[1] is None:
+            return False
+        return self._members_done(panel.group_add_member_folder(folder) > 0)
+
+    @rpc
+    def member_remove(self, mi):
+        return self._members_done(self._live().group_remove_member(int(mi)))
+
+    @rpc
+    def member_move(self, mi, delta):
+        if int(delta) not in (-1, 1):
+            raise RpcError("A game moves one place at a time.")
+        return self._members_done(
+            self._live().group_move_member(int(mi), int(delta)))
+
+    @rpc
+    def member_keep(self, path, on):
+        return self._members_done(
+            self._live().group_keep_set(str(path or ""), bool(on)))
+
+    def _members_done(self, changed):
+        self._multiboot_panel._dirty("rows", "checks", "preview", "editor")
+        return bool(changed)
+
     @rpc
     def sound_browse(self, field):
         """Browse… beside a sound box (``_media_row``'s)."""

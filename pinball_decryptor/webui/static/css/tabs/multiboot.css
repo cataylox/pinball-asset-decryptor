@@ -122,6 +122,11 @@
 .mb-indent { margin-left: 24px; }
 .mb-p { margin: 0; }
 .mb-rolls { gap: 2px; }
+/* PAD-239: a random card's games in Edit image… */
+.mb-members { gap: 2px; margin: 0; padding: 0; list-style: none; max-height: 180px; overflow-y: auto; }
+.mb-members li { gap: 2px; }
+.mb-member { overflow: hidden; text-overflow: ellipsis; }
+.mb-member-n { min-width: 20px; text-align: right; margin-right: 4px; }
 .mb-src { overflow-wrap: anywhere; }
 .mb-ed { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 16px; align-items: start; }
 .mb-ed-main { gap: 12px; }

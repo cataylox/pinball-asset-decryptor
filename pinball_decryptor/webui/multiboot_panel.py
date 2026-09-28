@@ -323,11 +323,7 @@ class _WebImageDialog:
         self._panel = panel
         self._index = index
         self._group = mt.is_group(row)
-        self.title = (("Edit random card %d — %d games"
-                       % (index, len(row.members))) if self._group else
-                      ("Edit image %d — %s" % (index, os.path.basename(
-                          (row.path or "").strip()) or row.device
-                          or "no source")))
+        self.title = self._title(row)
         self.source = mt._cell_image(row)
         self.kinds = list(mt.ImageEditorDialog.GROUP_KINDS if self._group
                           else mt.ImageEditorDialog.kinds_for(panel._backend))
@@ -356,6 +352,21 @@ class _WebImageDialog:
         self._frame_token = 0
         self._frame_job = None
         self._closed = False
+
+    def _title(self, row):
+        if self._group:
+            return "Edit random card %d — %d games" % (self._index,
+                                                        len(row.members))
+        return "Edit image %d — %s" % (self._index, os.path.basename(
+            (row.path or "").strip()) or row.device or "no source")
+
+    def sync_members(self):
+        """PAD-239: the games changed - the title counts them."""
+        rows = self._panel._rows
+        if 0 <= self._index < len(rows):
+            self.title = self._title(rows[self._index])
+            self.source = mt._cell_image(rows[self._index])
+        self.sync_preview()
 
     def show(self):
         self.sync_kind()
@@ -1098,6 +1109,8 @@ class WebMultibootPanel(_Base):
                 (self._ed_roll.get() or "").strip()),
             "roll_repeat_label": mt.ROLL_REPEAT_LABEL,
             "roll_note": mt.ImageEditorDialog.ROLL_NOTE,
+            # PAD-239: the random card's games, changed right here
+            "members": self._pub_members(d),
             # PAD-226: whose high-score table this image plays into
             "scores": self._scores_cell(
                 self._rows[d._index] if d._index is not None
@@ -1122,6 +1135,29 @@ class WebMultibootPanel(_Base):
                      "title": self._ed_title.get(),
                      "sub": self._ed_sub.get(),
                      "colors": self.menu_colors()},
+        }
+
+    def _pub_members(self, d):
+        """The Members box: ``None`` for a plain image; for a random card
+        its games in card order, and - when it rolls between images already
+        on the card - every image it could tick."""
+        if not d._group or not 0 <= d._index < len(self._rows):
+            return None
+        row = self._rows[d._index]
+        if not mt.is_group(row):
+            return None
+        return {
+            "keep": bool(row.keep),
+            # the file's name beside the title: variants of one game share a
+            # title, and the file is what tells them apart
+            "games": [{"title": (m.title or "").strip(),
+                       "file": os.path.basename(m.path or ""),
+                       "path": m.path or ""} for m in row.members],
+            "choices": [{"title": title, "file": os.path.basename(path),
+                         "path": path, "on": on}
+                        for path, title, on in self.group_keep_choices()],
+            "note": mt.ImageEditorDialog.MEMBERS_KEEP_NOTE if row.keep
+            else mt.ImageEditorDialog.MEMBERS_NOTE,
         }
 
     def _pub_menu(self, out):

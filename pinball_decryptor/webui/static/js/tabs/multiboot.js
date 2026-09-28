@@ -458,6 +458,7 @@ function EditDialog({ s, w }) {
           </div>
           ${ed.note ? html`<span class="small muted">${ed.note}</span>` : null}
         <//>
+        ${ed.members ? html`<${Members} m=${ed.members} />` : null}
         ${ed.group ? html`<${Box} legend="How it picks">
           <div class="stack mb-rolls">
             ${ed.rolls.map((r) => html`<label class="chk wrap-ok"><input type="radio" name="mb-roll" value=${r.value}
@@ -483,6 +484,40 @@ function EditDialog({ s, w }) {
       </div>
       <${Box} legend="Preview" cls="mb-ed-pv"><${CardPreview} card=${ed.card} /><//>
     </div>
+  <//>`;
+}
+
+// PAD-239: a random card's games, changed where the card is edited.  One
+// that brings its own games lists them (add, remove, reorder); one that rolls
+// between images already on the card ticks them.
+function Members({ m }) {
+  const n = m.games.length;
+  if (m.keep) {
+    return html`<${Box} legend=${`Games (${n})`}>
+      <div class="stack mb-members">
+        ${m.choices.map((c) => html`<label class="chk wrap-ok" key=${c.path} title=${c.path}>
+          <input type="checkbox" checked=${c.on} onChange=${(e) => call("multiboot.member_keep", c.path, e.target.checked)} />
+          <span>${c.title} <span class="small dim mono">${c.file}</span></span></label>`)}
+      </div>
+      <span class="small muted">${m.note}</span>
+    <//>`;
+  }
+  return html`<${Box} legend=${`Games (${n})`}>
+    <ol class="mb-members">
+      ${m.games.map((g, i) => html`<li class="row" key=${i + ":" + g.path}>
+        <span class="small dim mb-member-n">${i + 1}.</span>
+        <span class="grow nw mb-member" title=${g.path}>${g.title} <span class="small dim mono">${g.file}</span></span>
+        <${Button} kind="ghost" size="xs" icon="up" cls="mb-ic" disabled=${i === 0} label="Move up" onClick=${() => call("multiboot.member_move", i, -1)} />
+        <${Button} kind="ghost" size="xs" icon="down" cls="mb-ic" disabled=${i === n - 1} label="Move down" onClick=${() => call("multiboot.member_move", i, 1)} />
+        <${Button} kind="ghost" size="xs" icon="x" cls="mb-ic mb-del" disabled=${n <= 2} label="Remove"
+          title=${n <= 2 ? "A random card needs at least two games" : "Take this game off the random card"} onClick=${() => call("multiboot.member_remove", i)} />
+      </li>`)}
+    </ol>
+    <div class="row">
+      <${Button} onClick=${() => call("multiboot.member_add")}>Add files…<//>
+      <${Button} onClick=${() => call("multiboot.member_add_folder")}>Add folder…<//>
+    </div>
+    <span class="small muted">${m.note}</span>
   <//>`;
 }
 
