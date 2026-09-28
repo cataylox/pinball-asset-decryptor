@@ -21,6 +21,8 @@ TABS = (
     ("video", "video", "Replace Video", "Video", "Replace", "video"),
     ("images", "images", "Replace Images", "Images", "Replace", "images"),
     ("text", "text", "Replace Text", "Text", "Replace", "text"),
+    # PAD-251: the scene editor, a page of its own (it was a floating window)
+    ("scenes", "scenes", "Scenes", "Scenes", "Replace", "images"),
     ("modes", "modes", "Modes", "Modes", "Make", "modes"),
     ("defaults", "defaults", "Default Settings", "Defaults", "Make",
      "defaults"),

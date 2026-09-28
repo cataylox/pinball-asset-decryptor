@@ -1,8 +1,10 @@
-/* The Scenes window (js/tabs/text_scenes.js loads this itself, so it is
-   styled whichever tab is showing; its frame, ToolWindow, is styled in
-   text_fonts.css).  Tokens and components from app.css. */
+/* The Scenes tab (js/tabs/scenes.js + text_scenes.js, which loads this sheet itself).
+   Tokens and components from app.css. */
 
-.scenes-win > .bd { overflow: hidden; }
+.scenes-page { gap: 12px; }
+.scenes-card { flex: 1 1 auto; min-height: 560px; display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; container-type: inline-size; }
+.scenes-opening { gap: 10px; padding: 24px 4px; }
+.scenes-msg-head { max-width: 420px; }
 .scenes-body { display: grid; grid-template-columns: minmax(290px, 460px) minmax(0, 1fr); gap: 14px; flex: 1 1 auto; min-height: 0; }
 .scenes-left { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 .scenes-list { flex: 1 1 auto; min-height: 160px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
@@ -44,7 +46,7 @@
 .scenes-top > .scenes-contents { flex: 1 1 auto; min-height: 100px; }
 .scenes-preview.tree { align-items: flex-start; }
 .scenes-preview.tree .scenes-canvas { max-width: none; flex: 1 1 560px; height: auto; align-self: flex-start; }
-.scenes-preview.tree .scenes-side { flex: 0 0 290px; max-height: 440px; overflow: auto; padding-right: 4px; }
+.scenes-preview.tree .scenes-side { flex: 0 0 290px; max-height: 620px; overflow: auto; padding-right: 4px; }
 .scenes-bottom.hidden { display: none; }
 .scenes-body.wide { grid-template-columns: minmax(0, 1fr); }
 .scenes-body.wide .scenes-left { display: none; }
@@ -52,6 +54,30 @@
 .tree-canvas { position: relative; cursor: default; touch-action: none; outline: none; }
 .tree-canvas:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
 .tree-canvas img { position: absolute; inset: 0; user-select: none; pointer-events: none; }
+.tree-canvas.loading { cursor: progress; }
+.tree-live { transform-origin: 0 0; will-change: transform; }
+/* a redraw on its way: the picture stays, a quiet pill says so (only if it takes a moment) */
+.tree-busy { position: absolute; top: 10px; right: 10px; display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 11px 4px 8px; border-radius: 999px; background: rgba(12, 12, 16, .74); color: #f2f2f5;
+  font-size: 12px; pointer-events: none; backdrop-filter: blur(4px); opacity: 0;
+  animation: scenes-fade .18s ease .2s forwards; }
+.tree-busy .spin { width: 12px; height: 12px; flex-basis: 12px; border-color: rgba(255, 255, 255, .25); border-top-color: #fff; }
+@keyframes scenes-fade { to { opacity: 1; } }
+/* a scene being drawn for the first time, and the editor being prepared */
+.scenes-drawing { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #b9b9c4; overflow: hidden; }
+.scenes-drawing > .row { position: relative; }
+.scenes-canvas:not(.tree-canvas) { position: relative; }
+.scenes-shimmer { position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, .06) 50%, transparent 70%);
+  background-size: 250% 100%; animation: scenes-shimmer 1.5s linear infinite; }
+@keyframes scenes-shimmer { from { background-position: 150% 0; } to { background-position: -100% 0; } }
+.scenes-preparing { position: relative; overflow: hidden; width: 100%; max-width: 760px; aspect-ratio: 1360 / 768;
+  border: 1px solid var(--line-2); border-radius: 8px; background: var(--panel-2); }
+.scenes-prep-body { position: relative; height: 100%; box-sizing: border-box; padding: 28px 32px; display: flex;
+  flex-direction: column; justify-content: center; gap: 10px; }
+.scenes-prep-body p { margin: 0; max-width: 520px; }
+.scenes-prep-bar { max-width: 420px; }
+@media (prefers-reduced-motion: reduce) { .scenes-shimmer { animation: none; } .tree-busy { animation-duration: .01s; } }
 .tree-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .tree-hover { fill: rgba(255, 255, 255, 0.06); stroke: rgba(255, 255, 255, 0.7); stroke-width: 2; stroke-dasharray: 8 6; vector-effect: non-scaling-stroke; }
 .tree-sel { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
@@ -85,3 +111,4 @@ html.bp-1020 .scenes-contents { max-height: 240px; }
 html.bp-1020 .scenes-preview { flex-wrap: wrap; }
 /* was @media (max-height: 760px) */
 html.bph-760 .scenes-canvas { max-width: 420px; }
+.scenes-prep-bar .prog { background: var(--line); }

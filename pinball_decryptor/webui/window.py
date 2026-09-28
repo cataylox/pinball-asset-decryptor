@@ -47,7 +47,7 @@ PHASE_ROW_BY_KEY = {
     "Emulate Spike1": "emulate",
     "Multi-boot": "multiboot",
     "Replace Audio": None, "Replace Video": None,
-    "Replace Images": None, "Replace Text": None,
+    "Replace Images": None, "Replace Text": None, "Scenes": None,
     "Partition Explorer": None, "Default Settings": None,
 }
 
@@ -380,6 +380,7 @@ class WebWindow:
             "Replace Video": g("replace_video"),
             "Replace Images": g("replace_image"),
             "Replace Text": g("replace_text"),
+            "Scenes": g("replace_image"),
             "Write": g("write"),
             "Mod Pack": g("modpack"),
             "Partition Explorer": g("partition_explorer"),

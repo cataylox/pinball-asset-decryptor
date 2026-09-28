@@ -675,27 +675,42 @@ def _composite(canvas, patch, x0, y0, mul, add=(0, 0, 0, 0), premultiplied=True,
 
 
 def _load_png(assets_dir, rel, cache):
-    if rel in cache:
-        return cache[rel]
+    """*rel*'s picture, from *cache* while the file is unchanged (an editor keeps one cache
+    for many renders; a picture replaced on the Images tab is read again)."""
+    path = os.path.join(assets_dir, "images", *rel.split("/")) if rel else ""
+    try:
+        stamp = os.stat(path).st_mtime_ns if path else None
+    except OSError:
+        stamp = None
+    got = cache.get(rel)
+    if got is not None and got[0] == stamp:
+        return got[1]
     from PIL import Image
     img = None
-    if rel:
+    if stamp is not None:
         try:
-            img = Image.open(os.path.join(assets_dir, "images", *rel.split("/"))).convert("RGBA")
+            img = Image.open(path).convert("RGBA")
         except (OSError, ValueError):
             img = None
-    cache[rel] = img
+    cache[rel] = (stamp, img)
     return img
 
 
 def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
-                background=None, colors=None, text_edits=None, draws=None, cache=None):
+                background=None, colors=None, text_edits=None, draws=None, cache=None,
+                split=None):
     """The scene in manifest *man* (:func:`scene_eval.manifest`) at root *frame* as an RGB
     ``PIL.Image`` - every picture with its own place, scale, tilt and fade, in draw order, from
     the project folder's CURRENT PNGs and glyph slices.  *pins* / *hidden* are
     :func:`scene_eval.draw_list`'s; *colors* ``{string: (r, g, b)}`` and *text_edits*
     ``{string: replacement}`` are pending text edits, as in :func:`render_layout`.  Pass
-    *draws* to render a draw list already evaluated (and edited)."""
+    *draws* to render a draw list already evaluated (and edited).
+
+    *split*, a set of indices into the draw list (one node's draws, which run together in
+    draw order), also returns that node's LAYERS for an editor to move live: a dict of
+    ``full`` (the scene, as without *split*), ``under`` (what is drawn before it, over the
+    background, RGB), ``sel`` (the node alone) and ``over`` (what is drawn after it), the
+    last two RGBA with straight alpha.  ``full`` is composed from the three, so it is exact."""
     try:
         import numpy as np
         from PIL import Image
@@ -712,9 +727,13 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
     if draws is None:
         draws = ev.draw_list(man, frame, pins=pins, hidden=hidden)
     cache = {} if cache is None else cache
-    canvas = np.zeros((h, w, 4), np.float32)
+    split = set(split or ())
+    layers = [np.zeros((h, w, 4), np.float32) for _i in range(3 if split else 1)]
+    canvas = layers[0]
     by_key = None
-    for d in draws:
+    for i, d in enumerate(draws):
+        if split:
+            canvas = layers[1] if i in split else (layers[2] if i > min(split) else layers[0])
         if d["mul"][3] <= 0.0:
             continue
         if d["kind"] in ("bitmap", "flip"):
@@ -770,7 +789,26 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
             if got is not None:
                 _composite(canvas, got[0], got[1], got[2], d["mul"], d["add"],
                            premultiplied=False)
-    out = canvas.copy()
-    out[..., 3] = canvas[..., 3] * 255.0
-    frame8 = out.clip(0, 255).astype("uint8")
-    return _over_background(frame8, background_spec(background))
+    spec = background_spec(background)
+
+    def flat(c):
+        out = c.copy()
+        out[..., 3] = c[..., 3] * 255.0
+        return out.clip(0, 255).astype("uint8")
+
+    if not split:
+        return _over_background(flat(layers[0]), spec)
+    under, sel, over = layers
+    full = over.copy()
+    full += sel * (1.0 - over[..., 3:4])
+    full += under * ((1.0 - sel[..., 3:4]) * (1.0 - over[..., 3:4]))
+
+    def straight(c):
+        a = c[..., 3:4]
+        rgb = np.where(a > 1e-6, c[..., :3] / np.maximum(a, 1e-6), 0.0)
+        out = np.concatenate([rgb, a * 255.0], axis=2)
+        return Image.fromarray(out.clip(0, 255).astype("uint8"), "RGBA")
+
+    return {"full": _over_background(flat(full), spec),
+            "under": _over_background(flat(under), spec),
+            "sel": straight(sel), "over": straight(over)}

@@ -43,9 +43,19 @@ class TreeEditMixin:
         self._tparents = {}
         self._tman = None
         self._ttoken = 0
+        self._tdefault = {}          # card -> the stock scene's resting frame (costly to find)
+        self._tcache = {}            # pictures read for the renders, kept while unchanged
+        self._tlock = threading.Lock()
+        self._tjob = None            # the newest render asked for (the worker takes it)
+        self._trunning = False       # the render worker is up
+        self._trev = 0               # bumped by every edit: the page knows when an image is new
+        self._tshown_card = None     # the scene whose picture the canvas shows
 
     def _tree_reset(self):
         self._trees = None
+        self._tdefault = {}
+        self._tcache = {}
+        self._tshown_card = None
 
     def _load_trees(self):
         if self._trees is None:
@@ -77,10 +87,18 @@ class TreeEditMixin:
         edited, notes = scene_edit.apply_manifest(man, self._tree_ops(card))
         return edited, notes
 
-    def _tree_frame(self, card, man):
+    def _tree_default(self, card):
+        """The stock scene's resting frame (:func:`scene_eval.default_frame` draws every frame
+        where something changes, so it is found once per scene)."""
         from ..plugins.stern import scene_eval
+        if card not in self._tdefault:
+            stock = self._load_trees().get(card)
+            self._tdefault[card] = scene_eval.default_frame(stock) if stock else 1
+        return self._tdefault[card]
+
+    def _tree_frame(self, card, man):
         if card not in self._tframe:
-            self._tframe[card] = scene_eval.default_frame(man)
+            self._tframe[card] = self._tree_default(card)
         return self._tframe[card]
 
     # ------------------------------------------------------------------
@@ -89,8 +107,12 @@ class TreeEditMixin:
     def _tree_available(self, scene_dir):
         return self._tree_card(scene_dir)[0] is not None
 
-    def _render_tree_preview(self, scene_dir):
-        from ..plugins.stern import scene_eval, scene_render
+    def _render_tree_preview(self, scene_dir, quiet=False):
+        """Draw the scene (and the selected node's layers) on the render worker.  The picture
+        on the canvas stays until the new one is ready - an edit never blanks it; the page
+        shows it is updating (``tree_busy``), or, for a scene not drawn yet, that it is being
+        drawn (``tree_loading``).  *quiet*: only the selection's layers change."""
+        from ..plugins.stern import scene_eval
         card, stock = self._tree_card(scene_dir)
         self._ttoken += 1
         token = self._ttoken
@@ -102,48 +124,109 @@ class TreeEditMixin:
         self._tdraws, self._tworlds, self._tman = draws, worlds, man
         self._tparents = {n["id"]: (par["id"] if par else None)
                           for n, par, _d in _walk_man(man)}
-        bg = self._bg
-        text_edits = self._pending_texts(card, None)
-        colors = self._pending_colors(card)
-        tmp = self._tmpdir()
-        self.set(tree=True, canvas_msg="drawing…", can_save=False, frames=[],
-                 animated=False, screens=[])
+        new_scene = card != self._tshown_card
+        state = {"tree": True, "animated": False, "screens": []}
+        if new_scene:
+            state.update(frames=[], tree_layers=None, tree_loading=True, tree_busy=False,
+                         can_save=False, canvas_msg="")
+        elif not quiet:
+            state.update(tree_busy=True)
+        self.set(**state)
         self._tree_publish(card, man, frame, notes)
+        sel = self._tsel
+        split = self._tree_split(draws, sel) if sel is not None else set()
+        job = {"token": token, "rev": self._trev, "card": card, "man": man, "frame": frame,
+               "pins": pins, "draws": draws, "bg": self._bg, "sel": sel if split else None,
+               "split": split, "text_edits": self._pending_texts(card, None),
+               "colors": self._pending_colors(card), "tmp": self._tmpdir(),
+               "cache": self._tcache, "assets": self.assets_dir}
+        with self._tlock:
+            self._tjob = job
+            start = not self._trunning
+            self._trunning = True
+        if start:
+            threading.Thread(target=self._tree_worker, daemon=True, name="scene-tree").start()
 
-        def work():
-            img = None
+    def _tree_split(self, draws, nid):
+        """The indices of *draws* node *nid* draws (itself and what is inside it): they run
+        together in draw order, or the canvas gets no layers for it."""
+        got = []
+        for i, d in enumerate(draws):
+            p, hops = d["node"], 0
+            while p is not None and p != nid and hops < 256:
+                p, hops = self._tparents.get(p), hops + 1
+            if p == nid:
+                got.append(i)
+        if not got or got[-1] - got[0] + 1 != len(got):
+            return set()
+        return set(got)
+
+    def _tree_worker(self):
+        """One render at a time, always the newest asked for: a burst of edits draws once
+        for the last of them, not once each."""
+        while True:
+            with self._tlock:
+                job, self._tjob = self._tjob, None
+                if job is None:
+                    self._trunning = False
+                    return
+            img, paths = self._tree_draw(job)
+            with self._tlock:
+                newer = self._tjob is not None
+            if not newer:
+                self.ctx.loop.post(self._tree_show, job, img, paths)
+
+    def _tree_draw(self, job):
+        from ..plugins.stern import scene_render
+        got = None
+        try:
+            if self._fonts is None:
+                from ..plugins.stern import fontrender as fr
+                self._fonts = fr.load_fonts(job["assets"])
+            got = scene_render.render_tree(
+                job["assets"], job["man"], job["frame"], pins=job["pins"], fonts=self._fonts,
+                background=job["bg"], colors=job["colors"], text_edits=job["text_edits"],
+                draws=job["draws"], cache=job["cache"], split=job["split"] or None)
+        except Exception:                            # noqa: BLE001
+            log.exception("scene tree render")
+        if got is None:
+            return None, {}
+        parts = got if isinstance(got, dict) else {"full": got}
+        paths = {}
+        for key in ("full", "under", "sel", "over"):
+            if key not in parts:
+                continue
+            path = os.path.join(job["tmp"], "t%d%s.png" % (
+                job["token"], "" if key == "full" else "_" + key))
             try:
-                if self._fonts is None:
-                    from ..plugins.stern import fontrender as fr
-                    self._fonts = fr.load_fonts(self.assets_dir)
-                img = scene_render.render_tree(self.assets_dir, man, frame, pins=pins,
-                                               fonts=self._fonts, background=bg,
-                                               colors=colors, text_edits=text_edits,
-                                               draws=draws)
-            except Exception:                        # noqa: BLE001
-                log.exception("scene tree render")
-            path = ""
-            if img is not None:
-                path = os.path.join(tmp, "t%d.png" % token)
-                try:
-                    img.save(path, compress_level=1)
-                except OSError:
-                    path = ""
-            self.ctx.loop.post(self._tree_show, token, img, path)
+                parts[key].save(path, compress_level=1)
+            except OSError:
+                break
+            paths[key] = path
+        if "full" not in paths:
+            return None, {}
+        return parts["full"], paths
 
-        threading.Thread(target=work, daemon=True, name="scene-tree").start()
-
-    def _tree_show(self, token, img, path):
-        if token != self._ttoken or not self._alive:
+    def _tree_show(self, job, img, paths):
+        if job["token"] != self._ttoken or not self._alive:
             return
+        full = paths.get("full", "")
         self._preview_full = img
         self._frames_full = [img] if img is not None else []
-        self.set(frames=[path] if path else [], can_save=img is not None,
-                 canvas_msg="" if path else "nothing could be drawn")
-        for name in os.listdir(self._tmpdir()):
-            if name.startswith("t") and name != os.path.basename(path or ""):
+        self._tshown_card = job["card"]
+        layers = None
+        if job["sel"] is not None and all(k in paths for k in ("under", "sel", "over")):
+            layers = {"node": job["sel"], "under": paths["under"], "sel": paths["sel"],
+                      "over": paths["over"]}
+        self.set(frames=[full] if full else [], tree_layers=layers, tree_busy=False,
+                 tree_loading=False, tree_img_rev=job["rev"], can_save=img is not None,
+                 canvas_msg="" if full else "nothing could be drawn")
+        keep = {os.path.basename(p) for p in paths.values()}
+        tmp = self._tmpdir()
+        for name in os.listdir(tmp):
+            if name.startswith("t") and name not in keep:
                 try:
-                    os.remove(os.path.join(self._tmpdir(), name))
+                    os.remove(os.path.join(tmp, name))
                 except OSError:
                     pass
 
@@ -160,8 +243,8 @@ class TreeEditMixin:
                          "path": " › ".join(d["path"]),
                          "pts": [[round(x, 1), round(y, 1)] for x, y in
                                  scene_eval.outline(d)]})
-        moments = [{"value": "f:%d" % scene_eval.default_frame(man),
-                    "label": "Resting (frame %d)" % scene_eval.default_frame(man)}]
+        rest = self._tree_default(card)
+        moments = [{"value": "f:%d" % rest, "label": "Resting (frame %d)" % rest}]
         for name, f in sorted(man["root"]["labels"], key=lambda x: x[1]):
             moments.append({"value": "f:%d" % f, "label": "%s (frame %d)" % (name, f)})
         pins = self._tpins.get(card) or {}
@@ -196,7 +279,7 @@ class TreeEditMixin:
             "moment": "f:%d" % frame, "moments": moments, "states": states,
             "hits": hits, "layers": layers, "sel": sel,
             "props": self._tree_props(card, man, sel, ops) if sel is not None else None,
-            "edits": len(ops), "notes": list(notes)})
+            "edits": len(ops), "notes": list(notes), "rev": self._trev})
 
     def _tree_props(self, card, man, nid, ops):
         from ..plugins.stern import scene_edit
@@ -241,6 +324,7 @@ class TreeEditMixin:
         return min(xs), min(ys), max(xs), max(ys)
 
     def _tree_refresh(self):
+        self._trev += 1
         self._folder_state_written()
         if self._sel:
             self._render_tree_preview(self._sel)
@@ -281,7 +365,11 @@ class TreeEditMixin:
         if card is None:
             return False
         self._tsel = int(node) if node not in (None, "") else None
-        self._tree_publish(card, self._tman, self._tree_frame(card, _man))
+        if self._tsel is not None and self._tsel in self._tworlds:
+            # the picture is unchanged; the selection's own layers are drawn for live dragging
+            self._render_tree_preview(self._sel, quiet=True)
+        else:
+            self._tree_publish(card, self._tman, self._tree_frame(card, _man))
         return True
 
     # ------------------------------------------------------------------

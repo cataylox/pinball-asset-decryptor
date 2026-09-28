@@ -273,7 +273,7 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
             tree_edits = {}
         for path, ops in sorted(tree_edits.items()):
             scene = path.rstrip("/").rsplit("/", 2)[-2][:8] if "/" in path else path
-            rows.append(("scene %s  —  %d edit(s) from the Scenes window" % (scene, len(ops)),
+            rows.append(("scene %s  —  %d edit(s) from the Scenes tab" % (scene, len(ops)),
                          "image", "Pending (scene edit)", "pending"))
     rows.extend(mode_rows(mfr, assets_path, direct=direct))
     rows.extend(stock_mode_rows(mfr, assets_path))

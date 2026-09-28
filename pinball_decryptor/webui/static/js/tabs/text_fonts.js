@@ -148,13 +148,11 @@ export function ToolWindow({ ns, title, raiseN, onClose, onAside, holdEsc, foote
 // or its own Step aside button): Tk lowered it behind the main window, where
 // the taskbar still showed it.
 const DOCK = [
-  { ns: "text_scenes", label: "Scenes", icon: "images", tip: "Bring the Scenes window back." },
   { ns: "text_fonts", label: "Fonts", icon: "text", tip: "Bring the Fonts window back." },
 ];
 export function ToolDock() {
-  const sc = useNs("text_scenes");
   const fo = useNs("text_fonts");
-  const by = { text_scenes: sc, text_fonts: fo };
+  const by = { text_fonts: fo };
   const items = DOCK.filter((d) => by[d.ns].alive && !by[d.ns].open);
   const [at, setAt] = useState(null);
   useEffect(() => {

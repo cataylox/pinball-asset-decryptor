@@ -467,7 +467,7 @@ class TextFontsService:
             msg = ("The scenes tint this font: %s. That colour MULTIPLIES the "
                    "ink you import, so your colour only comes out as picked "
                    "where the scene is white%s. To colour a line itself, "
-                   "right-click it in the Scenes window."
+                   "right-click it in the Scenes tab."
                    % (listed,
                       " — and not at all on the %d line(s) tinted black"
                       % black if black else ""))
@@ -592,11 +592,14 @@ class TextFontsService:
             card = self._scene_paths[int(index)]
         except (TypeError, ValueError, IndexError):
             return False
-        # Tk ``_show_scene``: the Scenes window opens in front; this one
-        # stays open behind it.
-        return self.tab.scenes.open(
+        # Tk ``_show_scene``: the scenes open in front (the Scenes tab, PAD-251); this window
+        # steps aside so it does not cover them (its status bar button brings it back).
+        got = self.tab.scenes.open(
             self.assets_dir,
             preselect_dir=card.replace("\\", "/").rsplit("/", 1)[0])
+        if got:
+            self.hide()
+        return got
 
     # -- options -----------------------------------------------------------
     def _custom_color(self):

@@ -178,3 +178,41 @@ def test_the_language_screen_text_lands_on_the_emulators_pixels():
 
     ours, theirs = box(img), box(real)
     assert all(abs(a - b) <= 4 for a, b in zip(ours, theirs)), (ours, theirs)
+
+
+def test_the_selections_layers_compose_to_the_same_picture(tmp_path):
+    """The editor moves a selection's own pixels while it is dragged: render_tree(split=)
+    draws what is under it, it and what is over it apart, and the scene composed from the three
+    is the plain render to the pixel (premultiplied "over" is associative)."""
+    assets = _red_project(tmp_path)
+    m = man([N(1, "Back", [9], tr=((1, (6, 0, 0, 6, 10, 10)),)),
+             N(2, "Mid", [9], tr=((1, (4, 0, 0, 4, 40, 30)),),
+               col=((1, (0.2, 1, 1, 0.6), (0,) * 4),)),
+             N(3, "Front", [9], tr=((1, (3, 0, 0, 3, 55, 40)),),
+               col=((1, (1, 1, 1, 0.5), (0,) * 4),))], {9: BMP})
+    draws = E.draw_list(m, 1)
+    for bg in (None, R.BACKGROUND_NAMES[-1]):
+        plain = np.asarray(R.render_tree(assets, m, 1, background=bg)).astype(int)
+        got = R.render_tree(assets, m, 1, background=bg, draws=draws, split={1})
+        assert np.abs(np.asarray(got["full"]).astype(int) - plain).max() == 0
+    sel = np.asarray(got["sel"])
+    ys, xs = np.where(sel[..., 3] > 0)
+    assert (xs.min(), xs.max(), ys.min(), ys.max()) == (40, 79, 30, 69)     # Mid alone
+    assert np.asarray(got["over"])[..., 3].max() > 0 and got["under"].mode == "RGB"
+
+
+def test_a_long_idle_loop_settles_without_drawing_every_frame():
+    """A labelled sprite rests where most of it is on the glass within its first label's span;
+    a 2,460-frame idle loop (a Godzilla attract scene took 93 s to open) is sampled, and a
+    labelled sprite inside another is settled once per place, not once per frame tried."""
+    import time
+    inner = {"kind": "Sprite", "frames": 5000, "labels": [["Idle", 1], ["Out", 4990]],
+             "kids": [N(20, "Blink", [9], kf=[(f, f % 2) for f in range(1, 4990, 7)])]}
+    outer = {"kind": "Sprite", "frames": 3000, "labels": [["Loop", 1], ["End", 2990]],
+             "kids": [N(10, "Inner%d" % i, [4]) for i in range(6)]}
+    m = man([N(1, "Attract", [2])], {2: outer, 4: inner, 9: BMP}, frames=40)
+    t = time.time()
+    rest = E.default_frame(m)
+    draws = E.draw_list(m, rest)
+    assert time.time() - t < 5.0
+    assert 1 <= rest <= 40 and draws and all(d["path"][-1] == "Blink" for d in draws)

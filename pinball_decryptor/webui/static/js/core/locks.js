@@ -8,7 +8,7 @@
 // "extract" = reads the files an extract pulls off the card; "project" =
 // only saves its changes into a project folder
 export const NEEDS = {
-  audio: "extract", video: "extract", images: "extract", text: "extract",
+  audio: "extract", video: "extract", images: "extract", text: "extract", scenes: "extract",
   write: "extract", modpack: "extract",
   modes: "project", defaults: "project",
 };
@@ -34,6 +34,7 @@ export const WHAT = {
   video: "Replace videos.",
   images: "Replace pictures.",
   text: "Replace on-screen text.",
+  scenes: "See each scene as the machine draws it; move, resize, recolour or add to it.",
   write: "Build a new card with your changes.",
   write_flash: "Flash a card image onto an SD card, or build one with your changes.",
   modpack: "Share your changes as a zip, or apply someone else's.",

@@ -208,7 +208,7 @@ def first_visible(node):
 
 
 def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=None,
-              worlds=None):
+              worlds=None, _settled=None):
     """Every picture and line of text *man* draws at root frame *frame* (default:
     :func:`default_frame`), in draw order.  *pins* ``{node id: frame}`` seeks a nested sprite
     (what the game's code does with labels); *hidden* node ids are not drawn (what code
@@ -224,6 +224,9 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
     units (:func:`to_parent`)."""
     if frame is None:
         frame = default_frame(man)
+    # a labelled sprite's resting frame is found by drawing it (settled_frame), and nested
+    # labelled sprites would be re-settled at every level: one memo per call keeps it linear
+    settled = {} if _settled is None else _settled
     pins = pins or {}
     hidden = set(hidden or ())
     objects = man["objects"]
@@ -251,7 +254,10 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
         if n["id"] in pins:
             return max(1, min(frames, int(pins[n["id"]])))
         if o.get("labels"):
-            return settled_frame(man, o, world=w_of[n["id"]])
+            key = (id(o), tuple(round(v, 1) for v in w_of[n["id"]]))
+            if key not in settled:
+                settled[key] = settled_frame(man, o, world=w_of[n["id"]], _settled=settled)
+            return settled[key]
         return (f - first_visible(n)) % frames + 1
 
     w_of = {}
@@ -312,7 +318,10 @@ def _score(man, drawn):
     return sum(1 for d in drawn if on_glass(d, stage))
 
 
-def settled_frame(man, o, world=None):
+_SETTLE_TRIES = 40
+
+
+def settled_frame(man, o, world=None, _settled=None):
     """The frame a labelled sprite rests on when nothing seeks it: within its FIRST label's
     span, the frame where the most of its elements are fully drawn (Battle Select's kaiju
     picker: frame 4, ``Ebirah_FadeIn_End``, not frame 1 where the tile is still transparent)."""
@@ -322,10 +331,16 @@ def settled_frame(man, o, world=None):
     lo = labels[0]
     hi = next((f for f in labels if f > lo), int(o.get("frames") or lo) + 1)
     best, best_n = lo, -1
-    for f in range(lo, max(lo + 1, hi)):
+    span = list(range(lo, max(lo + 1, hi)))
+    if len(span) > _SETTLE_TRIES:
+        # a long first span (a 2,460-frame idle loop) is sampled, not walked frame by frame
+        step = len(span) / float(_SETTLE_TRIES)
+        span = sorted({span[int(i * step)] for i in range(_SETTLE_TRIES)})
+    for f in span:
         sub = {"objects": man["objects"], "stage": man.get("stage"),
                "root": {"kids": o.get("kids") or (), "frames": 1, "labels": []}}
-        n = _score(sub, draw_list(sub, f, origin=world or (0.0, 0.0), matrix=world))
+        n = _score(sub, draw_list(sub, f, origin=world or (0.0, 0.0), matrix=world,
+                                  _settled=_settled))
         if n > best_n:
             best, best_n = f, n
     return best
@@ -404,8 +419,9 @@ def default_frame(man):
         for e in n["col"]:
             cands.add(e[0])
     best, best_n = 1, -1
+    settled = {}
     for f in sorted(c for c in cands if 1 <= c <= frames):
-        score = _score(man, draw_list(man, f))
+        score = _score(man, draw_list(man, f, _settled=settled))
         if score > best_n:
             best, best_n = f, score
     return best

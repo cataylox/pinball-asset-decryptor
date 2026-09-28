@@ -488,6 +488,8 @@ def test_show_in_scenes_lands_on_the_line_and_jumps_back(tmp_path):
         sc = w.state("text_scenes")
         assert sc["open"] and sc["sel"] == "/g/scene2"
         assert sc["item"] == "txt::0"
+        # PAD-251: the scenes are a tab of their own; opening them brings it forward
+        assert w.state("shell")["tab"] == "scenes"
         groups = {g["key"]: g for g in sc["contents"]["groups"]}
         assert groups["txt"]["items"][0]["text"] == "BALL ONE"
         assert groups["txt"]["items"][0]["info"] == \
@@ -498,13 +500,16 @@ def test_show_in_scenes_lands_on_the_line_and_jumps_back(tmp_path):
         w.call("text.show_in_scene")
         sc = w.state("text_scenes")
         assert sc["search"] == "" and sc["sel"] == "/g/scene1"
-        # double-clicking the line goes back to it on the Text tab
+        # double-clicking the line goes back to it on the Text tab; the scenes stay as
+        # they were behind their own tab
         assert w.call("text_scenes.activate", "txt::0") is True
-        assert not w.state("text_scenes")["open"]
+        assert w.state("shell")["tab"] == "text"
+        assert w.state("text_scenes")["alive"]
         st = w.state("text")
         assert st["rows"][st["sel"]]["o"] == "CLOCK NOT SET"
         assert w.window.text_search_var.get() == "CLOCK NOT SET"
         assert w.call("text_scenes.show") is True
+        assert w.state("shell")["tab"] == "scenes"
         w.call("text_scenes.close")
         assert not w.state("text_scenes")["open"]
 
@@ -583,16 +588,17 @@ def test_other_tabs_open_the_scenes_window_and_its_jumps(tmp_path):
             folder, "images", "scene_textures")) if r.endswith(".png"))
         assert w.run(lambda: w.window.open_scene_browser(folder)) is True
         assert w.state("text_scenes")["open"]
+        assert w.state("shell")["tab"] == "scenes"
         # the Video tab's call
         assert w.run(lambda: w.window._open_scene_browser(
             preselect_video="video/x.mp4")) is True
-        # a jump to a tab that answers it steps the window aside
+        # a jump to a tab that answers it; the scenes stay open behind their tab
         seen = []
         w.window.reveal_image_slot = lambda r: seen.append(r)
         w.call("text_scenes.select", "/g/scene1")
         assert w.call("text_scenes.activate", "img::images/x.png") is True
         assert seen == ["images/x.png"]
-        assert not w.state("text_scenes")["open"]
+        assert w.state("text_scenes")["alive"]
         w.call("text_scenes.show")
         # a font row opens the Fonts window on that font
         assert w.call("text_scenes.activate", "font::tbl") is True
@@ -682,15 +688,16 @@ def test_fonts_window_scope_preview_blank_undo_revert(tmp_path):
         w.call("text_fonts.set_opt", "stroke", "9")
         assert w.state("text_fonts")["opts"]["stroke"] == 6
 
-        # right-click a scene: the Scenes window opens on it, in front; the
-        # Fonts window stays open under it (Tk: two Toplevels)
+        # right-click a scene: the Scenes tab comes forward on it and this window
+        # steps aside so it does not cover it (PAD-251; nothing is closed)
         raised = w.state("text_fonts")["raise_n"]
         assert w.call("text_fonts.show_scene", 0) is True
-        assert w.state("text_fonts")["open"]
+        assert not w.state("text_fonts")["open"]
+        assert w.state("text_fonts")["alive"]
+        assert w.state("shell")["tab"] == "scenes"
         sc = w.state("text_scenes")
         assert sc["open"] and sc["sel"] == "/g/scene1"
-        # ...and its font row brings this one to the front again, the Scenes
-        # window staying open under it
+        # ...and its font row brings this one back in front of the scenes
         assert w.call("text_scenes.activate", "font::tbl") is True
         assert w.state("text_fonts")["open"]
         assert w.state("text_fonts")["raise_n"] > raised
@@ -762,7 +769,8 @@ def test_a_manufacturer_switch_closes_windows_with_nothing_unsaved(tmp_path):
 def test_a_jump_steps_both_windows_aside_and_they_come_back(tmp_path):
     """Tk _step_aside_for_jump lowered EVERY open tool window below the main
     one; nothing was closed, and the Scenes… / Fonts… buttons (here also the
-    status bar's) lifted them back as they were."""
+    status bar's) lifted them back as they were.  PAD-251: the scenes are a tab
+    now, so a jump simply leaves it; the Fonts window still steps aside."""
     folder = _scene_extract(tmp_path / "proj")
     with web_app(tmp_path, mfr="stern") as w:
         _open(w, folder)
@@ -771,21 +779,19 @@ def test_a_jump_steps_both_windows_aside_and_they_come_back(tmp_path):
         assert w.call("text.show_in_scene") is True
         w.call("text_scenes.set_bg", "White")
         assert w.call("text_scenes.activate", "txt::0") is True
-        for ns in ("text_scenes", "text_fonts"):
-            st = w.state(ns)
-            assert not st["open"] and st["alive"], ns
+        st = w.state("text_fonts")
+        assert not st["open"] and st["alive"]
+        assert w.state("text_scenes")["alive"]
+        assert w.state("shell")["tab"] == "text"
         st = w.state("text")
         assert st["rows"][st["sel"]]["o"] == "CLOCK NOT SET"
         # back as they were: the scene, its line, the backdrop, the font
         assert w.call("text_scenes.show") is True
+        assert w.state("shell")["tab"] == "scenes"
         sc = w.state("text_scenes")
         assert sc["open"] and sc["sel"] == "/g/scene1" and sc["bg"] == "White"
         assert w.call("text_fonts.show") is True
         assert w.state("text_fonts")["sel"] == "tbl"
-        # the window's own Step aside button
-        assert w.call("text_scenes.hide") is True
-        assert not w.state("text_scenes")["open"]
-        assert w.state("text_scenes")["alive"]
         w.call("text_scenes.close")
         assert w.call("text_scenes.show") is False     # closed is closed
         w.call("text_fonts.close")

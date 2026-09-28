@@ -216,7 +216,7 @@ def scene_note(r, name=""):
             "line has the scene rewritten at the new length on Write "
             "(image build, not a Direct-SD write; not yet booted on a "
             "machine). Its box is the scene's fixed template: check a "
-            "longer line in the Scenes window.")
+            "longer line in the Scenes tab.")
 
 
 def program_note(r):

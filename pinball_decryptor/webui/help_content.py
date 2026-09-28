@@ -411,7 +411,7 @@ HELP_CONTENT = {
          "\"Revert all changes…\" on the Write tab is what restores those."),
         ("Scene editor (move, resize, tint, layers, add)",
          "When the project has a scene's tree (Extract or \"Rebuild previews…\" "
-         "records it), the Scenes window draws that scene the way the machine does - "
+         "records it), the Scenes tab draws that scene the way the machine does - "
          "every picture and line of text in its own place, size, tilt and fade, at one "
          "MOMENT of its timeline - and you edit it right there. Click something in the "
          "preview (or its row under Layers) to select it; drag it to move it, drag a "
@@ -422,14 +422,18 @@ HELP_CONTENT = {
          "\"Text…\" add something new (text is written in the font and size of the "
          "selected line). \"Moment\" picks where in the scene's own timeline to look, "
          "and \"States the game picks\" shows each state the game's code can switch a "
-         "part of the scene to (Battle Select's kaiju, a tile's Locked or city) - the "
+         "part of the scene to (which monster Battle Select shows, a tile's Locked or "
+         "city) - the "
          "file holds them all, the game chooses. Every edit is kept in the project and "
          "listed on the Write tab; the Write puts them on the card (moves, resizes, "
          "tints, hides and layer changes even straight to an SD card; an added picture "
          "or line of text makes the scene bigger, which needs an image build). The "
          "game's own parts are hidden rather than deleted, because its code finds them "
          "by name. Colour: these games draw most text in a styled font whose colours "
-         "are baked in, so Tint is the way to recolour it."),
+         "are baked in, so Tint is the way to recolour it. A project extracted before the "
+         "editor existed has its scenes read off the Extract tab's card the first time the "
+         "Scenes tab opens (about ten seconds, once). While you edit, the picture you see "
+         "stays up and a small \"Updating\" tag shows while the change is drawn."),
         ("Size limits",
          "On most games patching is size-neutral: a same-or-smaller "
          "replacement fits as-is, a larger one is re-encoded down to the "
@@ -537,7 +541,7 @@ HELP_CONTENT = {
          "already-changed file."),
         ("Seeing where a clip plays",
          "Right-click a slot and pick \"Show scene contents…\" to open the "
-         "Scenes window on the scene that plays it, with the images, fonts "
+         "Scenes tab on the scene that plays it, with the images, fonts "
          "and text it shares the screen with."),
         ("Very short clips",
          "Plenty of Spike 2 slots hold a clip well under a second — a sixth "
@@ -750,8 +754,8 @@ HELP_CONTENT = {
          "multiplies that colour — the line under the controls says which "
          "colours the scenes draw this font in, and a font a scene tints "
          "black stays black whatever you pick."),
-        ("Scenes window",
-         "The \"Scenes…\" toolbar button (where available) lists every "
+        ("Scenes tab",
+         "The Scenes tab (the Images tab's \"Scenes…\" button opens it too) lists every "
          "scene on the card with the images, fonts and on-screen text it "
          "is built from — double-click an item to jump to its row here, in "
          "the Fonts window, or on Replace Text. Right-click any scene "
@@ -852,7 +856,7 @@ HELP_CONTENT = {
          "place, and a longer line (up to the 96-byte cap the Max shows) "
          "has its scene file rewritten at the new length and written "
          "whole — the box it draws in is the scene's fixed template, so "
-         "check a longer line in the Scenes window preview. Game-program "
+         "check a longer line in the Scenes tab preview. Game-program "
          "text no longer has to fit either: a row whose Max reads \"96 (grows)\" "
          "may take up to 96 bytes, and a replacement longer than its slot "
          "is placed in a NEW area of the game program (a small read-only "
@@ -911,7 +915,7 @@ HELP_CONTENT = {
          "repeat once per scene/keyframe)."),
         ("Seeing the line in its scene",
          "\"Show in Scenes…\" (also on the right-click menu) opens the "
-         "Scenes window on the scene that draws the selected line, with the "
+         "Scenes tab on the scene that draws the selected line, with the "
          "line itself picked out — so you can see the font, the colour and "
          "the art it sits on before changing the words. The preview draws "
          "your PENDING edits too: change a row here and the scene redraws "
