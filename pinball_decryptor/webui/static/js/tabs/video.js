@@ -694,12 +694,19 @@ export default function VideoTab() {
         <button type="button" class=${cx("vid-link", !s.project && "none")} onClick=${() => call("video.open_project_folder")}
           ...${tip(T.project)}>${s.project_text}</button></span>`}>
       ${s.status ? html`<${Chip} kind="acc">${s.status}<//>` : null}
-      <${Button} onClick=${() => call(s.scanning ? "video.cancel_scan" : "video.scan")}>${s.scanning ? "Cancel scan" : "Scan"}<//>
-      <${Button} onClick=${() => call("video.replace_from_folder")} disabled=${running} title=${T.folder}>Replace from folder…<//>
-      <${Button} kind="ghost" onClick=${() => call("video.export_csv")} title=${T.csv}>Export CSV<//>
-      <${Button} kind="ghost" onClick=${() => call("video.clear_all")} disabled=${!s.can_clear || running} title=${T.clear}>Clear replacements…<//>
-      ${s.quality_report ? html`<${Button} kind="ghost" onClick=${() => call("video.quality_open")} title=${T.check}>Check card…<//>` : null}
-      ${s.best_supported ? html`<${Button} kind="ghost" onClick=${() => call("video.best_open")} title=${T.best}>Best quality…<//>` : null}
+      <${Button} icon=${s.scanning ? "x" : "refresh"} onClick=${() => call(s.scanning ? "video.cancel_scan" : "video.scan")}>${s.scanning ? "Cancel scan" : "Scan"}<//>
+      <${Button} icon="folder" onClick=${() => call("video.replace_from_folder")} disabled=${running} title=${T.folder}>Replace from folder…<//>
+      ${s.best_supported ? html`<${Button} kind="ghost" icon="star" onClick=${() => call("video.best_open")} title=${T.best}>Best quality…<//>` : null}
+      <${Button} kind="ghost" icon="more" label="More"
+        title=${s.quality_report ? "More: Export CSV, Clear replacements…, Check card…" : "More: Export CSV, Clear replacements…"}
+        onClick=${(e) => openMenu(e.currentTarget, [
+          { label: "Export CSV", icon: "download", title: T.csv, onClick: () => call("video.export_csv") },
+          { label: "Clear replacements…", icon: "trash", title: T.clear, disabled: !s.can_clear || running,
+            onClick: () => call("video.clear_all") },
+          s.quality_report ? { sep: true } : null,
+          s.quality_report ? { label: "Check card…", icon: "check", title: T.check,
+            onClick: () => call("video.quality_open") } : null,
+        ], { align: "right" })} />
     <//>
     ${s.ffmpeg_missing ? html`<${Note} kind="err">${T.ffmpeg}<//>` : null}
     <section class="card vid-card" ref=${cardRef}>
