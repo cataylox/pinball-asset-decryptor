@@ -6,10 +6,9 @@ Serves <repo> on a settings copy whose Stern project is <project copy> (a scratc
 editor writes scene_edits.json into it), opens the Scenes window on Godzilla's KAIJU BATTLE
 SELECT and writes:
 
-- <prefix>_battle_select.png   the scene as it opens
-- with --edit: <prefix>_selected.png (the portrait clicked), <prefix>_edited.png (dragged
-  80 px left and 40 px up, then enlarged from a corner, then tinted), and
-  <prefix>_language.png (the language screen, with the Layers list)
+- <prefix>_language.png, <prefix>_hud.png, <prefix>_battle_select.png   each scene as it opens
+- with --edit: <prefix>_selected.png (the portrait clicked) and <prefix>_edited.png (dragged
+  80 px left and 40 px up, enlarged from a corner, tinted)
 
 Needs Playwright (``pip install --target C:/tmp/pad251/pw playwright``; PYTHONPATH it) and the
 installed Edge.
@@ -35,6 +34,8 @@ BATTLE = ("/godzilla_le/assets/lcd/auto_loaded/"
           "cac32730af42b9d26d26c4bb6e667b07da53113e")
 LANGUAGE = ("/godzilla_le/assets/lcd/demand_loaded/"
             "762a9b99fc0c933b6c6c4822cb48911fa92bbd97")
+HUD = ("/godzilla_le/assets/lcd/auto_loaded/"
+       "9d57875196c613785a1eee010c55223a0f1aa821")
 
 
 def _serve(repo, scratch, project):
@@ -76,9 +77,10 @@ def main():
             time.sleep(2)
             assert api("images.open_scenes")
             time.sleep(1)
-            assert api("text_scenes.select", BATTLE)
-            time.sleep(5)
-            page.screenshot(path=os.path.join(out, prefix + "_battle_select.png"))
+            for scene, name in ((LANGUAGE, "language"), (HUD, "hud"), (BATTLE, "battle_select")):
+                assert api("text_scenes.select", scene)
+                time.sleep(6)
+                page.screenshot(path=os.path.join(out, prefix + "_%s.png" % name))
             if edit:
                 page.get_by_text("Hide the scene list").click()
                 time.sleep(1)
@@ -116,9 +118,6 @@ def main():
                 time.sleep(4)
                 page.screenshot(path=os.path.join(out, prefix + "_edited.png"))
                 print("edits:", state()["text_scenes"]["tree_view"]["edits"])
-                assert api("text_scenes.select", LANGUAGE)
-                time.sleep(5)
-                page.screenshot(path=os.path.join(out, prefix + "_language.png"))
             print("page errors:", errors)
             browser.close()
     finally:

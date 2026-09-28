@@ -1480,6 +1480,20 @@ class TextScenesService(TreeEditMixin):
                 card, layout = scene_render.layout_for_scene_dir(
                     self._layouts, d)
                 img = None
+                tcard, tman = self._tree_card(d)
+                if tman is not None:
+                    # PAD-251: drawn from the tree, with the scene's edits
+                    try:
+                        from ..plugins.stern import scene_edit
+                        man, _n = scene_edit.apply_manifest(
+                            tman, scene_edit.ops_for(self.assets_dir, tcard))
+                        img = scene_render.render_tree(
+                            self.assets_dir, man, fonts=self._fonts, background=bg,
+                            colors=self._pending_colors(tcard),
+                            text_edits=self._pending_texts(tcard, None))
+                    except Exception:                # noqa: BLE001
+                        img = None
+                    layout = None
                 if layout is not None:
                     try:
                         img = self._render_layout(
