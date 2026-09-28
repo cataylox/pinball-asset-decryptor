@@ -436,7 +436,10 @@ HELP_CONTENT = {
          "stays up and a small \"Updating\" tag shows while the change is drawn. Drag the "
          "dividers between the scene list, the preview and the panel on the right (and the one "
          "above Layers) to share the room the way you like; the app remembers them, and a "
-         "double-click puts one back. Lines of W's (or AAA) are the game's own placeholders "
+         "double-click puts one back. There is nothing to save: every edit is kept the "
+         "moment you make it, and Write puts it on the card (\"Export picture…\" only makes a "
+         "picture for you). Reset, under the preview, puts a scene back the way the last Write "
+         "left it or the way the game shipped it, or every scene at once. Lines of W's (or AAA) are the game's own placeholders "
          "for text it fills in while it runs, such as high score initials: the game writes the "
          "player's letters there, so they are as wide as the widest name can be."),
         ("Size limits",
