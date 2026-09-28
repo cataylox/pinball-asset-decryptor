@@ -276,9 +276,18 @@ class App:
         # in must not change what the tests see.
         if "PYTEST_CURRENT_TEST" in os.environ:
             self._checkout_badge = None
+            self._rig_badge = ""
         else:
             from .worktree_picker import checkout_badge
             self._checkout_badge = checkout_badge()
+            # WHO this window is for (core/rigslot.py): a copy launched for a
+            # triage ticket names the ticket. Its RIG is taken at the Emulate
+            # tab's Start and given back at Stop (claim_for_run - a rig is
+            # held only while it is used), so the rig number is on the tab's
+            # rig strip and every window the run opens, not up here. Empty on
+            # an ordinary install, which drives rig 0 exactly as before.
+            from .core import rigslot
+            self._rig_badge = rigslot.title_tag()
 
         self._settings = self._load_settings_file()
         saved_theme = self._settings.get("theme")
@@ -5682,6 +5691,8 @@ class App:
         the default only until a project exists.  Batch 20 put the detected
         game here; batch 19 the project)."""
         title = f"{APP_NAME} v{__version__}"
+        if getattr(self, "_rig_badge", ""):
+            title += "  [%s]" % self._rig_badge
         if self._checkout_badge:
             title += "  [%s]" % self._checkout_badge
         path = self._project_path

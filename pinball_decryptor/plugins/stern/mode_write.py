@@ -614,6 +614,44 @@ def _wav_name(spec, key):
     return getattr(spec, _SPEC_FIELD.get(key, key), "")
 
 
+def _call_ranks(entries):
+    """``{id(entry): rank}``: each swapped CALL's place among its own mode's calls, longest WAV first,
+    so the longest call starts at the title's longest carrier (hud-layers, shared carriers)."""
+    from . import mode_sounds as MS
+    by_slug = {}
+    for e in entries:
+        if not e.get("music"):
+            by_slug.setdefault(e["slug"], []).append(e)
+    ranks = {}
+    for mine in by_slug.values():
+        mine.sort(key=lambda e: -(MS.sound_ms(e["wav"]) or 0))
+        for k, e in enumerate(mine):
+            ranks[id(e)] = k
+    return ranks
+
+
+def _share_swapped(entries, c, taken):
+    """Each SWAPPED entry (``swap``) gets ``candidates``: the title's carriers of its kind, less the
+    requests re-pointed for good (*taken*), from its rank on; ``request`` is the first. The carriers
+    are shared across modes; the engine keeps them distinct within one (hud-layers). An entry with
+    no carrier at all is left out, and returned in the second list."""
+    from . import mode_sounds as MS
+    ranks = _call_ranks([e for e in entries if e.get("swap")])
+    kept, dropped = [], []
+    for e in entries:
+        if not e.get("swap"):
+            kept.append(e)
+            continue
+        key = "music" if e.get("music") else "call"
+        cands = MS.swap_candidates(c, key, taken, ranks.get(id(e), 0))
+        if not cands:
+            dropped.append(e)
+            continue
+        e["request"], e["candidates"] = cands[0], cands
+        kept.append(e)
+    return kept, dropped
+
+
 def choose_own_sounds(project, modes, sound_ok, end_sound=None, log=None):
     """The start sounds, shot sounds and music a card built from *modes* carries:
     ``[{"slug", "name", "key", "request", "wav", "music"}]`` in slot order, each on its own
@@ -645,7 +683,14 @@ def choose_own_sounds(project, modes, sound_ok, end_sound=None, log=None):
     taken = [int(end_sound["request"])] if end_sound and end_sound.get("request") else []
     taken_beds = []
     out = []
+    c = MS.carriers(game, version)
     for slug, spec, key in wanted:
+        if MS.swapped(c, key):
+            # hud-layers: a carrier shared with the other modes; the engine picks which
+            out.append({"slug": slug, "name": spec.name, "key": key, "request": 0,
+                        "wav": os.path.join(MP.mode_folder(project, slug), _wav_name(spec, key)),
+                        "music": key == "music", "swap": True})
+            continue
         try:
             got = MS.assign(game, version, [(key,)], taken=taken, taken_beds=taken_beds)[0]
         except MS.ModeSoundError as e:
@@ -666,6 +711,10 @@ def choose_own_sounds(project, modes, sound_ok, end_sound=None, log=None):
         if MS.carriers(game, version).swap:
             entry["swap"] = True        # item 163: swapped in at run time, no stock sound id changes
         out.append(entry)
+    out, dropped = _share_swapped(out, c, taken)
+    for e in dropped:
+        log("Modes: %s's %s is not put on this card: %s %s has no %s carrier." % (
+            e["name"], SOUND_WORDS[e["key"]], game, version, "music" if e["music"] else "call"), "warning")
     return out
 
 
@@ -710,7 +759,7 @@ def mode_file_text(project, slug, spec, own_sounds):
 
 
 def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_ok=(True, ""),
-         log=None, end_sound="choose", own_sounds=None, progress=None, stock_font=b""):
+         log=None, end_sound="choose", own_sounds=None, progress=None, stock_font=b"", hud_font=b""):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -738,7 +787,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     except MP.ModeProjectError as e:
         raise ModeWriteError(str(e)) from None
     port = find_port(prof, game_elf)
-    if (any(spec.clip != "none" for _s, spec in modes) or any(c.clip for _s, c in code)) and not ffmpeg:
+    if (any(spec.clip != "none" for _s, spec in modes) or any(c.clip_list() for _s, c in code)) and not ffmpeg:
         from ...core.audio import find_ffmpeg
         ffmpeg = find_ffmpeg()
     tree = os.path.join(scratch, "tree")
@@ -746,6 +795,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         kw = {"code": code, "prof": prof} if code else {}     # a form-mode build is called as before
         if stock_font:
             kw["stock_font"] = stock_font
+        if hud_font:
+            kw["hud_font"] = hud_font
         if progress is not None:
             kw["progress"] = progress
         build = mode_assets.build(project, stock_hud, stock_bank, tree, ffmpeg=ffmpeg, **kw)
@@ -1478,7 +1529,7 @@ SETTINGS_ONLY_FIELDS = frozenset((
     "start_shot", "start_count", "seconds", "scoring_shots", "countdown", "lights",
     "light_color", "light_on_raw", "light_off_raw", "stack", "award_ladder", "shot_award",
     "end_shot", "callout_at", "restore_after", "starts_on", "ends_on", "starts", "cooldown",
-    "priority", "light_shots", "light_shots_pattern"))
+    "priority", "light_shots", "light_shots_pattern", "start_also", "after", "after_when"))
 #: ...except these, for a mode with music of its own: its bed is cut to the mode's length.
 _SETTINGS_ONLY_UNLESS_MUSIC = frozenset(("seconds",))
 
@@ -1751,7 +1802,7 @@ def tryit_env(set_dir, guest_object="/lib/pad_mode.so"):
 #
 # A code mode (modes/<slug>/<slug>.c, :mod:`.code_modes`) used to reach Try it only. Write now
 # carries it the way it carries a form mode: its screen and clip into the HUD scene and bank (the
-# same :func:`.mode_assets.build` pass), its music on a bed and each call on a carrier of its own
+# same :func:`.mode_assets.build` pass), its music on a bed and each call on a carrier (shared across modes)
 # (the same :func:`choose_own_sounds` allocator and the engine's grow), and on the system partition
 # the object COMPILED from the project's code modes with the mode-file interpreter (instead of the
 # pinned one) and one ``<slug>.assets`` per code mode naming what the build carried.
@@ -1799,8 +1850,15 @@ def choose_code_sounds(project, code, sound_ok, prof, taken=(), taken_beds=(), l
             "requests to carry them have been measured for %s yet." % prof.label, "warning")
         return []
     taken, taken_beds, out = [int(t) for t in taken], [int(b) for b in taken_beds], []
+    c = MS.carriers(game, version)
     for w in wants:
         kind = "music" if w["music"] else "sound_start"
+        if MS.swapped(c, "music" if w["music"] else "call"):
+            # hud-layers: a carrier shared with the other modes; the engine picks which
+            entry = dict(w, request=0, swap=True)
+            entry.pop("priority", None)
+            out.append(entry)
+            continue
         try:
             got = MS.assign(game, version, [(kind,)], taken=taken, taken_beds=taken_beds)[0]
         except MS.ModeSoundError as e:
@@ -1815,12 +1873,17 @@ def choose_code_sounds(project, code, sound_ok, prof, taken=(), taken_beds=(), l
             entry["swap"] = True        # item 163: swapped in at run time
         entry.pop("priority", None)
         out.append(entry)
+    out, dropped = _share_swapped(out, c, taken)
+    for e in dropped:
+        log("Modes: %s's %s is not put on this card: %s %s has no %s carrier." % (
+            e["name"], sound_words(e["key"]), game, version, "music" if e["music"] else "call"), "warning")
     return out
 
 
 def own_sounds_taken(own):
-    """``(requests, beds)`` already carrying a sound in *own* (the engine's list)."""
-    return ([int(u["request"]) for u in own or () if u.get("request") and not u.get("sid")],
+    """``(requests, beds)`` already carrying a sound in *own* (the engine's list). A SWAPPED sound's
+    carrier is not taken: it is shared across modes (hud-layers)."""
+    return ([int(u["request"]) for u in own or () if u.get("request") and not u.get("sid") and not u.get("swap")],
             [int(u["sid"]) for u in own or () if u.get("sid")])
 
 
@@ -2046,7 +2109,7 @@ def code_plan(project, result, code, tree, prof, log=None):
     for slug, spec in code:
         text = CM.runtime_text(slug, spec, prof, own_sounds=result.own_sounds,
                                screen=bool(spec.screen and prof.can("screen")),
-                               clip=bool(spec.clip and prof.can("clip")))
+                               clip=bool(spec.clip_list() and prof.can("clip")))
         path = os.path.join(padmode, slug + CM.RUNTIME_SUFFIX)
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)

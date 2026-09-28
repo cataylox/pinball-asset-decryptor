@@ -1,0 +1,46 @@
+#!/bin/sh
+# Nothing is committed straight onto main except what moves it on purpose.
+#
+# Work on this repo goes through a ticket (pad-triage: ticket/PAD-n in its own
+# worktree) or one of the lanes still being drained (feature/*, item/*), and
+# main moves only when that work lands. Allowed onto main:
+#   - a merge or squash landing a ticket or branch (MERGE_HEAD / SQUASH_MSG)
+#   - a release commit: subject "vX.Y.Z ..." (/release, pad-triage's release)
+#   - queue bookkeeping touching only plans/TODO.md (the old /add, ranking)
+#   - PAD_ALLOW_MAIN=1 - the emergency override, which says so
+# Every other branch is untouched by this hook.
+#
+# Installed by scripts/install_hooks.py (core.hooksPath=.githooks), which also
+# retires the old untracked .git/hooks/commit-msg this replaces - that one
+# only caught subjects starting "Item N".
+
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || exit 0
+case "$branch" in main|master) ;; *) exit 0 ;; esac
+
+gd=$(git rev-parse --git-dir 2>/dev/null)
+[ -f "$gd/MERGE_HEAD" ] && exit 0
+[ -f "$gd/SQUASH_MSG" ] && exit 0
+
+subject=$(head -n 1 "$1" | tr -d '\r')
+case "$subject" in
+  v[0-9]*.[0-9]*.[0-9]*) exit 0 ;;
+esac
+
+if [ -z "$(git diff --cached --name-only | grep -v '^plans/TODO.md$')" ]; then
+  exit 0
+fi
+
+if [ "${PAD_ALLOW_MAIN:-}" = 1 ]; then
+  echo "PAD_ALLOW_MAIN=1: committing to main without a ticket." >&2
+  exit 0
+fi
+
+echo "BLOCKED: a commit straight onto main." >&2
+echo "" >&2
+echo "Work on this repo goes through a ticket: open one with /ticket (or" >&2
+echo "python <pad-triage>/padtriage_cli.py new \"<what>\"), work in the worktree" >&2
+echo "it prints, and let the ticket's Approve merge and release it. A running" >&2
+echo "feature/* or item/* branch is fine too - commit there, land it with /finish." >&2
+echo "" >&2
+echo "Do NOT pass --no-verify. For a real emergency: PAD_ALLOW_MAIN=1 git commit ..." >&2
+exit 1

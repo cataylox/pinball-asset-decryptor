@@ -120,3 +120,15 @@ def test_every_kind_has_a_pattern_matching_its_own_current_name():
     kind regex, that kind would be deleted the moment it is written."""
     for cur, pat in _CACHE_KINDS:
         assert pat.match(STEM + cur), cur
+
+
+def test_a_cache_without_each_records_whole_key_is_derived_again():
+    """A cache from before the derive recorded ``findkey`` (the whole container key) is
+    not used: a mode's music bed is found by that key, and a Godzilla Pro 1.15 cache
+    without it left every mode's music off the card with "names no record"."""
+    from pinball_decryptor.plugins.stern.engine import _params_cache_current
+    assert _params_cache_current([{"idx": 0, "key0": 1, "findkey": b"12345678"}])
+    assert _params_cache_current([{"idx": 0, "key0": None, "findkey": None}])   # a faulted find
+    assert not _params_cache_current([{"idx": 0, "key0": 1}])                   # before findkey
+    assert not _params_cache_current([{"idx": 0}])                              # before key0
+    assert not _params_cache_current([])

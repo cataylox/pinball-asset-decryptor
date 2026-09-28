@@ -89,6 +89,7 @@ class MultibootTab(TabService):
         ("ed_video", "_ed_video"), ("ed_music", "_ed_music"),
         ("ed_confirm", "_ed_confirm"), ("ed_roll", "_ed_roll"),
         ("ed_roll_norepeat", "_ed_roll_norepeat"),
+        ("ed_own_scores", "_ed_own_scores"),
     )
 
     #: Menu settings' fields (and ``color_<role>``): the same, while that

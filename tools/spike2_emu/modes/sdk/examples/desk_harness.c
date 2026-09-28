@@ -56,7 +56,7 @@ static const struct { const char *name; uint64_t mask; } SHOTS[] = {    /* godzi
     { "Shield target center", 0x100000000ull }, { "Shield target right", 0x200000000ull },
     { "Skill shot", 0x400000000ull }, { "Big loop", 0x1000000000ull }, { "Slingshot", 0x2ull },
     { "Left return lane", 0x4ull }, { "Right return lane", 0x10ull }, { "Pop bumper", 0x40ull },
-    { "Mecha exit bottom", 0x10000000000ull },
+    { "Mecha exit bottom", 0x10000000000ull }, { "Left spinner", 0x200ull },
 };
 #define N_SHOTS (int)(sizeof SHOTS / sizeof SHOTS[0])
 static const struct { const char *name; int id; } EVENTS[] = {
@@ -74,7 +74,7 @@ static const struct pm_mode *current, *running;
 static char trigger_file[64], trigger_text[128];
 
 struct fake_node { char name[160]; };
-static struct fake_node nodes[64];
+static struct fake_node nodes[1024];   /* six modes' HUDs: ~42 nodes each */
 static int n_nodes;
 
 static void *fake(const char *path)
@@ -82,7 +82,7 @@ static void *fake(const char *path)
     int i;
     for (i = 0; i < n_nodes; i++)
         if (!strcmp(nodes[i].name, path)) return &nodes[i];
-    if (n_nodes == 64) return 0;
+    if (n_nodes == 1024) return 0;
     snprintf(nodes[n_nodes].name, sizeof nodes[n_nodes].name, "%s", path);
     return &nodes[n_nodes++];
 }
@@ -150,6 +150,10 @@ const char *pm_shot_at(int i, uint64_t *mask)
     if (mask) *mask = SHOTS[i].mask;
     return SHOTS[i].name;
 }
+static const struct pm_mode *disp_owner;   /* the display arbitration's state (pm_display_priority) */
+static unsigned disp_prio;
+static unsigned long disp_linger_until;   /* pm_end_holding: the hold kept for an ending, until then */
+static void disp_linger_release(const char *why);
 int pm_begin(void)
 {
     if (running && running != current) {
@@ -157,6 +161,7 @@ int pm_begin(void)
         return 0;
     }
     running = current;
+    if (disp_linger_until && disp_owner != current) disp_linger_release("another mode began");
     return 1;
 }
 void pm_end(void) { if (running == current) running = 0; }
@@ -181,6 +186,41 @@ void pm_set_text(void *text, const char *words)
 int pm_clip(const char *name) { printf("%6lu CLIP %s\n", now_ms, name); return 1; }
 int pm_clip_playing(void) { return 0; }
 void pm_clip_stop(void) {}
+/* hud-layers: the backdrop (a clip behind the HUD) */
+static char backdrop_now[96];
+int pm_backdrop(const char *name)
+{
+    if (!name || !*name) {
+        if (backdrop_now[0]) printf("%6lu BACKDROP OFF\n", now_ms);
+        backdrop_now[0] = 0;
+        return 1;
+    }
+    if (strcmp(backdrop_now, name)) printf("%6lu BACKDROP %s\n", now_ms, name);
+    snprintf(backdrop_now, sizeof backdrop_now, "%s", name);
+    return 1;
+}
+int pm_backdrop_once(const char *name)
+{
+    if (!backdrop_now[0]) return 0;
+    printf("%6lu BACKDROP ONCE %s\n", now_ms, name);
+    return 1;
+}
+int pm_backdrop_showing(void) { return backdrop_now[0] != 0; }
+/* hud-layers: MELTDOWN's balls - the serve answers at once; "balls N" sets the count in play */
+static int balls_in_play = 1;
+int pm_multiball_start(unsigned balls, unsigned save_s)
+{
+    printf("%6lu MULTIBALL %u balls, save %u s\n", now_ms, balls, save_s);
+    balls_in_play = (int)balls;
+    return 1;
+}
+int pm_multiball_add(unsigned n, unsigned save_s)
+{
+    printf("%6lu ADD-A-BALL %u, save %u s\n", now_ms, n, save_s);
+    balls_in_play += (int)n;
+    return 1;
+}
+int pm_balls_in_play(void) { return balls_in_play; }
 const char *pm_port_text(const char *name)
 {
     if (!strcmp(name, "example_lights_on"))
@@ -269,8 +309,11 @@ int pm_sound_sid(unsigned request, unsigned sid)
 }
 int pm_sound_swap(unsigned request, const unsigned char stock[8], const unsigned char ours[8], int priority, unsigned ms)
 {
-    (void)stock; (void)ours;
-    printf("%6lu SWAP %u p%d %u\n", now_ms, request, priority, ms);
+    int i;
+    (void)stock;
+    printf("%6lu SWAP %u p%d %u ", now_ms, request, priority, ms);
+    for (i = 0; i < 8; i++) printf("%02x", ours[i]);            /* which record: the test reads it */
+    printf("\n");
     return 1;
 }
 int pm_sound_playing(unsigned *requests, unsigned *buses, int max)
@@ -336,8 +379,6 @@ static const struct { const char *name; uint64_t shot; } LAMPS[] = {    /* godzi
 #define N_LAMPS (int)(sizeof LAMPS / sizeof LAMPS[0])
 static const char *const PATTERN[] = { "solid", "blink", "pulse", "chase" };
 static struct { const struct pm_mode *owner; unsigned rgb, ms; int pattern; } held[N_LAMPS];
-static const struct pm_mode *disp_owner;
-static unsigned disp_prio;
 static int covered;
 
 static const char *mode_name(const struct pm_mode *m) { return m && m->name ? m->name : "?"; }
@@ -424,6 +465,9 @@ int pm_lamp_release_all(void)
         if (held[k].owner && held[k].owner == current) { lamp_off(k); n++; }
     return n;
 }
+/* hud-layers: the desk has no playfield picture, so no insert is placed and a light show paints none */
+int pm_lamp_xy(int i, int *x, int *y) { (void)i; (void)x; (void)y; return 0; }
+int pm_lamp_paint(int i, unsigned rgb) { (void)i; (void)rgb; return 0; }
 int pm_lamp_priority(unsigned p)
 {
     printf("%6lu LAMP PRIORITY %u %s\n", now_ms, p, mode_name(current));
@@ -438,6 +482,14 @@ static int lamps_held(void)
 }
 
 /* the display arbitration, as the runtime keeps it: only the RUNNING mode may hold a priority */
+static void disp_linger_release(const char *why)
+{
+    printf("%6lu DISPLAY released %s (%s)\n", now_ms, mode_name(disp_owner), why);
+    disp_prio = 0;
+    disp_owner = 0;
+    disp_linger_until = 0;
+}
+
 int pm_display_priority(unsigned p)
 {
     if (!p) {
@@ -445,6 +497,7 @@ int pm_display_priority(unsigned p)
             printf("%6lu DISPLAY 0 %s\n", now_ms, mode_name(current));
             disp_prio = 0;
             disp_owner = 0;
+            disp_linger_until = 0;
         }
         return 1;
     }
@@ -455,6 +508,16 @@ int pm_display_priority(unsigned p)
     return 1;
 }
 int pm_display_covered(void) { return disp_prio && covered; }
+int pm_end_holding(unsigned ms)
+{
+    if (!running || running != current) return 0;
+    if (disp_prio && disp_owner == current && ms) {
+        disp_linger_until = now_ms + ms;
+        printf("%6lu DISPLAY lingers %s %u ms\n", now_ms, mode_name(current), ms);
+    }
+    pm_end();
+    return 1;
+}
 
 /* ---- the runtime's part: call every mode ----------------------------------------------------- */
 #define EACH_MODE(m) for (const struct pm_mode *const *pp = __start_pm_modes; pp < __stop_pm_modes && ((m) = *pp, 1); pp++)
@@ -466,7 +529,11 @@ static void tick(void)
     now_ms = ticks * 1000 / 60;
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
-    if (disp_prio && running != disp_owner) {           /* the runtime's display_tick does the same */
+    if (disp_prio && running != disp_owner && disp_linger_until && !running && now_ms < disp_linger_until) {
+        /* an ending: the hold stays (pm_end_holding) */
+    } else if (disp_prio && running != disp_owner && disp_linger_until) {
+        disp_linger_release(running ? "another mode began" : "its ending is over");
+    } else if (disp_prio && running != disp_owner) {    /* the runtime's display_tick does the same */
         printf("%6lu DISPLAY released %s (the mode that held it ended)\n", now_ms, mode_name(disp_owner));
         disp_prio = 0;
         disp_owner = 0;
@@ -514,6 +581,7 @@ int main(int argc, char **argv)
             current = 0;
         } else if (!strcmp(c, "battle")) { battle = atoi(argv[++k]); printf("%6lu >> battle %d\n", now_ms, battle); }
         else if (!strcmp(c, "multiball")) { multiball = atoi(argv[++k]); printf("%6lu >> multiball %d\n", now_ms, multiball); }
+        else if (!strcmp(c, "balls")) { balls_in_play = atoi(argv[++k]); printf("%6lu >> balls in play %d\n", now_ms, balls_in_play); }
         else if (!strcmp(c, "ball_end")) {
             printf("%6lu >> ball_end\n", now_ms);
             EACH_MODE(m) if (m->ball_end) { current = m; m->ball_end(); }

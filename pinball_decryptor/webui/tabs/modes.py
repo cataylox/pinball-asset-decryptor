@@ -29,6 +29,7 @@ import shutil
 import tempfile
 import threading
 
+from ...plugins.stern import block_modes as BM   # PAD-232
 from ...plugins.stern import mode_assets as MA
 from ...plugins.stern import mode_project as MP
 from ...plugins.stern import mode_tryit as MT
@@ -56,8 +57,9 @@ _STR_FIELDS = (
     "clip_both_title", "clip_both_seconds", "restore_after",
     "callout_secs_0", "callout_id_0", "callout_secs_1", "callout_id_1",
     "callout_secs_2", "callout_id_2", "callout_secs_3", "callout_id_3",
-    "balls", "ball_save", "add_ball_shot", "add_ball_max",                     # item 167
-    "start_save_s")                                                            # PAD-225
+    "balls", "ball_save", "add_ball_shot", "add_ball_max", "mb_on_shot",       # item 167, PAD-228
+    "also_shot_0", "also_count_0", "also_shot_1", "also_count_1", "after_mode", "after_when",  # PAD-227
+    "start_save_s")  # PAD-225
 _DEFAULTS = {
     "screen": True, "countdown": True, "lights": False, "advanced": False, "stack": True,
     "light_shots_on": False, "panel_color": "#000000", "title_color": "#000000",
@@ -70,6 +72,9 @@ _DEFAULTS = {
     "clip_both": "none", "clip_both_seconds": "4", "restore_after": "6",
     "multiball": False, "balls": "3", "ball_save": "10", "add_ball_shot": "(none)", "add_ball_max": "1",
     "start_save": False, "start_save_s": "10",
+    "mb_on_shot": "(when it starts)",
+    "also_shot_0": "(nothing else)", "also_count_0": "1", "also_shot_1": "(nothing else)",
+    "also_count_1": "1", "after_mode": "(any time)", "after_when": "game",
 }
 
 
@@ -113,6 +118,7 @@ _PROBLEM_PAGES = tuple((re.compile(rx), page) for rx, page in (
     (r"^Pick at least one shot that scores|has no shot called", "mode"),
     (r"^How often it can start|^The wait after it ends", "mode"),
     (r"^A mode (starts|ends) on|^Pick the event that|has no event ", "mode"),
+    (r"other shots?\b|^A mode cannot wait for itself|starts only after|^The mode it starts after", "mode"),
 ))
 
 
@@ -230,6 +236,12 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     PARAM_NEVER = "(only when time runs out)"
     #: item 167: the add-a-ball list's first entry
     BALL_NONE = "(none)"
+    #: PAD-228: the multiball's balls come when the mode starts, not on a shot
+    MB_ON_START = "(when it starts)"
+    #: PAD-227: the "and also" shot lists' first entry, the "only after" list's, and the rows shown
+    ALSO_NONE = "(nothing else)"
+    AFTER_NONE = "(any time)"
+    ALSO_ROWS = 2
     PARAM_SECOND_CLIP = (("none", "None"), ("same", "The same clip"), ("title", "A title card"),
                          ("file", "My video…"))
     CODE_EXAMPLE_SUFFIX = " (code mode)"
@@ -246,6 +258,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         "balls": list(MP.MULTIBALL_BALLS), "ball_save": [0, MP.BALL_SAVE_MAX],   # item 167
         "add_ball_max": [1, MP.ADD_BALL_MAX],
         "start_save_s": [1, MP.BALL_SAVE_MAX],                                  # PAD-225
+        "also_count": [1, 20],                                                  # PAD-227
     }
 
     def __init__(self, window):
@@ -256,6 +269,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._shot_awards = {n: "" for n in self._shot_names}
         self._slugs = []
         self._found = {}
+        self._also_beyond = []         # PAD-227: start_also rows past the ones the form shows
         self._code_list = []           # [(slug, name)] of the project's code modes
         self._slug = None              # the form mode open in the editor
         self._spec = None
@@ -309,7 +323,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                  reasons={}, dis={}, code=None, code_words="", cut_ok=False,
                  stock={"msg": "", "rows": [], "on": False, "sel": None, "note": "",
                         "value": "", "row_on": False},
-                 film=None, about=self.ABOUT_TIP, n_form=0, n_code=0, ready=False,
+                 film=None, about=self.ABOUT_TIP, n_form=0, n_code=0, n_blocks=0, ready=False,
                  fix_pages=[], spin=dict(self.SPINBOXES), sdk_doc=self.sdk_doc(),
                  no_port_details="", ex_tip="", own_extra_ok=True, write_waits=False,
                  game_hidden=0, check_offer=False, check_wanted=False, check_done=None,
@@ -556,11 +570,12 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if not project:
             text = ""
         elif n >= MP.MAX_MODES:
-            text = ("%d of %d modes: delete one to add another. Modes written in C are "
-                    "not counted." % (n, MP.MAX_MODES))
+            text = ("%d of %d modes: delete one to add another. Modes made of blocks or "
+                    "written in C are not counted." % (n, MP.MAX_MODES))
         else:
             text = ""                       # the head says "N modes"
-        self.set(cap_text=text, n_form=n, n_code=len(self._code_list))
+        n_blocks = sum(1 for slug, _n in self._code_list if BM.is_blocks(project, slug))
+        self.set(cap_text=text, n_form=n, n_code=len(self._code_list) - n_blocks, n_blocks=n_blocks)
         self._publish_examples()
 
     def _publish_examples(self):
@@ -639,7 +654,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             except Exception:                      # noqa: BLE001 - the list must never fail on a chip
                 chip, tip = "", ""
             rows.append({"slug": slug, "kind": "code", "name": name, "chip": chip,
-                         "chip_tip": tip})
+                         "chip_tip": tip, "blocks": BM.is_blocks(self.project(), slug)})
         sel = ({"slug": str(self._game_mode), "kind": "game"} if self._game_mode is not None else
                {"slug": self._code_slug, "kind": "code"} if self._code_slug else
                {"slug": self._slug, "kind": "form"} if self._slug else None)
@@ -725,6 +740,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             self._open_advanced(spec)
             self._open_trigger(spec)
             self._open_display_lights(spec)
+            self._open_more_to_start(slug, spec)
         finally:
             self._loading = False
         self._publish_form()
@@ -766,6 +782,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._collect_advanced(spec)
         self._collect_trigger(spec)
         self._collect_display_lights(spec)
+        self._collect_more_to_start(spec)
         return spec
 
     # -- one edit from the page (a Tk variable's trace) ---------------------------------
@@ -863,6 +880,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         folder = (MP.mode_folder(self._open_project, self._slug)
                   if self._open_project and self._slug else None)
         problems = MP.validate(spec, folder) if spec else []
+        if spec is not None:                      # PAD-227: a mode it waits for that is not here
+            problems += MP.after_problems([(self._slug, spec)] + self._other_modes()).get(self._slug, [])
         status = ("Ready to build." if not problems
                   else "To fix before it can be built: " + " ".join(problems))
         self._problems = list(problems)
@@ -1011,6 +1030,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         save = MP._int_or_none(getattr(spec, "start_ball_save", 0))
         f["start_save"] = bool(save)
         f["start_save_s"] = str(save) if save else str(getattr(spec, "start_ball_save", "") or "10")
+        shot = getattr(spec, "multiball_on_shot", "") or ""        # PAD-228
+        f["mb_on_shot"] = shot if shot else self.MB_ON_START
 
     def _collect_multiball(self, spec):
         def number(text):
@@ -1027,6 +1048,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         shot = str(self.f["add_ball_shot"]).strip()
         spec.add_ball_shot = "" if shot == self.BALL_NONE else shot
         spec.start_ball_save = number(self.f["start_save_s"]) if self.f["start_save"] else 0   # PAD-225
+        shot = str(self.f["mb_on_shot"]).strip()                  # PAD-228
+        spec.multiball_on_shot = "" if shot == self.MB_ON_START else shot
 
     def _open_display_lights(self, spec):
         colour = spec.light_shots if isinstance(spec.light_shots, str) else ""
@@ -1043,6 +1066,38 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         spec.light_shots_pattern = keys.get(shown, shown)
         text = str(self.f["priority"]).strip()
         spec.priority = int(text) if text.isdigit() else (text or 0)
+
+    # PAD-227: more than one thing to meet before it starts
+    def _other_modes(self):
+        """``[(slug, ModeSpec)]`` of the project's other form modes."""
+        return [(slug, spec) for slug, spec in (self._found or {}).items() if slug != self._slug]
+
+    def _open_more_to_start(self, slug, spec):
+        f = self.f
+        rows = spec.start_also if isinstance(spec.start_also, list) else []
+        for i in range(self.ALSO_ROWS):
+            row = rows[i] if i < len(rows) and isinstance(rows[i], (list, tuple)) and len(rows[i]) == 2 else None
+            f["also_shot_%d" % i] = str(row[0]) if row else self.ALSO_NONE
+            f["also_count_%d" % i] = str(row[1]) if row else "1"
+        self._also_beyond = list(rows[self.ALSO_ROWS:])   # a hand-edited 3rd row is kept
+        after = spec.after.strip() if isinstance(spec.after, str) else ""
+        f["after_mode"] = after or self.AFTER_NONE
+        f["after_when"] = spec.after_when if spec.after_when in MP.AFTER_WHEN else "game"
+        self.set(other_modes=sorted({s.name.strip() for sl, s in self._found.items()
+                                     if sl != slug and s.name.strip()}))
+
+    def _collect_more_to_start(self, spec):
+        rows = []
+        for i in range(self.ALSO_ROWS):
+            shot = str(self.f["also_shot_%d" % i]).strip()
+            if not shot or shot == self.ALSO_NONE:
+                continue
+            text = str(self.f["also_count_%d" % i]).replace(",", "").strip()
+            rows.append([shot, int(text) if text.isdigit() else text])
+        spec.start_also = rows + list(self._also_beyond)
+        after = str(self.f["after_mode"]).strip()
+        spec.after = "" if after == self.AFTER_NONE else after
+        spec.after_when = self.f["after_when"]
 
     # item 147: what starts it and what ends it
     def _event_choices(self):
@@ -1193,7 +1248,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if p is None:
             return {"key": "", "label": "", "port": "", "shots": [], "cols": 2,
                     "callouts": [], "callouts_none": "", "events": [],
-                    "end_shots": [self.PARAM_NEVER], "ball_shots": [self.BALL_NONE]}
+                    "end_shots": [self.PARAM_NEVER], "ball_shots": [self.BALL_NONE],
+                    "mb_on_shots": [self.MB_ON_START]}
         names = [n for n, _m in p.shots]
         choices = [{"label": "%s (%d)" % (label, number), "number": number}
                    for label, number in MP.callout_choices(p) if number]
@@ -1204,7 +1260,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "callouts_none": ("" if choices else
                                   "(no callouts measured on %s: type an id)" % p.label),
                 "events": events, "end_shots": [self.PARAM_NEVER] + names,
-                "ball_shots": [self.BALL_NONE] + names}
+                "ball_shots": [self.BALL_NONE] + names,
+                "mb_on_shots": [self.MB_ON_START] + names}
 
     #: the note on a port the app worked out itself and no Try it has run yet: Write leaves
     #: the modes off a card until one has (mode_write.card_refusal)
@@ -1832,7 +1889,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             return str(e)
         if not code:
             return ("No code modes in this project. New code mode… starts one from the SDK's "
-                    "template; Examples has five written in C, with clips, music and calls cut "
+                    "template; Examples has six written in C, with clips, music and calls cut "
                     "from the films.")
         parts = []
         for slug, spec in code:
@@ -1842,12 +1899,15 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
 
     @staticmethod
     def _code_words_one(spec):
-        have = [w for w, on in (("clip", spec.clip), ("picture", spec.screen_art),
-                                ("music", spec.music)) if on]
+        clips = spec.clip_list() if hasattr(spec, "clip_list") else ([("start", spec.clip)] if spec.clip else [])
+        have = [w for w, on in (("%d clips" % len(clips) if len(clips) > 1 else "clip", clips),
+                                ("picture", spec.screen_art), ("music", spec.music)) if on]
         if spec.calls:
             have.append("%d call(s)" % len(spec.calls))
         recipe = (spec.film or {}).get("recipe")
-        if have:
+        if have:                                    # the HUD is built by Write, not cut: only beside assets
+            if getattr(spec, "hud", None):
+                have.insert(1 if clips else 0, "its HUD")
             return "%s (%s)" % (spec.name, ", ".join(have))
         if recipe:
             return "%s (its film assets are not cut yet)" % spec.name
@@ -1885,6 +1945,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             for key, name in (("art", spec.screen_art), ("clip", spec.clip), ("music", spec.music)):
                 path = os.path.join(folder, name) if name else ""
                 files[key] = path if path and os.path.isfile(path) else ""
+            clips = []                                     # hud-layers: a clip per cue
+            for cue, name in spec.clip_list():
+                path = os.path.join(folder, name) if name else ""
+                clips.append({"cue": cue, "file": name, "path": path if path and os.path.isfile(path) else ""})
             calls = []
             for cue, wav, prio in spec.call_list():
                 path = os.path.join(folder, wav) if wav else ""
@@ -1900,7 +1964,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 name=spec.name, seconds=spec.seconds, screen=bool(spec.screen),
                 screen_art=spec.screen_art, words_on_art=bool(spec.words_on_art),
                 panel_color=spec.panel_color, title_color=spec.title_color, clip=spec.clip,
-                music=spec.music, calls=calls, files=files, describe=words,
+                music=spec.music, calls=calls, clips=clips, hud=dict(spec.hud or {}), files=files, describe=words,
                 summary=self._code_words_one(spec),
                 recipe=CM.recipe_lines(film.get("recipe")),
                 needs_films=needs, needs_files=needs_files,
@@ -1909,10 +1973,123 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                         "Ready to build." if not problems
                         else "To fix before it can be built: " + " ".join(problems)),
                 has_assets_file=os.path.isfile(os.path.join(folder, CM.ASSETS_FILE)))
+        self._add_blocks(data, project, slug)
         self._game_mode = None
         self.set(code=data, status="", save_state="", game_mode=None)
         self._grey_what_the_title_cannot(False)
         self._publish_rows()
+
+    # ------------------------------------------------------------------
+    # PAD-232: modes made of blocks (a code mode whose C its blocks.json makes)
+    # ------------------------------------------------------------------
+    def _blocks_choices(self):
+        """What the block editor's boxes offer on the shown title: its shots, the events its
+        port reports (with the start and end lists' words) and the callouts."""
+        p = self._shown or self._profile
+        shots = [n for n, _m in p.shots] if p is not None else list(self._shot_names)
+        events = [{"name": n, "label": MP.EVENT_LABELS.get(n, n)} for n in (p.events or ())]             if p is not None else []
+        callouts = [{"role": r, "label": label} for r, label in BM.CALLOUT_ROLES.items()]
+        if p is not None:
+            roles = {getattr(p, "callout_ten_seconds", None), getattr(p, "callout_time_up", None)}
+            callouts += [{"id": number, "label": "%s (%d)" % (label, number)}
+                         for label, number in MP.callout_choices(p) if number and number not in roles]
+        return {"shots": shots, "events": events, "callouts": callouts,
+                "title": p.label if p is not None else ""}
+
+    def _blocks_check(self, program):
+        """``(problems, notes)`` of a program on the shown title (its shots and events)."""
+        p = self._shown or self._profile
+        shots = [n for n, _m in p.shots] if p is not None else None
+        events = list(p.events or ()) if p is not None else None
+        return BM.problems(program, shots, events), BM.notes(program)
+
+    def _add_blocks(self, data, project, slug):
+        """A code mode made of blocks: its program, what is wrong with it, and the C it makes,
+        for the block editor in the code pane's place."""
+        if not BM.is_blocks(project, slug):
+            data["blocks"] = None
+            return
+        try:
+            program = BM.load(project, slug)
+        except (OSError, ValueError) as e:
+            data["blocks"] = {"error": "Its blocks could not be read: %s" % e}
+            return
+        from ...plugins.stern import code_modes as CM
+        problems, notes = self._blocks_check(program)
+        try:
+            with open(CM.source_path(project, slug), "r", encoding="utf-8", errors="replace") as f:
+                c_text = f.read()
+        except OSError:
+            c_text = ""
+        data["blocks"] = {"program": program, "problems": problems, "notes": notes,
+                          "summary": BM.summary(program), "c": c_text,
+                          "choices": self._blocks_choices()}
+        if not self._refusal():
+            data["status"] = ("Ready to build." if not problems else
+                              "To fix before it can be built: " + " ".join(problems))
+        data["summary"] = BM.summary(program)
+
+    @rpc
+    def new_blocks_mode(self, name):
+        """New ▸ Blocks: a mode made of blocks, from a starter program on the card's shots."""
+        if not self.project():
+            self._tryit_note(MP.NO_PROJECT_HELP)
+            return None
+        if not name or not str(name).strip():
+            return None
+        why = self._refusal()
+        if why:
+            self._tryit_note(why)
+            return None
+        self._save_if_edited()
+        p = self._shown or self._profile
+        shots = [n for n, _m in p.shots] if p is not None else list(self._shot_names)
+        try:
+            slug, _path = BM.new_blocks_mode(self.project(), str(name).strip(), shots=shots)
+        except (MT.TryItError, OSError) as e:
+            self._tryit_note(str(e))
+            return None
+        self.stamp_code_title(self.project(), slug, p.key if p is not None else "")
+        self._say("made modes/%s: a mode made of blocks" % slug)
+        self.refresh(select_code=slug)
+        return slug
+
+    @rpc
+    def blocks_save(self, slug, program):
+        """The block editor changed the program of ``slug``: save it, write its C again, and
+        say what is wrong with it now. Only the open mode's blocks are saved."""
+        project = self.project()
+        if not project or slug != self._code_slug or not BM.is_blocks(project, slug):
+            return None
+        if not isinstance(program, dict):
+            return None
+        try:
+            BM.save(project, slug, program)
+        except (OSError, ValueError) as e:
+            self._tryit_note("%s could not be saved: %s" % (slug, e))
+            return None
+        self._refresh_list()
+        c = self.get("code") or {}
+        b = c.get("blocks") or {}
+        return {"problems": b.get("problems", []), "notes": b.get("notes", [])}
+
+    @rpc
+    def blocks_to_code(self):
+        """Edit as C: the open blocks mode keeps the C its blocks made and becomes a code mode."""
+        slug = self._code_slug
+        project = self.project()
+        if not slug or not BM.is_blocks(project, slug):
+            return False
+        if not compat.messagebox.askyesno(
+                "Edit as C", "Carry on with %s in C? Its C file stays as its blocks made it, and "
+                "the blocks are put away (as blocks.json.bak in its folder), so the tab no longer "
+                "edits it with blocks." % ((self.get("code") or {}).get("name") or slug)):
+            return False
+        BM.detach(project, slug)
+        self._say("modes/%s is a code mode now; its blocks are in blocks.json.bak" % slug)
+        self._refresh_list()
+        self.open_path(os.path.join(MP.mode_folder(project, slug), slug + ".c"))
+        return True
 
     @staticmethod
     def _films_needed(spec, folder):
@@ -1929,6 +2106,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if r.get("calls"):
             cut = cut and bool(spec.calls) and all(
                 wav and os.path.isfile(os.path.join(folder, wav)) for _c, wav, _p in spec.call_list())
+        if r.get("clips"):                                  # hud-layers: every clip of the recipe cut
+            names = dict(spec.clip_list())
+            cut = cut and all(names.get(cue) and os.path.isfile(os.path.join(folder, names[cue])) for cue in r["clips"])
         if cut:
             return "", ""
         keys = CM.recipe_films({"recipe": r})

@@ -47,7 +47,7 @@ CRIU=${CRIU:-$(pad_criu)}
 # pivoted guest is qemu running the game in-process, comm set to "game" by the
 # game via prctl, so this is the pid-namespace init's HOST pid.
 PID=$ARGPID
-[ -z "$PID" ] && PID=$(pgrep -x game | head -1)
+[ -z "$PID" ] && PID=$(pad_pids -x game | head -1)
 [ -n "$PID" ] || { echo "savestate: no guest (comm=game) - booted with PAD_PIVOT=1?"; exit 1; }
 [ -d "/proc/$PID" ] || { echo "savestate: pid $PID is gone"; exit 1; }
 echo "[save] guest pid $PID, root $(readlink /proc/$PID/root 2>/dev/null)"
@@ -311,7 +311,7 @@ esac
 # the renderer has long drained the ring, so the request is answered from
 # its idle poll and the journal matches the checkpoint exactly.
 GD="/proc/$PID/root/dump"
-if pgrep -x padglhost >/dev/null; then
+if [ -n "$(pad_pids -x padglhost)" ]; then
     rm -f "$GD/glstate.bin"
     : > "$GD/glstate.req"
     for _ in $(seq 1 100); do [ -e "$GD/glstate.req" ] || break; sleep 0.1; done

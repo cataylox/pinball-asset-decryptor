@@ -328,8 +328,8 @@ def test_the_renderer_is_built_where_the_dropped_helper_can_run_it():
     """PAD-182's sudo run: padglhost went to /root at 0700 and the helper drop
     then correctly ran it as the desktop user, who cannot read /root."""
     src = _src("padpath.sh")
-    assert "PAD_GLHOST_BIN=$PAD_HOME/padglhost" in src
-    assert "PAD_GLHOST_STAMP=$PAD_HOME/padglhost.srcs" in src
+    assert "PAD_GLHOST_BIN=${PAD_SLOTDIR:-$PAD_HOME}/padglhost" in src
+    assert "PAD_GLHOST_STAMP=${PAD_SLOTDIR:-$PAD_HOME}/padglhost.srcs" in src
     assert "PAD_GLHOST_BIN=$HOME/padglhost" not in src
 
 

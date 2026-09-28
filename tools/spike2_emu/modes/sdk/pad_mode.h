@@ -198,6 +198,11 @@ int pm_lights_as(unsigned owner, const char *command);    /* a specific owner id
 int pm_lamp_count(void);                                   /* how many inserts the port names */
 const char *pm_lamp_at(int i, uint64_t *shots);            /* the i-th insert's name, and its shots */
 int pm_lamp_find(const char *name);                        /* its index, or -1 */
+int pm_lamp_xy(int i, int *x, int *y);                     /* its place on the playfield picture (the port's
+                                                              "at X,Y"; x 0-300 across, y 0-600 down); 0 = not placed */
+int pm_lamp_paint(int i, unsigned rgb);                    /* hold ONE insert solid in rgb, quietly: a light
+                                                              show paints them all every tick, only changes reach
+                                                              the game; release them as usual */
 int pm_lamp_set(const char *names, unsigned rgb, int pattern, unsigned period_ms);
 int pm_lamp_shot(uint64_t shots, unsigned rgb, int pattern, unsigned period_ms);   /* a shot's inserts */
 int pm_lamp_all(unsigned rgb, int pattern, unsigned period_ms);      /* every insert the port names */
@@ -232,6 +237,18 @@ void pm_set_text(void *text, const char *words);
 int pm_clip(const char *name);        /* 1 if the game started it */
 int pm_clip_playing(void);
 void pm_clip_stop(void);
+
+/* ---- the backdrop: a clip BEHIND the HUD (hud-layers) ---------------------------------
+ * The game's own battles play their clip in the main-play background's place, with the score
+ * panel, the top bar and the timers drawn over it. pm_backdrop does the same for a mode: the clip
+ * (a stock one, or one the build added) loops in the city's place until the mode ends it (0 or
+ * ""), pm_end, or the ball ends. The game's own framed awards (the Maser) still play in that
+ * place and the loop comes back after them. A full-screen clip of yours (pm_clip, over
+ * everything, the HUD too) is played first when both are asked for: the loop waits for it. */
+#define PM_CAN_BACKDROP     0x20000u  /* pm_backdrop / pm_backdrop_once */
+int pm_backdrop(const char *name);         /* 1 = asked for; 0 = this port cannot */
+int pm_backdrop_once(const char *name);    /* play this once in the loop's place, then the loop again */
+int pm_backdrop_showing(void);             /* 1 while the backdrop is on the glass */
 
 /* ---- the game's own message screens (optional, title specific) --------------------- */
 int pm_message_set(unsigned id, const char *words);   /* show `words` wherever id is shown */
@@ -331,6 +348,12 @@ int pm_display_priority(unsigned priority);
 /* 1 while a display of the game's that beat your priority has the screen (your screen is
  * under it); 0 otherwise, and with no priority held. */
 int pm_display_covered(void);
+/* Your mode is over (as pm_end: another may begin at once) but its ENDING - a full-screen clip, its
+ * total - should keep the screen: the display priority it holds stays for `ms` more, so an award of
+ * the game's that waited through the mode does not take the one video surface from the ending clip.
+ * The hold goes when the time is up, another mode begins, the ball or the game ends, or you call
+ * pm_display_priority(0). 1 = ended (the hold kept if one was held); 0 = your mode was not running. */
+int pm_end_holding(unsigned ms);
 
 /* ---- the game's own rules: their shot handlers (item 160; MODE_SDK.md "Counts as") ----------
  * A rule the game shipped with (Godzilla's battle vs Ebirah, its tank attack multiball) is a

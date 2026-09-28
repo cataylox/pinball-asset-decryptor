@@ -37,6 +37,53 @@ function Notices({ s }) {
   return html`<div class="stack emu-notices">${out}</div>`;
 }
 
+// ------------------------------------------------------------ the rigs
+// Several emulator rigs can be up on one PC, one per session or triage
+// ticket (docs/plans/rig_slots.md).  Each has a colour - the band across the
+// top of its playfield window - and a holder.  Shown only when there is
+// something to say: this window drives a rig of its own, or another rig is
+// held or running.  An ordinary install never sees it.
+function ago(s) {
+  if (s == null) return "";
+  if (s < 60) return s + "s";
+  if (s < 3600) return Math.floor(s / 60) + "m";
+  return Math.floor(s / 3600) + "h" + String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+}
+
+function RigStrip({ s }) {
+  const rigs = s.rigs || [];
+  const mine = rigs.find((r) => r.mine) || { slot: 0 };
+  // A LAPSED hold is a free rig (riglock.sh: a lock is a lease, held only
+  // while the rig is used), so it is neither shown as held nor counted busy.
+  const held = (r) => (r.holder && r.state !== "lapsed") || r.run;
+  const busy = rigs.filter(held);
+  if (!mine.slot && !busy.some((r) => !r.mine)) return null;
+  const chips = rigs.filter((r) => r.mine || held(r)).map((r) => {
+    const run = r.run;
+    const what = run ? (run.stale ? run.game + " (no heartbeat " + ago(run.up_s) + ")"
+                                  : run.game + " running " + ago(run.up_s))
+                     : (r.doing || "held") + (r.state === "active" && r.idle_s != null
+                                              ? ", idle " + ago(r.idle_s) : "");
+    const who = r.holder || (run && run.label) || "";
+    const tipText = "Rig " + r.slot + (who ? ", held by " + who : "")
+      + (r.held_s != null ? " for " + ago(r.held_s) : "")
+      + (r.distro ? " (" + r.distro + ")" : "") + ". " + what + "."
+      + (r.mine ? " This window drives this rig." : "");
+    return html`<span class=${cx("emu-rig", r.mine && "mine", run && run.stale && "stale")}
+        style=${"--rig-c:" + r.colour} title=${tipText}>
+      <span class="emu-rig-n">${r.slot ? "Rig " + r.slot : "Main rig"}</span>
+      ${who ? html`<span class="emu-rig-who">${who}</span>` : null}
+      <span class="emu-rig-what">${r.mine && !r.holder && !run ? "this window" : what}</span>
+    </span>`;
+  });
+  const free = rigs.filter((r) => r.slot && !held(r) && !r.mine).length;
+  return html`<div class="row emu-rigs">
+    <span class="eyebrow">Emulator rigs</span>
+    ${chips}
+    ${free ? html`<span class="small muted">${free} free</span>` : null}
+  </div>`;
+}
+
 // ---------------------------------------------------------- run button
 function RunButton({ s }) {
   const b = s.run_btn || { label: "Start emulator", enabled: false, mode: "start" };
@@ -131,6 +178,8 @@ function CardSource({ s }) {
       <div class="stack emu-lblf"><label class="lbl" for="emu-power">Power</label>
         <${Select} id="emu-power" ns="emulate" k="power" value=${s.power} options=${powers} title=${s.power_tip} /></div>
     </div>
+    ${s.mains_note ? html`<div class="note warn emu-mains" role="status">
+      <span class="small warn-ink">${s.mains_note}</span></div>` : null}
     <div class="row emu-flags">
       <${Check} checked=${s.select} label="Boot selector" title=${s.select_tip}
         onChange=${(v) => call("emulate.set_select", v)} />
@@ -360,6 +409,7 @@ export default function EmulateTab() {
         title="Forget where the emulator windows were, so they open at their default position and size next time.">Reset windows<//>
     <//>
     <${Notices} s=${s} />
+    <${RigStrip} s=${s} />
     <div class="cols c75 emu-cols">
       <div class="stack emu-col">
         <${CardSource} s=${s} />

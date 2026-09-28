@@ -67,6 +67,89 @@ if [ -z "${PAD_HOME:-}" ]; then
 fi
 export PAD_HOME
 
+# ★ RIG SLOTS - SEVERAL RIGS ON ONE MACHINE, EACH A COMPLETE ONE.
+#
+# Worktrees isolate the code; until slots, nothing isolated the RIG. One
+# rootfs, one set of rings under its dump/, one renderer build, one set of run
+# logs, and killgame.sh / alive.sh that saw every rig process on the machine.
+# Two sessions sharing that could only take turns (the one rig lock), and when
+# they did not, two guests and two renderers shared one 96 MB ring.
+#
+# PAD_SLOT=N (N >= 1) gives a run its own rig without copying one:
+#
+#   $PAD_HOME/padslots/N/root     the guest rootfs: an OVERLAY whose lower
+#                                 layer is the ordinary ~/spike2root and whose
+#                                 upper layer ($SLOTDIR/upper) takes every
+#                                 write - builds, NVRAM, tables, save states,
+#                                 the rings and every other file in dump/
+#   $PAD_HOME/padslots/N/...      the renderer build, the build stage, the run
+#                                 logs and the card mountpoints
+#   audio relay port              45997 + N
+#
+# and marks every process the slot starts: PAD_SLOT is EXPORTED, so it rides
+# every child's environment down to the guest itself (run_game.sh never clears
+# it), and pad_pids() below reads it back out of /proc/<pid>/environ. That is
+# what lets killgame.sh and alive.sh see ONE slot instead of the whole machine.
+#
+# SLOT 0 IS THE RIG AS IT HAS ALWAYS BEEN. Unset or 0 changes nothing: same
+# paths, same port, and every process with no PAD_SLOT in its environment
+# belongs to it - so a machine that never uses slots never sees a difference.
+#
+# An overlay is the only form a slot can take on the machine this was written
+# for: the rootfs is tens of GB on a disk with 8 GB free, so a copy per slot is
+# not an option, and a hard-linked copy is worse than none (a build that
+# rewrites hwshim.so in place would rewrite every slot's).
+: "${PAD_SLOT:=0}"
+case "$PAD_SLOT" in
+    ''|*[!0-9]*)
+        echo "[slot] PAD_SLOT must be a number, not '$PAD_SLOT' - using slot 0" >&2
+        PAD_SLOT=0 ;;
+esac
+PAD_SLOT=$((10#$PAD_SLOT))
+export PAD_SLOT
+# Everything below is DERIVED from the slot and exported, so a child inherits
+# it - right for a run's own children, wrong the moment one slot's script asks
+# about another (riglock.sh, sourcing this as slot 0, runs
+# `PAD_SLOT=2 alive.sh`: that alive.sh would inherit slot 0's log and card
+# directories). PAD_PATHS_SLOT records which slot the inherited values belong
+# to; when it is not this one, they are dropped and derived again here.
+if [ -n "${PAD_PATHS_SLOT:-}" ] && [ "$PAD_PATHS_SLOT" != "$PAD_SLOT" ]; then
+    unset PAD_ROOT PAD_TABLES PAD_STAGE PAD_LOGDIR PAD_CARDS PAD_AUDIO_PORT PAD_LABEL
+fi
+PAD_PATHS_SLOT=$PAD_SLOT
+export PAD_PATHS_SLOT
+#: The slot count a machine offers. Each running guest is ~1.5 cores.
+: "${PAD_SLOTS_MAX:=4}"
+export PAD_SLOTS_MAX
+#: The one rootfs every slot is layered over - slot 0's own.
+PAD_BASE_ROOT=$PAD_HOME/spike2root
+export PAD_BASE_ROOT
+if [ "$PAD_SLOT" != 0 ]; then
+    PAD_SLOTDIR=$PAD_HOME/padslots/$PAD_SLOT
+    # UNCONDITIONAL, not `:=`. A slot run that inherited slot 0's PAD_ROOT (a
+    # shell that sourced this file once, a caller that exported it) would
+    # otherwise build into and boot from the SHARED rootfs while calling itself
+    # slot N - exactly the collision slots exist to prevent, and silent.
+    case "${PAD_ROOT:-}" in
+        "$PAD_SLOTDIR"/*) ;;
+        *) PAD_ROOT=$PAD_SLOTDIR/root
+           case "${PAD_TABLES:-}" in "$PAD_SLOTDIR"/*) ;; *) unset PAD_TABLES ;; esac ;;
+    esac
+    : "${PAD_AUDIO_PORT:=$((45997 + PAD_SLOT))}"
+    export PAD_AUDIO_PORT
+else
+    PAD_SLOTDIR=
+fi
+export PAD_SLOTDIR
+#: Where the run logs (gzwatch.log, padglhost.log, ...) live: the slot's own
+#: directory, or $PAD_HOME exactly as before on slot 0.
+: "${PAD_LOGDIR:=${PAD_SLOTDIR:-$PAD_HOME}}"
+export PAD_LOGDIR
+#: Where cardmount.sh mounts cards (card/<label>): per slot, because a slot's
+#: teardown unmounts what it mounted and must never take another slot's card.
+: "${PAD_CARDS:=${PAD_SLOTDIR:-$PAD_HOME}/card}"
+export PAD_CARDS
+
 : "${PAD_ROOT:=$PAD_HOME/spike2root}"
 export PAD_ROOT
 ROOT=$PAD_ROOT
@@ -102,7 +185,7 @@ TABLES=$PAD_TABLES
 # to writes instead of to reads. A root step hands the directory back to the
 # human whose home it is, and a root step is also the only thing that CAN
 # repair one that an earlier root step left behind, so it repairs it.
-: "${PAD_STAGE:=$PAD_HOME/emusrc}"
+: "${PAD_STAGE:=${PAD_SLOTDIR:-$PAD_HOME}/emusrc}"
 export PAD_STAGE
 
 # ★ WHO OWNS A PATH, ON EITHER stat. ONE DEFINITION, BECAUSE `-c` IS GNU-ONLY.
@@ -214,6 +297,168 @@ pad_give_back() {                 # [-R] <path>...
     return 0
 }
 
+# The slot process helpers (pad_slot_of, pad_pids, pad_count, pad_pkill) live
+# in padslot.sh, which a script that must not source this file can source
+# alone. See that file for why an unreadable environment counts as slot 0.
+. "$RIG/padslot.sh"
+
+# ---- RIG SLOTS: THE SLOT'S ROOTFS ---------------------------------------
+#
+# A slot's rootfs is an overlay mounted at $PAD_ROOT. Mounting one takes root,
+# so it happens where root already is: the app's runs are root, and so is
+# `slot.sh up N` (and `riglock.sh take` run through `wsl -u root`). The mount
+# lives until the WSL VM restarts; after that the first root step remounts it,
+# and the upper layer - everything the slot has written - is still on disk.
+#
+# THE LOWER LAYER IS LIVE. A build or mktables in slot 0 writes ~/spike2root,
+# and every slot that has not written that file itself sees the change. That is
+# the point (a slot starts from the current rig, not a snapshot), and it is why
+# ensurebuild.sh refuses a SLOT 0 rebuild while any slot's guest is running: a
+# linker truncating the base hwshim.so under a slot's mapped copy is a SIGBUS
+# in someone else's run.
+pad_slot_ready() {
+    [ "${PAD_SLOT:-0}" = 0 ] && return 0
+    mountpoint -q "$PAD_ROOT" 2>/dev/null && return 0
+    if [ ! -d "$PAD_BASE_ROOT" ]; then
+        echo "[slot] no rig to layer slot $PAD_SLOT over: $PAD_BASE_ROOT does not exist." >&2
+        echo "[slot] Set up the ordinary rig (slot 0) first." >&2
+        return 1
+    fi
+    if [ "$(id -u)" != 0 ]; then
+        echo "[slot] slot $PAD_SLOT is not mounted, and mounting it takes root. Once per WSL boot:" >&2
+        echo "[slot]   wsl -u root -e bash $RIG/slot.sh up $PAD_SLOT" >&2
+        return 1
+    fi
+    mkdir -p "$PAD_SLOTDIR/upper" "$PAD_SLOTDIR/work" "$PAD_ROOT" || return 1
+    pad_give_back "$PAD_HOME/padslots" "$PAD_SLOTDIR" "$PAD_SLOTDIR/upper" "$PAD_ROOT"
+    if ! mount -t overlay "padslot$PAD_SLOT" \
+            -o "lowerdir=$PAD_BASE_ROOT,upperdir=$PAD_SLOTDIR/upper,workdir=$PAD_SLOTDIR/work" \
+            "$PAD_ROOT"; then
+        echo "[slot] could not mount slot $PAD_SLOT's overlay at $PAD_ROOT" >&2
+        return 1
+    fi
+    echo "[slot] slot $PAD_SLOT mounted: $PAD_ROOT (writes go to $PAD_SLOTDIR/upper)" >&2
+}
+
+# ---- RIG SLOTS: THE BOARD - WHO HOLDS WHICH SLOT, SEEN FROM EVERYWHERE ----
+#
+# The lock and run records live on the WINDOWS side (%USERPROFILE%\.pad-rig),
+# because every reader is somewhere else: the sessions' rig in Ubuntu, the
+# app's rig in PAD-Runtime (a different distro, which cannot see Ubuntu's
+# files or processes), the app's window and the triage dashboard on Windows.
+# /mnt/c is the one place all of them can read without starting anything.
+#
+#   slot-N.lock   who holds slot N and what they are doing; mtime = last word
+#   slot-N.run    a run is up in slot N (game, label, distro); watch.sh touches
+#                 it while the run lives, so a stale mtime means it died hard
+#
+# Both are one line of JSON. riglock.sh writes the locks; watch.sh the runs.
+pad_board_dir() {
+    if [ -n "${PAD_BOARD:-}" ]; then echo "$PAD_BOARD"; return 0; fi
+    # A rig under /mnt/<d>/Users/<name>/ is a Windows checkout or install:
+    # that profile is the Windows side's %USERPROFILE%.
+    case "$RIG" in
+        /mnt/[a-z]/Users/*/*)
+            local u=${RIG#/mnt/?/Users/}
+            echo "${RIG%%/Users/*}/Users/${u%%/*}/.pad-rig"
+            return 0 ;;
+    esac
+    echo "$PAD_HOME/.pad-rig"
+}
+
+#: One field of a board record (flat one-line JSON with string/number values).
+pad_board_field() {               # <file> <key>
+    [ -f "$1" ] || return 0
+    sed -n -e "s/.*\"$2\": *\"\\([^\"]*\\)\".*/\\1/p" \
+           -e "t" -e "s/.*\"$2\": *\\([0-9-][0-9]*\\).*/\\1/p" "$1" 2>/dev/null | head -1
+}
+
+#: The git branch of the checkout this rig runs from, or nothing. Read off the
+#: files, not `git`: git in WSL cannot follow a Windows worktree's .git pointer
+#: (an absolute C:/ path), and this is asked on every run start.
+pad_branch() {
+    local top g head
+    top=$(cd "$RIG/../.." 2>/dev/null && pwd) || return 0
+    g=$top/.git
+    if [ -f "$g" ]; then
+        g=$(sed -n 's/^gitdir: //p' "$g" | tr -d '\r')
+        case "$g" in
+            [A-Za-z]:/*) g="/mnt/$(printf %s "${g%%:*}" | tr 'A-Z' 'a-z')${g#?:}" ;;
+            /*) ;;
+            *) g=$top/$g ;;
+        esac
+    fi
+    [ -f "$g/HEAD" ] || return 0
+    head=$(tr -d '\r' < "$g/HEAD")
+    case "$head" in "ref: refs/heads/"*) echo "${head#ref: refs/heads/}" ;; esac
+}
+
+#: WHO this run is for, in a few characters: the ticket or item that started it.
+#: PAD_LABEL wins; then whoever holds this slot's lock; then PAD_TICKET (the
+#: triage app sets it on every session and app it launches); then the branch
+#: of the checkout the rig runs from. main has no label - that is David's rig.
+pad_label() {
+    local l=${PAD_LABEL:-}
+    [ -n "$l" ] || l=$(pad_board_field "$(pad_board_dir)/slot-${PAD_SLOT:-0}.lock" who)
+    [ -n "$l" ] || l=${PAD_TICKET:-}
+    if [ -z "$l" ]; then
+        l=$(pad_branch)
+        case "$l" in main|master) l= ;; ticket/*) l=${l#ticket/} ;; esac
+    fi
+    printf '%s' "$l" | tr -cd 'A-Za-z0-9 ._/:#+-' | cut -c1-40
+}
+
+#: WHO IS ASKING, never who holds the slot: PAD_LABEL, PAD_TICKET, or the
+#: checkout's branch. pad_label() falls back to the holder, which is right for
+#: a window title and exactly wrong for "is this slot mine?".
+pad_own_label() {
+    local l=${PAD_LABEL:-${PAD_TICKET:-}}
+    if [ -z "$l" ]; then
+        l=$(pad_branch)
+        case "$l" in main|master) l= ;; ticket/*) l=${l#ticket/} ;; esac
+    fi
+    printf '%s' "$l" | tr -cd 'A-Za-z0-9 ._/:#+-' | cut -c1-40
+}
+
+# ★ "I AM USING THIS SLOT NOW" - the lease (riglock.sh, "A LOCK IS A LEASE").
+# watch.sh, killgame.sh and restorestate.sh call this before they act: it
+# renews the lease if the slot is ours, takes it if it is free or lapsed, and
+# REFUSES if it is someone else's and in use - a session whose lease lapsed
+# while it was reading logs, and whose slot another session took meanwhile,
+# must not Stop or restore into that session's run.
+#
+# Skipped with nobody to name (David's own runs from main, an installed app on
+# rig 0: exactly as before leases), with PAD_NO_CLAIM=1, under pytest unless the
+# test gave it a board of its own (a test must never write the real board), and
+# in a child of a process that already said it - a run's own helpers.
+pad_slot_use() {                  # [what...]
+    local me
+    [ -n "${PAD_NO_CLAIM:-}" ] && return 0
+    [ "${PAD_SLOT_USED:-}" = "$PAD_SLOT" ] && return 0
+    [ -n "${PYTEST_CURRENT_TEST:-}" ] && [ -z "${PAD_BOARD:-}" ] && return 0
+    me=$(pad_own_label)
+    [ -n "$me" ] || return 0
+    PAD_NO_CLAIM=1 bash "$RIG/riglock.sh" use "$PAD_SLOT" "$me" "$@" < /dev/null || return 1
+    PAD_SLOT_USED=$PAD_SLOT
+    export PAD_SLOT_USED
+}
+
+#: What every window a run opens puts at the FRONT of its title (the end is
+#: what a taskbar button cuts off), so a window says whose it is:
+#: "[rig 2: item/48]", "[PAD-231]" for a labelled slot-0 run, or
+#: nothing at all for David's own runs from main. "rig", not "slot", in
+#: anything a human reads: the app already calls save states "slots". Plain
+#: ASCII: X11's WM_NAME is Latin-1, and a middle dot arrives as mojibake.
+pad_title_tag() {
+    local l
+    l=$(pad_label)
+    if [ "${PAD_SLOT:-0}" != 0 ]; then
+        echo "[rig $PAD_SLOT${l:+: $l}]"
+    elif [ -n "$l" ]; then
+        echo "[$l]"
+    fi
+}
+
 # ★ CAN THIS ACCOUNT WRITE THAT FILE, AND IF NOT, WHY - IN WORDS.
 #
 # The other half of pad_give_back: it stops the trap being set, and this one
@@ -316,8 +561,8 @@ pad_is_wsl() {
 # sh in the second or two before ./game execs, and qemu-arm covers a container
 # whose binfmt rewrites argv with its own interpreter path.
 pad_guest_up() {
-    pgrep -x game >/dev/null 2>&1 && return 0
-    pgrep -f 'arm-binfmt|qemu-arm' >/dev/null 2>&1
+    [ -n "$(pad_pids -x game)" ] && return 0
+    [ -n "$(pad_pids -f 'arm-binfmt|qemu-arm')" ]
 }
 
 # ---- WHAT A CHECKPOINTABLE BOOT NEEDS AND AN ORDINARY ONE DOES NOT --------
@@ -733,8 +978,9 @@ export PAD_GLHOST_SRCS PAD_GLGUEST_SRCS
 #: On every ordinary run, and on the app's own WSL launches (which carry the
 #: desktop user's HOME on purpose), $PAD_HOME and $HOME are the same directory,
 #: so this changes nothing anywhere else.
-PAD_GLHOST_BIN=$PAD_HOME/padglhost
-PAD_GLHOST_STAMP=$PAD_HOME/padglhost.srcs
+#: A slot builds its own: two sessions' worktrees are two different renderers.
+PAD_GLHOST_BIN=${PAD_SLOTDIR:-$PAD_HOME}/padglhost
+PAD_GLHOST_STAMP=${PAD_SLOTDIR:-$PAD_HOME}/padglhost.srcs
 #: The guest half, stamped beside the libraries it produces.
 PAD_GLGUEST_STAMP=$ROOT/usr/lib/glbridge.srcs
 export PAD_GLHOST_BIN PAD_GLHOST_STAMP PAD_GLGUEST_STAMP
@@ -991,12 +1237,17 @@ pad_x_socket() {
 #   ok        the local socket is there.
 #   masked    it is not there, and WSLg's copy of it IS - repairable.
 #   nosocket  it is not there and there is nothing to put back.
+#   hidden    a PAD_HIDDEN=1 run (watch.sh, PAD-230): DISPLAY is the rig's own
+#             Xvfb, which listens on the ABSTRACT socket only (WSLg mounts the
+#             socket directory read-only), so there is no file to look for and
+#             watch.sh has already seen it come up.
 #
 # `-e` rather than `-S` deliberately: what matters is whether libX11 finds
 # something at that path, a non-socket sitting there is a broken machine by any
 # reading, and a test can create a file where it cannot create a socket.
 pad_display_state() {
     local sock
+    [ "${PAD_HIDDEN:-0}" = 1 ] && { echo hidden; return 0; }
     [ -n "${DISPLAY:-}" ] || { echo none; return 0; }
     sock=$(pad_x_socket) || { echo remote; return 0; }
     [ -e "$sock" ] && { echo ok; return 0; }
@@ -1222,6 +1473,11 @@ pad_export_win() {
     PAD_ROOT_WSL=$ROOT
     export PAD_ROOT_WSL
     WSLENV="${WSLENV:+$WSLENV:}PAD_ROOT/p:PAD_TABLES/p:PAD_WSL_DISTRO:PAD_ROOT_WSL"
+    # The slot and the label cross too: the playfield window titles itself
+    # with them, keys its saved position by slot, and hands PAD_SLOT back to
+    # every helper it runs in WSL so a switch press lands in ITS slot's rings.
+    [ -n "${PAD_LABEL+x}" ] || { PAD_LABEL=$(pad_label); export PAD_LABEL; }
+    WSLENV="$WSLENV:PAD_SLOT:PAD_LABEL"
     export WSLENV
 }
 

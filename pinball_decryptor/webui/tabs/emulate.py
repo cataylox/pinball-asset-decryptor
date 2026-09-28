@@ -200,6 +200,8 @@ class EmulateTab(TabService):
         self._which_token = 0
         self._which = None
         self._browsed = None
+        self._mains_note = ""       # PAD-173: what this game does about 50 Hz
+        self._mains_key = None
         self._slots_rows = None
         self._slots_total = None
         self._slots_free = None
@@ -209,14 +211,23 @@ class EmulateTab(TabService):
                       "audio": "—"}
 
         self.emulate_card_var.trace_add("write", self._on_card_changed)
+        # PAD-173: the note belongs to the pair (card, Power), so both move it.
+        self.emulate_power_var.trace_add("write", lambda *_a: self._mains_kick())
         self.emulate_overrides_var.trace_add(
             "write", lambda *_a: self._overrides_paint())
         self._volume_var.trace_add("write", self._on_volume_change)
         self._mute_var.trace_add("write", self._on_volume_change)
 
         rig_ok = rig.rig_available()
+        # The board as it stands when the tab opens; the status poll keeps it
+        # current from then on. File reads only - see core/rigslot.py.
+        try:
+            from ...core import rigslot
+            rigs = rigslot.board()
+        except Exception:                                # noqa: BLE001
+            rigs = []
         self.set(
-            platform=sys.platform, no_rig=no_rig(), rig=rig_ok,
+            platform=sys.platform, no_rig=no_rig(), rig=rig_ok, rigs=rigs,
             rig_missing="" if rig_ok else self._rig_missing_text(),
             countries=[rig.COUNTRY_GAME] + list(rig.COUNTRIES),
             powers=[label for label, _env in rig.POWER_CHOICES],
@@ -235,7 +246,7 @@ class EmulateTab(TabService):
             slots_sum=("The slots appear with the next status poll."
                        if sys.platform == "win32" else
                        "Slot management is available on Windows (WSL)."),
-            game=None, which=None,
+            game=None, which=None, mains_note="",
             assets="", ovr_hint=rig.OVR_OFF, ovr_refused=False,
             cache=None, rename=None)
         self._run_label(False, False)
@@ -416,6 +427,7 @@ class EmulateTab(TabService):
         self._precache_kick()
         self._select_probe_kick()
         self._which_kick()
+        self._mains_kick()
 
     # -- which card this is, next to the project (PAD-199) ----------------
     def _which_kick(self):
@@ -622,6 +634,44 @@ class EmulateTab(TabService):
             if not self._select_touched and self._select_menu is not None:
                 self._select_var.set(self._select_menu)
         self._select_hint()
+
+    # -- does this game HAVE a mains lock? (PAD-173) -----------------------
+    #
+    # The Power row's "50 Hz mains, US machine" is the setup a US game refuses
+    # to run on, and the emulator sets it up faithfully - but whether the
+    # refusal comes is the GAME'S decision, and the builds do not agree (see
+    # plugins/stern/mains_check.py, where both shapes are decoded).  Sam
+    # picked it twice, saw his game start both times, and reported it as a
+    # bug; it was his game's own code.  So the card is asked, and the answer
+    # sits beside the row rather than the app promising a lock.
+    def _mains_kick(self):
+        """Probe the picked card, off the loop, when the lock is selected."""
+        card = self._card()
+        want = (self.emulate_power_var.get() == rig.POWER_CHOICES[2][0]
+                and bool(card))
+        if not want:
+            self._mains_note = ""
+            self.set(mains_note="")
+            return
+        from ...plugins.stern import mains_check
+        stamp = mains_check.cache_stamp(card)
+        key = (card, stamp)
+        if key == self._mains_key:
+            return
+        self._mains_key = key
+
+        def run():
+            title, verdict = mains_check.verdict_card(card)
+            self._post(self._mains_apply, key,
+                       mains_check.sentence(title, verdict))
+
+        self._thread(run)
+
+    def _mains_apply(self, key, note):
+        if key != self._mains_key:      # the card or the row moved on
+            return
+        self._mains_note = note
+        self.set(mains_note=note)
 
     # -- the machine row (PAD-149) -----------------------------------------
     def _machine_env(self):
@@ -1980,6 +2030,15 @@ class EmulateTab(TabService):
             self._refuse_start("the emulator is not set up on this PC; use "
                                "Check setup on the Emulate tab")
             return
+        # A TICKET'S RIG IS TAKEN NOW, for this run, and given back at Stop
+        # (core/rigslot.py claim_for_run). Nothing changes without a ticket.
+        from ...core import rigslot
+        if rigslot.claim_for_run() is None:
+            busy = ", ".join("rig %d: %s" % (r["slot"], r["holder"])
+                             for r in rigslot.board()[1:] if r["holder"])
+            self._refuse_start("every emulator rig is in use right now (%s). "
+                               "Try again when one is free." % busy)
+            return
         self._cancel_prepare = False
         self._starting = True
         self._run_label(False, True)
@@ -1992,6 +2051,10 @@ class EmulateTab(TabService):
             self._refuse_start(self.get("hint") or "")
             return
         env = self._launch_env(src)
+        # PAD-173: a lock this game will not give is worth saying once more
+        # here, because the log is what a user sends when it "did not work".
+        if self._mains_note:
+            self._log("[emulate] " + self._mains_note)
         ovr_request = self._overrides_wanted()
         ovr_selector = bool(self._select_var.get())
         prepare_card = self._card()
@@ -2147,6 +2210,16 @@ class EmulateTab(TabService):
         for key, name in (("root", "PAD_ROOT"), ("tables", "PAD_TABLES")):
             if fields.get(key):
                 env[name] = fields[key]
+        # WHICH RIG (core/rigslot.py): the window titles itself with it, and a
+        # rig >= 1's window carries the marker its own Stop matches on (and
+        # every other rig's Stop leaves alone) - watch.sh's launch does both.
+        from ...core import rigslot
+        n = int(fields.get("slot") or rigslot.slot() or 0)
+        if n:
+            env["PAD_SLOT"] = str(n)
+            cmd.append("--pad-slot=%d" % n)
+        if rigslot.label():
+            env["PAD_LABEL"] = rigslot.label()
         # PAD-204: the window's status bar moves this tab's volume / Mute
         env["PAD_AUDIO_CTL"] = audio_ctl_file()
         try:
@@ -2204,6 +2277,9 @@ class EmulateTab(TabService):
                     except Exception:                    # noqa: BLE001
                         pass
             self._close_playfield()
+            # the rig goes back the moment it is not used (claim_for_run)
+            from ...core import rigslot
+            rigslot.release_claimed()
             self._stopping = False
             if needs_restart and sys.platform == "win32":
                 self._post(self._offer_wsl_restart)
@@ -2431,6 +2507,13 @@ class EmulateTab(TabService):
                 rt = runtime.status()
             except Exception:                            # noqa: BLE001
                 rt = None
+            # WHO HOLDS THE OTHER RIGS (core/rigslot.py): file reads on the
+            # Windows side, no WSL call, so it rides this poll for free.
+            try:
+                from ...core import rigslot
+                rigs = rigslot.board()
+            except Exception:                            # noqa: BLE001
+                rigs = []
             if self._stopped:
                 self._poll_busy = False
                 return
@@ -2441,6 +2524,7 @@ class EmulateTab(TabService):
                 self._runtime_apply(rt)
                 self._apply(info)
                 self._follow_audio_ctl()
+                self.set(rigs=rigs)
             self._post(apply_and_release)
 
         self._thread(run)

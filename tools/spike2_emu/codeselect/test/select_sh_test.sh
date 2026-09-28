@@ -82,6 +82,15 @@ if command -v "$QEMU" >/dev/null 2>&1 && [ -x "$ROOT/bin/busybox.nosuid" ]; then
     check busybox 2 ""
     lookups busybox
     glookups "busybox group"
+    # PAD-226: the scores= lookup, as the card's own awk reads it (spaces around the fields)
+    printf 'image=/dev/mmcblk0p3|A|a
+scores=0|heisei
+scores = 2 | orchestra 
+' > "$tmp.s"
+    [ "$(sh select.sh --scores 0 "$tmp.s")" = heisei ] || { echo "select_sh_test: FAIL (busybox) --scores 0"; exit 1; }
+    [ "$(sh select.sh --scores 2 "$tmp.s")" = orchestra ] || { echo "select_sh_test: FAIL (busybox) --scores 2"; exit 1; }
+    [ -z "$(sh select.sh --scores 1 "$tmp.s")" ] || { echo "select_sh_test: FAIL (busybox) --scores 1"; exit 1; }
+    rm -f "$tmp.s"
     unset AWK
     awks="host awk and the card's busybox awk under qemu"
 else
@@ -210,6 +219,73 @@ grep -q "has no device" "$W/out" || { echo "select_sh_test: FAIL (nodev) message
 CODESELECT_MULTI="$W/blocked/multi" \
 hook fallback 2 0 "" "umount $G" "mount -t ext4 -o ro,relatime,exec /dev/mmcblk0p7 $W/multi2" "mount --bind $W/multi2/img2 $G"
 grep -q "using $W/multi2" "$W/out" || { echo "select_sh_test: FAIL (fallback) message"; cat "$W/out"; exit 1; }
+# ---- PAD-226: an image with its own machine store (scores=<N>|<name>) ------------------------
+# the games tree's game -> <title>/game names the title; the shared store is $NVD/<title>; the
+# image's own is $NVO/<name>/<title>, seeded once from the shared one and bound over it
+NVD="$W/nv"; NVO="$W/nvown"
+export CODESELECT_NV="$NVD" CODESELECT_NV_OWN="$NVO"
+rm -f "$G/game"; mkdir -p "$G/godzilla_pro"; ln -s godzilla_pro/game "$G/game"
+mkdir -p "$NVD/godzilla_pro/NVM"; echo shared > "$NVD/godzilla_pro/NVM/00000001"
+{ cat "$W/conf"; echo "scores=0|heisei"; echo "scores = 2 | orchestra "; } > "$W/conf_scores"
+[ "$(sh select.sh --scores 0 "$W/conf_scores")" = heisei ] || { echo "select_sh_test: FAIL --scores 0"; exit 1; }
+[ "$(sh select.sh --scores 2 "$W/conf_scores")" = orchestra ] || { echo "select_sh_test: FAIL --scores 2 (spaces)"; exit 1; }
+[ -z "$(sh select.sh --scores 1 "$W/conf_scores")" ] || { echo "select_sh_test: FAIL --scores 1 is not shared"; exit 1; }
+check "scores lines" 1 /dev/mmcblk0p7 "$W/conf_scores"
+checksub "scores lines" 2 img2 "$W/conf_scores"
+export CODESELECT_CONF="$W/conf_scores"
+hook scores_first 0 0 "" "mount --bind $NVO/heisei/godzilla_pro $NVD/godzilla_pro"
+grep -q "image 0: its own machine store $NVO/heisei/godzilla_pro, started from a copy of the shared one" "$W/out" \
+    || { echo "select_sh_test: FAIL (scores_first) message"; cat "$W/out"; exit 1; }
+[ "$(cat "$NVO/heisei/godzilla_pro/NVM/00000001")" = shared ] || { echo "select_sh_test: FAIL (scores_first) the seed is not the shared store"; exit 1; }
+[ ! -e "$NVO/heisei/godzilla_pro.part" ] || { echo "select_sh_test: FAIL (scores_first) a .part was left"; exit 1; }
+# the next boot binds the store it already has and never copies over it
+echo "shared, later" > "$NVD/godzilla_pro/NVM/00000001"; echo own > "$NVO/heisei/godzilla_pro/NVM/00000002"
+hook scores_again 0 0 "" "mount --bind $NVO/heisei/godzilla_pro $NVD/godzilla_pro"
+[ "$(cat "$NVO/heisei/godzilla_pro/NVM/00000001")" = shared ] || { echo "select_sh_test: FAIL (scores_again) the store was copied over"; exit 1; }
+grep -q "started from a copy" "$W/out" && { echo "select_sh_test: FAIL (scores_again) seeded twice"; cat "$W/out"; exit 1; }
+# the selector fails and the primary boots: image 0's own store still applies
+hook scores_selfail 1 2 "" "mount --bind $NVO/heisei/godzilla_pro $NVD/godzilla_pro"
+# no shared store yet (a new machine): the image's own starts empty
+rm -rf "$NVO" "$NVD"
+hook scores_empty 0 0 "" "mount --bind $NVO/heisei/godzilla_pro $NVD/godzilla_pro"
+grep -q "started empty" "$W/out" || { echo "select_sh_test: FAIL (scores_empty) message"; cat "$W/out"; exit 1; }
+[ -d "$NVD/godzilla_pro" ] || { echo "select_sh_test: FAIL (scores_empty) no mountpoint made"; exit 1; }
+# a name that walks out of the store dir is refused: the image shares, no bind
+{ cat "$W/conf"; echo "scores=0|../etc"; } > "$W/conf_badname"
+export CODESELECT_CONF="$W/conf_badname"
+hook scores_badname 0 0 ""
+grep -q "bad scores name '../etc': it shares the machine store" "$W/out" || { echo "select_sh_test: FAIL (scores_badname) message"; cat "$W/out"; exit 1; }
+# a games tree whose game is not <title>/game: the image shares, no bind
+export CODESELECT_CONF="$W/conf_scores"
+rm -f "$G/game"; : > "$G/game"
+hook scores_notitle 0 0 ""
+grep -q "cannot tell its title" "$W/out" || { echo "select_sh_test: FAIL (scores_notitle) message"; cat "$W/out"; exit 1; }
+export CODESELECT_CONF="$W/conf"
+unset CODESELECT_NV CODESELECT_NV_OWN
+rm -rf "$G/godzilla_pro" "$NVD" "$NVO"
+# ---- PAD-226: each image's own custom modes ($DIR/modes/img<N>, else $DIR/modes/none) -------
+PM="$W/padmode"
+mkdir -p "$W/modes/img2" "$W/modes/none" "$PM"
+: > "$W/modes/img2/mode.so"
+export CODESELECT_PADMODE="$PM"
+# image 2 carries its own set: it is bound over the rootfs's
+hook modes_own 2 0 "" "umount $G" "mount -t ext4 -o ro,relatime,exec /dev/mmcblk0p7 $M" "mount --bind $M/img2 $G" \
+    "mount --bind $W/modes/img2 $PM"
+grep -q "image 2: $W/modes/img2 bound over $PM (its own custom modes)" "$W/out" || { echo "select_sh_test: FAIL (modes_own) message"; cat "$W/out"; exit 1; }
+# image 1 carries none: the empty set, so the primary's modes never run under it
+hook modes_none 1 0 "" "umount $G" "mount -t ext4 -o ro,relatime,exec /dev/mmcblk0p7 $G" "mount --bind $W/modes/none $PM"
+grep -q "(no custom modes)" "$W/out" || { echo "select_sh_test: FAIL (modes_none) message"; cat "$W/out"; exit 1; }
+# image 0 keeps the set its own card put on the rootfs
+hook modes_primary 0 0 ""
+# no mountpoint on the rootfs: nothing is bound, and the log says so
+rmdir "$PM"
+hook modes_nomount 1 0 "" "umount $G" "mount -t ext4 -o ro,relatime,exec /dev/mmcblk0p7 $G"
+grep -q "no $PM: the rootfs's modes stay as they are" "$W/out" || { echo "select_sh_test: FAIL (modes_nomount) message"; cat "$W/out"; exit 1; }
+# a card built before per-image modes (no $DIR/modes): exactly the mounts it always made
+rm -rf "$W/modes"; mkdir -p "$PM"
+hook modes_oldcard 1 0 "" "umount $G" "mount -t ext4 -o ro,relatime,exec /dev/mmcblk0p7 $G"
+unset CODESELECT_PADMODE
+rm -rf "$PM"
 # ---- deltas (item 107): a tree carrying .multiboot/deltas runs materialize.py --------------
 # the fake mount grows the index under img2 when FAKE_DELTAS is set; the fake python records
 # its command line; no --mount-dev when CODESELECT_WORKDEV is empty (a plain work directory)
@@ -286,4 +362,4 @@ else
     real="no python on this host: materialize.py's own run skipped"
 fi
 rm -rf "$W"
-echo "select_sh_test: OK ($awks; the hook against fake mounts: 15 cases; $real)"
+echo "select_sh_test: OK ($awks; the hook against fake mounts: 26 cases; $real)"

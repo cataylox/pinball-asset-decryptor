@@ -122,7 +122,12 @@ GODZILLA_PRO_1_15 = TitleProfile(
         ("Left spinner", 0x200),
         ("Top spinner", 0x2000),
         ("Right spinner", 0x20000),
+        # PAD-228: the cabinet buttons, from the framework's switch drain (the port's `switch` lines)
+        ("Action button", 0x1000000000000000),
+        ("Left flipper button", 0x2000000000000000),
+        ("Right flipper button", 0x4000000000000000),
     ),
+    switch_shots=("Action button", "Left flipper button", "Right flipper button"),
     callout_countdown=1287,
     callout_ten_seconds=1291,
     callout_time_up=1295,
@@ -573,7 +578,12 @@ SWITCH_SHOTS_PROVEN = frozenset({"beatles-1.29"})
 #: Builds whose shots from the framework's switch drain (site switch_edge, `switch` lines) were seen
 #: reaching a mode in the emulator, each switch once, as ``<game>-<version>`` (2026-09-23: The Beatles
 #: 1.29 and Star Wars ELG 1.10 of generation B, Batman 66 1.13 and Rush LE 1.18 of generation A).
-SWITCH_EDGE_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10", "batman-1.13", "rush_le-1.18"})
+#: PAD-228 (2026-09-27, rig 2): the Godzilla builds' cabinet buttons - Action 34, left flipper 60, right
+#: flipper 59 - one hit per press on the press edge (the game's mode mask is 0 in play), a mode scored the
+#: flipper buttons +1M and +2M and served its multiball on the Action button, and the shim's LED view had
+#: the Action button solid red for the whole run of the mode (the game's own animation before it).
+SWITCH_EDGE_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10", "batman-1.13", "rush_le-1.18",
+                                "godzilla_pro-1.15", "godzilla_pro-1.16", "godzilla_le-1.16"})
 
 
 def _core_names(port):
@@ -1503,6 +1513,13 @@ class ModeSpec:
     # PAD-225: a ball save when it starts, with no multiball: a drained ball is served back for this many
     # seconds (1-60), through the game's own ball saver; 0 = none. A multiball uses its own ball_save.
     start_ball_save: int = 0
+    # PAD-228: the balls come on this shot while the mode runs (the Action button: "press it now for a
+    # multiball"), not when it starts; its clock is the window to hit it. "" = when it starts
+    multiball_on_shot: str = ""
+    # PAD-227: more than one thing to meet before it starts (MODE_PARAMETERS.md `trigger_also`, `after`)
+    start_also: list = field(default_factory=list)   # [[shot name, count]]: hit these too, in one ball
+    after: str = ""                      # another mode's NAME: starts only once that one has run; "" = none
+    after_when: str = "game"             # ball | game: ... this ball, or this game
 
     # ---- JSON ----------------------------------------------------------------
     def to_json(self):
@@ -1742,6 +1759,15 @@ def retarget(spec, p):
         out.start_shot = p.example_start_shot if p.example_start_shot in names else names[0]
     dropped += [s for s in out.scoring_shots if s not in names]
     out.scoring_shots = [s for s in out.scoring_shots if s in names]
+    if isinstance(out.start_also, list):             # PAD-227: matched by name, as the start shot
+        kept = []
+        for row in out.start_also:
+            shot = row[0] if isinstance(row, (list, tuple)) and len(row) == 2 else None
+            if isinstance(shot, str) and shot not in names:
+                dropped.append(shot)
+                continue
+            kept.append(row)
+        out.start_also = kept
     _retarget_advanced(out, spec.title, p, names, dropped)
     out.title = p.key
     return out, dropped
@@ -1785,6 +1811,10 @@ def _retarget_advanced(out, old_key, p, names, dropped):
         if out.add_ball_shot not in dropped:                # item 167
             dropped.append(out.add_ball_shot)
         out.add_ball_shot = ""
+    if isinstance(out.multiball_on_shot, str) and out.multiball_on_shot and out.multiball_on_shot not in names:
+        if out.multiball_on_shot not in dropped:            # PAD-228
+            dropped.append(out.multiball_on_shot)
+        out.multiball_on_shot = ""
     if old_key == p.key or not isinstance(out.callout_at, list):
         return
     try:
@@ -2028,6 +2058,11 @@ def copy_modes(src, dest, slugs=None):
                 # a code mode is modes/<slug>/<slug>.c: the file follows its folder's new name
                 os.replace(os.path.join(mode_folder(dest, new_slug), slug + ".c"),
                            os.path.join(mode_folder(dest, new_slug), new_slug + ".c"))
+                from . import block_modes as BM   # PAD-232: a blocks mode's C names its folder
+                try:
+                    BM.regenerate(dest, new_slug)
+                except (OSError, ValueError):
+                    pass                            # its old C, renamed, still builds
             taken.add(new_slug)
             report.modes.append(CopiedMode(slug, name, COPY_CODE, new_slug,
                                            "a build says if %s lacks a shot it names" % p.label))
@@ -2117,6 +2152,7 @@ def validate(spec, folder=None):
     out += validate_display_lights(spec)
     out += validate_multiball(spec, p)
     out += validate_ball_save(spec, p)
+    out += validate_more_to_start(spec, p)
     return out
 
 
@@ -2145,6 +2181,11 @@ def validate_multiball(spec, p):
         n = _int_or_none(spec.add_ball_max)
         if n is None or not 1 <= n <= ADD_BALL_MAX:
             out.append("A shot adds a ball 1 to %d times a multiball." % ADD_BALL_MAX)
+    if spec.multiball_on_shot:                                       # PAD-228
+        if spec.multiball_on_shot not in dict(p.shots):
+            out.append("%s has no shot called %r to start the multiball on." % (p.label, spec.multiball_on_shot))
+        if not _int_or_none(spec.seconds):
+            out.append("A multiball that starts on a shot needs Runs for: its seconds are the time to hit the shot.")
     return out
 
 
@@ -2155,6 +2196,8 @@ def multiball_lines(spec, p):
     lines = ["multiball      %d %d" % (int(spec.balls), int(spec.ball_save))]
     if spec.add_ball_shot:
         lines.append("add_ball       0x%08x %d" % (p.mask([spec.add_ball_shot]), int(spec.add_ball_max)))
+    if spec.multiball_on_shot:                                       # PAD-228
+        lines.append("multiball_on   0x%08x" % p.mask([spec.multiball_on_shot]))
     return lines
 
 
@@ -2337,8 +2380,74 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
         lines.append("stack          no")
     lines += parameter_lines(spec, slug, p)
     lines += display_light_lines(spec)
+    lines += more_to_start_lines(spec, p)    # PAD-227: nothing unless the mode has them
     lines = _starts_ends_lines(spec, lines)
     return "\n".join(lines) + "\n"
+
+
+# ---- PAD-227: more than one thing to meet before it starts ---------------------------------
+#: ``start_also`` rows mode_file.c takes (its ALSO_MAX)
+START_ALSO_MAX = 3
+AFTER_WHEN = ("ball", "game")
+
+
+def _also_rows(spec):
+    """``spec.start_also`` as ``[(shot, count)]``; None when it is not a list of pairs."""
+    rows = spec.start_also
+    if not isinstance(rows, list):
+        return None
+    out = []
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or len(row) != 2:
+            return None
+        out.append((row[0], row[1]))
+    return out
+
+
+def validate_more_to_start(spec, p):
+    """The reasons ``start_also`` / ``after`` cannot be built, as sentences."""
+    out = []
+    names = dict(p.shots)
+    rows = _also_rows(spec)
+    if rows is None or len(rows) > START_ALSO_MAX:
+        out.append("A mode can also wait for up to %d other shots." % START_ALSO_MAX)
+        rows = []
+    for shot, count in rows:
+        if shot not in names:
+            out.append("%s has no shot called %r." % (p.label, shot))
+        if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 20:
+            out.append("Each other shot it waits for is hit 1 to 20 times.")
+    after = spec.after if isinstance(spec.after, str) else None
+    if after is None:
+        out.append("The mode it starts after is a mode's name.")
+    elif after.strip():
+        if after.strip() == spec.name.strip():
+            out.append("A mode cannot wait for itself to run first.")
+        if spec.after_when not in AFTER_WHEN:
+            out.append("The mode it starts after has run this ball or this game.")
+    return out
+
+
+def more_to_start_lines(spec, p):
+    """The ``trigger_also`` and ``after`` lines (nothing at the defaults, so every file made
+    before PAD-227 stays byte-identical)."""
+    lines = ["%-14s 0x%08x %d" % ("trigger_also", p.mask([shot]), int(count))
+             for shot, count in _also_rows(spec) or ()]
+    if isinstance(spec.after, str) and spec.after.strip():
+        lines.append("%-14s %s %s" % ("after", spec.after_when, spec.after.strip()))
+    return lines
+
+
+def after_problems(modes):
+    """``{slug: [sentence]}`` for each of ``modes`` (``[(slug, ModeSpec)]``, one project's)
+    whose ``after`` names no mode of the project: on the card it would never start."""
+    have = {spec.name.strip() for _slug, spec in modes}
+    out = {}
+    for slug, spec in modes:
+        after = spec.after.strip() if isinstance(spec.after, str) else ""
+        if after and after not in have:
+            out[slug] = ["%s starts only after %s, and no mode is called that." % (spec.name.strip(), after)]
+    return out
 
 
 # ---- item 157: the display priority and the lit shots ------------------------------------

@@ -181,11 +181,15 @@ project open and nothing ticked. The log says what was found:
 - A card whose `game_monitor` does not load the object is left as a machine leaves it, with a
   line saying so. A card that cannot be read, or a guest the account cannot write to, is a
   line in the log and an ordinary boot, never a refused run.
-- A multi-boot card has ONE rootfs, the primary image's (`mkmulticard.py` carries only the
-  games partitions of the other images), and the machine's hook preloads the same object
-  whichever image the menu boots. The same files go in here; the runtime checks its port
-  against the game it finds itself in and stays out of the way when they differ. This case is
-  reasoned from the card layout, not yet run.
+- A multi-boot card has ONE rootfs, the primary image's, so `/usr/local/padmode` is image 0's
+  set. Since PAD-226 `mkmulticard.py` carries every other image's set to
+  `/usr/local/codeselect/modes/img<N>/` (plus an empty `modes/none`), hooks `game_monitor` when
+  it has to, and the card's `select.sh` binds the booted image's set - or none - over
+  `/usr/local/padmode`: each image runs its own modes and no one else's. The emulator does the
+  same: once its menu has chosen image N, `run_game.sh` asks `cardmodes.sh` again with
+  `PAD_CARD_IMAGE=N`. A card built before this has no `modes/` directory, and every image
+  still gets the primary's set, as on a machine. Proven on synthetic cards (mkmulticard
+  selftest part 9, select_sh_test.sh, tests/test_spike2_card_modes.py); not yet run on a machine.
 
 ## The rules (break one and the game can crash or hang)
 
@@ -229,6 +233,8 @@ project open and nothing ticked. The log says what was found:
 | show your screen | `pm_node("hud", name)`, `pm_show(node, 1)` | see "Screens" below |
 | write on your screen | `pm_text("hud", "Screen.Screen_Words")`, `pm_set_text` | |
 | play a clip full screen | `pm_clip("name")` | a stock clip or one the build added; the runtime draws it until it ends |
+| play a clip BEHIND the HUD | `pm_backdrop("name")`, `pm_backdrop_once("name")` | in the main-play background's place, the score panel over it; see "A mode that looks like the game's own" |
+| paint an insert by its place | `pm_lamp_xy(i, &x, &y)`, `pm_lamp_paint(i, rgb)` | light shows (`intricate_kit.h`'s `kit_show`) |
 | test from the emulator | `pm_trigger("my_mode.start")`, `pm_trigger_text(name, buf, cap)` | once when `/dump/<name>` appears; the file is deleted |
 | read a file | `pm_read_file(path, buf, cap)` | whole file, up to `cap` bytes |
 | log | `pm_log("...")` | goes to `/dump/mode.log`, prefixed with your mode's name |
@@ -705,8 +711,15 @@ Write (and Try it, which is Write's code) then:
 
 - adds the screen to the HUD scene and the clip to the video bank, named after the folder
   (`PadMode_<folder>_Screen`, `PadMode_<folder>_Clip`), in the same pass as the form modes';
-- puts the music on a bed of its own and each call on a carrier of its own, from the same allocator
-  as the form modes' sounds (`mode_write.choose_code_sounds`), and grows and encodes them the same way;
+- puts the music on a bed of its own (or, on a title with no beds, swaps it in on a music carrier) and
+  each call on a CARRIER, from the same allocator as the form modes' sounds
+  (`mode_write.choose_code_sounds`), and grows and encodes them the same way. Carriers are SHARED across
+  modes (hud-layers): each sound is its own appended record - a grown copy of a HOST record, the
+  carrier's own when free, else a stock record of the same channels no longer than the carrier's - and
+  the mode swaps the carrier's key for its record for its own play (`pm_sound_swap`). Within one mode
+  each call takes another carrier, and a call is no longer than its carrier's record (the carrier's
+  descriptor says how long the play is). So what limits a mode is its own calls against the title's
+  carriers (21 on Godzilla), not every mode's together;
 - compiles the project's code modes with `mode_file.c` into the card's `mode.so` (build_mode.sh in the
   app's Linux) instead of the pinned object;
 - writes `<folder>.assets` beside it, naming what it carried:
@@ -717,7 +730,12 @@ screen PadMode_ghidorah_heads_Screen PadMode_ghidorah_heads_Screen.PadMode_ghido
 clip   start PadMode_ghidorah_heads_Clip
 music  125 576
 call   sever 1186 1400 4
+swap   1186 a20a51102c1c0020 d1eaa8b4ae100000 call:sever
 ```
+
+A `swap` line names the carrier, its own record key, the mode's appended record key, and whose it is
+(`call:<cue>` or `music`). The runtime logs `sound swap: request N looked up <stock>, took <ours>` the
+first time the game looks each one up: the proof the play was the mode's own record.
 
 The mode reads it with `pad_mode_assets.h` (a header, nothing added to the runtime):
 
@@ -1150,6 +1168,22 @@ seconds        0             # no clock: it ends when one ball is left
 The Modes tab's Mode page has it under Multiball: the balls, the ball save and the add-a-ball
 shot; `Runs for` 0 is no clock.
 
+**The balls on a shot (PAD-228).** `multiball_on <mask>` holds the balls back at the start: the
+first hit of that shot while the mode runs serves them. The mode's clock is then the time the
+player has to hit it (a clip or callout at the start says what to press), and time up ends the
+mode with no multiball. Once the balls come the clock stops and one ball left ends it. With the
+Action button as the shot (a `switch` line of the port, "Buttons" below) and `light_shots`, the
+button lights while the mode waits:
+
+```
+seconds        10                    # ten seconds to press it
+multiball      3 15
+multiball_on   0x1000000000000000    # Godzilla's Action button
+light_shots    ff0000 blink          # the button blinks red
+```
+
+The tab's Multiball section has it as "Balls come": (when it starts), or a shot.
+
 **What the runtime does.** At the start it asks the game for the balls; the mode does not start
 when the game refuses (no game in play, a tilt, a port without the call) and keeps its trigger
 count. It then watches the framework's count of the balls in play (`site balls_in_play`, the
@@ -1426,6 +1460,40 @@ of the line, so put a comment on a line of its own above it, never after the nam
 - The Modes tab offers the switch shots beside the port's own, and says they are not proven
   until `mode_project.SWITCH_SHOTS_PROVEN` names the port. Emulator-proven on The Beatles 1.29:
   each of 73-76 and 48-51 gave exactly one shot in play and none in attract, and 60/61 gave none.
+
+#### Buttons (PAD-228)
+
+The Action button (the game's LOCKDOWN BUTTON, switch 34 on Godzilla) and the flipper buttons (60
+left, 59 right) are switches like any other, but their descriptors carry flags 0 and no
+handler (read off all three Godzilla builds), so the rules' shot dispatch never sends them and no
+`switch_hit` broadcasts them. The switch drain's per-switch call
+(`site switch_edge`) sees every edge, so a port that hooks it hands the buttons to the modes
+through `switch` lines of their own, on bits the dispatch never sends:
+
+```
+site switch_edge      0x001e6860 0xe30433d8 0xe340307e
+site switch_drain     0x001e7540 0xe92d4ff0 0xe30b9584
+switch 34   0x1000000000000000 Action button
+switch 60   0x2000000000000000 Left flipper button
+switch 59   0x4000000000000000 Right flipper button
+lamp 282,283,284  0x1000000000000000 ACTION BUTTON  # lamp 97, I/O group 5 index 5, the cabinet front
+```
+
+A button is then a shot like the others: a mode starts on it, scores it, ends on it (`end_shot`),
+adds a ball on it or serves its multiball on it (`multiball_on`). The `lamp` line is the Action
+button's RGB light (LOCKDOWN BUTTON-R/G/B in the light table), tied to the button's shot, so
+`light_shots` (the tab's Light the shots that score) and `light <mask>` light the button. Every
+flip is a hit, so a flipper button as a scoring shot pays on every flip. The three Godzilla ports
+carry these lines (`portswitch.switch_source` read their drains).
+
+Emulator-proven 2026-09-27 on Godzilla Pro 1.15, Pro 1.16 and Premium/LE 1.16, one boot each in a
+rig slot (`value switch_edge_log` on): in play the game's mode mask is 0, so every press is ONE hit,
+on its press edge (level 0; the release is level 1 and no hit); a mode scored the left and right
+flipper buttons (+1M, +2M on the ladder) and served its multiball on the Action button; the shim's
+LED view (node 1, channels 5/4/7 = R/G/B) showed the Action button held solid red for the whole run
+of the mode and the game's own animation before and after. In ATTRACT the mask is 0x0010 and
+`pm_in_game()` is 0, so nothing counts - and the Action button or a flipper there opens the game's DJ
+Mixer, which then ignores Start: a rig script must not press them before its game.
 
 #### A ball end from the bus
 
@@ -2439,6 +2507,13 @@ While your mode holds priority P (`pm_display_priority(P)`, or `priority P` in a
   released: the layered display's own priority back, its effect queue run. A display still waiting then
   plays (held off, then shown): run 3's raid award waited out a 45 s mode and started the millisecond
   the mode ended.
+- **An ending that keeps the screen** (`pm_end_holding(ms)` in place of `pm_display_priority(0)` +
+  `pm_end()`): the mode ends (another may begin at once) but its hold stays `ms` more, for its ending
+  clip and total. Run t7 (hud-layers): FINAL WARS released at its end and the POWERLINE ATTACK award
+  that waited through it took the one video surface 22 ms later, stopping the ending clip and covering
+  the total. The kept hold goes when the time is up, another mode begins (`pm_begin`: the new mode takes
+  over at once), the ball or the game ends, or the mode calls `pm_display_priority(0)` (a drain or a
+  tilt: the display back at the same tick). The examples' `kit_end_after(ms)` and `kit_end_now()`.
 - A display of the game's that is ALREADY on the screen when the mode starts plays to its end; the
   hold applies to everything asked for after.
 
@@ -2697,6 +2772,110 @@ did not end the ball in 25 s); the kit's own tilt path (in the emulator the tilt
 modes first and ended them); the game's battle ending by itself with ANGUIRUS in it (the battle's timer
 did not run out in the run's window; the stop trigger ended it, so the total's wait for the battle's
 own total is desk-proven only); Pro 1.15.
+
+## A mode that looks like the game's own: the backdrop, the HUD and light shows (hud-layers)
+
+The game presents its own battles in one way: a clip of the monster plays full screen BEHIND the score
+panel, the top bar and the timers, and the battle's own words sit at the edges (a title and an
+instruction line above the score panel, counters across the top, a timer badge on the left). A mode's
+picture in the middle of the glass does not look like that. Three pieces do.
+
+### The backdrop: a clip behind the HUD
+
+```c
+pm_backdrop("PadMode_meltdown_Loop");       /* loops in the main-play background's place */
+pm_backdrop_once("PadMode_meltdown_Jackpot");   /* once in its place, then the loop again */
+pm_backdrop(0);                              /* the city again (pm_end and a ball end do it too) */
+```
+
+How the game draws a frame (Godzilla Premium 1.16, measured with `display_probe.c`, docs/plans/hud-layers.md):
+the layered display draws its BACKGROUND element first (`BDLBackground::v[8]`): the video bank's player
+when the background object has a clip (its video field, +0x54), then the element's own scene; the HUD
+scenes are drawn after it, all on display layer 0, in call order. In main play the background is one of
+five city objects. A battle's background plays its clip in the "ScoreFrame" crop and its scene is text
+only.
+
+A player the runtime puts in the frame's list itself stops the game's display processes (runs h3-h11:
+vetoing the city's draw, swapping its argument, drawing over it, drawing from the tick with the HUD shown
+again: every one froze the glass until taken away). The route that works is the game's own, taken from
+inside the city element's draw: `clip_play(name, 1, "ScoreFrame")` there, and the city object's video field
+set to the surface, as `BDLBackground::v[13]` does for a background with a clip. The game's update then
+advances the player and its draw shows it; the city's own scene show is handed the player, which is
+already in the frame's list, so `display_draw` refuses it and the city is not drawn (h12). The runtime
+does exactly that (`on_backdrop_draw`, `on_scene_show`), plays the loop again once the one surface is idle
+(a framed award of the game's took it), and while a full-screen clip of the mode's own (`pm_clip`) plays it
+sets the field back to 0 so the tick's draw is not refused. While a backdrop is up the game's FRAMED
+layered awards are dropped as its full-screen ones are (a display priority is needed): they would take
+the backdrop's place, and their words sit where the mode's title does.
+
+Port lines (godzilla_le 1.16):
+
+```
+site backdrop_draw       0x0003fec4 0xe5903054 0xe92d4010   # BDLBackground::v[8]
+site scene_show          0x00405d2c 0xe92d4070 0xe306427c   # scene_show(scene, 3)
+data backdrop_city_vtable    0x00632ff0                     # BDLMainplayBG
+value backdrop_video_at      0x54
+value backdrop_scene_at      0x18
+text backdrop_crop           ScoreFrame
+```
+
+**Measured (emulator, Premium 1.16):** run b1 with `backdrop_test_mode.c`: the intro full screen, then the
+loop under the score panel and the top bar; a one-shot in its place and the loop again; the Maser's framed
+award over it and the loop back after; LOOPS through; the score live throughout; the city back at the
+stop; the renderer presenting every frame. Not measured: a machine; another title (no other port has the
+lines); a battle's background (the backdrop only takes the city's place, so ANGUIRUS, inside a battle,
+does not use it).
+
+### The HUD at the glass's edges
+
+A code mode's `assets.json` names a `hud`; the build (`pinball_decryptor/plugins/stern/mode_hud.py`) adds
+ONE Sprite group per mode to Godzilla's slide-outs scene `32e6ae28`, laid out as the game lays out a
+battle, lettered in the game's own font (GameFont_Primary white and GameFont_Secondary orange, with their
+kerning, carried in from the Ebirah battle scene) and hidden until the mode shows it:
+
+```json
+"hud": {
+  "title": "KING GHIDORAH", "line": "SHOOT THE LIT HEAD",
+  "counters": [["LEFT HEAD", "3", "HEALTH"], ["MIDDLE HEAD", "3", "HEALTH"], ["RIGHT HEAD", "3", "HEALTH"]],
+  "timer": {"label": "GHIDORAH", "icon": "bolt"},
+  "gauge": {"label": "SEVERED", "kind": "diamond", "count": 3, "colours": [[255, 170, 0]]}
+}
+```
+
+- `title` / `line`: above the score panel (y 444 / 538), the battle's title and instruction line;
+- `counters`: up to three across the top (x 17.6 / 573.6 / 1123.6): a label, a big value, a sub-label;
+- an award line and a line under it in the middle (for a moment: a jackpot, a head severed);
+- `timer`: the stock BATTLE badge's panel with the mode's own green LED label and a glowing disc with its
+  icon (`bolt`, `oxygen`, `maser`, `xilien`, `anguirus`, `radiation`), in the BATTLE badge's slot (y 267),
+  the seconds in its window;
+- `gauge`: pips on the right edge (`spike`, `segment` - filled from the bottom - or `diamond`), each a lit
+  and a dark picture.
+
+In C, `intricate_kit.h`'s `struct kit_hud` drives it (`kit_hud_begin`, `kit_hud_title`, `kit_hud_counter`,
+`kit_hud_timer`, `kit_hud_gauge`, `kit_hud_award`, `kit_hud_note`, `kit_hud_hide_in`, `kit_hud_tick` every
+tick). Texts are written only when they change and hidden by writing a space: only a Sprite may be shown
+or hidden (a Text's visibility slot is another virtual), so the badge, the gauge and each pip's pictures
+are Sprite groups of their own. The names are `PadMode_<folder>_Hud`, `..._Hud_Title`, `..._Hud_C1_Value`,
+`..._Hud_Timer.PadMode_<folder>_Hud_Timer_Num`, `..._Hud_Gauge.PadMode_<folder>_Hud_G1_On` and so on.
+
+### Clips by cue
+
+`assets.json` `"clips": {"intro": "intro.mp4", "loop": "loop.mp4", "sever": "sever.mp4", "won": ..., "lost": ...}`:
+the build adds each to the video bank as `PadMode_<folder>_<Cue>` (the old `clip` stays the "start" cue,
+`PadMode_<folder>_Clip`) and names them in `<folder>.assets` (`clip <cue> <name>`). `pad_mode_assets.h`:
+`pa_start` plays the intro (or start) clip full screen and asks for the loop behind the HUD;
+`pa_clip_event(&own, "sever")` plays a clip once in the backdrop's place; `pa_clip_full(&own, "won")` plays
+one full screen (an ending); `pa_end` gives the city back. Every clip is cut to fill the 1360x768 glass.
+
+### Light shows
+
+`pm_lamp_xy(i, &x, &y)` gives an insert's place on the playfield picture (the port's `at X,Y`: x 0-300 across,
+y 0-600 down) and `pm_lamp_paint(i, rgb)` holds it solid in a colour, quietly (only a change reaches the
+game). `intricate_kit.h`'s `struct kit_show` runs a list of steps - a burst or an implosion from a place, a
+band sweeping up, down or across, a turning beam, a rainbow, a strobe, sparkles, fire, a pulse, a chase
+round a point, lightning, a fade - each for its milliseconds in its colours, with the GI strings kept, dark
+or flashing. At its end every insert goes back to the game and the mode's own shot lights are sent again.
+Each example has its own start and end shows (`SHOW_START`, `SHOW_WON`, `SHOW_LOST` in its C file).
 
 ## Watching the game's own rules play (item 158)
 

@@ -15,6 +15,7 @@
 .modes-list .li .chip.sm { padding: 0 7px; }
 .modes-list-empty { padding: 10px 8px; }
 .modes-list-ft { flex-direction: column; align-items: flex-start !important; gap: 6px !important; padding: 8px 12px !important; }
+.modes-list-acts { gap: 6px; flex-wrap: wrap; max-width: 100%; }   /* PAD-232: Delete wrapped instead of running off the card */
 
 .modes-editor { flex: 1 1 auto; min-width: 0; }
 .modes-editor > .hd { padding: 10px 16px; flex-wrap: nowrap; }
@@ -94,7 +95,7 @@ button.modes-list-grp:hover { color: var(--ink-2); background: var(--panel-2); }
 
 /* the first mode: three ways in */
 .modes-first .modes-editor-bd { gap: 18px; }
-.modes-first-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.modes-first-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 .modes-first-opt { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
 .modes-first-opt.rec { border-color: var(--accent); }
 .modes-first-opt > .row { gap: 8px; }
@@ -161,3 +162,77 @@ html.bph-760 .modes-tryrow .btn.big { padding-top: 6px; padding-bottom: 6px; }
 html.bph-760 .modes-body { flex: 0 0 auto; }
 html.bph-760 .modes-editor-bd { overflow: visible; }
 html.bph-760 .modes-list-bd { max-height: 300px; }
+
+/* ---- PAD-232: a mode made of blocks ------------------------------------------------------ */
+.bk-pill { background: #6d4bc2; color: #fff; border-color: #6d4bc2; }
+.bk-pane-bd { padding: 0 !important; overflow: hidden !important; }
+.bk-editor { display: flex; flex: 1 1 auto; min-height: 0; height: 100%; }
+.bk-palette { flex: 0 0 196px; overflow-y: auto; padding: 10px 10px 16px; border-right: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 4px; background: var(--panel-2); }
+.bk-pal-h { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin: 8px 0 2px; }
+.bk-pal-h:first-child { margin-top: 0; }
+.bk-pal { text-align: left; border: 0; border-radius: 6px; padding: 5px 9px; font: 500 12.5px var(--sans); color: #fff;
+  cursor: grab; box-shadow: inset 0 -2px 0 rgba(0,0,0,.18); }
+.bk-pal:hover { filter: brightness(1.08); }
+.bk-pal:active { cursor: grabbing; }
+.bk-pal.bk-num, .bk-pal.bk-bool { border-radius: 999px; }
+.bk-ws { flex: 1 1 auto; min-width: 0; overflow: auto; padding: 12px 16px 24px; display: flex; flex-direction: column; gap: 10px; }
+.bk-settings { gap: 8px; align-items: center; }
+.bk-vars { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.bk-varbox { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 6px; border-radius: 8px; background: #c8553a22; border: 1px solid #c8553a66; }
+.bk-scripts { display: flex; flex-direction: column; gap: 14px; }
+.bk-newscript { padding: 10px 12px; border: 1px dashed var(--line-2); border-radius: 8px; }
+
+/* the blocks: Scratch's idea, the app's type. White words on a solid colour read in both themes. */
+.bk { color: #fff; border-radius: 7px; font: 500 13px var(--sans); box-shadow: inset 0 -2px 0 rgba(0,0,0,.2); }
+.bk-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 5px 6px 5px 4px; min-height: 34px; }
+.bk-w { white-space: nowrap; }
+.bk-w.b { font-weight: 600; }
+.bk-grip { cursor: grab; opacity: .6; padding: 0 2px; letter-spacing: -2px; user-select: none; }
+.bk-grip:hover { opacity: 1; }
+.bk-hat { background: #c28a12; border-radius: 12px 12px 7px 7px; }
+.bk-hat .bk-line { padding-left: 10px; }
+.bk-mode { background: #8b5bd6; }
+.bk-score { background: #2f9a5b; }
+.bk.bk-var, .bk-pal.bk-var { background: #c8553a; color: #fff; }
+.bk-flow { background: #d77a21; }
+.bk-show { background: #3a78c9; }
+.bk-num { background: #4aa36b; }
+.bk-bool { background: #169a92; }
+.bk-pal.bk-hat { border-radius: 10px 10px 6px 6px; }
+.bk-body { margin-left: 14px; padding-left: 8px; border-left: 3px solid #c28a1266; }
+.bk-c .bk-in { margin-left: 14px; padding: 2px 0 2px 8px; background: var(--panel); border-radius: 0 6px 6px 0; }
+.bk-c .bk-else { min-height: 26px; padding-top: 3px; padding-bottom: 3px; }
+.bk-c .bk-foot { height: 10px; }
+.bk-stack { display: flex; flex-direction: column; border-radius: 6px; padding: 1px 0; }
+.bk-stack.picked { box-shadow: -3px 0 0 var(--accent); }
+.bk-gap { height: 5px; border-radius: 3px; margin: 0 2px; }
+.bk-gap.on { height: 10px; background: var(--accent); }
+.bk-add { align-self: flex-start; margin-top: 2px; border: 1px dashed var(--line-2); background: transparent; color: var(--ink-3);
+  border-radius: 6px; padding: 2px 10px; font: 12px var(--sans); cursor: pointer; }
+.bk-add:hover { color: var(--ink); border-color: var(--ink-3); }
+.bk-x { border: 0; background: rgba(0,0,0,.18); color: #fff; width: 20px; height: 20px; border-radius: 5px; line-height: 18px;
+  padding: 0; cursor: pointer; font-size: 13px; flex: 0 0 auto; }
+.bk-x:hover:not(:disabled) { background: rgba(0,0,0,.4); }
+.bk-x:disabled { opacity: .35; cursor: default; }
+/* slots: a hole for a value (round) or a condition (pointed), filled by a reporter block */
+.bk-slot { border: 1.5px dashed rgba(255,255,255,.7); background: rgba(0,0,0,.22); color: rgba(255,255,255,.85);
+  border-radius: 999px; padding: 2px 12px; font: italic 12px var(--sans); cursor: pointer; min-height: 24px; }
+.bk-slot.bool { border-radius: 5px; }
+.bk-slot.over, .bk-rep.over { outline: 2px solid var(--accent); }
+.bk-rep { display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; padding: 2px 3px 2px 8px; border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
+.bk-rep.num { background: #4aa36b; }
+.bk-rep.bool { background: #169a92; border-radius: 6px; }
+.bk-rep .bk-x { width: 18px; height: 18px; line-height: 16px; border-radius: 999px; }
+.bk .field.sm { background: var(--panel); color: var(--ink); }
+.bk .chk { color: #fff; }
+.bk-color { width: 30px; height: 24px; padding: 0; border: 1px solid rgba(0,0,0,.3); border-radius: 4px; background: none; cursor: pointer; }
+.bk-c-src { margin: 0; padding: 12px 14px; background: var(--log-bg); color: var(--log-ink); border: 1px solid var(--line);
+  border-radius: 8px; font-size: 12px; line-height: 1.45; overflow: auto; max-height: 100%; white-space: pre; }
+.bk-pane .modes-editor-bd .stack { padding: 12px 16px; min-height: 0; }
+html.bp-1100 .bk-palette { flex-basis: 160px; }
+html.bp-860 .bk-editor { flex-direction: column; }
+html.bp-860 .bk-palette { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line); }
+.bk-stack.bk-empty > .bk-gap { height: 22px; border: 1px dashed var(--line-2); border-radius: 6px; margin: 2px 0; }
+.bk-stack.bk-empty > .bk-gap.on { background: var(--accent-soft); border-color: var(--accent); }

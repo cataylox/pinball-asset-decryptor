@@ -3345,3 +3345,87 @@ def test_a_random_cards_pictures_round_trip_through_the_row(tmp_path):
 
 
 # ---- item 106: deleting a game, and picking games that are already here ----
+
+
+# ---- PAD-226: an image that keeps high scores of its own -------------------------------------
+def _own_scores_words(argv):
+    words = _tool_words(argv)
+    return words[words.index("--own-scores") + 1] if "--own-scores" in words else None
+
+
+def test_own_scores_ride_on_build_inject_and_update(tmp_path):
+    """One store name per GAME, '' = it shares, and ALWAYS spelled out on a
+    Stern card: the form is the record, so a tick taken off is taken off the
+    card by the next Apply too."""
+    form = _form(tmp_path, 3)
+    form.images[1].own_scores = "heisei"
+    card = str(tmp_path / "card.raw")
+    assert "--own-scores" in build_args(form)
+    assert build_args(form)[build_args(form).index("--own-scores") + 1] == ";heisei;"
+    assert inject_args(form, card)[inject_args(form, card).index("--own-scores") + 1] == ";heisei;"
+    upd = multiboot_core.update_args(form, card)
+    assert upd[upd.index("--own-scores") + 1] == ";heisei;"
+    # nobody keeps their own: still said, so a card that had one loses it
+    form.images[1].own_scores = ""
+    assert build_args(form)[build_args(form).index("--own-scores") + 1] == ";;"
+    # a name the card would refuse never reaches the tool
+    form.images[1].own_scores = "../etc"
+    assert build_args(form)[build_args(form).index("--own-scores") + 1] == ";;"
+
+
+def test_a_random_cards_games_share_the_cards_store(tmp_path):
+    mb = multiboot_core
+    form, _paths = _group_form(tmp_path)
+    form.images[2].own_scores = "jukebox"
+    names = mb.own_scores_args(form)[1].split(";")
+    n_games = len(mb.form_trees(form))
+    assert len(names) == n_games
+    assert names[:2] == ["", ""] and set(names[2:]) == {"jukebox"}
+
+
+def test_a_jjp_card_has_no_score_stores(tmp_path):
+    form = _form(tmp_path, 2, platform="jjp")
+    form.images[1].own_scores = "x"
+    assert multiboot_core.own_scores_args(form) == []
+
+
+def test_own_scores_come_back_off_the_card_and_are_a_menu_change(tmp_path):
+    rows, _warn = multiboot_core.rows_from_inspect({"images": [
+        {"device": "/dev/mmcblk0p3", "title": "A"},
+        {"device": "/dev/mmcblk0p7:img1", "title": "B", "own_scores": "heisei"},
+        {"device": "/dev/mmcblk0p7:img2", "title": "C1", "own_scores": "set"},
+        {"device": "/dev/mmcblk0p7:img3", "title": "C2", "own_scores": "set"},
+    ], "groups": [{"title": "RANDOM", "members": [2, 3]}]})
+    assert [r.own_scores for r in rows] == ["", "heisei", "set"]
+    before = _form(tmp_path, 2)
+    after = _form(tmp_path, 2)
+    after.images[1].own_scores = "b"
+    menu, rebuild = multiboot_core.diff_forms(before, after)
+    assert menu == ["high scores"] and not rebuild
+
+
+def test_a_store_name_is_the_title_made_unique():
+    f = multiboot_core.scores_name_for
+    assert f("TMNT 1987!") == "tmnt-1987"
+    assert f("TMNT 1987", taken={"tmnt-1987"}) == "tmnt-1987-2"
+    assert f("TMNT 1987", taken={"tmnt-1987", "tmnt-1987-2"}) == "tmnt-1987-3"
+    assert f("***") == "own"
+    assert multiboot_core.SCORES_NAME_RE.match(f("Godzilla, Mothra & Rodan"))
+
+
+def test_the_plan_says_which_images_run_custom_modes():
+    text = "\n".join([
+        "== custom modes",
+        "modes image 0: 2 mode files, 0 code modes (the primary's own rootfs)",
+        "modes image 2: 0 mode files, 1 code mode (carried to /usr/local/codeselect/modes/img2, "
+        "bound over /usr/local/padmode when it boots)",
+        "every other image boots with no custom modes"])
+    info = parse_plan(text)
+    assert info["modes"] == {0: "2 mode files, 0 code modes", 2: "0 mode files, 1 code mode"}
+    assert parse_plan("")["modes"] == {}
+    rows, _w = multiboot_core.rows_from_inspect({"images": [
+        {"device": "/dev/mmcblk0p3", "title": "A", "modes": "1 mode file, 0 code modes"},
+        {"device": "/dev/mmcblk0p7", "title": "B", "modes": None}]})
+    assert [r.modes for r in rows] == ["1 mode file, 0 code modes", ""]
+    assert multiboot_core.modes_line(rows[1]) == "" and "runs custom modes (1 mode file" in \
+        multiboot_core.modes_line(rows[0])

@@ -310,7 +310,7 @@ def _load_or_derive_params(emu, game_real_path, image_path, log, progress):
             params = pickle.load(open(cache, "rb"))
             # Re-derive a pre-SFX-naming cache (no ``key0``) so the container-key
             # snapshot the name mapping needs is present; harmless for decode.
-            if params and "key0" in params[0]:
+            if _params_cache_current(params):
                 log("Loaded cached codec parameters (%d sounds)."
                     % len(params), "info")
                 return params
@@ -5170,6 +5170,10 @@ _MODE_CLIP_CONTAINER = 64 << 10
 #: A mode's own screen: its picture, at most 1360x768 (mode_assets.load_art)
 #: at a byte a pixel (BC3), added to the HUD scene the build re-serialises.
 _MODE_SCREEN_BYTES = 1360 * 768
+#: hud-layers: the game font a code mode's HUD carries into the slide-outs scene (1.6 MB once), and each
+#: HUD's own art and nodes (a timer badge, a gauge of up to 12 pips, the texts)
+_MODE_HUD_FONT_BYTES = 1700000
+_MODE_HUD_BYTES = 200000
 
 #: Past this many clips to settle, the log says why the build is probing
 #: videos before it encodes anything.
@@ -5364,12 +5368,19 @@ def _unsized_bytes(assets_dir, mode_list, code_list, radimg_edits):
                                   both.get("file", ""), folder)
             if getattr(spec, "screen", False):
                 total += _MODE_SCREEN_BYTES
+        huds = 0
         for slug, spec in code_list or ():
             folder = _MP.mode_folder(assets_dir, slug)
-            if getattr(spec, "clip", ""):
-                total += clip("file", 0, spec.clip, folder)
+            clips = spec.clip_list() if hasattr(spec, "clip_list") else (
+                [("start", spec.clip)] if getattr(spec, "clip", "") else [])
+            for _cue, f in clips:
+                total += clip("file", 0, f, folder)
             if getattr(spec, "screen", False):
                 total += _MODE_SCREEN_BYTES
+            if getattr(spec, "hud", None):
+                huds += 1
+        if huds:        # hud-layers: the game font carried once, and each HUD's art
+            total += _MODE_HUD_FONT_BYTES + huds * _MODE_HUD_BYTES
     return total + sum(_kept_size_scenes(radimg_edits).values())
 
 
@@ -7022,6 +7033,11 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 from . import scene_write as _SWF
                 _font_node = (_MW.lookup(reader, "%s/%s" % (_mprof.game_dir, _SWF.SYSTEM_FONT_SCENE))
                               if _hud_rel else None)
+                # hud-layers: the battle scene whose font a code mode's HUD is lettered in
+                from . import mode_hud as _MHF
+                _hudfont_node = (_MW.lookup(reader, "%s/%s" % (_mprof.game_dir, _MHF.GAME_FONT_SCENE))
+                                 if _hud_rel and any(getattr(_c, "hud", None) for _s, _c in (_MW.code_mode_list(assets_dir) or ()))
+                                 else None)
                 mode_plan = _MW.plan(
                     assets_dir,
                     reader.read_file_bytes(_mnodes[_hud_rel]) if _hud_rel else b"",
@@ -7031,7 +7047,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     end_sound=mode_sound_used, own_sounds=mode_own_used,
                     progress=_span(progress, 91, 94),
                     stock_font=(bytes(reader.read_file_bytes(_font_node))
-                                if _font_node is not None else b""))
+                                if _font_node is not None else b""),
+                    hud_font=(bytes(reader.read_file_bytes(_hudfont_node))
+                              if _hudfont_node is not None else b""))
                 _ipath = {bytes(n["i_block"]): p.lstrip("/")
                           for p, _i, n in reader.iter_regular_files(
                               min_size=1, max_depth=20)}
@@ -11387,6 +11405,15 @@ def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None,
 _FORCE_SERIAL_ENCODE = os.environ.get("PAD_STERN_SERIAL_ENCODE") == "1"
 
 
+def _params_cache_current(params):
+    """A cached params list written by today's derive: every row carries ``key0`` (the
+    SFX naming) and ``findkey`` (the whole container key, None where the find faulted).
+    An older cache lacks them and is derived again, once: without ``findkey`` a mode's
+    music bed names no record and its music is silently left off the card (a Godzilla
+    Pro 1.15 cache from before the key was recorded, hud-layers 2026-09-27)."""
+    return bool(params) and "key0" in params[0] and "findkey" in params[0]
+
+
 def _params_for(gr_path, img_path, log, progress):
     """Codec params for the card — from the Extract-time cache, or derived on a
     throwaway emulator if the cache is cold (rare for Write, which follows an
@@ -11398,9 +11425,10 @@ def _params_for(gr_path, img_path, log, progress):
     if os.path.exists(cache):
         try:
             params = pickle.load(open(cache, "rb"))
-            log("Loaded cached codec parameters (%d sounds)." % len(params),
-                "info")
-            return params
+            if _params_cache_current(params):
+                log("Loaded cached codec parameters (%d sounds)." % len(params),
+                    "info")
+                return params
         except Exception:
             pass
     _note_cold_consumed(log)
@@ -14292,6 +14320,10 @@ def _mode_swap_keys(used, params, log):
             continue
         p = byidx.get(int(u["idx"]), {})
         old, new = p.get("stock_findkey"), p.get("findkey")
+        if u.get("carrier_idx") is not None and int(u["carrier_idx"]) != int(u["idx"]):
+            # hud-layers: a shared carrier - the game looks up the CARRIER's record, not the host's
+            c = byidx.get(int(u["carrier_idx"]), {})
+            old = c.get("stock_findkey") if c.get("grown") else c.get("findkey")
         if not p.get("grown") or not old or not new or bytes(old) == bytes(new):
             used.remove(u)
             log("Modes: %s's own %s is not put on this card: its record's key did not come out of "
@@ -14360,6 +14392,109 @@ def _mode_music_level_refs(gr_path, img_path, params, sites, loop_idx, log, used
     return {int(i): int(ref) for i in loop_idx}
 
 
+def _mode_host_record(pc, clen, params, mine, audio_edits):
+    """A stock record to hold a shared carrier's sound beside the others (hud-layers): the same
+    channels as the carrier's record *pc*, no longer than it (*clen*: its descriptor says how long
+    the play is, so the grown copy is that long), not holding a sound already and not replaced by
+    the project; the longest such, the lowest idx among equals. Its own sound stays as it was (the
+    copy is appended, and no descriptor is pointed at it). ``None`` if there is none."""
+    chan = pc.get("chan")
+    best = None
+    for q in params:
+        i, n = q["idx"], int(q.get("length", 0) or 0)
+        if i in mine or i in audio_edits or q.get("grown") or not q.get("findkey"):
+            continue
+        if q.get("chan") != chan or n <= 0 or n > clen:
+            continue
+        if best is None or n > best[0] or (n == best[0] and i < best[1]):
+            best = (n, i)
+    return best[1] if best else None
+
+
+def _mode_shared_sound(s, what, ctx, audio_edits, grows, mine, work_dir, log):
+    """One SHARED carrier's sound (hud-layers): the first of its ``candidates`` its own mode does
+    not use, that resolves to one record and (a call) is long enough for it; its WAV grown into a
+    host record (:func:`_mode_host_record`, the carrier's own when free). Returns its *used* entry
+    (``request``, ``idx`` the host, ``carrier_idx``), or ``None`` after logging why not."""
+    from . import mode_sounds as _MS
+    from . import mode_write as _MW
+    from .spike2.emulator import emitted_length
+    wav = s["wav"]
+    want = _wav_frames_44k(wav)
+    if want is None:
+        log("Modes: %s is not put on this card: %s is not a WAV this app can read."
+            % (what, os.path.basename(wav)), "warning")
+        return None
+    slug = s.get("slug")
+    taken = ctx["by_mode"].setdefault(slug, set())
+    why = []
+    picked = None
+    fits = []                       # a call: every carrier that takes it, the shortest one wins
+    for req in (int(r) for r in s["candidates"]):
+        if req in taken:
+            continue
+        if req not in ctx["located"]:
+            try:
+                ctx["located"][req] = _MW.request_record(ctx["elf"], ctx["head"], ctx["params"],
+                                                         ctx["sites"], req, ctx["mask"])
+            except (RuntimeError, OSError, ValueError, LookupError, struct.error) as e:
+                ctx["located"][req] = e
+        cidx = ctx["located"][req]
+        if isinstance(cidx, Exception):
+            why.append("request %d could not be located (%s)" % (req, cidx))
+            continue
+        pc = ctx["byidx"].get(cidx)
+        if pc is None:
+            why.append("request %d's record is unknown" % req)
+            continue
+        clen = int(pc.get("length", 0) or 0)
+        if not s.get("music") and want > clen:
+            why.append("request %d's record is %.2f s" % (req, clen / 44100.0))
+            continue
+        host = cidx if (cidx not in mine and cidx not in audio_edits) else \
+            _mode_host_record(pc, clen, ctx["params"], mine, audio_edits)
+        if host is None:
+            why.append("no record is left to hold it beside request %d's" % req)
+            continue
+        if s.get("music"):
+            picked = (req, cidx, clen, host)            # the music: the title's order
+            break
+        fits.append((clen, len(fits), (req, cidx, clen, host)))
+    if picked is None and fits:
+        picked = min(fits)[2]
+    if picked is None:
+        log("Modes: %s is not put on this card: no carrier takes it (%s)." % (
+            what, "; ".join(why[:3]) or "every carrier of its kind is taken by the mode's other sounds"),
+            "warning")
+        return None
+    req, cidx, clen, host = picked
+    hlen = int(ctx["byidx"][host].get("length", 0) or 0)
+    if s.get("music"):
+        # as a bed: a seamless loop, repeated past the carrier's record (its descriptor loops there)
+        os.makedirs(_lp(work_dir), exist_ok=True)
+        tiled = os.path.join(work_dir, "music_%d_loop.wav" % host)
+        try:
+            reps, loop = _MS.loop_wav(_lp(wav), _lp(tiled), _MS.bed_min_frames(s.get("seconds"), clen),
+                                      edge_ms=_MS.BED_EDGE_MS)
+        except _MS.ModeSoundError as e:
+            log("Modes: %s is not put on this card: %s." % (what, e), "warning")
+            return None
+        log("Modes: %s (%s, %.2f s) is made a seamless %.3f s loop and repeated %d time(s) "
+            "to fill its record." % (what, os.path.basename(wav), want / 44100.0, loop / 44100.0, reps), "info")
+        wav, want = tiled, _wav_frames_44k(tiled)
+    audio_edits[host] = wav
+    grows[host] = (emitted_length(hlen), max(int(want), clen, hlen))
+    mine.add(host)
+    taken.add(req)
+    log("Modes: %s (%s, %.2f s) goes on the card as a new record (a copy of sound idx %d%s) that "
+        "request %d plays for the mode alone; the game still plays its own on that request%s." % (
+            what, os.path.basename(s["wav"]), _wav_frames_44k(s["wav"]) / 44100.0, host,
+            ", the carrier's own" if host == cidx else "", req,
+            "" if host == cidx else ", which other modes' sounds share"), "info")
+    return dict(s, request=req, idx=host, carrier_idx=cidx,
+                ms=None if s.get("music") else _MS.sound_ms(_lp(s["wav"])))
+
+
 def _mode_own_sounds_grow(gr_path, img_path, params, sites, audio_edits, grows,
                           own, work_dir, log):
     """Item 149 with item 150: put the modes' START SOUNDS, SHOT SOUNDS and MUSIC into
@@ -14395,8 +14530,21 @@ def _mode_own_sounds_grow(gr_path, img_path, params, sites, audio_edits, grows,
     byidx = {q["idx"]: q for q in params}
     audio_edits, grows = dict(audio_edits), dict(grows)
     mine, used = set(), []
+    # hud-layers: the sounds on a carrier of their own first, then the SHARED ones (a shared sound's
+    # host record is picked from what the others left); *used* comes back in the modes' own order
+    order = {(s.get("slug"), s.get("key")): i for i, s in enumerate(own)}
+    shared = sorted((s for s in own if s.get("candidates")),       # a mode's longest call chooses first
+                    key=lambda s: (bool(not s.get("music")), -(_wav_frames_44k(s["wav"]) or 0)))
+    own = [s for s in own if not s.get("candidates")] + shared
+    ctx = {"elf": elf, "head": head, "params": params, "sites": sites, "mask": mask,
+           "byidx": byidx, "located": {}, "by_mode": {}}
     for s in own:
         what = "%s's own %s" % (s["name"], _MW.sound_words(s["key"]))
+        if s.get("candidates"):
+            got = _mode_shared_sound(s, what, ctx, audio_edits, grows, mine, work_dir, log)
+            if got is not None:
+                used.append(got)
+            continue
         try:
             if s.get("sid"):
                 # item 150 follow-up: a music BED is its own sid's record (no request names
@@ -14467,6 +14615,7 @@ def _mode_own_sounds_grow(gr_path, img_path, params, sites, audio_edits, grows,
             "and the mode's file names that request." % (
                 what, os.path.basename(s["wav"]), _wav_frames_44k(s["wav"]) / 44100.0,
                 s["request"], idx, length / 44100.0), "info")
+    used.sort(key=lambda u: order.get((u.get("slug"), u.get("key")), len(order)))
     return audio_edits, grows, used
 
 

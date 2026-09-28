@@ -652,6 +652,7 @@ const char *pm_shot_at(int i, uint64_t *mask)
 
 /* ---- one mode at a time ---------------------------------------------------------------- */
 static const struct pm_mode *running;
+static void disp_linger_other_began(void);
 
 int pm_begin(void)
 {
@@ -660,10 +661,16 @@ int pm_begin(void)
         return 0;
     }
     running = current;
+    disp_linger_other_began();
     return 1;
 }
 
-void pm_end(void) { if (running == current) running = 0; }
+static void bd_reset(const char *why);
+void pm_end(void)
+{
+    if (running == current) running = 0;
+    if (!running) bd_reset("the mode ended");
+}
 int pm_running(void) { return running && running == current; }
 
 /* ---- sound ---------------------------------------------------------------------------------- */
@@ -923,7 +930,7 @@ static void on_sound_worker(unsigned *r)
  * key, not on "the next lookup", holds when the worker thread looks it up later, and holds for a
  * looping descriptor that looks its key up again at every loop. */
 #define SWAPS_MAX 8
-static struct { unsigned request; int old; unsigned long until; unsigned char stock[8], ours[8]; } swaps[SWAPS_MAX];
+static struct { unsigned request; int old; unsigned long until; unsigned char stock[8], ours[8]; volatile int looked; } swaps[SWAPS_MAX];
 static volatile int swaps_live;
 
 int pm_sound_swap(unsigned request, const unsigned char stock[8], const unsigned char ours[8], int priority, unsigned ms)
@@ -937,7 +944,11 @@ int pm_sound_swap(unsigned request, const unsigned char stock[8], const unsigned
     if (free_i < 0) return 0;
     old = pm_sound_priority(request, priority, 0);
     if (swaps[free_i].request != request) swaps[free_i].old = old;
-    for (i = 0; i < 8; i++) { swaps[free_i].stock[i] = stock[i]; swaps[free_i].ours[i] = ours[i]; }
+    for (i = 0; i < 8; i++) {
+        if (swaps[free_i].ours[i] != ours[i]) swaps[free_i].looked = 0;     /* another record: say it again */
+        swaps[free_i].stock[i] = stock[i];
+        swaps[free_i].ours[i] = ours[i];
+    }
     swaps[free_i].until = pm_ms() + (ms ? ms + ms / 8 + 1000 : 10000);
     swaps[free_i].request = request;          /* last: the lookup hook reads it */
     swaps_live = 1;
@@ -980,6 +991,15 @@ static void on_sound_lookup(unsigned *r)
         for (i = 0; i < SWAPS_MAX; i++)
             if (swaps[i].request && key_is(k, swaps[i].stock)) {
                 r[1] = (unsigned)(unsigned long)swaps[i].ours;
+                if (!swaps[i].looked) {         /* once per record armed: the proof it was the one played */
+                    swaps[i].looked = 1;
+                    say("sound swap: request %u looked up %02x%02x%02x%02x%02x%02x%02x%02x, took "
+                        "%02x%02x%02x%02x%02x%02x%02x%02x", swaps[i].request,
+                        swaps[i].stock[0], swaps[i].stock[1], swaps[i].stock[2], swaps[i].stock[3],
+                        swaps[i].stock[4], swaps[i].stock[5], swaps[i].stock[6], swaps[i].stock[7],
+                        swaps[i].ours[0], swaps[i].ours[1], swaps[i].ours[2], swaps[i].ours[3],
+                        swaps[i].ours[4], swaps[i].ours[5], swaps[i].ours[6], swaps[i].ours[7]);
+                }
                 return;
             }
     }
@@ -1051,7 +1071,7 @@ int pm_lights_as(unsigned owner, const char *command)
 #define LAMP_MODES   64
 #define LAMP_SAY_MAX 400
 
-struct lamp { char name[40]; unsigned light[3]; int mono; uint64_t shot; };
+struct lamp { char name[40]; unsigned light[3]; int mono; uint64_t shot; int x, y; };   /* x, y: -1 = not placed */
 static struct lamp lamps[N_LAMPS];
 static int n_lamps;
 
@@ -1103,6 +1123,17 @@ static void lamp_line(const char *s)
     x->shot = number(&s, &ok);
     if (!ok) return;
     rest(s, x->name, sizeof x->name);
+    x->x = x->y = -1;
+    {   /* hud-layers: the comment's "at X,Y" (the insert's place on the playfield picture), when given */
+        const char *c = s;
+        for (; *c && *c != 10; c++)
+            if (c[0] == 'a' && c[1] == 't' && c[2] == ' ' && c > s && c[-1] == ' ') {
+                const char *q = c + 3;
+                int ok1 = 0, ok2 = 0;
+                long px = (long)number(&q, &ok1), py;
+                if (*q == ',') { q++; py = (long)number(&q, &ok2); if (ok1 && ok2 && (px || py)) { x->x = (int)px; x->y = (int)py; } }
+            }
+    }
     for (i = 0; x->name[i]; i++)                          /* a trailing comment is not the name */
         if (x->name[i] == '#' && i && (x->name[i - 1] == ' ' || x->name[i - 1] == '\t')) {
             while (i && (x->name[i - 1] == ' ' || x->name[i - 1] == '\t')) i--;
@@ -1138,6 +1169,14 @@ const char *pm_lamp_at(int i, uint64_t *shots)
     if (!(can & PM_CAN_LAMPS) || i < 0 || i >= n_lamps) return 0;
     if (shots) *shots = lamps[i].shot;
     return lamps[i].name;
+}
+
+int pm_lamp_xy(int i, int *x, int *y)
+{
+    if (!(can & PM_CAN_LAMPS) || i < 0 || i >= n_lamps || lamps[i].x < 0) return 0;
+    if (x) *x = lamps[i].x;
+    if (y) *y = lamps[i].y;
+    return 1;
 }
 
 int pm_lamp_find(const char *name)
@@ -1312,6 +1351,34 @@ static int lamp_hold(const int *list, int n, unsigned rgb, int pattern, unsigned
     lamp_say("lamps: %d insert(s) held (%s): %06x %s, %u ms, layer %u", n, what, rgb & 0xffffffu,
              lamp_pattern_name[pattern], period_ms, prio);
     return n;
+}
+
+/* hud-layers: ONE insert held solid in `rgb`, quietly - a light show paints every insert every tick,
+ * and only a level that changed reaches the game (lamp_write). 0 black is still held (dark). */
+int pm_lamp_paint(int k, unsigned rgb)
+{
+    struct lamp_held *h;
+    int layer;
+    if (!(can & PM_CAN_LAMPS) || k < 0 || k >= n_lamps) return 0;
+    h = &lamp_held[k];
+    if (h->owner == (current ? current : (const struct pm_mode *)&lamps) && h->pattern == PM_LAMP_SOLID) {
+        h->rgb = rgb;
+        return 1;
+    }
+    layer = lamp_layer_for(lamp_prio_of(current));
+    if (layer < 0) return 0;
+    if (h->owner && h->layer != layer) lamp_let_go(k);
+    h->owner = current ? current : (const struct pm_mode *)&lamps;
+    h->rgb = rgb;
+    h->pattern = PM_LAMP_SOLID;
+    h->period = 150u;
+    h->t0 = pm_ms();
+    h->chase_i = 0;
+    h->chase_n = 1;
+    h->layer = layer;
+    h->last[0] = h->last[1] = h->last[2] = -1;
+    h->on_ms = 0;
+    return 1;
 }
 
 /* the lamps a comma-separated list names, in its order; unknown names are said once */
@@ -1849,6 +1916,184 @@ static void clip_tick(void)
     clip.last = now;
 }
 
+/* ---- the backdrop: a clip BEHIND the HUD (hud-layers) --------------------------------------------
+ * How the game shows its own backgrounds (Godzilla Premium 1.16, docs/plans/hud-layers.md, runs h1-h12):
+ * every frame the layered display draws its BACKGROUND element first (site backdrop_draw,
+ * BDLBackground::v[8]): the video bank's player when the background has a clip (the object's video field,
+ * +backdrop_video_at), then the element's own scene (+backdrop_scene_at). The HUD scenes are drawn after
+ * it, so a battle's clip sits under the score panel, the top bar and the timers. In main play the
+ * background is one of the city objects (data backdrop_city_vtable), whose scene is the city.
+ *
+ * A player WE put in the frame's list, however placed, stopped the game's display processes (h3-h11).
+ * What works is the game's own route, taken from inside the background element's draw (the layered
+ * display's process): clip_play there, and the city object's video field set to the surface, as
+ * BDLBackground::v[13] does for a background with a clip. The game's update then advances the player, its
+ * draw shows it, and the city's own scene show is handed the player instead - already in the frame's
+ * list, so display_draw refuses it and the city is not drawn (h12, variant 6).
+ *
+ * The one surface is shared: a framed award of the game's (the Maser) plays in its place and the loop is
+ * played again once the surface is idle; while one of our full-screen clips plays (pm_clip, layer 0) the
+ * video field is 0, so the tick's draw of it is not refused. Everything here runs on the display
+ * processes' thread (the hooks) or the tick's, which is the same thread (the runtime logs both). */
+static struct {
+    char loop[96], once[96];          /* the loop, and a clip to play once in its place first */
+    int on, pending, playing_once, lost;
+    unsigned elem, obj;               /* the background element drawing now; the city whose field we set */
+    unsigned long since;              /* pm_ms() of the last play */
+    unsigned plays, frames;
+} bd;
+static unsigned char *disp_layered_mgr;   /* the layered display's manager (display priority, below) */
+
+static unsigned bd_surface_state(void)
+{
+    void *s = ((void *(*)(void))(unsigned long)fn("video_surface"))();
+    return s ? (unsigned)((int (*)(void *))(unsigned long)fn("surface_state"))(s) : 0;
+}
+
+static void bd_field(unsigned obj, unsigned v)
+{
+    if (obj) *(unsigned *)(unsigned long)(obj + (unsigned)pm_port_value("backdrop_video_at", 0x54)) = v;
+}
+
+static void bd_release(const char *why)
+{
+    if (bd.obj) {
+        bd_field(bd.obj, 0);
+        say("backdrop: taken away (%s) after %u play(s), %u frame(s)", why, bd.plays, bd.frames);
+    }
+    bd.obj = 0;
+}
+
+static void on_backdrop_draw(unsigned *r)
+{
+    bd.elem = r[0];
+}
+
+static void bd_play(unsigned e)
+{
+    const char *name = bd.once[0] ? bd.once : bd.loop;
+    const char *crop = pm_port_text("backdrop_crop");
+    int once = name == bd.once;
+    char was[96];
+    unsigned i;
+    if (!name[0]) return;
+    for (i = 0; name[i] && i + 1 < sizeof was; i++) was[i] = name[i];
+    was[i] = 0;
+    disp_clip_ours = 1;
+    ((void (*)(const char *, int, const char *))(unsigned long)fn("clip_play"))(was, once ? 0 : 1, crop ? crop : "ScoreFrame");
+    disp_clip_ours = 0;
+    bd.playing_once = once;
+    if (once) bd.once[0] = 0;
+    bd_field(e, (unsigned)(unsigned long)((void *(*)(void))(unsigned long)fn("video_surface"))());
+    bd.obj = e;
+    bd.pending = bd.lost = 0;
+    bd.since = pm_ms();
+    if (bd.plays++ < 60)
+        say("backdrop: \"%s\" %s behind the HUD, in the city 0x%08x's place", was, once ? "once" : "looped", e);
+}
+
+/* scene_show(scene, layer): the city's own scene is where the backdrop goes */
+static void on_scene_show(unsigned *r)
+{
+    unsigned e = bd.elem, playing = (unsigned)pm_port_value("surface_playing", 2);
+    if (!e || r[0] != *(unsigned *)(unsigned long)(e + (unsigned)pm_port_value("backdrop_scene_at", 0x18))) return;
+    if (!bd.on || *(unsigned *)(unsigned long)e != data("backdrop_city_vtable")) {
+        if (bd.obj) bd_release(!bd.on ? "the mode ended it" : "another background");
+        return;
+    }
+    if (bd.obj && bd.obj != e) bd_release("the city changed");
+    if (clip.on) {                     /* our full-screen clip (layer 0) plays: the tick draws it over all */
+        if (bd.obj) bd_release("a full-screen clip of ours plays");
+        bd.pending = 1;
+        return;
+    }
+    if (!bd.pending && bd.obj && !bd.lost) {
+        if (bd_surface_state() == playing) {
+            void *player = ((void *(*)(void))(unsigned long)fn("video_player"))();
+            if (player) {
+                r[0] = (unsigned)(unsigned long)player;   /* refused: it is in the list already */
+                bd.frames++;
+            }
+            return;
+        }
+        if (pm_ms() - bd.since < 1500) return;          /* still starting */
+    }
+    if (bd.lost && bd_surface_state() == playing) {      /* the game's clip on the surface: the city */
+        if (bd.obj) { bd_field(bd.obj, 0); bd.obj = 0; }
+        return;
+    }
+    bd_play(e);                        /* asked, a one-shot or the game's clip over: play (again) */
+}
+
+int pm_backdrop(const char *name)
+{
+    unsigned i;
+    if (!(can & PM_CAN_BACKDROP)) return 0;
+    if (!name || !*name) {
+        if (bd.on && !clip.on && bd.obj && bd_surface_state() == (unsigned)pm_port_value("surface_playing", 2))
+            ((void (*)(void))(unsigned long)fn("clip_stop"))();
+        bd.on = 0;
+        bd.loop[0] = bd.once[0] = 0;
+        bd.playing_once = 0;
+        bd_release("the mode ended it");
+        return 1;
+    }
+    if (bd.on && str_eq(bd.loop, name)) return 1;
+    for (i = 0; name[i] && i + 1 < sizeof bd.loop; i++) bd.loop[i] = name[i];
+    bd.loop[i] = 0;
+    bd.on = bd.pending = 1;
+    return 1;
+}
+
+int pm_backdrop_once(const char *name)
+{
+    unsigned i;
+    if (!(can & PM_CAN_BACKDROP) || !name || !*name || !bd.on) return 0;
+    for (i = 0; name[i] && i + 1 < sizeof bd.once; i++) bd.once[i] = name[i];
+    bd.once[i] = 0;
+    bd.pending = 1;
+    return 1;
+}
+
+int pm_backdrop_showing(void)
+{
+    return bd.on && bd.obj && !bd.pending && !clip.on;
+}
+
+/* the game played a clip of its own on the one surface while the backdrop is up (the clip_play hook
+ * tells us): ours is played again once the surface is idle */
+static void bd_clip_lost(void)
+{
+    if (bd.on && bd.obj) bd.lost = 1;
+}
+
+/* a ball end or leaving the game: no backdrop outlives the mode that asked for it */
+static void bd_reset(const char *why)
+{
+    if (!bd.on && !bd.obj) return;
+    bd.on = 0;
+    bd.loop[0] = bd.once[0] = 0;
+    bd_release(why);
+}
+
+static int have_sites(const char *const *names);
+static void backdrop_arm(void)
+{
+    static const char *const s[] = { "backdrop_draw", "scene_show", "clip_play", "clip_stop", "video_player",
+                                     "video_surface", "surface_state", 0 };
+    static const char *const d[] = { "backdrop_city_vtable", 0 };
+    if (!site("backdrop_draw")) return;                  /* a port without it: silent */
+    if (!(can & PM_CAN_CLIPS) || clip_v2 || clip_layer || !have_sites(s) || !have_data(d)) {
+        say("backdrop: off - the port's backdrop lines are incomplete or do not match this build");
+        return;
+    }
+    if (hook(fn("backdrop_draw"), on_backdrop_draw) && hook(fn("scene_show"), on_scene_show)) {
+        can |= PM_CAN_BACKDROP;
+        say("backdrop: on - a mode's clip plays behind the HUD in the main-play background's place "
+            "(draw 0x%08x, scene show 0x%08x)", fn("backdrop_draw"), fn("scene_show"));
+    }
+}
+
 /* ---- display priority (item 154 display) --------------------------------------------------------
  * HOW THE GAME LAYERS ITS DISPLAY (read off Godzilla Pro 1.15 and Premium 1.16, measured in the
  * emulator with display_probe.c; MODE_SDK.md "Display priority"):
@@ -1881,6 +2126,7 @@ static void clip_tick(void)
  * returns. Released at the mode's end: the layered display's own priority back, its queue run. */
 static const struct pm_mode *disp_owner;
 static unsigned disp_prio;                /* 0: no hold */
+static unsigned long disp_linger_until;   /* pm_end_holding: the hold outlives its mode until then */
 static int disp_covered_now, disp_said_wait;
 static unsigned disp_said_layered[8];     /* the layered displays a hold has said wait, one bit each */
 static unsigned disp_said_dropped[8];     /* item 157: the layered displays a hold has dropped, one bit each */
@@ -1929,6 +2175,7 @@ static void disp_release(const char *why)
     if (!p) return;
     disp_prio = 0;
     disp_owner = 0;
+    disp_linger_until = 0;
     disp_covered_now = 0;
     if (m && disp_now(m) == disp_host() && *disp_level(m) == p) {
         *disp_level(m) = (unsigned char)disp_effect(disp_host(), 0);
@@ -1964,6 +2211,25 @@ int pm_display_priority(unsigned priority)
 
 int pm_display_covered(void) { return disp_prio && disp_covered_now; }
 
+/* a hold kept for an ending (pm_end_holding) is not the new mode's */
+static void disp_linger_other_began(void)
+{
+    if (disp_linger_until && disp_owner != current) disp_release("another mode began");
+}
+
+int pm_end_holding(unsigned ms)
+{
+    if (!running || running != current) return 0;
+    if (disp_prio && disp_owner == current && ms) {
+        disp_linger_until = pm_ms() + ms;
+        if (!disp_linger_until) disp_linger_until = 1;
+        say("display: %s ended - its hold at %u stays %u ms for its ending",
+            current->name ? current->name : "a mode", disp_prio, ms);
+    }
+    pm_end();
+    return 1;
+}
+
 /* every tick, from clip_tick: the hold follows its mode, is raised again when the layered display
  * comes back, and says when a display that beat it covers the screen and when it is gone */
 static void display_tick(void)
@@ -1972,7 +2238,11 @@ static void display_tick(void)
     unsigned now;
     int covered;
     if (!disp_prio) return;
-    if (!disp_owner || running != disp_owner) { disp_release("the mode that held it ended"); return; }
+    if (!disp_owner || running != disp_owner) {
+        if (!disp_linger_until) { disp_release("the mode that held it ended"); return; }
+        if (running) { disp_release("another mode began"); return; }
+        if (pm_ms() >= disp_linger_until) { disp_release("its ending is over"); return; }
+    }
     if (!pm_in_game()) { disp_release("left the game"); return; }
     m = disp_manager();
     if (!m) return;
@@ -2050,7 +2320,10 @@ static void on_display_effect_start(unsigned *r)
  * does; a mode start (0x40) or total (0x04) counts as one of the game's mode displays (mode_level) and
  * comes through when that beats the hold; any other display counts as its layered-display effect
  * (priority 1). Of those, a full-screen one (0x10) waits; a framed one plays under the mode's screen,
- * as the game layers it, except while the mode's own clip plays (it would take the one surface). */
+ * as the game layers it, except while the mode's own clip plays (it would take the one surface) or its
+ * backdrop is up (hud-layers: the game's framed award would take the backdrop's place, and its words
+ * sit where the mode's title does - measured, run t1: the Maser's "2 MORE TO LIGHT MASER CANNON" over
+ * KING GHIDORAH's title; the game's own battles keep the glass the same way). */
 static int disp_layered_must_wait(unsigned flags, unsigned hold, unsigned mode_level, int our_clip)
 {
     unsigned level;
@@ -2079,7 +2352,7 @@ static void on_layered_priority(unsigned *r)
     rec = (unsigned char *)(unsigned long)(*(unsigned *)(unsigned long)t + id * (unsigned)pm_port_value("layered_record_size", 16));
     flags = *(unsigned *)rec;
     if (!disp_layered_must_wait(flags, disp_prio, (unsigned)pm_port_value("display_mode_level", 184),
-                                clip.on && !disp_clip_lost)) return;
+                                (clip.on && !disp_clip_lost) || bd.on)) return;
     *(unsigned *)(disp_fake_layered + pm_port_value("layered_fg_at", 0x58)) = 1;
     disp_fake_layered[pm_port_value("layered_fg_at", 0x58) + 4] = 255;   /* the foreground's priority, read by the waiter */
     r[0] = (unsigned)(unsigned long)disp_fake_layered;
@@ -2112,7 +2385,7 @@ static void on_layered_waiter(unsigned *r)
     rec = (unsigned char *)(unsigned long)(*(unsigned *)(unsigned long)t + id * (unsigned)pm_port_value("layered_record_size", 16));
     flags = *(unsigned *)rec;
     if (!disp_layered_must_wait(flags, disp_prio, (unsigned)pm_port_value("display_mode_level", 184),
-                                clip.on && !disp_clip_lost)) return;
+                                (clip.on && !disp_clip_lost) || bd.on)) return;
     r[1] = 0;
     if (id < 256 && !(disp_said_dropped[id / 32] & (1u << (id % 32)))) {
         disp_said_dropped[id / 32] |= 1u << (id % 32);
@@ -2130,6 +2403,7 @@ static void on_clip_play(unsigned *r)
     unsigned char *m;
     const char *name = (const char *)(unsigned long)r[0];
     unsigned i;
+    if (!disp_clip_ours) bd_clip_lost();      /* hud-layers: the backdrop is played again after it */
     if (disp_clip_ours || !clip.on) return;
     m = disp_manager();
     if (disp_prio && m && disp_now(m) == disp_host() && disp_layered_mgr &&
@@ -3920,6 +4194,8 @@ static void on_ball_end(unsigned *r)
     stock_ball_ends++;
     EACH_MODE(m) if (m->ball_end) { current = m; m->ball_end(); }
     current = 0;
+    if (disp_linger_until) disp_release("the ball ended");
+    bd_reset("the ball ended");
     roster_owed_ball_end();
 }
 
@@ -4774,6 +5050,7 @@ static void pad_mode_start(void)
             (unsigned)ball_end_event);
     }
     display_arm();                            /* item 154 display: the clip_play hook, display priority */
+    backdrop_arm();                           /* hud-layers: a clip behind the HUD */
     if (can & PM_CAN_OWN_SOUND) hook(fn("sound_lookup"), on_sound_lookup);
     /* item 163: with /dump/soundlog.on there at the start, every request the game's sound worker
      * takes is logged ("[pad] sound <request> <n>"), so a check game is also the sound census that
@@ -4802,11 +5079,12 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
-        can & PM_CAN_AWARD_SCREEN ? " award-screen" : "", can & PM_CAN_MULTIBALL ? " multiball" : "");
+        can & PM_CAN_AWARD_SCREEN ? " award-screen" : "", can & PM_CAN_MULTIBALL ? " multiball" : "",
+        can & PM_CAN_BACKDROP ? " backdrop" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }

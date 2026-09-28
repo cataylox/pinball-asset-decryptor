@@ -115,7 +115,10 @@ POWER_TIP = (
     "European machine is a 50 Hz board on 50 Hz mains. US machine is the "
     "refusal a US game gives on European power, and the emulator leaves "
     "it on screen rather than pressing past it. Takes effect at the next "
-    "Start.")
+    "Start.\n\nNot every game refuses: the newer code asks about the mains "
+    "once at power-up and answers itself when its own reading is not ready "
+    "yet, and the home machines carry no mains check at all. When the card "
+    "you picked is one of those, it says so under this row.")
 
 #: The cost, spelled out beside the section it belongs to.
 #:

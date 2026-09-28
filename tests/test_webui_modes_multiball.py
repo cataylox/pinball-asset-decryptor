@@ -27,6 +27,9 @@ def test_multiball_is_greyed_until_proven_and_the_fields_round_trip(tmp_path, pr
         f = st["form"]
         assert f["multiball"] is False and f["balls"] == "3" and f["ball_save"] == "10"
         assert f["add_ball_shot"] == "(none)" and f["add_ball_max"] == "1"
+        # PAD-228: the balls come when it starts, or on a shot the page lists (the Action button among them)
+        assert f["mb_on_shot"] == "(when it starts)"
+        assert st["profile"]["mb_on_shots"][0] == "(when it starts)" and "Action button" in st["profile"]["mb_on_shots"]
 
         # the edits save themselves into mode.json as the model's fields
         path = proj / "modes" / slug / "mode.json"
@@ -58,6 +61,14 @@ def test_multiball_is_greyed_until_proven_and_the_fields_round_trip(tmp_path, pr
         # (none) again means no add-a-ball shot in the file
         w.call("ui.set", "modes", "f:add_ball_shot", "(none)")
         assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("add_ball_shot") == "")
+        # PAD-228: the balls on the Action button, and back to the start
+        w.call("ui.set", "modes", "f:mb_on_shot", "Action button")
+        assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("multiball_on_shot") == "Action button")
+        w.call("modes.new")
+        w.call("modes.select", slug, "form")
+        assert w.state("modes")["form"]["mb_on_shot"] == "Action button"
+        w.call("ui.set", "modes", "f:mb_on_shot", "(when it starts)")
+        assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("multiball_on_shot") == "")
 
 
 def test_ball_save_is_greyed_until_proven_and_its_fields_round_trip(tmp_path, preview_on):

@@ -122,6 +122,7 @@ def test_a_broken_assets_json_stops_the_list_with_its_name(tmp_path):
 def test_the_assets_file_names_only_what_the_build_carried(tmp_path):
     project = _code_project(tmp_path)
     (slug, spec), = CM.list_code(project)
+    spec.clip = "clip.mp4"
     used = [{"slug": slug, "key": "music", "request": 125, "sid": 618},
             {"slug": slug, "key": "call:sever", "request": 1251, "ms": 1500},
             {"slug": slug, "key": "call:won", "request": 1249, "ms": 1500},
@@ -136,6 +137,25 @@ def test_the_assets_file_names_only_what_the_build_carried(tmp_path):
     assert "call   sever 1251 1500 4" in lines and "call   won 1249 1500 4" in lines
     assert not any("lost" in ln for ln in lines)          # another mode's carrier is not this one's
     assert text.endswith("\n") and "—" not in text
+
+
+def test_the_assets_file_names_every_clip_by_its_cue(tmp_path):
+    """hud-layers: a clip per cue - the old start clip keeps its name, every other is
+    PadMode_<slug>_<Cue>, one line each, in the order the assets name them."""
+    project = _code_project(tmp_path)
+    (slug, spec), = CM.list_code(project)
+    spec.clips = {"intro": "intro.mp4", "loop": "loop.mp4", "sever": "sever.mp4"}
+    spec.hud = {"title": "KING GHIDORAH"}
+    assert spec.clip_list() == [("intro", "intro.mp4"), ("loop", "loop.mp4"), ("sever", "sever.mp4")]
+    text = CM.runtime_text(slug, spec, GZ, clip=True)
+    assert "clip   intro PadMode_ghidorah_heads_Intro" in text.splitlines()
+    assert "clip   loop PadMode_ghidorah_heads_Loop" in text.splitlines()
+    assert "clip   sever PadMode_ghidorah_heads_Sever" in text.splitlines()
+    assert CM.clip_name(slug, "start") == "PadMode_ghidorah_heads_Clip"
+    spec.clip = "clip.mp4"                            # an old start clip beside an intro is not added twice
+    assert [c for c, _f in spec.clip_list()] == ["intro", "loop", "sever"]
+    assert "3 clips of its own (intro, loop, sever)" in CM.describe(slug, spec, prof=GZ)
+    assert "its own HUD at the screen's edges" in CM.describe(slug, spec, prof=GZ)
 
 
 def test_the_sdk_header_reads_the_file_the_build_writes():
@@ -179,14 +199,21 @@ def test_code_sounds_off_or_on_a_title_without_carriers_are_left_out_with_a_line
     assert "no stock requests to carry them" in said[-1]
 
 
-def test_a_code_mode_asking_more_calls_than_carriers_keeps_the_ones_it_got(tmp_path):
+def test_a_code_modes_calls_share_the_carriers_less_the_ones_re_pointed_for_good(tmp_path):
+    """hud-layers: a swapped call is not given a carrier of its own at the desk: it gets every call
+    carrier the title has, less the ones re-pointed for good (*taken*), from its rank in its mode on
+    (longest first). The engine picks the one it takes, distinct within the mode."""
     cues = ["c%02d" % i for i in range(16)]
     project = _code_project(tmp_path, calls=cues, music=False)
     said = []
     got = MW.choose_code_sounds(project, CM.list_code(project), (True, ""), GZ,
                                 taken=list(MS._JP_CALLS[:10]), log=lambda m, *a: said.append(m))
-    assert len(got) == len(MS._JP_CALLS) - 10
-    assert any("is not put on this card" in s for s in said)
+    left = list(MS._JP_CALLS[10:])
+    assert len(got) == 16 and not said
+    for u in got:
+        assert u["swap"] and sorted(u["candidates"]) == sorted(left) and u["request"] == u["candidates"][0]
+    firsts = [u["candidates"][0] for u in got]
+    assert set(firsts) == set(left)                   # each rank starts at another carrier
 
 
 # ---- Write's plan -------------------------------------------------------------------------------------
@@ -271,15 +298,26 @@ def test_the_rig_scripts_carry_the_assets_files():
 
 
 # ---- the examples ---------------------------------------------------------------------------------------
-def test_the_five_intricate_modes_are_the_code_examples_and_their_recipes_fit():
-    assert CM.example_names() == ["KING GHIDORAH", "OXYGEN DESTROYER", "MASER BARRAGE", "FINAL WARS", "ANGUIRUS"]
+def test_the_intricate_modes_are_the_code_examples_and_their_recipes_fit():
+    assert CM.example_names() == ["KING GHIDORAH", "OXYGEN DESTROYER", "MASER BARRAGE", "FINAL WARS", "ANGUIRUS",
+                                  "MELTDOWN"]
     for ex in CM.EXAMPLES:
         src = open(os.path.join(EX, ex["source"]), encoding="utf-8").read()
         assert '#define FOLDER             "%s"' % ex["slug"] in src
         for h in ex["headers"]:
             assert os.path.isfile(os.path.join(EX, h))
         r = ex["recipe"]
-        assert 0 < r["clip"]["length"] <= 8.0 and r["clip"]["crop"] in ("fill", "letterbox")
+        # hud-layers: a clip per cue - an intro (full screen), a loop behind the HUD unless the mode
+        # plays inside the game's own battle (ANGUIRUS), events, and the two endings
+        clips = r["clips"]
+        assert "intro" in clips and "won" in clips and "lost" in clips
+        assert "loop" in clips or ex["slug"] == "anguirus_assist"
+        for cue, c in clips.items():
+            assert CM.CUE_RE.match(cue) and c["crop"] in ("fill", "letterbox")
+            assert 0 < c["length"] <= (16.0 if cue.startswith("loop") else 6.0), (ex["name"], cue)
+            assert ('"%s"' % cue) in src or cue in ("intro", "start") or cue.startswith("loop"), (ex["name"], cue)
+        assert len(clips) <= CM.MAX_CLIPS
+        assert ex["hud"] and isinstance(ex["hud"], dict)
         assert 10.0 <= r["music"]["length"] <= 30.0
         assert abs(r["music"]["length"] * 100 - round(r["music"]["length"] * 100)) < 1e-6   # 10 ms steps
         cues = set(re.findall(r'pa_call\(&own, (?:[^"]*\? )?"(\w+)"(?: : "(\w+)")?', src))
@@ -287,11 +325,14 @@ def test_the_five_intricate_modes_are_the_code_examples_and_their_recipes_fit():
         assert set(r["calls"]) <= named, (ex["name"], set(r["calls"]) - named)
         for cue, c in r["calls"].items():
             assert 0 < c["length"] <= 4.0 and CM.CUE_RE.match(cue)
-        for part in [r["clip"], r["art"], r["music"]] + list(r["calls"].values()):
+        for part in [r["music"]] + list(r["calls"].values()) + list(clips.values()):
             assert part["film"] in CM.FILMS and part["film"] in CM.FILM_TITLES
             assert "—" not in part.get("what", "")
-    total = sum(len(ex["recipe"]["calls"]) for ex in CM.EXAMPLES)
-    assert total <= len(MS._JP_CALLS)                  # every call of the five has a carrier
+    # hud-layers: the carriers are SHARED across modes, so what has to fit is one mode's calls (each
+    # takes another carrier within its mode); the six together carry more than there are carriers
+    for ex in CM.EXAMPLES:
+        assert len(ex["recipe"]["calls"]) <= len(MS._JP_CALLS), ex["name"]
+    assert sum(len(ex["recipe"]["calls"]) for ex in CM.EXAMPLES) > len(MS._JP_CALLS)
     assert len(CM.EXAMPLES) <= len(MS._BEDS_LE116)     # and every music a bed of its own
 
 
@@ -303,7 +344,9 @@ def test_an_example_without_its_films_is_added_with_its_code_and_says_which(tmp_
     folder = MP.mode_folder(project, slug)
     assert sorted(os.listdir(folder)) == ["assets.json", "intricate_kit.h", "oxygen_destroyer.c"]
     spec = CM.load(project, slug)
-    assert spec.screen and not spec.clip and not spec.music and not spec.calls
+    # hud-layers: its HUD at the glass's edges, no panel; nothing of a film without the films
+    assert not spec.screen and spec.hud["title"] == "OXYGEN DESTROYER"
+    assert not spec.clip and not spec.clips and not spec.music and not spec.calls
     assert spec.film["recipe"]["music"]["film"] == "des95"
     assert "Godzilla (1954)" in CM.missing_words(missing) and " and " in CM.missing_words(missing)
     with pytest.raises(CM.CodeModeError, match="already in this project"):

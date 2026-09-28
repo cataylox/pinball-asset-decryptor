@@ -1553,13 +1553,40 @@ static int legend_dirty = 1;
 #define WINPOS_PATH_MAX 512
 static char winpos_path[WINPOS_PATH_MAX];
 
+/* The rig slot this renderer belongs to (PAD_SLOT, tools/spike2_emu/padpath.sh):
+ * 0 for the ordinary rig and for every run from before slots existed. */
+static int my_rig_slot(void)
+{
+    const char *s = getenv("PAD_SLOT");
+    return s && *s ? atoi(s) : 0;
+}
+
+/* "[rig 2: item/48] " - who this run is for, at the front of every window
+ * title (watch.sh sets PAD_TITLE_TAG from padpath.sh's pad_title_tag). Empty
+ * for David's own runs from main, so those titles are exactly as before. */
+static const char *title_tag(void)
+{
+    static char tag[96];
+    const char *t = getenv("PAD_TITLE_TAG");
+    if (!tag[0] && t && *t) snprintf(tag, sizeof tag, "%s ", t);
+    return tag;
+}
+
 static const char *winpos_file(void)
 {
     const char *home;
+    int slot = my_rig_slot();
     if (winpos_path[0]) return winpos_path;
     home = getenv("HOME");
-    snprintf(winpos_path, sizeof winpos_path, "%s/.pad_windows",
-             home && *home ? home : "/tmp");
+    /* One file per rig slot: two slots' game windows are two windows, and one
+     * shared record would put the second exactly on top of the first. Slot 0
+     * keeps the file it has always had. */
+    if (slot > 0)
+        snprintf(winpos_path, sizeof winpos_path, "%s/.pad_windows.rig%d",
+                 home && *home ? home : "/tmp", slot);
+    else
+        snprintf(winpos_path, sizeof winpos_path, "%s/.pad_windows",
+                 home && *home ? home : "/tmp");
     return winpos_path;
 }
 
@@ -1854,7 +1881,29 @@ static double pause_t0;
  * a previous session left in the counter are never replayed (pause_poll) */
 static unsigned pause_req_seen;
 
-/* SIGSTOP or SIGCONT every process named `game`; how many were signalled. */
+/* Is <pid> in THIS renderer's rig slot? Read from its environment, the way
+ * padslot.sh's pad_slot_of does: PAD_SLOT=N, absent means 0, and an
+ * environment this account cannot read (another user's process) counts as
+ * slot 0 - which a slot >= 1 renderer then leaves alone. Pausing used to stop
+ * every `game` on the machine, which with two rigs up froze the other one. */
+static int pid_in_my_slot(int pid)
+{
+    char path[64], buf[8192];
+    FILE *f;
+    size_t n, i;
+    int slot = 0, mine = my_rig_slot();
+    snprintf(path, sizeof path, "/proc/%d/environ", pid);
+    if (!(f = fopen(path, "r"))) return mine == 0;
+    n = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    buf[n] = 0;
+    for (i = 0; i < n; i += strlen(buf + i) + 1)
+        if (!strncmp(buf + i, "PAD_SLOT=", 9)) { slot = atoi(buf + i + 9); break; }
+    return slot == mine;
+}
+
+/* SIGSTOP or SIGCONT every process named `game` in this rig slot; how many
+ * were signalled. */
 static int pause_signal(int sig)
 {
     DIR *d = opendir("/proc");
@@ -1870,7 +1919,7 @@ static int pause_signal(int sig)
         if (!(f = fopen(path, "r"))) continue;
         if (fgets(comm, sizeof comm, f)) {
             comm[strcspn(comm, "\n")] = 0;
-            if (!strcmp(comm, "game")) {
+            if (!strcmp(comm, "game") && pid_in_my_slot(pid)) {
                 if (kill(pid, sig) == 0) n++;
                 else fprintf(stderr, "[pause] not allowed to signal the game"
                              " (pid %d runs as another user)\n", pid);
@@ -2129,7 +2178,11 @@ static void legend_open(int scr)
                                      (unsigned)(nbinds * 20 + 124), 0,
                                      XBlackPixel(xdpy, scr), XBlackPixel(xdpy, scr));
     win_place(legend_win, lx, ly);
-    XStoreName(xdpy, legend_win, "Controls - Spike 2 emulator");
+    {
+        char lt[160];
+        snprintf(lt, sizeof lt, "%sControls - Spike 2 emulator", title_tag());
+        XStoreName(xdpy, legend_win, lt);
+    }
     win_brand(legend_win);
     /* KeyPress | KeyRelease | Exposure | StructureNotify. Keys are selected on
      * this window too, so whichever of the two has focus can drive the game. */
@@ -2312,8 +2365,8 @@ static int win_open(void)
      * under games/; watch.sh always sets it. */
     {
         const char *g = getenv("PAD_GAME");
-        snprintf(win_title, sizeof win_title, "%s - Stern Spike 2 emulator",
-                 (g && *g) ? g : "Spike 2");
+        snprintf(win_title, sizeof win_title, "%s%s - Stern Spike 2 emulator",
+                 title_tag(), (g && *g) ? g : "Spike 2");
         XStoreName(xdpy, xwin, win_title);
     }
     win_brand(xwin);
@@ -3019,8 +3072,8 @@ static void win2_open(int disp)
          * needles, so the second window cannot steal the game window's slot. */
         static char title[160];
         const char *g = getenv("PAD_GAME");
-        snprintf(title, sizeof title, "%s [display %d] - Stern Spike 2 "
-                 "emulator", (g && *g) ? g : "Spike 2", disp);
+        snprintf(title, sizeof title, "%s%s [display %d] - Stern Spike 2 "
+                 "emulator", title_tag(), (g && *g) ? g : "Spike 2", disp);
         XStoreName(xdpy, xwin2, title);
     }
     win_brand(xwin2);

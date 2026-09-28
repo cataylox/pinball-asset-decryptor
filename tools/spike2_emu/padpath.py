@@ -175,7 +175,11 @@ def wsl_root():
     if p and not is_windows_path(p):
         return p
     home = wsl_home()
-    return home.rstrip("/") + "/spike2root" if home else None
+    if not home:
+        return None
+    if slot():
+        return "%s/padslots/%d/root" % (home.rstrip("/"), slot())
+    return home.rstrip("/") + "/spike2root"
 
 
 def win_root():
@@ -220,8 +224,61 @@ def dump():
     return os.path.join(r, "dump") if r else None
 
 
+# ---- RIG SLOTS (padpath.sh, "RIG SLOTS"; padslot.sh) ---------------------
+
+def slot():
+    """This process's rig slot: PAD_SLOT, 0 when unset (the ordinary rig)."""
+    v = _env("PAD_SLOT")
+    try:
+        return max(0, int(v)) if v else 0
+    except ValueError:
+        return 0
+
+
+def pid_slot(pid):
+    """The rig slot of process <pid>, read from its environment; None when
+    this account cannot read it (another user's process), -1 when the
+    process is gone. padslot.sh's pad_slot_of, in Python."""
+    try:
+        with open("/proc/%d/environ" % int(pid), "rb") as f:
+            env = f.read()
+    except FileNotFoundError:
+        return -1                     # gone: nobody's (padslot.sh's "-")
+    except OSError:
+        return None
+    for item in env.split(b"\0"):
+        if item.startswith(b"PAD_SLOT="):
+            try:
+                return int(item[9:] or b"0")
+            except ValueError:
+                return 0
+    return 0
+
+
+def in_my_slot(pid):
+    """Does <pid> belong to this process's rig slot? An unreadable process
+    counts as slot 0, as in padslot.sh."""
+    s = pid_slot(pid)
+    return (slot() == 0) if s is None else (s == slot())
+
+
+def label():
+    """Who this run is for (PAD_LABEL, set by watch.sh), or ""."""
+    return _env("PAD_LABEL") or ""
+
+
+def title_tag():
+    """"[rig 2: item/48]" / "[PAD-231]" / "" - the front of every window title,
+    the same words padpath.sh's pad_title_tag gives the renderer's windows."""
+    n, l = slot(), label()
+    if n:
+        return "[rig %d%s]" % (n, (": " + l) if l else "")
+    return "[%s]" % l if l else ""
+
+
 def main():
     print("platform         : %s" % ("windows" if _WIN else "wsl/linux"))
+    print("rig slot         : %d%s" % (slot(), (" (" + label() + ")") if label() else ""))
     print("rig              : %s" % RIG)
     print("wsl home         : %s" % wsl_home())
     print("rootfs (wsl)     : %s" % wsl_root())
@@ -229,7 +286,7 @@ def main():
         print("rootfs (windows) : %s" % win_root())
     print("dump             : %s" % dump())
     print("tables           : %s" % tables())
-    for name in ("PAD_ROOT", "PAD_TABLES", "PAD_WSL_DISTRO", "PAD_WSL_HOME"):
+    for name in ("PAD_ROOT", "PAD_TABLES", "PAD_WSL_DISTRO", "PAD_WSL_HOME", "PAD_SLOT"):
         if _env(name):
             print("  %-14s = %s" % (name, _env(name)))
     return 0

@@ -10,9 +10,17 @@ Modes written in C against `pad_mode.h` (read `../MODE_SDK.md` first). Each file
 | `maser_barrage.c` | MASER BARRAGE | a combo chain with a timer between shots and a growing multiplier; started by the game's skill shot EVENT |
 | `final_wars.c` | FINAL WARS | a multi-phase wizard mode, lit by playing the other modes, with add-time shots |
 | `anguirus_assist.c` | ANGUIRUS | a mode that stacks with the game's own battle on purpose: it starts and ends with it |
+| `meltdown.c` | MELTDOWN | a MULTIBALL of our own: a core temperature that climbs, sets the jackpots' multiplier, and melts down at 100% (hud-layers) |
 | `ebirah_rewrite.c` | EBIRAH, three shots then the Building | the game's OWN Ebirah battle with its shot logic replaced in C (item 161, against `../pad_stock.h`; emulator-proven on Premium 1.16, MODE_SDK.md says what was measured) |
 
-The last five (item 152) were written for Godzilla Premium 1.16 (`godzilla_le-1.16.port`) and use
+**How they look (hud-layers).** Like the game's own battles: an intro clip full screen when a mode starts,
+then a clip looping BEHIND the score panel (`pm_backdrop`), and the mode's words at the glass's EDGES in the
+game's own font - its title and what to shoot above the score panel, counters across the top, a timer
+badge made from the stock BATTLE badge with the mode's own label and icon, and a gauge on the right edge
+(MODE_SDK.md, "A mode that looks like the game's own"). Events play their own clip behind the HUD, endings
+play full screen, and every start and end has its own light show. No picture panel any more.
+
+The six after POWERLINE BLITZ (item 152, and MELTDOWN) were written for Godzilla Premium 1.16 (`godzilla_le-1.16.port`) and use
 only shot names, events and callout roles that port has. They also build and run on Pro 1.15's port,
 which has two shield targets where Premium has three (ANGUIRUS then needs two spikes, and FINAL
 WARS has two add-time targets). They share `intricate_kit.h`:
@@ -105,6 +113,36 @@ upper playfield (left, center, right); the GODZILLA target is upper left, beside
 MASER target is on the left side, halfway down; the three SHIELD targets are on the right side,
 halfway down, in front of Mechagodzilla; the BIG LOOP is the orbit across the top.
 
+### MELTDOWN (`meltdown.c`): a multiball of our own
+
+- **How to light it:** hit the Magna-Grab CAPTIVE BALL (the Godzilla target) 10 times in a game. Each hit
+  says how many are left; the tenth says MELTDOWN IS READY and the MAGNA GRAB insert pulses red.
+- **How to start it:** hit the captive ball again: 3 balls in play, a 15 s ball save. It waits (still
+  ready) while another of our modes, or the game's own battle or multiball, runs.
+- **The core:** Burning Godzilla's core temperature starts at 25% and rises 1% a second (2% from 70%);
+  each jackpot heats it 4% (8% for the HEART). The heat is the multiplier: STABLE x1, HOT x2 (40%),
+  CRITICAL x3 (70%), MELTDOWN IMMINENT x5 (90%).
+- **Jackpots:** the LEFT RAMP, RIGHT RAMP, BUILDING and BIG LOOP: 2,000,000 x the heat. One of them is the
+  HEART (it moves every 8 s and when hit): double.
+- **Cadmium:** each SHIELD target cools the core 12% (the Super X III's cadmium): cool him down, or ride the
+  heat for x5.
+- **MELTDOWN:** at 100% the BUILDING is the MELTDOWN SUPER JACKPOT for 20 s: twice every jackpot this
+  multiball paid. Made: Godzilla Junior absorbs the radiation, the core back to 25%, the jackpots' base
+  +500,000. Missed: the core blows, back to 50% and the base back to 2,000,000.
+- **Add-a-ball:** after 4 jackpots the MAGNA GRAB insert lights green; the captive ball adds a ball, once.
+- **How it ends:** one ball left (after the ball save and 3 s more), a tilt.
+- **The glass:** Burning Godzilla steaming in the dark, full screen; his night walk glowing red behind the
+  score panel; CORE, JACKPOT and JACKPOTS across the top, the CORE gauge on the right filling yellow to
+  white-hot, the MELTDOWN badge counting its 20 s. The spiral ray behind the HUD at a jackpot, the freezing
+  mist at cadmium, the glowing veins crossing into CRITICAL; the meltdown and Junior's revival full screen.
+- **Inserts:** the four jackpot shots in the heat's colour (yellow, orange, red, flashing white), the HEART
+  blinking; the shields ice blue while the core is above 40%; MELTDOWN: only the Building, strobing white.
+- **Lights:** the playfield dark and a red fire rising into a white-hot strobe at the start; a white
+  implosion into the Building at MELTDOWN; a burst of blue and white at the super jackpot; embers at the end.
+- **Sound:** Ifukube's end-title march from Godzilla vs. Destoroyah as its bed; his roar when it is ready,
+  the spiral ray, the freezer beams, a strained roar at CRITICAL, the final battle's biggest blast, Junior's
+  roar.
+
 ### KING GHIDORAH (`ghidorah_heads.c`): a boss battle
 
 - **How to start it:** hit all three powerline targets (any order) in one ball. The third one starts it.
@@ -126,7 +164,8 @@ halfway down, in front of Mechagodzilla; the BIG LOOP is the orbit across the to
 
 ### OXYGEN DESTROYER (`oxygen_destroyer.c`): a hurry-up
 
-- **How to start it:** the Godzilla target 3 times in one ball.
+- **How to start it:** spin the LEFT SPINNER 25 times in one ball (hud-layers: it used to be the Godzilla
+  target 3 times; that captive ball now leads to MELTDOWN). The Godzilla target is its hold-off.
 - **What to do:** a value starts at 20,000,000 and falls 800,000 a second. The LEFT RAMP collects it.
   The Godzilla target holds it off: 2 s back, three times.
 - **Then:** the RIGHT RAMP is lit for 12 s: the super jackpot, DOUBLE what you collected.
@@ -181,9 +220,10 @@ halfway down, in front of Mechagodzilla; the BIG LOOP is the orbit across the to
 - **How it ends:** with the game's battle, or a drain or a tilt. The game's battle itself is never touched.
 - **Inserts:** the shield inserts are the charge meter: blinking orange = still to charge, solid orange
   = charged. The roll lit: the BIG LOOP blinks cyan, faster as its 6 s run out.
-- **The screen:** it yields to the battle, whose own screen (timer, shot progress, what to shoot) sits
-  where the panel does. Its entrance (clip, music, panel) waits until the battle's start screen is over
-  (`pm_display_covered`); after that the panel speaks for 3 s at a spike, the roll lit and each rolling
+- **The glass (hud-layers):** the battle keeps its own clip, title, counters and BATTLE badge; ANGUIRUS keeps
+  to the right edge: its SPIKES gauge, a spike lighting as it charges, from its entrance to its exit. Its
+  entrance (the intro clip full screen, its music) waits until the battle's start screen is over
+  (`pm_display_covered`); after that its award line speaks for 3 s at a spike, the roll lit and each rolling
   attack, holding display priority 180 only for those moments; its total waits for the battle's own.
 - **How often:** once per game battle.
 

@@ -232,6 +232,17 @@ value effect_waiter_call     0x00052c08
 value layered_fg_at          0x58
 value layered_fg_flags_at    0x60
 
+# ---- the backdrop (hud-layers): a mode's clip BEHIND the HUD, in the main-play background's place --------
+# BDLBackground::v[8] (slot 8 of BDLMainplayBG's vtable) and the scene_show it calls, read off this program by
+# the shape of Premium 1.16's measured lines (docs/plans/hud-layers.md); emulator-proven on this build (hud-layers
+# run tp115, 2026-09-27: all six Godzilla examples' loops and event clips behind the HUD, no render gap).
+site backdrop_draw       0x0003fd74 0xe5903054 0xe92d4010
+site scene_show          0x003ba964 0xe92d4070 0xe3074e84
+data backdrop_city_vtable    0x00622a90
+value backdrop_video_at      0x54
+value backdrop_scene_at      0x18
+text backdrop_crop           ScoreFrame
+
 # ---- named inserts (item mode-leds): MODE_SDK.md "Lights: named inserts" ----------------------------
 # The game's lamp LAYERS (lamp groups): the active list's head is the word after the free list's at
 # lamp_layers; each group holds a pointer to one 40-byte slot per light (+0), its priority (+4), its
@@ -456,3 +467,26 @@ site balls_in_play         0x003984e4 0xe92d4010 0xe30a4b48
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x00398660 0xe92d41f0 0xe30bea5a
 # EMU 2026-09-26 (mb_e2e.sh): served 3 on a mode file's start, add-a-ball to 4, drains to 1, END (one ball left). PROVEN.
+
+# ---- PAD-228: the cabinet buttons as shots, and the Action button's light ----------------------------
+# The Action button (the game's LOCKDOWN BUTTON) and the flipper buttons have no handler of their own
+# (descriptor flags 0), so the rules never send them as a shot and no switch_hit broadcasts them. The
+# framework's switch drain calls one per-switch function for EVERY edge (portswitch.py, generation B):
+# hooked as switch_edge, it hands the buttons to the modes through the `switch` lines below, on bits the
+# rules' shot dispatch never sends. Read off this build's own drain by portswitch.switch_source.
+site switch_edge      0x001e6860 0xe30433d8 0xe340307e
+site switch_drain     0x001e7540 0xe92d4ff0 0xe30b9584
+data switch_records         0x007a958c
+data switch_count           0x007e43d8
+value switch_drain_size     384
+value switch_record_size    32
+value switch_level_at       24
+value switch_desc_via       8
+value switch_flags_at       26
+value switch_polarity_at    28
+switch 34   0x1000000000000000 Action button
+switch 60   0x2000000000000000 Left flipper button
+switch 59   0x4000000000000000 Right flipper button
+# the Action button's RGB light (lamp 97, I/O group 5 index 5/4/7, on the cabinet front), tied to its shot:
+# a mode that lights its shots lights the button
+lamp 282,283,284  0x1000000000000000 ACTION BUTTON  # lamp 97, I/O group 5 index 5, the cabinet front

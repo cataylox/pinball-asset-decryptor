@@ -290,6 +290,18 @@ if [ -n "${PAD_CARD:-}" ]; then
             # 'Launching' must preview as that card, not as the default menu.
             printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|text_size|counter|countdown_word|footer|theme|color_[a-z_]+)[[:space:]]*=' || true
         } > "$R/dump/codeselect.conf"
+        # ★ PAD-226: THE CARD'S OWN INDEX FOR EACH DEVICE, and the store name its
+        # scores= line gives it. The menu above counts the trees it found; the
+        # card's per-image modes (modes/img<N>) and scores= lines count the
+        # card's images.conf lines. `<token><TAB><card index><TAB><scores name>`.
+        printf '%s\n' "$SEL_CARDCONF" | awk -F'|' '
+            /^[ \t]*image[ \t]*=/ { d = $1; sub(/^[ \t]*image[ \t]*=[ \t]*/, "", d)
+                                    gsub(/[ \t]+$/, "", d); sub(/^\/dev\/mmcblk0/, "", d)
+                                    dev[n++] = d }
+            /^[ \t]*scores[ \t]*=/ { i = $1; sub(/^[ \t]*scores[ \t]*=[ \t]*/, "", i); gsub(/[ \t]/, "", i)
+                                     nm = $2; gsub(/^[ \t]+|[ \t]+$/, "", nm); sc[i] = nm }
+            END { for (k = 0; k < n; k++) printf "%s\t%d\t%s\n", dev[k], k, sc[k] }' \
+            > "$R/dump/codeselect.cardidx"
         echo "[select] menu: $SEL_N images; default $SEL_DEFAULT; auto-boot after $SEL_TIMEOUT s"
         # THE MEDIA (item 90 v2): the card's /usr/local/codeselect/media,
         # pulled out of its rootfs with debugfs (parts.py --rootfs-dir, no
@@ -394,6 +406,9 @@ fi
 # it has always been: no line, no file, no variable. And it never stops a run - see the
 # script's header for every rule. Called with an empty card too (an extracted title, a
 # folder): it then only takes out what an earlier card's install of ours left behind.
+# PAD-226: whether the modes are the CARD's to decide (nothing the launch brought) - the
+# menu below asks the card again for the image it chose, which has a set of its own
+[ -z "${PAD_MODE_SO:-}" ] && [ "${PAD_CARD_MODES:-1}" != 0 ] && export PAD_CARDMODES_OWN=1
 _cardmode_so=$(bash "$S/modes/cardmodes.sh" "${PAD_CARD:-}" | tail -1)
 [ -n "$_cardmode_so" ] && export PAD_MODE_SO="$_cardmode_so"
 unset _cardmode_so
@@ -860,7 +875,53 @@ if [ -n "$SEL_DIRS" ]; then
         fi
     else
         echo "[select] fallback: primary (could not bind $SEL_DIR over /games/$GAME)" >&2
+        SEL_DIR=""
     fi
+    # ★ PAD-226: WHAT BELONGS TO THE IMAGE THAT BOOTS, as the card's select.sh
+    # binds it on the machine, keyed by the CARD's index for the chosen device.
+    SEL_CARDIDX=""; SEL_SCORES=""
+    if [ "$SEL_RC" = 0 ] && [ -n "$SEL_DIR" ] && [ -f "$R/dump/codeselect.cardidx" ]; then
+        IFS=$'\t' read -r _tok SEL_CARDIDX SEL_SCORES \
+            < <(awk -F'\t' -v t="$SEL_IDX" '$1 == t' "$R/dump/codeselect.cardidx" | head -1)
+    fi
+    # ITS OWN CUSTOM MODES: image N's set (or none) instead of the primary's -
+    # only when the modes were the card's to decide (nothing the launch brought)
+    if [ -n "$SEL_CARDIDX" ] && [ "$SEL_CARDIDX" != 0 ] \
+            && [ "${PAD_CARDMODES_OWN:-}" = 1 ] && [ -n "${PAD_CARD:-}" ]; then
+        PAD_MODE_SO=$(PAD_MODE_SO= PAD_CARD_IMAGE="$SEL_CARDIDX" bash "$S/modes/cardmodes.sh" "$PAD_CARD" | tail -1)
+        export PAD_MODE_SO
+    fi
+    # ITS OWN HIGH SCORES: scores=<N>|<name> gives image N its own machine store,
+    # seeded once from the shared one and bound over /data/nv/<title>
+    case "$SEL_SCORES" in
+        ""|.*|*/*|*[!A-Za-z0-9._-]*) ;;
+        *)
+            _title=$(basename "$SEL_DIR")
+            _store="$R/data/nv.own/$SEL_SCORES/$_title"
+            if [ ! -d "$_store" ]; then
+                mkdir -p "$(dirname "$_store")"
+                if [ -d "$R/data/nv/$_title" ]; then
+                    cp -a "$R/data/nv/$_title" "$_store" \
+                        && echo "[select] image $SEL_CARDIDX: its own machine store, started from a copy of the shared one"
+                else
+                    mkdir -p "$_store"
+                fi
+            fi
+            mkdir -p "$R/data/nv/$_title"
+            # ROOT IS ELEVATION, NOT OWNERSHIP (PAD-182): what a root run makes
+            # here goes to whoever owns the rig's data, or a later run as that
+            # user could not make a store of its own beside it
+            if [ "$(id -u)" = 0 ]; then
+                _o=$(stat -c %u:%g "$R/data" 2>/dev/null)
+                [ -n "$_o" ] && chown "$_o" "$R/data/nv.own" "$R/data/nv.own/$SEL_SCORES" 2>/dev/null
+                [ -n "$_o" ] && [ -z "$(ls -A "$_store" 2>/dev/null)" ] && chown "$_o" "$_store" 2>/dev/null
+            fi
+            if [ -d "$_store" ] && mount --bind "$_store" "$R/data/nv/$_title"; then
+                echo "[select] image $SEL_CARDIDX keeps its own high scores: data/nv.own/$SEL_SCORES/$_title bound over data/nv/$_title"
+            else
+                echo "[select] image $SEL_CARDIDX: its own machine store could not be bound; it shares the title's" >&2
+            fi ;;
+    esac
 fi
 
 # ★ ITEM 45 - THIS TITLE'S PANEL IS BOLTED IN UPSIDE DOWN AND OUR MONITOR IS NOT.

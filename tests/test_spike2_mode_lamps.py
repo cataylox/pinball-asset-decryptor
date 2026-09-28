@@ -80,8 +80,12 @@ def test_the_shots_inserts_are_the_ones_in_front_of_them(key):
         assert lamps[insert][2] & shots[shot], (shot, insert)
     assert lamps["LEFT RAMP"][0] == (346, 347, 348) and lamps["MASER"][:2] == ((298, 0, 0), True)
     # a tie is a bit of the game's own shot table (43 cshot objects on both builds): the port's named shots,
-    # and bits it leaves unnamed (the outlanes, the spinners' extra bits, the flashers)
+    # and bits it leaves unnamed (the outlanes, the spinners' extra bits, the flashers); the one exception is the
+    # ACTION BUTTON lamp, tied to the Action button's own shot bit above the table (PAD-228)
     for lights, mono, shot, name in lamps.values():
+        if name == "ACTION BUTTON":
+            assert shot == 1 << 60, name   # switch 34, the Action button's bit
+            continue
         assert shot < (1 << 43), name
     assert lamps["LEFT OUTLANE"][2] == 0x8 and lamps["TOP SPINNER"][2] == 0x1800
 

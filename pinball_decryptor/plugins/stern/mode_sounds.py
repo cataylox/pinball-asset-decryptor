@@ -75,8 +75,13 @@ class Carriers:
     #: item 163: every sound of a mode's own on this title is SWAPPED in at run time. Each carrier's
     #: own record is grown with the mode's sound and left un-pointed (no stock sound id changes);
     #: while the mode plays it, the runtime swaps the carrier's key for the appended record's
-    #: (pad_mode.h ``pm_sound_swap``). Carriers are distinct per sound, music too.
+    #: (pad_mode.h ``pm_sound_swap``). hud-layers: a carrier is SHARED across modes - each sound its
+    #: own record, a grown copy of a host record (engine ``_mode_shared_sound``) - and distinct within
+    #: one mode.
     swap: bool = False
+    #: hud-layers: the CALLS alone are swapped in (the music keeps its beds): Godzilla Premium 1.16 and
+    #: Pro 1.15, whose calls were one carrier each, re-pointed for good.
+    swap_calls: bool = False
 
 
 # The 21 Japanese-language variants, longest record first on Premium 1.16 (the same ids on
@@ -109,9 +114,9 @@ _BEDS_PRO115 = (257, 94, 234, 369, 347, 617, 605, 607, 421, 486, 248, 391)
 # whole 3-ball games). It does not cover the DJ Mixer or the Japanese callouts (see above).
 TITLES = {
     ("godzilla_le", "1.16"): Carriers(key_mask=0xE0001FFF, calls=_JP_CALLS, music=_MUSIC, status="census",
-                                      beds=_BEDS_LE116),
+                                      beds=_BEDS_LE116, swap_calls=True),
     ("godzilla_pro", "1.15"): Carriers(key_mask=0xFC0003FF, calls=_JP_CALLS, music=_MUSIC, status="census",
-                                       beds=_BEDS_PRO115),
+                                       beds=_BEDS_PRO115, swap_calls=True),
 }
 
 
@@ -139,7 +144,7 @@ _SWAP = {
     ("foo_fighters_le", "1.04"): (0x800075FF, (899, 875, 321, 314, 281, 316, 315, 280, 805, 322, 898, 320, 312, 327, 352, 339, 184, 313, 317, 200, 806),
         (63, 64), "census"),
     ("godzilla_pro", "1.16"): (0xE0001FFF, (1845, 1846, 2001, 1319, 2008, 1545, 1548, 1996, 2006, 1457, 1550, 2007, 1851, 1547, 1850, 1597, 1544, 1999, 1037, 1539, 1848),
-        (123, 86, 73, 79, 101), "census"),
+        (86, 73, 79, 101, 123), "census"),
     ("guardians_le", "1.14"): (0xE0001FFF, (625, 680, 538, 722, 549, 857, 729, 598, 683, 699, 791, 694, 600, 686, 602, 860, 691, 624, 862, 527, 893),
         (90, 93, 112, 113, 138), "census"),
     ("iron_maiden_le", "1.16"): (0x7F00007B, (489, 298, 498, 491, 465, 490, 482, 471, 390, 392, 456, 386, 383, 367, 384, 388, 391, 449, 385, 346, 389),
@@ -189,6 +194,25 @@ _SWAP = {
 }
 for (_g, _v), (_m, _c, _mu, _st) in _SWAP.items():
     TITLES[(_g, _v)] = Carriers(key_mask=_m, calls=_c, music=_mu, status=_st, swap=True)
+
+
+def swapped(c, key):
+    """True when a sound of *key* ("music" or a call's) is SWAPPED in on this title's carriers (item
+    163), so a carrier can take several modes' sounds, each its own record (hud-layers)."""
+    return bool(c and (c.swap or (key != "music" and c.swap_calls)))
+
+
+def swap_candidates(c, key, taken=(), rank=0):
+    """The carriers a swapped sound of *key* may take, best first: the title's calls (longest record
+    first) or its music, less *taken* (requests re-pointed for good, the end sound's). A carrier is
+    SHARED across modes; within one mode each sound takes another (the engine keeps them apart, and
+    checks each call fits its carrier's record), so the *rank*-th longest call of a mode starts at
+    the *rank*-th carrier."""
+    pool = [int(r) for r in (c.music if key == "music" else c.calls) if int(r) not in {int(t) for t in taken}]
+    if not pool:
+        return []
+    k = int(rank) % len(pool)
+    return pool[k:] + pool[:k]
 
 
 class ModeSoundError(ValueError):

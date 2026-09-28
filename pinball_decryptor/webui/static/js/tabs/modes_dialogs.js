@@ -137,14 +137,16 @@ export function FilmDialog({ film }) {
 }
 
 // ---------------------------------------------------------------- New code mode
-export function NewCodeDialog({ onClose }) {
+export function NewCodeDialog({ onClose, blocks }) {
   const [name, setName] = useState("");
-  const ok = () => { const n = name.trim(); if (!n) return; call("modes.new_code_mode", n); onClose(); };
-  return html`<${Modal} title="New code mode" icon="edit" onClose=${onClose}
+  const ok = () => { const n = name.trim(); if (!n) return; call(blocks ? "modes.new_blocks_mode" : "modes.new_code_mode", n); onClose(); };
+  return html`<${Modal} title=${blocks ? "New mode from blocks" : "New code mode"} icon=${blocks ? "blocks" : "edit"} onClose=${onClose}
     footer=${html`<${Button} onClick=${onClose}>Cancel<//><${Button} kind="primary" disabled=${!name.trim()} onClick=${ok}>OK<//>`}>
     <label class="lbl" for="modes-code-name">What is the mode called?</label>
     <${Field} id="modes-code-name" value=${name} onChange=${setName} autoFocus onCommit=${(v) => { if (v.trim()) { setName(v); } }} />
-    <div class="small muted">A mode written in C, for what the form cannot do: a copy of the Mode SDK's template in this project's modes folder. Try it builds it in with the others.</div>
+    <div class="small muted">${blocks
+      ? "A mode built from blocks, starting from a small working one on this card's shots to change: what starts it, what scores, what it says and lights. Try it builds it in with the others."
+      : "A mode written in C, for what the form cannot do: a copy of the Mode SDK's template in this project's modes folder. Try it builds it in with the others."}</div>
     <${EnterKey} onEnter=${ok} />
   <//>`;
 }

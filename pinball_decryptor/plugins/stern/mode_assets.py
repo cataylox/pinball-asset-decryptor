@@ -365,8 +365,29 @@ def _second_clip_job(project, slug, spec, parsed):
     return _file_job(os.path.join(MP.mode_folder(project, slug), spec.clip_both["file"]), parsed)
 
 
-def _code_clip_job(project, slug, spec, parsed):
-    return _file_job(os.path.join(MP.mode_folder(project, slug), spec.clip), parsed)
+def _code_clip_job(project, slug, spec, parsed, f=None):
+    """A code mode's clip as a job: ``f`` one of its clips' files (hud-layers: a clip per cue), else
+    its start clip."""
+    return _file_job(os.path.join(MP.mode_folder(project, slug), f or spec.clip), parsed)
+
+
+def _code_clip_jobs(project, code_clips, parsed):
+    """``[(job, bank name)]`` for every clip of every code mode, in order (hud-layers)."""
+    from . import code_modes as CM
+    return [(_code_clip_job(project, slug, spec, parsed, f), CM.clip_name(slug, cue))
+            for slug, spec in code_clips for cue, f in spec.clip_list()]
+
+
+#: the HUD scene a code mode's HUD goes in (Godzilla's slide-outs, mode_hud.py)
+HUD_SCENE = "32e6ae280ddaec08e203a02289bb39a04968e7b0"
+
+
+def _code_huds(code, prof, hud_font):
+    """``[(slug, hud spec)]`` of the code modes with a HUD, when this title's HUD scene is Godzilla's
+    slide-outs and the card gave the game font's scene (hud-layers)."""
+    if not hud_font or not prof.can("screen") or not (prof.lcd("hud") or "").endswith(HUD_SCENE):
+        return []
+    return [(slug, dict(c.hud)) for slug, c in code or () if c.hud]
 
 
 # ---- the whole build -----------------------------------------------------------------------
@@ -389,7 +410,7 @@ def mode_file_name(slot):
 
 
 def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=None, prof=None,
-          progress=None, stock_font=b""):
+          progress=None, stock_font=b"", hud_font=b""):
     """Build every mode in ``project`` (or the slugs in ``only``) from the stock scenes.
 
     ``stock_hud`` / ``stock_bank`` are the stock bytes of the title's HUD scene and video
@@ -403,7 +424,11 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
     title, :func:`.code_modes.profile_for`).
 
     The clips are made before the bank is built, side by side and kept between builds
-    (:func:`make_clips`); ``progress(done, total, words)`` follows them."""
+    (:func:`make_clips`); ``progress(done, total, words)`` follows them.
+
+    ``hud_font`` (hud-layers) is the card's scene that holds the game's own font
+    (``mode_hud.GAME_FONT_SCENE``): with it, each code mode's HUD goes into Godzilla's slide-outs scene
+    in the same pass as the screens."""
     found, broken = MP.list_modes(project)
     if broken:
         raise ModeAssetError("these modes could not be read: %s"
@@ -459,11 +484,12 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
                             words="%s A SHOT" % "{:,}".format(int(spec.award)),
                             words_name=names["screen_text"].split(".", 1)[1]))
     screens += _code_screens(project, code, prof)
+    huds = _code_huds(code, prof, hud_font)
 
     # the clips: made first (side by side, kept between builds), then one after another into
     # the stock bank
     clips = [(slug, spec) for slug, spec in found if spec.clip != "none" and prof.can("clip")]
-    code_clips = [(slug, c) for slug, c in code if c.clip and prof.can("clip")]
+    code_clips = [(slug, c) for slug, c in code if c.clip_list() and prof.can("clip")]
     # item 164: a title whose video bank IS the scene its screens go in (JP The Pin 1.05 draws one
     # scene) gets the clips first and then the screens, onto the grown bank - the bank's walk
     # refuses anything but clips, and the screens' offsets are moved past what the clips added
@@ -475,8 +501,9 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
                        result, write, progress, stock_font)
         clips = code_clips = []
         screens = []
-    if screens and not shared:
-        hud, _infos = SW.add_screens(stock_hud, screens, font_source=stock_font)
+    if (screens or huds) and not shared:
+        hud, _infos = SW.add_screens(stock_hud, screens, font_source=stock_font, huds=huds,
+                                     hud_font_source=hud_font)
         write("%s/scene.radium" % prof.lcd("hud"), hud)
 
     def with_screens(bank):
@@ -490,7 +517,7 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
         for slug, spec in clips:
             jobs.append(_first_clip_job(project, slug, spec, size))
             jobs.append(_second_clip_job(project, slug, spec, size))
-        jobs += [_code_clip_job(project, slug, c, size) for slug, c in code_clips]
+        jobs += [job for job, _name in _code_clip_jobs(project, code_clips, size)]
         made, scratch = make_clips([j for j in jobs if j is not None], ffmpeg, progress=progress)
     try:
         if code_clips and not clips:
@@ -625,16 +652,15 @@ def _add_code_clips(project, code_clips, bank, parsed, prof, out_dir, ffmpeg, re
     """The code modes' start clips into the bank, after the form modes' (``PadMode_<slug>_Clip``),
     each made into the bank's format like a form mode's own video. Returns the bank and its parse.
     ``made``: the clips :func:`make_clips` made."""
-    for slug, spec in code_clips:
-        names = MP.asset_names(slug)
+    for job, name in _code_clip_jobs(project, code_clips, parsed):
         path = VB.next_path(parsed)
         rel = "%s/scene.assets/%s" % (prof.lcd("bank"), path)
         local = os.path.join(out_dir, *rel.split("/"))
         os.makedirs(os.path.dirname(local), exist_ok=True)
-        _place_clip(_code_clip_job(project, slug, spec, parsed), local, made, ffmpeg)
+        _place_clip(job, local, made, ffmpeg)
         result.files.append(rel)
         result.new_files.append(rel)
-        bank, _info = VB.add_clip(bank, names["clip"], os.path.getsize(local), path)
+        bank, _info = VB.add_clip(bank, name, os.path.getsize(local), path)
         parsed = VB.parse(bank)
     return bank, parsed
 
@@ -659,8 +685,7 @@ def _build_grafted(project, prof, stock_hud, screens, clips, code_clips, out_dir
         second = _second_clip_job(project, slug, spec, frame)
         if second is not None:
             todo.append((second, MP.second_clip_name(slug)))
-    todo += [(_code_clip_job(project, slug, c, frame), MP.asset_names(slug)["clip"])
-             for slug, c in code_clips]
+    todo += _code_clip_jobs(project, code_clips, frame)
     made, scratch = make_clips([job for job, _name in todo], ffmpeg, progress=progress)
     entries = []
     try:

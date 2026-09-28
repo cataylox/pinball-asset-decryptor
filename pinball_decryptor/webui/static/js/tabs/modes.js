@@ -14,6 +14,7 @@ import { html, useEffect, useRef, useState, Button, Field, Select, Check, Radio,
          InfoBadge, Icon, Progress, tip, cx, call, setField, openMenu, mediaUrl, fmtClock } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { StockDialog, FilmDialog, NewCodeDialog, ClipDialog, PlayButton } from "./modes_dialogs.js";
+import { BlocksEditor, BlocksCode, BLOCKS_WORDS } from "./modes_blocks.js";
 
 export const css = true;
 
@@ -22,6 +23,8 @@ const T = {
   name: "What the mode is called. It is the title on its screen and clip unless you give those their own.",
   startShot: "The shot that starts the mode.",
   itsShot: "The mode starts when its shot is made that many times in one ball.",
+  alsoShot: "Another shot the player has to make as well, that many times in the same ball, before the mode starts. The shots can be made in any order.",
+  afterMode: "The mode can only start once this other mode has run for the same player. Until then its shots do not count toward starting it. Only one of your modes runs at a time, so if this one is ready while the other still runs, the next start shot after it ends starts it.",
   startEvent: "Something the game itself does: a ball starting, a multiball starting, the skill shot being made. The mode starts the moment the game does it.",
   drain: "The mode ends when its time runs out, or sooner if the ball drains.",
   clock: "The mode keeps running into the next ball until its time runs out.",
@@ -33,11 +36,12 @@ const T = {
   cooldown: "0 = no wait. The wait runs from the moment the mode ends, and carries on through the end of a ball.",
   starts: "Counted for each player. Once a ball starts again on the player's next ball; once a game, and up to N times, start again in the next game.",
   stack: "On: the mode starts whenever its shot is made, even during one of the game's own battles or multiballs. Off: it waits until the game's own battle or multiball ends, and the next start shot after that starts it.",
-  multiball: "When the mode starts, the game serves balls from the trough until this many are in play, through the game's own ball code, with a ball save of its own. The mode ends when one ball is left (and when its time runs out, if it has a clock). The shots that score are its jackpots; the game's own multiball screens and music stay off, so the mode's screen, clip, sounds and lights are what the player sees and hears.",
+  multiball: "When the mode starts (or on the shot Balls come names), the game serves balls from the trough until this many are in play, through the game's own ball code, with a ball save of its own. The mode ends when one ball is left (and when its time runs out, if it has a clock). The shots that score are its jackpots; the game's own multiball screens and music stay off, so the mode's screen, clip, sounds and lights are what the player sees and hears.",
   balls: "How many balls are in play together, 2 to 6. A machine with fewer balls serves what it has.",
   ballSave: "For this many seconds after the balls are served, a drained ball is served back.",
   startSave: "When the mode starts, the game's own ball saver is on for this many seconds: a ball that drains in that time is served back, and the ball does not end. A multiball uses its own ball save instead.",
   addBall: "A shot that puts one more ball in play while the multiball runs, up to that many times. It still scores if it is also a scoring shot.",
+  mbOn: "When the game serves the balls. On a shot (the Action button, say), the mode's clock is the time the player has to hit it: time up ends the mode with no multiball. Once the balls come, the clock stops and one ball left ends it. Light the shots that score lights that shot too.",
   lit: "While the mode runs, the insert in front of every shot that scores (and every shot with its own points) shows this colour and pattern, over the game's own light shows; every other insert keeps doing what the game wants. They go back to the game the moment the mode ends. Blink and Pulse repeat about twice a second and every 1.6 s; Chase lights one of them at a time.",
   priority: "How the mode's screen and clip sit among the game's own displays while it runs, on the game's own scale (1-255). At 180 the game's full-screen shot awards wait until the mode ends (on Godzilla: LOOPS and BATTLE IS LIT); its jackpots, multiball and battle starts and the tilt warning still come through, and the mode's screen is back when they end. Higher holds more back (190: starts and jackpots wait too). 0 leaves the game's display order as it is.",
   film: "Cut this mode's clip, its sound or its screen's picture from a video file of your own (a film, an episode, anything): pick the video, a start time and a length (up to 30 seconds), and whether to keep its letterbox or fill the frame. The mode keeps only the cut (clip.mp4, end.wav, art.png), never the video.",
@@ -113,7 +117,7 @@ function Num({ k, value, disabled, width = 64, title }) {
 function Head({ s }) {
   const proj = s.project || "";
   const nForm = s.n_form || 0;
-  const counts = `${nForm} mode${nForm === 1 ? "" : "s"}${s.n_code ? ` + ${s.n_code} in C` : ""}`;
+  const counts = `${nForm} mode${nForm === 1 ? "" : "s"}${s.n_blocks ? ` + ${s.n_blocks} from blocks` : ""}${s.n_code ? ` + ${s.n_code} in C` : ""}`;
   const modesDir = proj ? proj.replace(/[\\/]+$/, "").split(/[\\/]/).pop() + (proj.includes("\\") ? "\\" : "/") + "modes" : "";
   // one line: the card's game and version (its full words in the tooltip), the counts, the folder
   const compact = proj && (s.title_label || s.card_label) && (s.title_text || "").startsWith("Card:");
@@ -167,7 +171,8 @@ function ReadingPanel({ r }) {
 }
 
 // ------------------------------------------------------------------ the list
-// New ▾: everything that makes a mode. A blank mode, one from an example, and under
+// New ▾: everything that makes a mode. A blank mode, one from an example, a mode made of
+// blocks (PAD-232), and under
 // Advanced a mode written in C (a blank one from the SDK's template, or one of the C
 // examples) with the Mode SDK's document. With no project, Mode in C's Blank gives Tk's
 // own sentence.
@@ -190,13 +195,16 @@ function codeItems(s, onNewCode) {
   ];
 }
 
-function newMenuItems(s, onNewCode) {
+function newMenuItems(s, onNewCode, onNewBlocks) {
   const ex = exampleItems(s);
   return [
     { label: "Blank mode", icon: "plus", disabled: !s.new_ok, onClick: () => call("modes.new"),
       title: s.new_ok ? "" : (s.cap_text || s.project_label) },
     { label: "From an example", icon: "list", disabled: !s.ex_ok || !ex.length, submenu: ex,
       title: s.ex_ok ? "" : s.ex_tip },
+    { label: "Mode from blocks…", icon: "blocks", disabled: !!(s.project && s.no_port),
+      title: s.project && s.no_port ? s.no_port : BLOCKS_WORDS.newTip,
+      onClick: () => (s.project ? onNewBlocks() : call("modes.new_blocks_mode", "")) },
     { sep: true },
     { header: "Advanced" },
     { label: "Mode in C", icon: "edit", submenu: codeItems(s, onNewCode) },
@@ -206,7 +214,8 @@ function newMenuItems(s, onNewCode) {
 // One row of the list: the person's modes (form, and code with a C pill) and the game's own
 // modes (kind "game", with a count of staged changes).
 function ListRow({ r, i, selIdx, isSel }) {
-  const where = r.kind === "code" ? "modes/" + r.slug + "/" + r.slug + ".c"
+  const where = r.blocks ? "modes/" + r.slug + " (made of blocks)"
+    : r.kind === "code" ? "modes/" + r.slug + "/" + r.slug + ".c"
     : r.kind === "game" ? "One of the game's own modes: its timers and awards" : "modes/" + r.slug;
   return html`<button type="button" role="option" key=${r.kind + r.slug}
       aria-selected=${isSel(r)} tabindex=${i === Math.max(0, selIdx) ? 0 : -1}
@@ -214,7 +223,8 @@ function ListRow({ r, i, selIdx, isSel }) {
       onClick=${() => call("modes.select", r.slug, r.kind)}
       ...${tip(where + (r.chip_tip ? "\n" + r.chip_tip : ""))}>
       <span class="ellip">${r.name}</span>
-      ${r.kind === "code" ? html`<span class="r pill" title="Written in C">C</span>`
+      ${r.blocks ? html`<span class="r pill bk-pill" title="Made of blocks">Blocks</span>`
+        : r.kind === "code" ? html`<span class="r pill" title="Written in C">C</span>`
         : r.kind === "game" ? (r.chip ? html`<span class="r chip acc sm">${r.chip}</span>` : null)
         : r.chip === "ready" ? html`<span class="r chip ok sm">ready</span>`
         : r.chip ? html`<span class="r chip warn sm">${r.chip}</span>` : null}
@@ -225,7 +235,7 @@ function ListRow({ r, i, selIdx, isSel }) {
 // GAME_FOLD_AT of them (a person's choice to open or fold them is kept in this browser).
 const GAME_FOLD_AT = 6;
 
-function ModeList({ s, onNewCode, onAllNumbers }) {
+function ModeList({ s, onNewCode, onNewBlocks, onAllNumbers }) {
   const [fold, setFold] = useStored("pad.modes.game_fold2", "auto");
   const sel = s.sel || {};
   const allGame = s.game_rows || [];
@@ -254,7 +264,7 @@ function ModeList({ s, onNewCode, onAllNumbers }) {
   };
   return html`<section class="card modes-list">
     <div class="hd"><span class="h2">Modes</span><span class="sp"></span>
-      <${Button} kind="primary" size="sm" iconRight="down" onClick=${(e) => openMenu(e.currentTarget, newMenuItems(s, onNewCode))}>New<//></div>
+      <${Button} kind="primary" size="sm" iconRight="down" onClick=${(e) => openMenu(e.currentTarget, newMenuItems(s, onNewCode, onNewBlocks))}>New<//></div>
     <div class="bd modes-list-bd">
       ${rows.length || allGame.length ? html`<div class="list" role="listbox" aria-label="Modes in this project" onKeyDown=${onKey} ref=${listRef}>
         ${allGame.length ? html`<div class="modes-list-grp" role="presentation">Yours</div>` : null}
@@ -273,7 +283,7 @@ function ModeList({ s, onNewCode, onAllNumbers }) {
     </div>
     <div class="ft modes-list-ft">
       ${s.cap_text ? html`<span class="small muted">${s.cap_text}</span>` : null}
-      <div class="row" style="gap:6px">
+      <div class="row modes-list-acts">
         <${Button} size="sm" disabled=${!s.dup_ok} onClick=${() => call("modes.duplicate")}>Duplicate<//>
         <${Button} size="sm" disabled=${!s.copy_ok} onClick=${() => call("modes.copy_to")}
           title="Copy every mode here into another card's project: pick that project's folder. Each is matched to that card's shots by name, and the app says which need a look there.">Copy to…<//>
@@ -295,11 +305,18 @@ function ModePage({ s, f, off, dis, rs }) {
     ? [{ value: f.start_shot, label: f.start_shot }, ...shots.map((x) => ({ value: x, label: x }))]
     : shots.map((x) => ({ value: x, label: x }));
   const evOff = off || dis.events;
+  // PAD-227: the "and also" shots and the mode it waits for
+  const ALSO_NONE = "(nothing else)", AFTER_NONE = "(any time)";
+  const withValue = (list, v) => (v && !list.some((o) => o.value === v) ? [{ value: v, label: v }, ...list] : list);
+  const alsoOpts = (v) => withValue([{ value: ALSO_NONE, label: ALSO_NONE }, ...shots.map((x) => ({ value: x, label: x }))], v);
+  const afterOpts = withValue([{ value: AFTER_NONE, label: AFTER_NONE }, ...(s.other_modes || []).map((x) => ({ value: x, label: x }))], f.after_mode);
+  const afterOff = off || !f.after_mode || f.after_mode === AFTER_NONE;
   const mbOff = off || dis.multiball;
   const mbIn = mbOff || !f.multiball;
   const bsOff = off || dis.ball_save || f.multiball;
   const balls = (prof.ball_shots || ["(none)"]).map((x) => ({ value: x, label: x }));
   const ballOpts = f.add_ball_shot && !balls.some((o) => o.value === f.add_ball_shot) ? [{ value: f.add_ball_shot, label: f.add_ball_shot }, ...balls] : balls;
+  const mbOnOpts = withValue((prof.mb_on_shots || ["(when it starts)"]).map((x) => ({ value: x, label: x })), f.mb_on_shot);
   return html`<div class="modes-grid2">
       <div class="stack">
         <label class="lbl" for="m-name">Name</label>
@@ -319,6 +336,18 @@ function ModePage({ s, f, off, dis, rs }) {
         <div class="row wrap">
           <${Radio} name="m-starts" value="event" label="an event" checked=${f.starts_kind === "event"} disabled=${evOff} onChange=${(v) => setF("starts_kind", v, true)} />
           <${Select} value=${f.start_event} options=${withBlank(events, f.start_event)} ns="modes" k="f:start_event" disabled=${evOff} width=${230} title=${T.startEvent} />
+        </div>
+        ${[0, 1].map((i) => html`<div class="row wrap">
+          <span class="dim nw">and also</span>
+          <${Select} value=${f["also_shot_" + i]} options=${alsoOpts(f["also_shot_" + i])} ns="modes" k=${"f:also_shot_" + i} disabled=${off || !shots.length} width=${180} title=${T.alsoShot} />
+          <span class="row nw" style="gap:8px"><${Num} k=${"also_count_" + i} value=${f["also_count_" + i]} disabled=${off || f["also_shot_" + i] === ALSO_NONE} width=${64} title=${T.alsoShot} />
+          <span class="dim nw">times</span></span>
+        </div>`)}
+        <div class="row wrap">
+          <span class="dim nw">Only after</span>
+          <${Select} value=${f.after_mode || AFTER_NONE} options=${afterOpts} ns="modes" k="f:after_mode" disabled=${off} width=${160} title=${T.afterMode} />
+          <span class="dim nw">has run this</span>
+          <${Select} value=${f.after_when} options=${[{ value: "ball", label: "ball" }, { value: "game", label: "game" }]} ns="modes" k="f:after_when" disabled=${afterOff} width=${80} title=${T.afterMode} />
         </div>
       <//>
       <${Sec} title="Ends on">
@@ -357,7 +386,11 @@ function ModePage({ s, f, off, dis, rs }) {
         ${f.multiball && !dis.ball_save ? html`<div class="small muted">A multiball has its own ball save, below.</div>` : null}
       <//>
       <${Sec} title="Multiball" reason=${rs.multiball}>
-        <${Check} label="A multiball: the game serves more balls when it starts" checked=${f.multiball} disabled=${mbOff} title=${T.multiball} ns="modes" k="f:multiball" />
+        <${Check} label="A multiball: the game serves more balls" checked=${f.multiball} disabled=${mbOff} title=${T.multiball} ns="modes" k="f:multiball" />
+        <div class="row wrap">
+          <span class="dim nw">Balls come</span>
+          <${Select} value=${f.mb_on_shot} options=${mbOnOpts} ns="modes" k="f:mb_on_shot" disabled=${mbIn || !shots.length} width=${180} title=${T.mbOn} />
+        </div>
         <div class="row wrap">
           <span class="dim nw">Balls in play</span><${Num} k="balls" value=${f.balls} disabled=${mbIn} width=${56} title=${T.balls} />
           <span class="dim nw" style="margin-left:10px">Ball save</span><${Num} k="ball_save" value=${f.ball_save} disabled=${mbIn} width=${64} title=${T.ballSave} /><span class="dim">seconds</span>
@@ -618,6 +651,29 @@ function Editor({ s, showClip }) {
         ...${tip(fixPages.has(k) ? "What the line above says to fix is on this page." : offPages.has(k) ? "Nothing on this page works on this game yet: the page says why." : "")}>${l}${fixPages.has(k) ? html`<span class="m" aria-label="to fix">•</span>` : null}</button>`)}
     </div>
     <div class="bd modes-editor-bd"><${P} ...${props} /></div>
+  </section>`;
+}
+
+// A mode made of blocks (PAD-232): the block editor, and the C it makes.
+function BlocksPane({ s }) {
+  const [page, setPage] = useStored("pad.modes.blockspage", "blocks");
+  const c = s.code || {};
+  const b = c.blocks || {};
+  const ready = c.status === "Ready to build.";
+  return html`<section class="card modes-editor bk-pane">
+    <div class="hd">
+      <span class="h2 ellip">${c.name}</span><span class="pill bk-pill" title="Made of blocks">Blocks</span>
+      ${c.status ? html`<span class=${cx("chip", ready ? "ok" : "warn")}><span class="dot"></span>${ready ? "Ready to build" : "To fix"}</span>` : null}
+      <span class="sp"></span><span class="small muted ellip">${b.summary || ""}</span>
+    </div>
+    ${c.status && !ready ? html`<div class="modes-status warn">${c.status}</div>` : null}
+    ${c.error || b.error ? html`<div class="modes-status warn">${c.error || b.error}</div>` : null}
+    <div class="pages" role="tablist">
+      ${[["blocks", "Blocks"], ["c", "C it makes"]].map(([k, l]) => html`<button type="button" role="tab" aria-selected=${page === k} class=${page === k ? "on" : ""} onClick=${() => setPage(k)}>${l}</button>`)}
+    </div>
+    <div class="bd modes-editor-bd bk-pane-bd">
+      ${b.program ? (page === "c" ? html`<${BlocksCode} c=${c} />` : html`<${BlocksEditor} s=${s} c=${c} key=${c.slug} />`) : null}
+    </div>
   </section>`;
 }
 
@@ -907,7 +963,7 @@ function CheckNote({ s }) {
 
 // ------------------------------------------------------------------ the first mode
 // A project with no mode of its own yet: the three ways in, the easiest first.
-function FirstMode({ s, onNewCode }) {
+function FirstMode({ s, onNewCode, onNewBlocks }) {
   const ex = exampleItems(s);
   const off = !!s.no_port;
   return html`<section class="card modes-editor modes-first">
@@ -933,6 +989,11 @@ function FirstMode({ s, onNewCode }) {
           <div class="row"><${Button} size="sm" disabled=${!s.new_ok || off} onClick=${() => call("modes.new")}>Blank mode<//></div>
         </div>
         <div class="modes-first-opt">
+          <div class="row wrap"><${Icon} name="blocks" /><b>Build with blocks</b></div>
+          <div class="small muted wrap">${BLOCKS_WORDS.pick}</div>
+          <div class="row"><${Button} size="sm" disabled=${off} title=${s.no_port || BLOCKS_WORDS.newTip} onClick=${onNewBlocks}>Mode from blocks…<//></div>
+        </div>
+        <div class="modes-first-opt">
           <div class="row wrap"><${Icon} name="edit" /><b>Write one in C</b><${Chip} sm>advanced<//></div>
           <div class="small muted wrap">For what the form can't do. It starts from the Mode SDK's template.</div>
           <div class="row wrap">
@@ -951,7 +1012,7 @@ export default function ModesTab() {
   const s = useNs("modes");
   if (s.spin) SPIN = s.spin;
   const [stock, setStock] = useState(false);
-  const [newCode, setNewCode] = useState(false);
+  const [newCode, setNewCode] = useState(false);     // "code" | "blocks" | false
   const [clip, setClip] = useState(null);
   const showClip = (path, title) => setClip({ path, title });
   const withClip = Object.assign({}, s, { _showClip: showClip });
@@ -963,11 +1024,12 @@ export default function ModesTab() {
     <${CheckNote} s=${s} />
     ${s.insider_note ? html`<div class="modes-note"><${Note} kind="info">${s.insider_note}<//></div>` : null}
     <div class="modes-body">
-      <${ModeList} s=${s} onNewCode=${() => setNewCode(true)} onAllNumbers=${() => setStock(true)} />
+      <${ModeList} s=${s} onNewCode=${() => setNewCode("code")} onNewBlocks=${() => setNewCode("blocks")} onAllNumbers=${() => setStock(true)} />
       ${s.game_mode ? html`<${GameModePage} g=${s.game_mode} s=${s} />`
+        : s.code && s.code.blocks ? html`<${BlocksPane} s=${s} />`
         : s.code ? html`<${CodePane} s=${withClip} />`
         : s.open ? html`<${Editor} s=${s} showClip=${showClip} />`
-        : hasProject && !(s.rows || []).length ? html`<${FirstMode} s=${s} onNewCode=${() => setNewCode(true)} />`
+        : hasProject && !(s.rows || []).length ? html`<${FirstMode} s=${s} onNewCode=${() => setNewCode("code")} onNewBlocks=${() => setNewCode("blocks")} />`
         : html`<section class="card modes-editor modes-empty">
             <${Empty} icon="modes" title=${hasProject ? "No mode open" : "No project"}>
               ${hasProject ? (s.status || "Pick a mode on the left.") : s.project_label}
@@ -977,7 +1039,7 @@ export default function ModesTab() {
     <${TryFooter} s=${s} />
     ${stock ? html`<${StockDialog} s=${s} onClose=${() => setStock(false)} />` : null}
     ${s.film ? html`<${FilmDialog} film=${s.film} key=${s.film.seq} />` : null}
-    ${newCode ? html`<${NewCodeDialog} onClose=${() => setNewCode(false)} />` : null}
+    ${newCode ? html`<${NewCodeDialog} blocks=${newCode === "blocks"} onClose=${() => setNewCode(false)} />` : null}
     ${clip ? html`<${ClipDialog} path=${clip.path} title=${clip.title} onClose=${() => setClip(null)} />` : null}
   </div>`;
 }

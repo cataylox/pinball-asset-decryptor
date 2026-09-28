@@ -257,8 +257,25 @@ value display_priority_at    0xe
 value layered_record_size    16
 value layered_priority_at    12
 value layered_wait_for_at    0xa0
+# hud-layers 2026-09-27: the two return addresses the display hold compares (without layered_waiter_call the
+# display priority stayed OFF on this build: "the port's display lines are incomplete"). Derived by the offsets
+# Premium 1.16 and Pro 1.15 share (the waiter + 0x58, the waiter - 0x14c) and checked in this program: each
+# follows a BL, to layered_priority 0x3ce7c and to the function 0x260 before scene_show, as on both.
+value layered_waiter_call    0x00052dac
+value effect_waiter_call     0x00052c08
 value layered_fg_at          0x58
 value layered_fg_flags_at    0x60
+
+# ---- the backdrop (hud-layers): a mode's clip BEHIND the HUD, in the main-play background's place --------
+# BDLBackground::v[8] (slot 8 of BDLMainplayBG's vtable) and the scene_show it calls, read off this program by
+# the shape of Premium 1.16's measured lines (docs/plans/hud-layers.md); emulator-proven on this build (hud-layers
+# run tp116b, 2026-09-27: all six Godzilla examples' loops and event clips behind the HUD, no render gap).
+site backdrop_draw       0x0003fd74 0xe5903054 0xe92d4010
+site scene_show          0x0035e1ec 0xe92d4070 0xe30d415c
+data backdrop_city_vtable    0x00628cb0
+value backdrop_video_at      0x54
+value backdrop_scene_at      0x18
+text backdrop_crop           ScoreFrame
 value lamp_slot_size        40
 value lamp_slot_level       2
 value lamp_slot_alpha       3
@@ -315,7 +332,10 @@ value tank_maser_hits_at    0xb0      # + 4 * (player - 1)
 value tank_path_entries     6
 value tank_path_entry_size  16
 
-# ---- shots: COPIED from Godzilla Premium/LE 1.16, the same title; unverified ----
+# ---- shots: from a census on this build (hud-layers run c116, 2026-09-27: census_mode.c + shot_census.py, every
+# playfield switch pressed on a stock Pro 1.16 card). They were copied from Premium/LE 1.16 until then, which was
+# wrong for the shields: Pro has two shield targets (left 0x80000000, right 0x100000000, as Pro 1.15) and no center;
+# 0x200000000 is sent by the right spinner, not a target. The right spinner is 0x20000 (Premium's shield ramp spinner). ----
 shot 0x00100000    Left ramp
 shot 0x00200000    Right ramp
 shot 0x00400000    Building
@@ -325,8 +345,7 @@ shot 0x10000000    Powerline left
 shot 0x20000000    Powerline center
 shot 0x40000000    Powerline right
 shot 0x80000000    Shield target left
-shot 0x100000000   Shield target center
-shot 0x200000000   Shield target right
+shot 0x100000000   Shield target right
 shot 0x400000000   Skill shot
 shot 0x1000000000  Big loop
 shot 0x2           Slingshot
@@ -336,7 +355,7 @@ shot 0x40          Pop bumper
 shot 0x10000000000 Mecha exit bottom
 shot 0x200         Left spinner
 shot 0x2000        Top spinner
-shot 0x20000       Shield ramp spinner
+shot 0x20000       Right spinner
 
 # ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
 # sites played each id and the game's audio was transcribed: countdown 1287 (clips 1-5 said "ONE", "2", "Three", "4", "Five."); ten_seconds 1291 ("Time is running out!"); time_up 1295 ("Time is up!")
@@ -473,3 +492,26 @@ site balls_in_play         0x0037101c 0xe92d4010 0xe30744e4
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x00371198 0xe92d41f0 0xe305e8ea
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# ---- PAD-228: the cabinet buttons as shots, and the Action button's light ----------------------------
+# The Action button (the game's LOCKDOWN BUTTON) and the flipper buttons have no handler of their own
+# (descriptor flags 0), so the rules never send them as a shot and no switch_hit broadcasts them. The
+# framework's switch drain calls one per-switch function for EVERY edge (portswitch.py, generation B):
+# hooked as switch_edge, it hands the buttons to the modes through the `switch` lines below, on bits the
+# rules' shot dispatch never sends. Read off this build's own drain by portswitch.switch_source.
+site switch_edge      0x003e3800 0xe3033644 0xe340307e
+site switch_drain     0x003e44e0 0xe92d4ff0 0xe3009c74
+data switch_records         0x007dec7c
+data switch_count           0x007e3644
+value switch_drain_size     384
+value switch_record_size    32
+value switch_level_at       24
+value switch_desc_via       8
+value switch_flags_at       26
+value switch_polarity_at    28
+switch 34   0x1000000000000000 Action button
+switch 60   0x2000000000000000 Left flipper button
+switch 59   0x4000000000000000 Right flipper button
+# the Action button's RGB light (lamp 97, I/O group 5 index 5/4/7, on the cabinet front), tied to its shot:
+# a mode that lights its shots lights the button
+lamp 282,283,284  0x1000000000000000 ACTION BUTTON  # lamp 97, I/O group 5 index 5, the cabinet front
