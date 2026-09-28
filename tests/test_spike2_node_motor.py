@@ -122,6 +122,14 @@ int main(int argc, char **argv)
             char *e;
             now_ms = strtoul(s + 1, &e, 10);
             motor_tick((unsigned)strtoul(e + 1, 0, 10));
+        } else if (s[0] == 's') {           /* s<node>:<motor> - a cmd 52 reply */
+            char *e;
+            unsigned nid = (unsigned)strtoul(s + 1, &e, 10);
+            unsigned char r[4] = {0xee, 0xee, 0xee, 0xee};
+            if (motor_status(nid, (unsigned)strtoul(e + 1, 0, 10), r))
+                printf("S %%lu %%02x%%02x%%02x%%02x\n", now_ms, r[0], r[1], r[2], r[3]);
+            else
+                printf("S %%lu none\n", now_ms);
         } else {                            /* f<hex> - a frame on the wire   */
             unsigned char f[64];
             int n = 0;
@@ -143,7 +151,8 @@ int main(int argc, char **argv)
 def cbin(tmp_path_factory):
     d = tmp_path_factory.mktemp("nbmotor")
     body = chr(10).join([_state(), _extract("nb_motor_on"), _extract("motor_ms"),
-                         _extract("motor_say"), _extract("motor_tick"),
+                         _extract("motor_say"), _extract("motor_pos"),
+                         _extract("motor_status"), _extract("motor_tick"),
                          _extract("motor_note")])
     src = d / "motor.c"
     src.write_text(HARNESS % body, encoding="utf-8")
@@ -242,3 +251,99 @@ def test_node_and_motor_come_from_the_frame(cbin):
     edges = _run(cbin, ["t0:10", "f" + OTHER,
                         "f8a075301fa14c8004600", "t600:10"])
     assert edges == [(600, 10, 5, 1)]
+
+
+# ---- PAD-249: an ENCODER motor, james_bond_le's JETPACK --------------------
+#
+# The game's EncoderMotor (JetPackMotor derives from it) homes the motor with
+# cmd 53, sends it to a position with cmd 55, and every tick reads cmd 52's
+# reply for THAT motor: bytes 0-1 the position the board counted, byte 2 the
+# flags 0x01 moving / 0x08 homed and done / 0x40 fault. A poll with none of
+# them set makes it configure and home the motor again from scratch; the zero
+# reply did that every tick (20586 x cmd 53 in 40 s from Start). Frames:
+# james_bond_le 1.06, node 9, rig 1 trace 2026-09-28.
+
+#: cmd 51: motor 0, home opto input 1, encoder optos inputs 3 and 2.
+JB_CONFIG = "89155100410000434200c04241200028010000000000bf00"
+JB_HOME = "890753002820e803ea00"                 # cmd 53: speed 40, accel 32
+JB_TO_10 = "890955000a0040e80300e400"            # cmd 55: to position 10
+JB_TO_0 = "89095500000040e80300ee00"             # cmd 55: to position 0
+
+
+def _replies(cbin, steps, **env):
+    """The cmd 52 replies asked for with s<node>:<motor>, as (ms, hex)."""
+    e = dict(os.environ)
+    e.pop("PAD_NB_MOTOR", None)
+    e.pop("PAD_MOTOR_MS", None)
+    e.update(env)
+    r = subprocess.run([cbin] + steps, capture_output=True, text=True, env=e)
+    assert r.returncode == 0, r.stderr
+    return [(int(line.split()[1]), line.split()[2])
+            for line in r.stdout.splitlines() if line.startswith("S ")]
+
+
+def test_encoder_motor_homes_then_reports_done(cbin):
+    """53: moving at once, then homed at position 0 with the home opto made."""
+    steps = ["t0:9", "f" + JB_CONFIG, "s9:0", "t1000:9", "f" + JB_HOME,
+             "s9:0", "t1300:9", "s9:0", "t1599:9", "s9:0", "t1600:9", "s9:0"]
+    assert _replies(cbin, steps) == [
+        (0, "00000000"),         # configured, never homed: the game homes it
+        (1000, "00000100"),      # moving
+        (1300, "00000100"),
+        (1599, "00000100"),
+        (1600, "00000800"),      # homed and done, position 0
+    ]
+    assert _run(cbin, steps) == [(1600, 9, 1, 1)]
+
+
+def test_encoder_motor_goes_to_a_position(cbin):
+    """55 to 10: leaves the home opto, the count climbs, then done at 10."""
+    steps = ["t0:9", "f" + JB_CONFIG, "f" + JB_HOME, "t600:9",
+             "t1000:9", "f" + JB_TO_10, "s9:0", "t1300:9", "s9:0",
+             "t1600:9", "s9:0"]
+    assert _replies(cbin, steps) == [
+        (1000, "00000100"), (1300, "05000100"), (1600, "0a000800")]
+    assert _run(cbin, steps) == [(600, 9, 1, 1), (1000, 9, 1, 0)]
+
+
+def test_encoder_motor_back_to_zero_makes_home_again(cbin):
+    steps = ["t0:9", "f" + JB_CONFIG, "f" + JB_HOME, "t600:9",
+             "f" + JB_TO_10, "t1200:9", "f" + JB_TO_0, "t1800:9", "s9:0"]
+    assert _replies(cbin, steps) == [(1800, "00000800")]
+    assert _run(cbin, steps) == [(600, 9, 1, 1), (600, 9, 1, 0),
+                                 (1800, 9, 1, 1)]
+
+
+def test_encoder_motor_resend_is_not_a_new_move(cbin):
+    """The game re-sends; the move under way keeps its own clock."""
+    steps = ["t0:9", "f" + JB_CONFIG, "f" + JB_HOME, "t300:9", "f" + JB_HOME,
+             "t600:9", "s9:0", "f" + JB_TO_10, "t900:9", "f" + JB_TO_10,
+             "t1200:9", "s9:0", "f" + JB_TO_10, "t1300:9", "s9:0"]
+    assert _replies(cbin, steps) == [
+        (600, "00000800"), (1200, "0a000800"), (1300, "0a000800")]
+
+
+def test_encoder_motor_never_reads_as_a_restart(cbin):
+    """Once homed, no poll may show none of moving/done - that is a re-home."""
+    steps = ["t0:9", "f" + JB_CONFIG, "f" + JB_HOME]
+    t = 0
+    for cmd in [None, JB_TO_10, JB_TO_0, JB_HOME, JB_TO_10, JB_TO_10, JB_TO_0]:
+        t += 700
+        steps += ["t%d:9" % t]
+        if cmd:
+            steps += ["f" + cmd]
+        for dt in (0, 1, 299, 599, 600, 650):
+            steps += ["t%d:9" % (t + dt), "s9:0"]
+    for ms, hexs in _replies(cbin, steps):
+        assert int(hexs[4:6], 16) & 0x09, "a restart reply at %d ms: %s" % (ms, hexs)
+
+
+def test_end_stop_motor_keeps_its_own_reply(cbin):
+    """john_wick's car names no encoder inputs: motor_status leaves it alone."""
+    assert _replies(cbin, ["t0:9", "f" + CONFIG, "f" + HOME, "t600:9",
+                           "s9:0"]) == [(600, "none")]
+
+
+def test_encoder_motor_off(cbin):
+    assert _replies(cbin, ["t0:9", "f" + JB_CONFIG, "f" + JB_HOME, "t600:9",
+                           "s9:0"], PAD_NB_MOTOR="0") == [(600, "none")]
