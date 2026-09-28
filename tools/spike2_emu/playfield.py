@@ -67,7 +67,7 @@ toward an artwork pixel sampled at build time). Both scales
 have a floor on purpose - a lamp at 5% duty is ON, and must not render as a
 ghost. The HUE is still brightness-lifted so a dim insert keeps its colour.
 
-THE RATE IS 60 fps AND IT IS MEASURED, not assumed: the side panel's Live rows show the
+THE RATE IS 60 fps AND IT IS MEASURED, not assumed: the side panel's Live data rows show the
 achieved rate, and PAD_PF_LOG=<path> writes a line a second breaking it into
 transport and drawing. It was 15 fps before that was measured, while nominally
 being a 20 Hz loop; 30 until 2026-08-07, when David asked why not 60 - the
@@ -408,7 +408,7 @@ PRESS_MS = 150
 #: draw is change-gated, so 60 costs ~25% of one core in blocking reads and
 #: buys the tween below its full smoothness. The loop is PACED, not slept -
 #: see Field.tick - and the rate it ACHIEVES is measured and printed in the
-#: side panel's Live rows. An unmeasured frame rate is how this window sat at an unknown
+#: side panel's Live data rows. An unmeasured frame rate is how this window sat at an unknown
 #: rate for weeks.
 TARGET_FPS = 60
 FRAME_MS = 1000.0 / TARGET_FPS
@@ -1104,7 +1104,7 @@ def inventory(switch_list=None, positioned=None, leds=None, fixtures=None,
               coils=None):
     """THE TITLE'S INVENTORY, BOTH VIEWS: how many switches, lamps and coils
     the title has (PAD-238, from the PAD-81 list), as [label, count, note]
-    rows for the side panel's "This title" section - never on the playfield
+    rows for the side panel's "Game hardware" section - never on the playfield
     itself, which David wants kept clear.
 
     From the TABLES, never the wire, so it is there from the first frame -
@@ -3332,7 +3332,7 @@ class Field(LedRing):
         if emu_gone(self, raw is not None):
             return None
         # the status line carries only what the last press said; the rates
-        # and counts are the side panel's "Live" rows (PAD-238), [label,
+        # and counts are the side panel's "Live data" rows (PAD-238), [label,
         # value, note, alarm]
         status = self.ctl.state_status() or ""
         if d is None:

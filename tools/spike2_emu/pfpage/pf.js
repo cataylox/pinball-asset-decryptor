@@ -584,8 +584,8 @@ function startMain() {
   }
 
   // ================================================== the info accordion
-  // "This title" is the switch / lamp / coil totals from the tables, there
-  // from the first frame; "Live" is what the status strip used to say (the
+  // "Game hardware" is the switch / lamp / coil totals from the tables, there
+  // from the first frame; "Live data" is what the status strip used to say (the
   // rates, the counts the game has written, the alarms). Rows are
   // [label, value, note(, alarm)]. Each section remembers whether it was
   // left open. A folded Live section is not redrawn at 60 fps.
@@ -614,9 +614,9 @@ function startMain() {
         rows.append(row);
       }
     }
-    const t = section("title", "THIS TITLE");
+    const t = section("title", "GAME HARDWARE");
     fill(t.rows, title);
-    const l = section("live", "LIVE");
+    const l = section("live", "LIVE DATA");
     let latest = live;
     fill(l.rows, latest);
     for (const [k, sec] of [["title", t], ["live", l]]) {

@@ -197,7 +197,7 @@ def run_case(name, script, secs, expect_led, expect_data, expect_gap,
         led = playfield._rate(view._draw_ev, t)
         data = playfield._rate(view._data_ev, t)
         gap = view._gap_worst
-        # the rates are the side panel's Live rows now (PAD-238)
+        # the rates are the side panel's Live data rows now (PAD-238)
         bar = "   ".join("%s %s" % (r[0], r[1]) for r in view.live)
 
     print("\n--- %s ---" % name)
