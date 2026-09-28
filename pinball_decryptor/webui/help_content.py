@@ -663,8 +663,8 @@ HELP_CONTENT = {
          "To drop some, select the rows — click one, then Shift-click for a "
          "range or Ctrl-click to add single images — and right-click the "
          "selection. Sort by the Replacement column first and everything you "
-         "have picked sits together. \"Clear replacements…\" beside the "
-         "project folder drops every pick on this tab at once, and a scene "
+         "have picked sits together. \"Clear replacements…\" (in the More "
+         "menu, the ⋯ button at the top) drops every pick on this tab at once, and a scene "
          "group's own right-click menu clears just that animation.\n\n"
          "Clearing takes the replacement back out. A pick nothing has applied "
          "yet is simply dropped; a slot that a build, or Start on the Emulate "
@@ -755,7 +755,7 @@ HELP_CONTENT = {
          "colours the scenes draw this font in, and a font a scene tints "
          "black stays black whatever you pick."),
         ("Scenes tab",
-         "The Scenes tab (the Images tab's \"Scenes…\" button opens it too) lists every "
+         "The Scenes tab (an image's right-click \"Show scene contents…\" opens it too) lists every "
          "scene on the card with the images, fonts and on-screen text it "
          "is built from — double-click an item to jump to its row here, in "
          "the Fonts window, or on Replace Text. Right-click any scene "

@@ -20,7 +20,8 @@ const SOURCE_TIP = "Show only images from one store: plain files on the card, sc
 const SHOW_TIP = "Narrow the list by what you've already done to it. Changed = the slots with a pending replacement or already changed on disk by a previous build. Unchanged = everything you haven't touched yet, so a part-finished pass is what's left in front of you instead of something to scroll past.";
 const GROUP_TIP = "Group the images under the scene / animation they belong to (in play order), so a whole animation can be reviewed — or bulk-replaced via right-click — as one unit.";
 const FONTS_TIP = "Preview any game font (type your own text, rendered from the real glyphs) and import a desktop font into it — letters are auto-fitted into the space each character has. Stern Spike 2.";
-const SCENES_TIP = "Browse the card scene by scene: the images, fonts and on-screen text each scene is built from, with jumps to the matching rows here and on Replace Text. Stern Spike 2.";
+const MORE_TIP = "More: Export CSV, Clear replacements…";
+const CSV_TIP = "Save every row of the list as a spreadsheet (CSV), exactly as it reads here.";
 const FOLDER_TIP = "Pick a folder of your own files and each one becomes the replacement for the slot with the same name — for a whole set you reworked outside the app, like every clip made black and white. The file type and capital letters don't have to match (Intro.mp4 is used for Intro.mov and converted to suit it), and subfolders are fine. Nothing changes until you confirm, and every file left out is named in the log.\n\nKeep the extract's own files where they are: files dropped into the project folder only count under the card's exact name.";
 const CLEAR_TIP = "Drop every replacement picked on this tab in one go — for starting a project over without clearing 48 rows one at a time. It only drops the picks: your own files are untouched, and a slot already built into the project folder keeps the bytes it has (use “Revert all changes…” on the Write tab for those). To clear only some, select the rows — click, then Shift-click or Ctrl-click — and right-click the selection.";
 const KEEP_TIP = "Off: the replacement is scaled to the original picture's size, which squeezes a longer name. On: it keeps its own width and height, and the build grows the scene to fit it. The game draws it from the same top-left corner, so a wider picture reaches further right. Needs an image build (not a direct SD write). A picture nothing in its scene draws by size is fitted instead, and the log says so.";
@@ -401,10 +402,13 @@ export default function ImagesTab() {
         ? html`<${Button} icon="x" onClick=${() => call("images.cancel_scan")}>Cancel scan<//>`
         : html`<${Button} icon="refresh" onClick=${() => call("images.scan")}>Scan<//>`}
       <${Button} icon="folder" onClick=${() => call("images.from_folder")} disabled=${running} title=${FOLDER_TIP}>Replace from folder…<//>
-      <${Button} kind="ghost" onClick=${() => call("images.export_csv")}>Export CSV<//>
-      <${Button} kind="ghost" onClick=${() => call("images.clear_all")} disabled=${!s.can_clear} title=${CLEAR_TIP}>Clear replacements…<//>
-      <${Button} kind="ghost" onClick=${() => call("images.open_fonts")} title=${FONTS_TIP}>Fonts…<//>
-      <${Button} kind="ghost" onClick=${() => call("images.open_scenes")} title=${SCENES_TIP}>Scenes…<//>
+      <${Button} kind="ghost" icon="text" onClick=${() => call("images.open_fonts")} title=${FONTS_TIP}>Fonts…<//>
+      <${Button} kind="ghost" icon="more" label="More" title=${MORE_TIP}
+        onClick=${(e) => openMenu(e.currentTarget, [
+          { label: "Export CSV", icon: "download", title: CSV_TIP, onClick: () => call("images.export_csv") },
+          { label: "Clear replacements…", icon: "trash", title: CLEAR_TIP, disabled: !s.can_clear,
+            onClick: () => call("images.clear_all") },
+        ], { align: "right" })} />
     <//>
 
     ${s.pil_ok === false ? html`<${Note} kind="err">${PILLOW}<//>` : null}
