@@ -885,7 +885,13 @@ def test_image_info_window_closes_on_mfr_switch(tmp_path):
     f.write_bytes(b"\0" * 1024)
     with web_app(tmp_path, mfr="spooky") as w:
         w.call("ui.set", "extract", "input", str(f))
-        assert w.call("extract.open_image_info") is True
+        svc = w.window.service("extract")
+        # The ⓘ beside the PICKED image now goes to Select card, where the
+        # same report already is (PAD-173), so the window is opened here the
+        # way its remaining callers do - this test is about the window's
+        # lifetime, not about which button opens it.
+        w.run(lambda: (setattr(svc, "_info_path", str(f)),
+                       svc._info_refresh()))
         assert _wait(w, lambda: (w.state("extract")["info"] or {}).get(
             "sections"))
         w.call("ui.pick_manufacturer", "jjp")

@@ -17,7 +17,7 @@ const T = {
   projTip: "Shared by every tab — it is set on the Extract tab. Click to open it.",
   cancelTip: "Cancel the operation in progress — it stops as soon as it's safe to.",
   busyTip: "Another operation is running — cancel it or let it finish first.",
-  infoTip: "Technical details about this image",
+  infoTip: "Technical details about this image, under the card on the Select card tab",
 };
 
 const plural = (n, one, many) => (n === 1 ? one : many);

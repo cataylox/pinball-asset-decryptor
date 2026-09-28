@@ -31,7 +31,7 @@ export function inputPhrase(label) {
   return article(noun) + " " + noun;
 }
 
-const IMAGE_INFO_TIP = "Technical details about this image";
+const IMAGE_INFO_TIP = "Technical details about this image, under the card on the Select card tab";
 const PROJECT_INFO_TIP = "Stats about this project folder";
 
 // A path box with the recent-paths list (the Tk combobox's dropdown) and

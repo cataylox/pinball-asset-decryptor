@@ -2064,6 +2064,16 @@ class WriteTab(TabService):
 
     @rpc
     def image_info(self):
+        # PAD-173: the Original is a mirror of the picked card, and Select
+        # card already shows that card's report under the tile - so send the
+        # person there rather than collecting the same thing again in a
+        # window. Anything else (an Original that is no longer the picked
+        # card) still opens the window, which is its only home.
+        path = (self.write_upd_var.get() or "").strip()
+        ext = self.window.service("extract")
+        if ext is not None and ext._info_lives_on_the_card_tab(path):
+            self.window.select_tab("card")
+            return True
         return self._info.show(self.write_upd_var.get(), self.mfr,
                                self._info_assets_dir())
 

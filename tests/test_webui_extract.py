@@ -622,7 +622,17 @@ def test_image_info(tmp_path):
         assert w.call("extract.open_image_info") is False
         assert "File not found" in _titles(w)
         w.call("ui.set", "extract", "input", str(f))
+        # PAD-173: for the PICKED image the ⓘ now goes to Select card, where
+        # the same report already is, instead of collecting it again here.
         assert w.call("extract.open_image_info") is True
+        assert w.state("shell")["tab"] == "card"
+        assert w.state("extract")["info"] is None
+        # The window itself still serves everything else (a card in a reader,
+        # an Original that is not the picked card), so its own lifetime is
+        # tested through the call its remaining callers make.
+        svc = w.window.service("extract")
+        w.run(lambda: (setattr(svc, "_info_path", str(f)),
+                       svc._info_refresh()))
         _settle(w)
         info = w.state("extract")["info"]
         assert info["open"] and not info["loading"]

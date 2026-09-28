@@ -215,3 +215,54 @@ def test_page_buttons_and_no_drop_zone():
     start = ext.index("export function SourceBody(")
     body = ext[start:ext.index("\nfunction ", start)]
     assert "InfoBadge" not in body and "DropZone" not in body
+
+
+# ------------------------------------------------- the ⓘ and this section
+# PAD-173, Sam: "the 'Technical details about this image' information button
+# seems a bit redundant and slower than the Information section on the select
+# card."  It was: the ⓘ predates this tab and collected the same report again
+# in a window of its own.  For the PICKED card it now brings the person here.
+
+def test_the_info_badge_for_the_picked_card_comes_to_this_tab(tmp_path):
+    card = _card(tmp_path)
+    with web_app(tmp_path, mfr="stern") as w:
+        w.call("ui.set", "extract", "input", card)
+        w.call("ui.select_tab", "extract")
+        assert w.call("extract.open_image_info", "input") is True
+        assert w.state("shell")["tab"] == "card"
+        # ...and the window was not opened behind it: one report, one place.
+        assert not (w.state("extract")["info"] or {}).get("sections")
+
+
+def test_the_write_tabs_original_comes_here_too(tmp_path):
+    card = _card(tmp_path)
+    with web_app(tmp_path, mfr="stern") as w:
+        w.call("ui.set", "extract", "input", card)
+        w.run(lambda: w.window.write_upd_var.set(card))
+        w.call("ui.select_tab", "write")
+        assert w.call("write.image_info") is True
+        assert w.state("shell")["tab"] == "card"
+
+
+def test_an_original_that_is_not_the_picked_card_keeps_its_window(tmp_path):
+    """The Original can be an image this tab is not showing, and then the
+    window is the only place its details have."""
+    picked = _card(tmp_path, "picked.raw")
+    other = _card(tmp_path, "other.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        w.call("ui.set", "extract", "input", picked)
+        w.run(lambda: w.window.write_upd_var.set(other))
+        w.call("ui.select_tab", "write")
+        w.call("write.image_info")
+        assert w.state("shell")["tab"] == "write"
+
+
+def test_a_picked_path_that_is_not_there_still_says_so(tmp_path):
+    """A half-typed path has no section here either, so the window's "File
+    not found" stays the answer."""
+    with web_app(tmp_path, mfr="stern") as w:
+        w.call("ui.set", "extract", "input", str(tmp_path / "nope.raw"))
+        w.call("ui.select_tab", "extract")
+        assert w.call("extract.open_image_info", "input") is False
+        assert w.state("shell")["tab"] == "extract"
+        assert w.asked and w.asked[-1]["title"] == "File not found"

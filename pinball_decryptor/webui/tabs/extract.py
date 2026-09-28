@@ -1040,12 +1040,41 @@ class ExtractTab(TabService):
     # ------------------------------------------------------------------
     # Image Info (the i badge beside the input / the drive)
     # ------------------------------------------------------------------
+    def _info_lives_on_the_card_tab(self, path):
+        """Is the Select card tab the place this image's details already
+        are? (PAD-173)
+
+        THE ⓘ PREDATES THAT SECTION.  Select card reads the same
+        ``image_info.collect`` when a card is picked and shows it under the
+        card tile, keeping it for as long as the card is the one on the page
+        - so for the picked card the window was a second copy of the same
+        report, collected again from scratch, which is exactly how the
+        reporter found it: "redundant and slower than the Information
+        section" (Sam, PAD-173).  A drive, or an image that is not the one
+        picked, still has nowhere else to be shown, so it keeps the window.
+        """
+        if not path or not os.path.isfile(path):
+            # A path that is not there has no section on Select card either
+            # (look() drops it), and the window's "File not found" is the
+            # answer the person needs - keep it.
+            return False
+        if not self.window.tab_visible("Select Card"):
+            return False
+        picked = (self.extract_input_var.get() or "").strip()
+        if not picked:
+            return False
+        return os.path.normcase(os.path.abspath(picked)) == \
+            os.path.normcase(os.path.abspath(path))
+
     @rpc
     def open_image_info(self, which="input"):
         from ...core.rawdevice import is_device_path
         var = (self.extract_drive_var if which == "drive"
                else self.extract_input_var)
         path = (var.get() or "").strip()
+        if which != "drive" and self._info_lives_on_the_card_tab(path):
+            self.window.select_tab("card")
+            return True
         if not path:
             compat.messagebox.showinfo(
                 "No image selected",
