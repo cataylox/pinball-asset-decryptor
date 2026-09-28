@@ -15,9 +15,8 @@ import { ShellxOverlays } from "./shellx_dialogs.js";
 // The Build / flash dialog floats over any tab (Write, and Multi-boot's
 // Build / flash card...), so opening it no longer switches tabs.
 import { WriteOverlays } from "./tabs/write_dialogs.js";
-// The Fonts and Scenes tool windows float over any tab: Text, Images (Fonts...,
-// Scenes...) and Video (Show scene contents...) all open them.
-import { ScenesWindow } from "./tabs/text_scenes.js";
+// The Fonts tool window floats over any tab: Text and Images (Fonts...) open it.  The
+// scenes are a tab of their own (tabs/scenes.js, PAD-251).
 import { FontsWindow } from "./tabs/text_fonts.js";
 
 // ------------------------------------------------------------------ zoom
@@ -919,7 +918,6 @@ export function Shell() {
     <${ShellxOverlays} />
     <${WriteOverlays} />
     <${FontsWindow} />
-    <${ScenesWindow} />
     <${DialogHost} />
   </div>`;
 }

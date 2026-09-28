@@ -141,6 +141,7 @@ def load_fonts(assets_dir):
     by_key = {}
     for fo in fonts.values():
         gs = [g for g in fo["glyphs"].values() if g["lh"] > 1]
+        fo["cell_pad"], fo["cell_scale"] = cell_fit(gs)
         fo["ascent"] = int(round(max((g["by"] for g in gs), default=8)))
         fo["descent"] = max(0, int(round(
             max((g["lh"] - g["by"] for g in gs), default=0))))
@@ -254,6 +255,53 @@ def _space_advance(font):
     return 0.6 * (sum(advs) / len(advs)) if advs else 8.0
 
 
+# A glyph's atlas CELL holds its ink plus a margin for the outline and glow, and the game
+# draws the whole cell at the font's scale with the ink landing on the metric box (PAD-251).
+# Measured on Godzilla LE 1.16's GameFont_Secondary: 'K' is an 80x78 cell whose ink is 56x54
+# and whose metric box is 45x43 at 62 px.  Fitting ``metric = scale * (cell - 2 * pad)`` over
+# every glyph of a size gives pad 15.75 cell px and scale 0.923 (= 62 px / the 67 px master)
+# with a spread of 3 %, against 18 % for "the cell IS the box".  Drawing the whole cell into
+# the box (the old reading) shrank the ink by a fifth and opened gaps between letters that
+# the machine does not have (PAD-154's emulator capture of the language screen).
+_CELL_FIT_MAX_SPREAD = 0.08
+
+
+def cell_fit(glyphs):
+    """``(pad, scale)`` of a font size: the cell margin (atlas px) and the scale the cell is
+    drawn at, fitted over *glyphs*' cells and metric boxes.  ``(0.0, None)`` when no margin
+    explains the metrics better than none - TMNT's and Munsters' cells ARE their boxes - or the
+    fit is loose; :func:`_fit_to_metrics` then fits the whole cell to the box as before."""
+    rows = [(g["w"] if not g["rot"] else g["h"], g["h"] if not g["rot"] else g["w"],
+             g["lw"], g["lh"]) for g in glyphs if g.get("lw", 0) > 2 and g.get("lh", 0) > 2]
+    if len(rows) < 8:
+        return 0.0, None
+
+    def spread(p):
+        vals = []
+        for cw, ch, lw, lh in rows:
+            if cw - 2 * p <= 1 or ch - 2 * p <= 1:
+                return None, None
+            vals += [lw / (cw - 2 * p), lh / (ch - 2 * p)]
+        mean = sum(vals) / len(vals)
+        var = sum((v - mean) ** 2 for v in vals) / len(vals)
+        return (var ** 0.5) / mean, mean
+
+    base, _m = spread(0.0)
+    best = (base, 0.0, None)
+    p = 0.25
+    while p <= 40.0:
+        sp, mean = spread(p)
+        if sp is None:
+            break
+        if sp < best[0]:
+            best = (sp, p, mean)
+        p += 0.25
+    sp, pad, scale = best
+    if scale is None or pad <= 0 or sp > _CELL_FIT_MAX_SPREAD or sp > base * 0.5:
+        return 0.0, None
+    return pad, scale
+
+
 def _fit_to_metrics(img, glyph, scale=1.0):
     """Scale a glyph's atlas bitmap to the box its METRICS say it occupies.
 
@@ -349,9 +397,20 @@ def render_text(font, text, slice_loader=None, tracking=0, metric_scale=1.0):
                 missing.add(ch)
                 pen += adv + kern + tracking
                 continue
-            img = _fit_to_metrics(img, g, ms)
-            x = pen + bx
-            y = base_y - by
+            pad, cscale = font.get("cell_pad", 0.0), font.get("cell_scale")
+            if cscale:
+                # the whole cell at the font's scale, its ink box on the metrics
+                k = cscale * ms
+                cw, ch = img.size
+                tw, th = max(1, int(round(cw * k))), max(1, int(round(ch * k)))
+                if (tw, th) != img.size:
+                    img = img.resize((tw, th), _pil().LANCZOS)
+                x = pen + bx - pad * k
+                y = base_y - by - pad * k
+            else:
+                img = _fit_to_metrics(img, g, ms)
+                x = pen + bx
+                y = base_y - by
             placed.append((x, y, img))
             min_x = min(min_x, x)
             max_x = max(max_x, x + img.size[0], pen + adv)
@@ -363,7 +422,11 @@ def render_text(font, text, slice_loader=None, tracking=0, metric_scale=1.0):
     canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     for x, y, img in placed:
         ix, iy = int(round(x - min_x)), int(round(y))
-        canvas.alpha_composite(img, (max(0, ix), max(0, iy)))
+        if ix < 0 or iy < 0:
+            # a cell's outline margin can reach past the line's box: clip it, don't shift it
+            img = img.crop((max(0, -ix), max(0, -iy), img.size[0], img.size[1]))
+            ix, iy = max(0, ix), max(0, iy)
+        canvas.alpha_composite(img, (ix, iy))
     return canvas, missing
 
 

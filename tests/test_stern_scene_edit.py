@@ -1,0 +1,179 @@
+"""PAD-251: edits to a scene's tree - recorded per project, drawn by the preview, written to
+the card - and the Write path that carries them.
+
+EMULATOR-PROVEN on Godzilla LE 1.16's language screen (2026-09-28, hidden run, framebuffer
+grabs): a scene carrying a move, a 1.6x resize, a hidden line, an added picture, four added
+lines of text and three tints loaded and drew exactly where the preview put them, and the
+game went on into play.  Also measured there: a Text's own rgba is ignored by a styled game
+font whatever its flags; the node colour track tints text and pictures alike.
+
+What has to hold, and is tested here:
+
+* the file keeps one list per scene, folds a drag into one move, and can drop / undo / reset;
+* the preview (manifest) and the card (scene tree) apply the same ops to the same result;
+* a node the card does not have (or has under another name) is left alone and reported;
+* the Write patches a same-size edit IN PLACE (writes + overlay, fine for a direct SD write)
+  and hands a scene that grows to the whole-file path, which a direct SD write refuses.
+"""
+import pytest
+
+from pinball_decryptor.plugins.stern import (                                  # noqa: E402
+    engine, scene_edit as X, scene_eval as E, scene_tree as T)
+from tests.test_stern_scene_tree import scene                                  # noqa: E402
+from tests.test_stern_text_colors import _FakeReader                           # noqa: E402
+
+CARD = "/godzilla_le/assets/lcd/demand_loaded/abc/scene.radium"
+
+
+def _man():
+    return E.manifest(T.parse(scene()))
+
+
+def _draws(man, frame=1):
+    return [(tuple(round(v, 3) for v in d["m"]), d["kind"], d.get("text"),
+             tuple(round(v, 3) for v in d["mul"])) for d in E.draw_list(man, frame)]
+
+
+OPS = [
+    {"op": "move", "node": 50, "dx": 7, "dy": -3},
+    {"op": "scale", "node": 50, "s": 1.5, "px": 8, "py": 4},
+    {"op": "tint", "node": 51, "mul": [1, 0, 0, 0.5]},
+    {"op": "visible", "node": 54, "on": False},
+    {"op": "order", "node": 53, "index": 0},
+    {"op": "add_text", "parent": None, "index": 99, "id": X.FIRST_ADDED_ID, "name": "New",
+     "text": "HELLO", "x": 20, "y": 30, "like": 53},
+]
+
+
+def test_the_file_folds_a_drag_and_can_drop_undo_and_reset(tmp_path):
+    a = str(tmp_path)
+    X.add(a, CARD, {"op": "move", "node": 5, "dx": 1, "dy": 2})
+    X.add(a, CARD, {"op": "move", "node": 5, "dx": 3, "dy": -2})
+    assert X.ops_for(a, CARD) == [{"op": "move", "node": 5, "dx": 4, "dy": 0}]
+    X.add(a, CARD, {"op": "move", "node": 5, "dx": -4, "dy": 0})
+    assert X.ops_for(a, CARD) == []                     # a drag back to where it was
+    X.add(a, CARD, {"op": "visible", "node": 6, "on": False})
+    X.add(a, CARD, {"op": "scale", "node": 6, "s": 2, "px": 0, "py": 0})
+    X.drop(a, CARD, 6, "visible")
+    assert [op["op"] for op in X.ops_for(a, CARD)] == ["scale"]
+    X.undo(a, CARD)
+    assert X.load(a) == {}
+    X.add(a, CARD, {"op": "tint", "node": 7, "mul": [1, 1, 1, 1]})
+    X.reset_node(a, CARD, 7)
+    assert X.count(a) == 0
+
+
+def test_preview_and_card_apply_the_same_edits_to_the_same_result():
+    man = _man()
+    preview, notes = X.apply_manifest(man, OPS)
+    assert notes == []
+    sc = T.parse(scene())
+    n, notes = X.apply_scene(sc, OPS, names=X.names_of(man))
+    assert (n, notes) == (6, [])
+    card = E.manifest(T.parse(T.serialize(sc)))
+    assert _draws(preview) == _draws(card)
+    names = [d["path"][-1] for d in E.draw_list(card, 1)]
+    assert names[0] == "Title" and names[-1] == "New" and "Box" not in names
+
+
+def test_what_each_edit_does_to_the_drawing():
+    man = _man()
+    before = {d["path"][-1]: d for d in E.draw_list(man, 1)}
+    after = {d["path"][-1]: d for d in E.draw_list(X.apply_manifest(man, OPS)[0], 1)}
+    b, a = before["Art"]["m"], after["Art"]["m"]
+    assert a[0] == pytest.approx(b[0] * 1.5)
+    # scaled about the local point (8, 4): that point stays put (after the move)
+    px = (b[0] * 8 + b[2] * 4 + b[4] + 7, b[1] * 8 + b[3] * 4 + b[5] - 3)
+    qx = (a[0] * 8 + a[2] * 4 + a[4], a[1] * 8 + a[3] * 4 + a[5])
+    assert qx == pytest.approx(px)
+    tinted = [d for d in E.draw_list(X.apply_manifest(man, OPS)[0], 1)
+              if d["path"] == ["Tile_1", "Frame_Art"]][0]
+    assert tinted["mul"] == pytest.approx((1, 0, 0, 0.5))                # a tint reaches kids
+    assert after["New"]["text"] == "HELLO"
+
+
+def test_a_node_the_card_lacks_or_names_differently_is_left_alone():
+    sc = T.parse(scene())
+    n, notes = X.apply_scene(sc, [{"op": "move", "node": 9999, "dx": 1, "dy": 1},
+                                  {"op": "move", "node": 50, "dx": 1, "dy": 1}],
+                             names={9999: "Gone", 50: "NotArt"})
+    assert n == 0 and len(notes) == 2 and all("left alone" in x for x in notes)
+    assert T.serialize(sc) == scene()
+
+
+def test_a_stock_node_is_hidden_not_removed():
+    sc = T.parse(scene())
+    n, notes = X.apply_scene(sc, [{"op": "remove", "node": 50}])
+    assert "Art" in [k.name for k in sc.root["kids"]]
+    assert sc.root["kids"][0].keyframes == [(1, 0)] and notes
+
+
+# ---------------------------------------------------------------------------------------------
+# the Write
+# ---------------------------------------------------------------------------------------------
+def _project(tmp_path, ops):
+    import json
+    a = str(tmp_path)
+    X.save(a, {CARD: ops})
+    tex = tmp_path / "images" / "scene_textures"
+    (tex / "scene_tree.json").write_text(json.dumps({CARD: _man()}), encoding="utf-8")
+    return a
+
+
+def test_a_same_size_edit_is_patched_in_place(tmp_path):
+    data = scene()
+    a = _project(tmp_path, [{"op": "move", "node": 50, "dx": 5, "dy": 5},
+                            {"op": "visible", "node": 54, "on": False}])
+    ov, msgs = {}, []
+    writes, n, whole = engine._scene_tree_plan(
+        _FakeReader({CARD: data}), a, lambda m, lvl="info": msgs.append((lvl, m)),
+        lambda: False, False, ov)
+    assert (n, whole) == (2, {})
+    new = bytearray(data)
+    for off, b in writes:                      # the fake reader maps file offset == disk
+        new[off:off + len(b)] = b
+    back = E.manifest(T.parse(bytes(new)))
+    art = [d for d in E.draw_list(back, 1) if d["path"][-1] == "Art"][0]
+    assert art["m"][4] == pytest.approx(105.0)
+    (_ib, (_node, patch)), = ov.items()
+    assert sorted(patch) == sorted(off for off, _b in writes)
+
+
+@pytest.mark.parametrize("device", [False, True])
+def test_a_scene_that_grows_goes_whole_and_not_to_a_card_directly(tmp_path, device):
+    a = _project(tmp_path, [{"op": "add_text", "parent": None, "index": 0,
+                             "id": X.FIRST_ADDED_ID, "name": "New", "text": "HI",
+                             "x": 0, "y": 0, "like": 53}])
+    msgs = []
+    writes, n, whole = engine._scene_tree_plan(
+        _FakeReader({CARD: scene()}), a, lambda m, lvl="info": msgs.append((lvl, m)),
+        lambda: False, device, {})
+    assert writes == []
+    if device:
+        assert (n, whole) == (0, {})
+        assert any("image build" in m for _l, m in msgs)
+    else:
+        assert n == 1 and list(whole) == [CARD]
+
+
+def test_a_stretch_scales_width_and_height_apart_and_both_sides_agree():
+    """PAD-251 follow-up: a picture's width and height set on their own."""
+    op = [{"op": "scale", "node": 50, "s": 2.0, "sy": 0.5, "px": 8, "py": 4}]
+    man = _man()
+    before = [d for d in E.draw_list(man, 1) if d["path"][-1] == "Art"][0]["m"]
+    preview = X.apply_manifest(man, op)[0]
+    after = [d for d in E.draw_list(preview, 1) if d["path"][-1] == "Art"][0]["m"]
+    assert after[0] == pytest.approx(before[0] * 2.0)
+    assert after[3] == pytest.approx(before[3] * 0.5)
+    sc = T.parse(scene())
+    X.apply_scene(sc, op, names=X.names_of(man))
+    assert _draws(preview) == _draws(E.manifest(T.parse(T.serialize(sc))))
+    assert X.describe(op[0]) == "200 x 50 %"
+
+
+def test_stretches_fold_into_one_op(tmp_path):
+    a = str(tmp_path)
+    X.add(a, CARD, {"op": "scale", "node": 5, "s": 2.0, "px": 0, "py": 0})
+    X.add(a, CARD, {"op": "scale", "node": 5, "s": 1.0, "sy": 3.0, "px": 0, "py": 0})
+    assert X.ops_for(a, CARD) == [{"op": "scale", "node": 5, "s": 2.0, "sy": 6.0,
+                                   "px": 0, "py": 0}]

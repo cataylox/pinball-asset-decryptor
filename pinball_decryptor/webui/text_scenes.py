@@ -1,10 +1,11 @@
-"""The Scenes window ("what each scene is made of") as a floating window.
+"""The Scenes tab ("what each scene is made of"; it was a floating window until PAD-251).
 
 Ported from ``gui/scene_browser.py`` (``SceneBrowserWindow`` and its
 ``_LayoutDialog``).  The Replace Text tab opens it ("Show in Scenes…"); the
 Images and Video tabs open it too in Tk, and can here through the text tab's
-``_open_scene_browser`` (exported on the window) and the page component
-``ScenesWindow`` in ``static/js/tabs/text_scenes.js``.
+``_open_scene_browser`` (exported on the window).  The page is ``ScenesPage`` in
+``static/js/tabs/text_scenes.js``, shown by the Scenes tab (``tabs/scenes.py``): opening
+the scenes brings that tab forward.
 
 State lives in the store namespace ``text_scenes``; calls are
 ``text_scenes.<method>``.  Everything the Tk window computed is computed the
@@ -23,6 +24,7 @@ import threading
 
 from . import compat
 from .rpc import rpc
+from .text_scenes_tree import TreeEditMixin
 
 log = logging.getLogger(__name__)
 
@@ -41,9 +43,9 @@ _DISPLAY_SIZE = (960, 544)
 
 HINT = ("Every scene on the card, with the images, fonts and on-screen text "
         "it is built from. Double-click an item to jump to it on the "
-        "matching tab — this window steps aside so you can see where you "
-        "landed, and its button at the bottom of the app brings it back. "
-        "Right-click an item to recolour a line of text or blank a font out "
+        "matching tab; this tab keeps its place for when you come back. "
+        "Click a picture or a line of text in the preview to move, resize, tint, hide or "
+        "re-layer it; right-click an item to recolour a line of text or blank a font out "
         "of the picture.")
 HINT_EMPTY = ("No scene manifests found in this project folder. Run Extract "
               "(with Images and Text enabled) on a Stern Spike 2 card image "
@@ -269,7 +271,7 @@ def glyph_atlas_rel(assets, rel):
     return None
 
 
-class TextScenesService:
+class TextScenesService(TreeEditMixin):
     ns = "text_scenes"
 
     def __init__(self, tab):
@@ -302,6 +304,8 @@ class TextScenesService:
         self._rebuild = None
         self._tmp = None
         self._raise_n = 0
+        self._auto_tried = None
+        self._tree_init()
         self._reset_state()
 
     # ------------------------------------------------------------------
@@ -326,7 +330,9 @@ class TextScenesService:
                  fps_choice=_FPS_FROM_FILE, fps_choices=list(_FPS_CHOICES),
                  bg=self._bg, bgs=self._bg_names(), bg_rgb=self._bg_rgb(),
                  exporting=False, bulk=False, rebuilding=False,
-                 rebuild_msg="", layout_dialog=None, tips=TIPS)
+                 rebuild_msg="", layout_dialog=None, tips=TIPS,
+                 tree=False, tree_view=None, tree_layers=None, tree_busy=False,
+                 tree_loading=False, tree_img_rev=0, preparing=None)
 
     def is_open(self):
         return self._alive
@@ -369,19 +375,23 @@ class TextScenesService:
             self._bg = self._bg_names()[0]
             self._reset_state()
             self.reload(preselect, focus_text)
-        # Tk: deiconify + lift.  Both tool windows float over the app and
-        # stay open together; the one opened last is in front (a Fonts
-        # window under it shows again when this one closes).
         self._raise()
         return True
 
     def _raise(self):
+        """PAD-251: the scenes are a tab now; opening them brings the Scenes tab forward."""
         self._raise_n += 1
         self.set(open=True, alive=True, raise_n=self._raise_n)
+        window = self.window
+        try:
+            if window.service("scenes") is not None and                     self.store.get("shell", "tab") != "scenes":
+                window.select_tab("scenes")
+        except Exception:                            # noqa: BLE001
+            log.exception("scenes tab")
 
     @rpc
     def show(self):
-        """Bring a stepped-aside window back, in front."""
+        """Bring the scenes forward (the Scenes tab)."""
         if not self._alive:
             return False
         self._raise()
@@ -389,11 +399,8 @@ class TextScenesService:
 
     @rpc
     def hide(self):
-        """Step aside (Tk ``_step_aside_for_jump`` lowered the window behind
-        the main one): nothing is closed or reset, and the window's button
-        in the page's dock (or Show in Scenes… / Scenes…) brings it back."""
-        if self._alive:
-            self.set(open=False)
+        """Nothing to step aside any more: the scenes are a tab of their own and a jump to
+        another tab simply leaves it (nothing is closed or reset)."""
         return True
 
     @rpc
@@ -431,10 +438,34 @@ class TextScenesService:
         except Exception:                            # noqa: BLE001
             self._scenes = {}
         self._layouts = scene_render.load_layouts(self.assets_dir)
+        self._tree_reset()
         self._fonts = None
         self._text_changes = None
         self.set(hint=HINT if self._scenes else HINT_EMPTY)
         self._refresh_list(preselect, focus_text)
+        self._auto_trees()
+
+    def _auto_trees(self):
+        """PAD-251: a project extracted before the scene editor has previews but no
+        ``scene_tree.json``, and the window would quietly show the old preview.  When the
+        Extract tab's card is there, the trees are read off it now, in the background (the
+        same few seconds as Rebuild previews); the editor takes over when they land."""
+        if self._rebuild is not None or not self._scenes:
+            return
+        tex = os.path.join(self.assets_dir, "images", "scene_textures")
+        if os.path.isfile(os.path.join(tex, "scene_tree.json")):
+            return
+        if not os.path.isfile(os.path.join(tex, "radium_images.txt")):
+            return
+        card = self.card_image_path()
+        if not card or not os.path.isfile(card):
+            self.set(rebuild_msg="To edit the scenes, set the Extract tab's Input to this "
+                                 "project's card image and press Rebuild previews.")
+            return
+        if self._auto_tried == (self.assets_dir, card):
+            return                  # read once already (it failed: its message is showing)
+        self._auto_tried = (self.assets_dir, card)
+        self.rebuild(quiet=True)
 
     def _sorted_dirs(self):
         key = _SORT_KEYS.get(self._sort_col, _SORT_KEYS["#0"])
@@ -510,6 +541,7 @@ class TextScenesService:
         if d != self._sel:
             self._focus_want = None
             self._drop_live_edit()
+            self._tsel = None
         self._sel = d
         self._on_select()
         return True
@@ -1142,6 +1174,20 @@ class TextScenesService:
         token = self._token
         self._frames_full = []
         self._preview_full = None
+        if self._tree_available(scene_dir):
+            # PAD-251: drawn from the scene's tree, as the machine draws it, and editable
+            self._preview_dir = scene_dir
+            self._set_caption(
+                "Drawn from the scene itself, as the machine draws it. Click a picture or a "
+                "line of text to select it; drag to move, drag a corner to resize.")
+            self._render_tree_preview(scene_dir)
+            return
+        self._tshown_card = None
+        self.set(tree=False, tree_view=None, tree_layers=None, tree_busy=False,
+                 tree_loading=False)
+        if self._rebuild is not None and self._rebuild.get("quiet"):
+            self._render_preview_idle()
+            return
         card, layout = scene_render.layout_for_scene_dir(self._layouts,
                                                          scene_dir)
         new_scene = scene_dir != self._preview_dir
@@ -1465,6 +1511,20 @@ class TextScenesService:
                 card, layout = scene_render.layout_for_scene_dir(
                     self._layouts, d)
                 img = None
+                tcard, tman = self._tree_card(d)
+                if tman is not None:
+                    # PAD-251: drawn from the tree, with the scene's edits
+                    try:
+                        from ..plugins.stern import scene_edit
+                        man, _n = scene_edit.apply_manifest(
+                            tman, scene_edit.ops_for(self.assets_dir, tcard))
+                        img = scene_render.render_tree(
+                            self.assets_dir, man, fonts=self._fonts, background=bg,
+                            colors=self._pending_colors(tcard),
+                            text_edits=self._pending_texts(tcard, None))
+                    except Exception:                # noqa: BLE001
+                        img = None
+                    layout = None
                 if layout is not None:
                     try:
                         img = self._render_layout(
@@ -1527,9 +1587,11 @@ class TextScenesService:
             return ""
 
     @rpc
-    def rebuild(self):
+    def rebuild(self, quiet=False):
         """Rebuild previews…: re-read the scene layouts off the card image
-        (a few seconds, one file rewritten); while it runs it cancels."""
+        (a few seconds, one file rewritten); while it runs it cancels.
+        *quiet* (the window's own first run, :meth:`_auto_trees`) says what happened in the
+        window instead of a message box."""
         if self._rebuild is not None:
             self._rebuild["cancel"] = True
             self.set(rebuild_msg="Stopping…")
@@ -1542,8 +1604,12 @@ class TextScenesService:
                 "folder was extracted from — the scene layouts are read back "
                 "off the card.")
             return False
-        state = self._rebuild = {"cancel": False}
-        self.set(rebuilding=True, rebuild_msg="Reading the card…")
+        state = self._rebuild = {"cancel": False, "quiet": bool(quiet)}
+        self.set(rebuilding=True, rebuild_msg="" if quiet else "Reading the card…")
+        if quiet:
+            # the page shows this in place of the preview until the editor can take over
+            self.set(preparing={"cur": 0, "total": 0})
+            self._render_preview_idle()
         assets = self.assets_dir
 
         def progress(cur, total, _d=""):
@@ -1569,25 +1635,44 @@ class TextScenesService:
         return True
 
     def _rebuild_tick(self, state, cur, total):
-        if state is self._rebuild:
+        if state is not self._rebuild:
+            return
+        if state.get("quiet"):
+            self.set(preparing={"cur": cur, "total": total})
+        else:
             self.set(rebuild_msg="Scene %d of %d…" % (cur, total))
+
+    def _render_preview_idle(self):
+        """While the editor is being prepared nothing is drawn the old way: the page shows
+        the preparation instead of a preview that is about to be replaced."""
+        self._token += 1
+        self._frames_full = []
+        self._preview_full = None
+        self.set(frames=[], canvas_msg="", can_save=False, animated=False)
 
     def _rebuild_done(self, state, n, err, msgs):
         if state is not self._rebuild:
             return
         self._rebuild = None
-        self.set(rebuilding=False)
+        self.set(rebuilding=False, preparing=None)
+        failed = state["cancel"] or err is not None or not n
+        if state.get("quiet") and failed and self._alive and self._sel:
+            self._render_preview(self._sel)          # the preview it held back
         if state["cancel"]:
             self.set(rebuild_msg="Stopped — layouts unchanged.")
             return
         if err is not None or not n:
             why = next((m for m, lvl in msgs if lvl == "warning"), None)
             self.set(rebuild_msg="Could not rebuild.")
+            if state.get("quiet"):
+                self.set(rebuild_msg="The scenes could not be read off the Extract tab's "
+                                     "card: " + (why or str(err or "") or "no scenes found"))
+                return
             compat.messagebox.showwarning(
                 "Rebuild previews", why or str(err or "")
                 or "No scene layouts could be read from that card image.")
             return
-        self.set(rebuild_msg="Rebuilt %d scene layout(s)." % n)
+        self.set(rebuild_msg="" if state.get("quiet") else "Rebuilt %d scene layout(s)." % n)
         if self._alive:
             self.reload(self._sel)
 

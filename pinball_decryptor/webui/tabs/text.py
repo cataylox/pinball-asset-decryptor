@@ -922,7 +922,7 @@ class TextTab(TabService):
         if r is None:
             compat.messagebox.showinfo(
                 "Scenes",
-                "Pick a line of text first — the Scenes window then opens on "
+                "Pick a line of text first — the Scenes tab then opens on "
                 "the scene that draws it.")
             return False
         if not R.row_is_scene(r):
@@ -948,7 +948,7 @@ class TextTab(TabService):
         if not assets or not os.path.isdir(assets):
             compat.messagebox.showinfo(
                 "Scenes", "Pick your extracted project folder first (Extract "
-                          "tab) — the Scenes window works on an extracted "
+                          "tab) — the Scenes tab works on an extracted "
                           "Stern Spike 2 card.")
             return False
         return self.scenes.open(assets, preselect_rel=preselect_rel,

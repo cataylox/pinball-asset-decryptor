@@ -1,14 +1,37 @@
-/* The Scenes window (js/tabs/text_scenes.js loads this itself, so it is
-   styled whichever tab is showing; its frame, ToolWindow, is styled in
-   text_fonts.css).  Tokens and components from app.css. */
+/* The Scenes tab (js/tabs/scenes.js + text_scenes.js, which loads this sheet itself).
+   Tokens and components from app.css. */
 
-.scenes-win > .bd { overflow: hidden; }
-.scenes-body { display: grid; grid-template-columns: minmax(290px, 460px) minmax(0, 1fr); gap: 14px; flex: 1 1 auto; min-height: 0; }
-.scenes-left { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
-.scenes-list { flex: 1 1 auto; min-height: 160px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+/* One screen tall, like a workspace: the scene list | the preview, as big as the room lets it
+   be (width AND height) | the inspector (the moment, the selection, then Layers / Contents,
+   which scroll on their own).  A short or narrow window falls back to a page that scrolls. */
+.scenes-page { gap: 12px; overflow: hidden; }
+.scenes-card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 12px; container-type: inline-size; }
+.scenes-opening { gap: 10px; padding: 24px 4px; }
+.scenes-msg-head { max-width: 420px; }
+.scenes-body { display: grid; grid-template-columns: minmax(230px, min(340px, 25%)) minmax(0, 1fr) 304px; gap: 12px; flex: 1 1 auto; min-height: 0; }
+.scenes-body.wide { grid-template-columns: minmax(0, 1fr) 304px; }
+.scenes-body.wide .scenes-left { display: none; }
+.scenes-left { display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; }
+.scenes-search { gap: 6px; flex-wrap: nowrap; }
+.scenes-search > .field { flex: 1 1 auto; min-width: 0; }
+.scenes-list-wrap { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.scenes-list { flex: 1 1 auto; min-height: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .scenes-list .tr { padding: 0 10px; gap: 6px; }
 .scenes-list .th { letter-spacing: .02em; }
-.scenes-right { display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; }
+.scenes-center { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
+.scenes-stage { flex: 1 1 auto; min-height: 200px; container-type: size; display: flex; align-items: center; justify-content: center; }
+.scenes-stage > .scenes-canvas, .scenes-stage > .scenes-preparing {
+  width: min(100cqw, calc(100cqh * var(--ar, 1.7708))); max-width: none; min-width: 0; flex: none; aspect-ratio: var(--ar, 1.7708); }
+.scenes-stagebar { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; min-height: 32px; flex: 0 0 auto; }
+.scenes-stagebar .grow { flex: 1 1 140px; min-width: 0; }
+.scenes-stagebar .scenes-ctl { margin-top: 0; }
+.tree-actions { gap: 2px; flex-wrap: wrap; }
+.tree-actions-sep { width: 1px; height: 18px; background: var(--line-2); margin: 0 6px; }
+.scenes-inspector { display: flex; flex-direction: column; gap: 10px; min-height: 0; min-width: 0; }
+.insp-top { flex: 0 1 auto; max-height: 56%; overflow: auto; padding-right: 4px; }
+/* Layers takes what the moment and the selection leave (never the other way round) */
+.scenes-inspector > .scenes-top { flex: 1 1 0; min-height: 150px; }
+.scenes-inspector > .scenes-contents { flex: 1 1 auto; min-height: 0; }
 .scenes-contents { flex: 1 1 auto; min-height: 120px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 4px 0; }
 .sc-head { padding: 4px 12px 2px; }
 .sc-gh { all: unset; display: flex; align-items: center; gap: 6px; padding: 4px 10px; font-family: var(--cond); font-weight: 600; font-size: 13px; color: var(--ink-2); cursor: pointer; width: calc(100% - 20px); }
@@ -19,16 +42,12 @@
 .sc-item.sel { background: var(--sel); box-shadow: inset 2px 0 0 var(--accent); }
 .sc-item.note { color: var(--ink-3); font-style: italic; }
 .sc-sw { width: 12px; height: 12px; border-radius: 3px; }
-.scenes-preview { display: flex; gap: 12px; align-items: flex-start; flex: 0 0 auto; }
-.scenes-canvas { flex: 1 1 400px; max-width: 540px; aspect-ratio: 1360 / 768; min-width: 240px; border-radius: 8px; border: 1px solid var(--line-2); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.scenes-canvas { aspect-ratio: 1360 / 768; border-radius: 8px; border: 1px solid var(--line-2); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .scenes-canvas img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .scenes-msg { color: #6b6b76; font-size: 13px; }
-.scenes-side { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; min-width: 0; flex: 0 0 272px; }
-.scenes-side > .btn { min-width: 160px; justify-content: flex-start; }
 .scenes-ctl { display: flex; align-items: center; gap: 4px; margin-top: 4px; flex-wrap: nowrap; }
 .scenes-ctl .lbl { width: 46px; }
 .scenes-ctl .field { width: 136px; flex: 0 0 136px; }
-.scenes-caption { gap: 6px; min-height: 22px; }
 .scenes-bottom { gap: 10px; align-items: center; }
 .scenes-thumb { width: 160px; height: 90px; flex: 0 0 160px; }
 .scenes-detail { overflow-wrap: anywhere; min-width: 0; }
@@ -39,17 +58,68 @@
 .scenes-ly-f { width: 88px; flex: 0 0 88px; }
 .scenes-edit-n { flex: 1 0 100%; }
 
-/* a narrow window (the app's, or this one sized down): one column */
-@container (max-width: 1000px) {
-  .scenes-body { grid-template-columns: minmax(0, 1fr); overflow: auto; }
-  .scenes-list { min-height: 200px; max-height: 260px; }
-  .scenes-contents { max-height: 240px; }
-  .scenes-preview { flex-wrap: wrap; }
+/* PAD-251: the scene editor */
+.scenes-top { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.scenes-top > .scenes-contents { flex: 1 1 auto; min-height: 0; }
+.tree-canvas { position: relative; cursor: default; touch-action: none; outline: none; }
+.tree-canvas:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.tree-canvas img { position: absolute; inset: 0; user-select: none; pointer-events: none; }
+.tree-canvas.loading { cursor: progress; }
+.tree-live { transform-origin: 0 0; will-change: transform; }
+/* a redraw on its way: the picture stays, a quiet pill says so (only if it takes a moment) */
+.tree-busy { position: absolute; top: 10px; right: 10px; display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 11px 4px 8px; border-radius: 999px; background: rgba(12, 12, 16, .74); color: #f2f2f5;
+  font-size: 12px; pointer-events: none; backdrop-filter: blur(4px); opacity: 0;
+  animation: scenes-fade .18s ease .2s forwards; }
+.tree-busy .spin { width: 12px; height: 12px; flex-basis: 12px; border-color: rgba(255, 255, 255, .25); border-top-color: #fff; }
+@keyframes scenes-fade { to { opacity: 1; } }
+/* a scene being drawn for the first time, and the editor being prepared */
+.scenes-drawing { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #b9b9c4; overflow: hidden; }
+.scenes-drawing > .row { position: relative; }
+.scenes-canvas:not(.tree-canvas) { position: relative; }
+.scenes-shimmer { position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, .06) 50%, transparent 70%);
+  background-size: 250% 100%; animation: scenes-shimmer 1.5s linear infinite; }
+@keyframes scenes-shimmer { from { background-position: 150% 0; } to { background-position: -100% 0; } }
+.scenes-preparing { position: relative; overflow: hidden;
+  border: 1px solid var(--line-2); border-radius: 8px; background: var(--panel-2); }
+.scenes-prep-body { position: relative; height: 100%; box-sizing: border-box; padding: 28px 32px; display: flex;
+  flex-direction: column; justify-content: center; gap: 10px; }
+.scenes-prep-body p { margin: 0; max-width: 520px; }
+.scenes-prep-bar { max-width: 420px; }
+@media (prefers-reduced-motion: reduce) { .scenes-shimmer { animation: none; } .tree-busy { animation-duration: .01s; } }
+.tree-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.tree-hover { fill: rgba(255, 255, 255, 0.06); stroke: rgba(255, 255, 255, 0.7); stroke-width: 2; stroke-dasharray: 8 6; vector-effect: non-scaling-stroke; }
+.tree-sel { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.tree-box { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }
+.tree-handle { fill: var(--accent); stroke: #000; stroke-width: 1; vector-effect: non-scaling-stroke; cursor: nwse-resize; }
+.tree-side { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.tree-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tree-num { display: flex; align-items: center; gap: 4px; }
+.tree-num .field { width: 76px; }
+.tree-num .lbl { width: auto; }
+.tree-color { width: 40px; height: 28px; border: 1px solid var(--line-2); border-radius: 5px; background: transparent; padding: 1px; cursor: pointer; }
+.tree-props { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: var(--panel-2); width: 100%; box-sizing: border-box; }
+.tree-states summary { cursor: pointer; }
+.tree-state { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 6px; align-items: center; margin: 3px 0; }
+.ly-item { grid-template-columns: 20px minmax(0, 1.2fr) minmax(0, 1fr); cursor: pointer; }
+.ly-off { opacity: .5; }
+.ly-eye { all: unset; cursor: pointer; display: inline-flex; color: var(--ink-3); }
+.ly-eye:hover { color: var(--ink); }
+
+/* a narrow window: the scene list goes across the top, the preview and inspector under it */
+@container (max-width: 1060px) {
+  .scenes-body { grid-template-columns: minmax(0, 1fr) 280px; grid-template-rows: 210px minmax(0, 1fr); }
+  .scenes-body > .scenes-left { grid-column: 1 / -1; }
+  .scenes-body.wide { grid-template-rows: minmax(0, 1fr); }
 }
-/* was @media (max-width: 1020px); kept for engines without container queries */
-html.bp-1020 .scenes-body { grid-template-columns: minmax(0, 1fr); overflow: auto; }
-html.bp-1020 .scenes-list { min-height: 200px; max-height: 260px; }
-html.bp-1020 .scenes-contents { max-height: 240px; }
-html.bp-1020 .scenes-preview { flex-wrap: wrap; }
-/* was @media (max-height: 760px) */
-html.bph-760 .scenes-canvas { max-width: 420px; }
+@container (max-width: 700px) {
+  .scenes-body, .scenes-body.wide { grid-template-columns: minmax(0, 1fr); grid-template-rows: 210px 360px auto; }
+  .scenes-inspector > .scenes-top { min-height: 280px; }
+}
+/* a short window (or a narrow one): the page scrolls instead of squeezing the preview and the
+   inspector away */
+html.bph-760 .scenes-page, html.bp-1180 .scenes-page { overflow: auto; }
+html.bph-760 .scenes-card { flex: 0 0 auto; height: 780px; }
+html.bp-1180 .scenes-card { flex: 0 0 auto; height: 980px; }
+.scenes-prep-bar .prog { background: var(--line); }

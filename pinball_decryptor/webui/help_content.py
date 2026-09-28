@@ -210,8 +210,8 @@ HELP_CONTENT = {
          "To drop some, select the rows — click one, then Shift-click for a "
          "range or Ctrl-click to add single sounds — and right-click the "
          "selection. Sort by the Replacement column first and everything you "
-         "have picked sits together. \"Clear replacements…\" beside the "
-         "project folder drops every pick on this tab at once.\n\n"
+         "have picked sits together. \"Clear replacements…\" (in the More "
+         "menu, the ⋯ button at the top) drops every pick on this tab at once.\n\n"
          "Clearing takes the replacement back out. A pick nothing has applied "
          "yet is simply dropped; a slot that a build, or Start on the Emulate "
          "tab, already wrote into the project folder gets the card's own file "
@@ -399,8 +399,8 @@ HELP_CONTENT = {
          "To drop some, select the rows — click one, then Shift-click for a "
          "range or Ctrl-click to add single clips — and right-click the "
          "selection. Sort by the Replacement column first and everything you "
-         "have picked sits together. \"Clear replacements…\" beside the "
-         "project folder drops every pick on this tab at once.\n\n"
+         "have picked sits together. \"Clear replacements…\" (in the More "
+         "menu, the ⋯ button at the top) drops every pick on this tab at once.\n\n"
          "Clearing takes the replacement back out. A pick nothing has applied "
          "yet is simply dropped; a slot that a build, or Start on the Emulate "
          "tab, already wrote into the project folder gets the card's own file "
@@ -409,6 +409,31 @@ HELP_CONTENT = {
          "some other way (a file copied over it by hand, or a build from "
          "before the app kept a saved original) keeps what it has — "
          "\"Revert all changes…\" on the Write tab is what restores those."),
+        ("Scene editor (move, resize, tint, layers, add)",
+         "When the project has a scene's tree (Extract or \"Rebuild previews…\" "
+         "records it), the Scenes tab draws that scene the way the machine does - "
+         "every picture and line of text in its own place, size, tilt and fade, at one "
+         "MOMENT of its timeline - and you edit it right there. Click something in the "
+         "preview (or its row under Layers) to select it; drag it to move it, drag a "
+         "corner to resize it about its middle, or use the arrow keys to nudge it (Shift "
+         "for 10 px). The panel beside the preview sets its position and size exactly, "
+         "tints it (a colour and an opacity), hides it, and moves it forward or back "
+         "among the layers beside it - later layers draw on top. \"Picture…\" and "
+         "\"Text…\" add something new (text is written in the font and size of the "
+         "selected line). \"Moment\" picks where in the scene's own timeline to look, "
+         "and \"States the game picks\" shows each state the game's code can switch a "
+         "part of the scene to (which monster Battle Select shows, a tile's Locked or "
+         "city) - the "
+         "file holds them all, the game chooses. Every edit is kept in the project and "
+         "listed on the Write tab; the Write puts them on the card (moves, resizes, "
+         "tints, hides and layer changes even straight to an SD card; an added picture "
+         "or line of text makes the scene bigger, which needs an image build). The "
+         "game's own parts are hidden rather than deleted, because its code finds them "
+         "by name. Colour: these games draw most text in a styled font whose colours "
+         "are baked in, so Tint is the way to recolour it. A project extracted before the "
+         "editor existed has its scenes read off the Extract tab's card the first time the "
+         "Scenes tab opens (about ten seconds, once). While you edit, the picture you see "
+         "stays up and a small \"Updating\" tag shows while the change is drawn."),
         ("Size limits",
          "On most games patching is size-neutral: a same-or-smaller "
          "replacement fits as-is, a larger one is re-encoded down to the "
@@ -516,7 +541,7 @@ HELP_CONTENT = {
          "already-changed file."),
         ("Seeing where a clip plays",
          "Right-click a slot and pick \"Show scene contents…\" to open the "
-         "Scenes window on the scene that plays it, with the images, fonts "
+         "Scenes tab on the scene that plays it, with the images, fonts "
          "and text it shares the screen with."),
         ("Very short clips",
          "Plenty of Spike 2 slots hold a clip well under a second — a sixth "
@@ -526,7 +551,7 @@ HELP_CONTENT = {
          "The preview posters the first frame of a clip that short, "
          "because it is the whole clip."),
         ("Checking a card you already built",
-         "\"Check card…\" on the toolbar asks the other question: not what "
+         "\"Check card…\" (in the More menu, the ⋯ button at the top) asks the other question: not what "
          "you are about to put on, but how the clips ALREADY on a card came "
          "out. Point it at a built card image and it measures every clip on "
          "it and lists the ones low enough in bitrate to look blocky — the "
@@ -638,8 +663,8 @@ HELP_CONTENT = {
          "To drop some, select the rows — click one, then Shift-click for a "
          "range or Ctrl-click to add single images — and right-click the "
          "selection. Sort by the Replacement column first and everything you "
-         "have picked sits together. \"Clear replacements…\" beside the "
-         "project folder drops every pick on this tab at once, and a scene "
+         "have picked sits together. \"Clear replacements…\" (in the More "
+         "menu, the ⋯ button at the top) drops every pick on this tab at once, and a scene "
          "group's own right-click menu clears just that animation.\n\n"
          "Clearing takes the replacement back out. A pick nothing has applied "
          "yet is simply dropped; a slot that a build, or Start on the Emulate "
@@ -729,8 +754,8 @@ HELP_CONTENT = {
          "multiplies that colour — the line under the controls says which "
          "colours the scenes draw this font in, and a font a scene tints "
          "black stays black whatever you pick."),
-        ("Scenes window",
-         "The \"Scenes…\" toolbar button (where available) lists every "
+        ("Scenes tab",
+         "The Scenes tab (an image's right-click \"Show scene contents…\" opens it too) lists every "
          "scene on the card with the images, fonts and on-screen text it "
          "is built from — double-click an item to jump to its row here, in "
          "the Fonts window, or on Replace Text. Right-click any scene "
@@ -831,7 +856,7 @@ HELP_CONTENT = {
          "place, and a longer line (up to the 96-byte cap the Max shows) "
          "has its scene file rewritten at the new length and written "
          "whole — the box it draws in is the scene's fixed template, so "
-         "check a longer line in the Scenes window preview. Game-program "
+         "check a longer line in the Scenes tab preview. Game-program "
          "text no longer has to fit either: a row whose Max reads \"96 (grows)\" "
          "may take up to 96 bytes, and a replacement longer than its slot "
          "is placed in a NEW area of the game program (a small read-only "
@@ -890,7 +915,7 @@ HELP_CONTENT = {
          "repeat once per scene/keyframe)."),
         ("Seeing the line in its scene",
          "\"Show in Scenes…\" (also on the right-click menu) opens the "
-         "Scenes window on the scene that draws the selected line, with the "
+         "Scenes tab on the scene that draws the selected line, with the "
          "line itself picked out — so you can see the font, the colour and "
          "the art it sits on before changing the words. The preview draws "
          "your PENDING edits too: change a row here and the scene redraws "

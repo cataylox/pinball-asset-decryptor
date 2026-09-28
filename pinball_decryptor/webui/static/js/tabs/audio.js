@@ -635,12 +635,18 @@ export default function AudioTab() {
     <${PageHead} title="Audio" sub=${T.intro}>
       ${s.status ? html`<${Chip} kind="acc">${s.status}<//>` : null}
       <${Button} onClick=${() => call("audio.scan")} icon=${s.scanning ? "x" : "refresh"}>${s.scanning ? "Cancel scan" : "Scan"}<//>
-      <${Button} disabled=${s.running} title=${T.fromFolder} onClick=${() => call("audio.replace_from_folder")}>Replace from folder…<//>
-      <${Button} kind="ghost" title=${T.csv} onClick=${() => call("audio.export_csv")}>Export CSV<//>
-      <${Button} kind="ghost" title=${T.clear} disabled=${!s.can_clear || s.running} onClick=${() => call("audio.clear_all")}>Clear replacements…<//>
-      ${s.adv_cap ? html`
-        <${Button} kind="ghost" title=${T.adv} onClick=${openAdv}>${s.adv_marker ? "Advanced…*" : "Advanced…"}<//>
-        <${Button} kind="ghost" title=${T.profile} disabled=${s.profile_busy} busy=${s.profile_busy} onClick=${() => call("audio.profile")}>Profile vs stock<//>` : null}
+      <${Button} icon="folder" disabled=${s.running} title=${T.fromFolder} onClick=${() => call("audio.replace_from_folder")}>Replace from folder…<//>
+      ${s.adv_cap ? html`<${Button} kind="ghost" icon="gear" title=${T.adv} onClick=${openAdv}>${s.adv_marker ? "Advanced…*" : "Advanced…"}<//>` : null}
+      <${Button} kind="ghost" icon="more" label="More" busy=${s.profile_busy}
+        title=${s.adv_cap ? "More: Export CSV, Clear replacements…, Profile vs stock" : "More: Export CSV, Clear replacements…"}
+        onClick=${(e) => openMenu(e.currentTarget, [
+          { label: "Export CSV", icon: "download", title: T.csv, onClick: () => call("audio.export_csv") },
+          { label: "Clear replacements…", icon: "trash", title: T.clear, disabled: !s.can_clear || s.running,
+            onClick: () => call("audio.clear_all") },
+          s.adv_cap ? { sep: true } : null,
+          s.adv_cap ? { label: s.profile_busy ? "Profiling…" : "Profile vs stock", icon: "wave", title: T.profile,
+            disabled: s.profile_busy, onClick: () => call("audio.profile") } : null,
+        ], { align: "right" })} />
     <//>
     <div class="row small aud-folder">
       <span class="lbl nw">Project Folder:</span>

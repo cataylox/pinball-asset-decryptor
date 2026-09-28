@@ -621,3 +621,194 @@ def layout_for_scene_dir(layouts, scene_dir):
         if card.replace("\\", "/").rsplit("/", 1)[0] == want:
             return card, lay
     return None, None
+
+
+# ---------------------------------------------------------------------------------------------
+# PAD-251: the scene as the machine draws it, from its TREE (scene_eval draw list)
+# ---------------------------------------------------------------------------------------------
+_GUTTER = 2.0
+
+
+def _warp(img, m, cw, ch):
+    """*img* placed on a (cw, ch) glass by the affine *m* = (a, b, c, d, tx, ty): returns
+    ``(patch RGBA float array, x0, y0)`` covering only the transformed box, or ``None``."""
+    import numpy as np
+    from PIL import Image
+    a, b, c, d, tx, ty = m
+    det = a * d - b * c
+    if abs(det) < 1e-9:
+        return None
+    iw, ih = img.size
+    xs = [tx, a * iw + tx, c * ih + tx, a * iw + c * ih + tx]
+    ys = [ty, b * iw + ty, d * ih + ty, b * iw + d * ih + ty]
+    x0, x1 = max(0, int(np.floor(min(xs)))), min(cw, int(np.ceil(max(xs))))
+    y0, y1 = max(0, int(np.floor(min(ys)))), min(ch, int(np.ceil(max(ys))))
+    if x1 <= x0 or y1 <= y0:
+        return None
+    # inverse: glass (X, Y) -> image (x, y); PIL wants image = A*(X', Y') + C with X' = X - x0
+    ia, ib, ic, id_ = d / det, -b / det, -c / det, a / det
+    ox, oy = x0 - tx, y0 - ty
+    coeffs = (ia, ic, ia * ox + ic * oy, ib, id_, ib * ox + id_ * oy)
+    patch = img.transform((x1 - x0, y1 - y0), Image.AFFINE, coeffs, resample=Image.BILINEAR)
+    return np.asarray(patch, dtype=np.float32), x0, y0
+
+
+def _composite(canvas, patch, x0, y0, mul, add=(0, 0, 0, 0), premultiplied=True,
+               additive=False):
+    """Lay *patch* (RGBA float 0..255) on the float *canvas* (premultiplied RGB + coverage).
+    Pictures off the card are PREMULTIPLIED (memory of PAD-154: stock BC art keeps RGB <= A);
+    glyph ink from :mod:`fontrender` is straight.  *mul* / *add* are the node's colour
+    transform."""
+    import numpy as np
+    h, w = patch.shape[:2]
+    dst = canvas[y0:y0 + h, x0:x0 + w]
+    a = patch[..., 3:4] / 255.0 * float(mul[3])
+    rgb = patch[..., :3] * np.asarray(mul[:3], np.float32)
+    if not premultiplied:
+        rgb = rgb * (patch[..., 3:4] / 255.0)
+    rgb = rgb * float(mul[3]) + np.asarray(add[:3], np.float32) * 255.0 * a
+    if additive:
+        dst[..., :3] = dst[..., :3] + rgb
+    else:
+        dst[..., :3] = rgb + dst[..., :3] * (1.0 - a)
+    dst[..., 3:4] = a + dst[..., 3:4] * (1.0 - a)
+
+
+def _load_png(assets_dir, rel, cache):
+    """*rel*'s picture, from *cache* while the file is unchanged (an editor keeps one cache
+    for many renders; a picture replaced on the Images tab is read again)."""
+    path = os.path.join(assets_dir, "images", *rel.split("/")) if rel else ""
+    try:
+        stamp = os.stat(path).st_mtime_ns if path else None
+    except OSError:
+        stamp = None
+    got = cache.get(rel)
+    if got is not None and got[0] == stamp:
+        return got[1]
+    from PIL import Image
+    img = None
+    if stamp is not None:
+        try:
+            img = Image.open(path).convert("RGBA")
+        except (OSError, ValueError):
+            img = None
+    cache[rel] = (stamp, img)
+    return img
+
+
+def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
+                background=None, colors=None, text_edits=None, draws=None, cache=None,
+                split=None):
+    """The scene in manifest *man* (:func:`scene_eval.manifest`) at root *frame* as an RGB
+    ``PIL.Image`` - every picture with its own place, scale, tilt and fade, in draw order, from
+    the project folder's CURRENT PNGs and glyph slices.  *pins* / *hidden* are
+    :func:`scene_eval.draw_list`'s; *colors* ``{string: (r, g, b)}`` and *text_edits*
+    ``{string: replacement}`` are pending text edits, as in :func:`render_layout`.  Pass
+    *draws* to render a draw list already evaluated (and edited).
+
+    *split*, a set of indices into the draw list (one node's draws, which run together in
+    draw order), also returns that node's LAYERS for an editor to move live: a dict of
+    ``full`` (the scene, as without *split*), ``under`` (what is drawn before it, over the
+    background, RGB), ``sel`` (the node alone) and ``over`` (what is drawn after it), the
+    last two RGBA with straight alpha.  ``full`` is composed from the three, so it is exact."""
+    try:
+        import numpy as np
+        from PIL import Image
+    except Exception:
+        return None
+    from . import fontrender as fr
+    from . import scene_eval as ev
+    try:
+        w, h = int(man["stage"][0]), int(man["stage"][1])
+    except (KeyError, TypeError, ValueError, IndexError):
+        return None
+    if not (0 < w <= 8192 and 0 < h <= 8192):
+        return None
+    if draws is None:
+        draws = ev.draw_list(man, frame, pins=pins, hidden=hidden)
+    cache = {} if cache is None else cache
+    split = set(split or ())
+    layers = [np.zeros((h, w, 4), np.float32) for _i in range(3 if split else 1)]
+    canvas = layers[0]
+    by_key = None
+    for i, d in enumerate(draws):
+        if split:
+            canvas = layers[1] if i in split else (layers[2] if i > min(split) else layers[0])
+        if d["mul"][3] <= 0.0:
+            continue
+        if d["kind"] in ("bitmap", "flip"):
+            img = _load_png(assets_dir, d.get("image"), cache)
+            if img is None:
+                continue
+            got = _warp(img, d["m"], w, h)
+            if got is not None:
+                _composite(canvas, got[0], got[1], got[2], d["mul"], d["add"])
+        elif d["kind"] == "text":
+            if by_key is None:
+                if fonts is None:
+                    try:
+                        fonts = fr.load_fonts(assets_dir)
+                    except Exception:
+                        fonts = []
+                by_key = {f["key"]: f for f in fonts}
+            font = fr.font_at_size(by_key.get(d.get("font") or ""), d.get("font_px") or 0)
+            if font is None or not d["text"]:
+                continue
+            shown = (text_edits or {}).get(d["text"]) or d["text"]
+            try:
+                ink, _missing = fr.render_text(font, shown)
+            except Exception:
+                continue
+            rgba = list(d.get("rgba") or (1, 1, 1, 1))
+            if d.get("styled"):
+                rgba = [1.0, 1.0, 1.0, rgba[3]]          # the game ignores it (see scene_eval)
+            pick = (colors or {}).get(d["text"])
+            if pick:
+                rgba = [c / 255.0 for c in pick[:3]] + [rgba[3]]
+            ink = _tint(ink, rgba)
+            L, T, R, _B = (list(d.get("rect") or (0, 0, w, h)) + [0, 0, 0, 0])[:4]
+            align = d.get("align", 1)
+            iw = ink.size[0]
+            # A text field keeps a 2 px gutter inside its rect (every stock rect starts at
+            # -2, -2), and the first baseline sits the font size's DECLARED ascent below it -
+            # measured against the emulator's language screen to the pixel.
+            x = (L + _GUTTER if align == 0 else
+                 (R - _GUTTER - iw if align == 2 else L + (R - L - iw) / 2.0))
+            asc = float(d.get("ascent") or font.get("ascent", 0))
+            local = (1.0, 0.0, 0.0, 1.0, x, T + _GUTTER + asc - font.get("ascent", 0))
+            mul = tuple(d["mul"][i] * (1.0 if i < 3 else rgba[3]) for i in range(4))
+            got = _warp(ink, ev.compose(d["m"], local), w, h)
+            if got is not None:
+                _composite(canvas, got[0], got[1], got[2], mul, d["add"], premultiplied=False,
+                           additive=(fr.font_fmt(font) == 4))
+        elif d["kind"] in ("video", "spine"):
+            # no picture of its own in the project: outline where it plays
+            outline = Image.new("RGBA", (max(1, int(d.get("w") or 64)),
+                                         max(1, int(d.get("h") or 64))), (40, 40, 60, 90))
+            got = _warp(outline, d["m"], w, h)
+            if got is not None:
+                _composite(canvas, got[0], got[1], got[2], d["mul"], d["add"],
+                           premultiplied=False)
+    spec = background_spec(background)
+
+    def flat(c):
+        out = c.copy()
+        out[..., 3] = c[..., 3] * 255.0
+        return out.clip(0, 255).astype("uint8")
+
+    if not split:
+        return _over_background(flat(layers[0]), spec)
+    under, sel, over = layers
+    full = over.copy()
+    full += sel * (1.0 - over[..., 3:4])
+    full += under * ((1.0 - sel[..., 3:4]) * (1.0 - over[..., 3:4]))
+
+    def straight(c):
+        a = c[..., 3:4]
+        rgb = np.where(a > 1e-6, c[..., :3] / np.maximum(a, 1e-6), 0.0)
+        out = np.concatenate([rgb, a * 255.0], axis=2)
+        return Image.fromarray(out.clip(0, 255).astype("uint8"), "RGBA")
+
+    return {"full": _over_background(flat(full), spec),
+            "under": _over_background(flat(under), spec),
+            "sel": straight(sel), "over": straight(over)}

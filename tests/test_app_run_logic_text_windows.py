@@ -567,7 +567,9 @@ def test_font_studio_and_scene_browser_smoke(tmp_path):
         # on yet; test_webui_text covers landing on the row)
         w.call("text_scenes.activate", groups[2]["items"][0]["id"])
         assert w.window.text_search_var.get() == "HELLO"
-        assert not w.state("text_scenes")["open"]      # stepped aside
+        # the Text tab comes forward; the scenes stay open behind their tab (PAD-251)
+        assert w.state("shell")["tab"] == "text"
+        assert w.state("text_scenes")["alive"]
 
         w.call("text_fonts.close")
         w.call("text_scenes.close")
