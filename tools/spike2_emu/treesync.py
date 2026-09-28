@@ -356,15 +356,30 @@ def tree_bytes_budget(reader, root_ino=2, skip=SKIP_ROOT):
 
 
 # ============================================================================ the host cache
+def _editsource():
+    """editsource.py beside this file (PAD-241's base card + edits folder source)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import editsource
+    return editsource
+
+
 def source_stamp(path):
     """{path, size, mtime_ns}: the identity of a card FILE for the cache (size + mtime, as
-    cardmount.sh's cache key; the path is recorded for the reader, never compared)."""
+    cardmount.sh's cache key; the path is recorded for the reader, never compared).  A base
+    card + edits folder (PAD-241) is the base's stamp plus an "edits" token that moves with
+    the set, so neither the base alone nor the same base with other edits is ever taken for it."""
+    es = _editsource().load(path)
+    if es is not None:
+        st = os.stat(es.base)
+        return {"path": path, "size": st.st_size, "mtime_ns": st.st_mtime_ns, "edits": es.stamp_token()}
     st = os.stat(path)
     return {"path": os.path.abspath(path), "size": st.st_size, "mtime_ns": st.st_mtime_ns}
 
 
 def stamps_equal(a, b):
-    return bool(a) and bool(b) and a.get("size") == b.get("size") and a.get("mtime_ns") == b.get("mtime_ns")
+    return bool(a) and bool(b) and a.get("size") == b.get("size") and a.get("mtime_ns") == b.get("mtime_ns")         and a.get("edits") == b.get("edits")
 
 
 def stamp_key(stamp, uuid, sub=""):

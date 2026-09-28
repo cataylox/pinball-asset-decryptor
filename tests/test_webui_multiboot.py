@@ -1326,3 +1326,77 @@ def test_a_new_project_starts_with_an_empty_form_and_follows_without_asking(tmp_
         w.call("ui.select_tab", "multiboot")
         w.drain()
         assert loads == [os.path.normpath(card)]
+
+
+# ------------------------------------------------ a base card + edits (PAD-241)
+def _edits_set(tmp_path, base, name, card=None):
+    """An edits folder as the Emulate tab's Try it leaves it: one edited file
+    and overrides.json naming the card it was made from."""
+    import json
+    d = tmp_path / name
+    (d / "spk" / "index").mkdir(parents=True)
+    f = d / "spk" / "index" / "a.sidx"
+    f.write_bytes(b"edited")
+    st, fst = os.stat(base), os.stat(f)
+    card = card or {"path": base, "size": st.st_size, "mtime": int(st.st_mtime)}
+    (d / "overrides.json").write_text(json.dumps({
+        "version": 2, "generation": "g1", "parent": "", "card": card,
+        "run_card": dict(card),
+        "files": [{"path": "/spk/index/a.sidx", "size": fst.st_size,
+                   "mtime": int(fst.st_mtime), "ranges": [[0, 6]]}]}))
+    return str(d)
+
+
+def test_a_base_card_plus_edits_is_one_image_and_locks_compact(tmp_path):
+    a = _raw(tmp_path, "a_pro-1_59_0.Release.8G.sdcard.raw")
+    songs = _edits_set(tmp_path, a, "songs_b")
+    with web_app(tmp_path, mfr="stern") as w:
+        why = {c["attr"]: c for c in _st(w)["add_choices"]}
+        assert not why["_add_edits_image"]["enabled"]       # the primary first
+        _add(w, a)
+        w.answers.extend([a, songs])
+        w.call("multiboot.add_choice", "_add_edits_image")
+        s = _st(w)
+        assert len(s["rows"]) == 2
+        assert s["rows"][1]["title"] == "a_pro-1_59_0"
+        assert s["rows"][1]["sub"] == "songs_b"
+        assert s["compact"] is True and s["compact_locked"]
+        assert "base card + edits folder needs it" in s["compact_tip"]
+        panel = _panel(w)
+        from pinball_decryptor.webui import multiboot_core as mt
+        args = mt._image_args(panel.form())
+        assert args[-2] == "--extra" and args[-1] == mt.wsl(a) + "+" + mt.wsl(songs)
+        assert mt.host_path(args[-1]) .replace("\\", "/").lower() \
+            == (a + "+" + songs).replace("\\", "/").lower()
+
+
+def test_edits_from_another_card_are_refused_with_the_reason(tmp_path):
+    a = _raw(tmp_path, "a_pro-1_59_0.Release.8G.sdcard.raw")
+    songs = _edits_set(tmp_path, a, "songs_x",
+                       card={"path": "other.raw", "size": 1, "mtime": 1})
+    with web_app(tmp_path, mfr="stern") as w:
+        _add(w, a)
+        said = []
+        _panel(w)._error = said.append
+        w.answers.extend([a, songs])
+        w.call("multiboot.add_choice", "_add_edits_image")
+        s = _st(w)
+        assert len(s["rows"]) == 1
+        assert said and "different card" in said[0]
+
+
+def test_a_random_group_from_edits_folders(tmp_path):
+    a = _raw(tmp_path, "a_pro-1_59_0.Release.8G.sdcard.raw")
+    sets = tmp_path / "beatles_sets"
+    sets.mkdir()
+    for n in ("set_one", "set_two"):
+        _edits_set(sets, a, n)
+    with web_app(tmp_path, mfr="stern") as w:
+        _add(w, a)
+        w.answers.extend([a, str(sets)])
+        w.call("multiboot.add_choice", "_add_group_edits")
+        s = _st(w)
+        assert s["rows"][1]["group"] and s["rows"][1]["title"] == "BEATLES_SETS"
+        row = _panel(w)._rows[1]
+        assert [m.title for m in row.members] == ["set_one", "set_two"]
+        assert s["compact_locked"]

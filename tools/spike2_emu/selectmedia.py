@@ -1358,6 +1358,13 @@ def _duration_of(path):
 
 # ============================================================================ the card
 def open_card(path):
+    # a base card + edits folder (PAD-241): the menu's pictures and sounds come off the base
+    # card - the same title, whose logo and attract the edits do not touch
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import editsource
+    path = editsource.base_of(path)
     if not os.path.isfile(path):
         raise Refused("card image %s does not exist" % path)
     from pinball_decryptor.plugins.stern.explorer import CardImage
