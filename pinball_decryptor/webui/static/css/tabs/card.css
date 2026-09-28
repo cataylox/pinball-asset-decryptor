@@ -37,11 +37,26 @@
    log pane open, before: at 1920x1080 (a 4K screen at 200%) the details
    started at y=944 against a pane that ended at 845, and at 2560x1440 it
    cleared it by 50 px - i.e. by nothing.  The cap is on both, for two
-   ONE cap, on the tile, and the glass fills it: the glass is ~0.56 of its
-   own width, so the tile's width is what decides where the details land,
-   and capping the two separately just left dead space beside the picture.
-   The details tile is capped with it so the two stay one column. */
-.c-page .x-cols > .x-col:first-child > .card { max-width: 700px; }
+   TWO caps, because width alone cannot do it (David, same day: "the large
+   gap between tiles looks ugly... give a bit more width to the card tile?
+   i like seeing the bigger splash image, we just need a little affordance
+   that we can scroll down"):
+
+   * the tile stops at 900px, and past 1500px of window the right-hand tile
+     takes the slack instead of a gap opening between the two columns;
+   * the glass stops growing TALLER once the window is short enough that it
+     would push the details tile out of sight. Its height is what decides
+     where the details land, so this is the cap that keeps the top of that
+     tile on screen - the affordance that there is more below. A tall
+     screen (1440 and up) never reaches it and gets the full-width splash;
+     the image is object-fit: contain, so a capped glass letterboxes
+     rather than crops. MEASURED at 1920x1080 with the log pane open (a 4K
+     screen at 200%): details top 796 against a pane ending at 845. */
+.c-page .x-cols > .x-col:first-child > .card { max-width: 900px; }
+@media (min-width: 1500px) {
+  .c-page .x-cols { grid-template-columns: minmax(0, 900px) minmax(0, 1fr); }
+}
+.c-page .c-glass { max-height: max(300px, calc(100vh - 700px)); }
 
 /* the card details (the Image Info report, in place) */
 .c-page .c-info > .bd { gap: 12px; }

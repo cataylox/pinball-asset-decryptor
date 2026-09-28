@@ -266,3 +266,21 @@ def test_a_picked_path_that_is_not_there_still_says_so(tmp_path):
         assert w.call("extract.open_image_info", "input") is False
         assert w.state("shell")["tab"] == "extract"
         assert w.asked and w.asked[-1]["title"] == "File not found"
+
+
+def test_the_card_tile_is_capped_and_the_right_tile_takes_the_slack():
+    """PAD-173, David: at 4K the card details tile sat below the fold with
+    nothing to say it was there, and capping the tile alone left an ugly gap
+    beside it.  Measured at 1920x1080 with the log pane open (a 4K screen at
+    200%): the details started at y=944 against a pane ending at 845, and
+    with these three rules they start at 800.  The glass cap is the one that
+    keeps the top of the details on screen, so it is the one worth pinning."""
+    css = (_JS.parent.parent / "css" / "tabs" / "card.css").read_text(
+        encoding="utf-8")
+    assert ".c-page .x-cols > .x-col:first-child > .card { max-width:" in css
+    # the right-hand tile grows into what the cap leaves over
+    assert "@media (min-width: 1500px)" in css
+    assert "grid-template-columns: minmax(0, 900px) minmax(0, 1fr)" in css
+    # ...and the glass stops growing taller on a short window
+    assert ".c-page .c-glass { max-height: max(300px, calc(100vh - 700px)); }" \
+        in css
