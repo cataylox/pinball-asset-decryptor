@@ -27,6 +27,22 @@
 .c-page .c-cap-t { font-family: var(--cond); font-weight: 600; }
 .c-page .c-cap-note { margin-top: 2px; }
 
+/* HOW WIDE THE CARD TILE GETS, and why it is capped at all (David,
+   2026-09-28: "on wide-screen monitors exactly at 4k resolution the card
+   details tile is not immediately visible until you scroll, and users may
+   not know that they can scroll down").
+
+   The glass is the tallest thing on this page and it grew with its column,
+   so the details tile under it was pushed off the fold.  MEASURED with the
+   log pane open, before: at 1920x1080 (a 4K screen at 200%) the details
+   started at y=944 against a pane that ended at 845, and at 2560x1440 it
+   cleared it by 50 px - i.e. by nothing.  The cap is on both, for two
+   ONE cap, on the tile, and the glass fills it: the glass is ~0.56 of its
+   own width, so the tile's width is what decides where the details land,
+   and capping the two separately just left dead space beside the picture.
+   The details tile is capped with it so the two stay one column. */
+.c-page .x-cols > .x-col:first-child > .card { max-width: 700px; }
+
 /* the card details (the Image Info report, in place) */
 .c-page .c-info > .bd { gap: 12px; }
 .c-page .c-isec { display: flex; flex-direction: column; gap: 6px; }

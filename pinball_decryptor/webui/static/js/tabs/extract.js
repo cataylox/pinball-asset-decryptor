@@ -31,7 +31,9 @@ export function inputPhrase(label) {
   return article(noun) + " " + noun;
 }
 
-const IMAGE_INFO_TIP = "Technical details about this image, under the card on the Select card tab";
+// The card's own ⓘ is gone (PAD-173): the Select card tab shows that report
+// under the card, so a badge here was a second way to the same thing.  The
+// project folder's stats have no such home, and keep theirs.
 const PROJECT_INFO_TIP = "Stats about this project folder";
 
 // A path box with the recent-paths list (the Tk combobox's dropdown) and
@@ -236,7 +238,6 @@ function CardSummary({ s }) {
       <span class="lbl">${s.ssd ? s.drive_label : s.input_label}</span>
       ${name ? html`<div class="row x-pathrow">
           <span class="mono grow x-wrapany x-cardpath" title=${name}>${name}</span>
-          ${s.ssd ? null : html`<${InfoBadge} text=${IMAGE_INFO_TIP} onClick=${() => call("extract.open_image_info", "input")} />`}
           <${Button} onClick=${selectCard} title="Pick a different card on the Select card tab">Change…<//>
         </div>
         ${!s.ssd && det ? html`<div class="row wrap x-chips">

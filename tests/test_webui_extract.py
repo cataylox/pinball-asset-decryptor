@@ -868,9 +868,11 @@ def test_page_info_windows_are_not_modal():
     win = body("FloatWin")
     assert 'aria-modal="false"' in win and "scrim" not in win
     assert "badge-i" not in src and "IBadge" not in src
-    # import + the card and project badges (the Select card tab shows the
-    # Image Info in place, under the card, so its picker has none)
-    assert src.count("InfoBadge") >= 3
+    # The import and the PROJECT badge, and no more: the card's own ⓘ went
+    # when Select card started showing that report under the card (PAD-173),
+    # so this page has one badge, for the project folder's stats.
+    assert src.count("InfoBadge") == 2
+    assert "open_image_info" not in src
 
 
 # ----------------------------------------------------- capture extras
