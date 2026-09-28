@@ -133,6 +133,9 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.scene_layout" \
     --hidden-import "pinball_decryptor.plugins.stern.scene_render" \
     --hidden-import "pinball_decryptor.plugins.stern.scene_write" \
+    --hidden-import "pinball_decryptor.plugins.stern.scene_tree" \
+    --hidden-import "pinball_decryptor.plugins.stern.scene_eval" \
+    --hidden-import "pinball_decryptor.plugins.stern.scene_edit" \
     --hidden-import "pinball_decryptor.plugins.stern.sidx_append" \
     --hidden-import "pinball_decryptor.plugins.stern.sidx_deliver" \
     --hidden-import "pinball_decryptor.plugins.stern.film_cut" \
