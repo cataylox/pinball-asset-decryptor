@@ -202,13 +202,14 @@ class TreeEditMixin:
         from ..plugins.stern import scene_edit
         index = scene_edit._man_index(man)
         n, sibs = index[nid]
-        scale = 1.0
+        scale = scale_y = 1.0
         mul = [1.0, 1.0, 1.0, 1.0]
         for op in ops:
             if op.get("node") != nid:
                 continue
             if op["op"] == "scale":
                 scale *= op["s"]
+                scale_y *= op.get("sy", op["s"])
             elif op["op"] == "tint":
                 mul = [mul[i] * op["mul"][i] for i in range(4)]
         box = self._tree_box(nid)
@@ -217,7 +218,7 @@ class TreeEditMixin:
                 "x": round(box[0]) if box else None, "y": round(box[1]) if box else None,
                 "w": round(box[2] - box[0]) if box else None,
                 "h": round(box[3] - box[1]) if box else None,
-                "scale": round(scale * 100),
+                "scale": round(scale * 100), "scale_y": round(scale_y * 100),
                 "tint": "#%02x%02x%02x" % tuple(int(round(min(1, c) * 255)) for c in mul[:3]),
                 "alpha": round(mul[3] * 100),
                 "hidden": any(op["op"] == "visible" and op.get("node") == nid for op in ops),
@@ -312,12 +313,14 @@ class TreeEditMixin:
                                "dy": round(ly, 3)})
 
     @rpc
-    def tree_scale(self, node, factor):
-        """Resize by *factor* about the middle of what the node draws."""
+    def tree_scale(self, node, factor, factor_y=None):
+        """Resize by *factor* (and, when given, the height by *factor_y*) about the middle of
+        what the node draws."""
         from ..plugins.stern import scene_eval
         node = int(node)
         factor = float(factor)
-        if factor <= 0.01 or abs(factor - 1.0) < 1e-4:
+        fy = factor if factor_y in (None, "") else float(factor_y)
+        if factor <= 0.01 or fy <= 0.01 or (abs(factor - 1.0) < 1e-4 and abs(fy - 1.0) < 1e-4):
             return False
         box = self._tree_box(node)
         world = (self._tworlds.get(node) or (None, scene_eval.IDENTITY))[1]
@@ -327,8 +330,11 @@ class TreeEditMixin:
             if inv is not None:
                 px, py = scene_eval.apply(inv, (box[0] + box[2]) / 2.0,
                                           (box[1] + box[3]) / 2.0)
-        return self._tree_add({"op": "scale", "node": node, "s": round(factor, 6),
-                               "px": round(px, 3), "py": round(py, 3)})
+        op = {"op": "scale", "node": node, "s": round(factor, 6),
+              "px": round(px, 3), "py": round(py, 3)}
+        if abs(fy - factor) > 1e-6:
+            op["sy"] = round(fy, 6)
+        return self._tree_add(op)
 
     @rpc
     def tree_set_scale(self, node, pct):
@@ -343,6 +349,21 @@ class TreeEditMixin:
         if pct <= 1 or cur <= 0:
             return False
         return self.tree_scale(node, pct / float(cur))
+
+    @rpc
+    def tree_set_size(self, node, w_pct=None, h_pct=None):
+        """Width % and height % on their own (a picture stretched), each against the size
+        the game ships."""
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        p = self._tree_props(card, self._tman, int(node), self._tree_ops(card))
+        try:
+            fw = float(w_pct) / p["scale"] if w_pct not in (None, "") else 1.0
+            fh = float(h_pct) / p["scale_y"] if h_pct not in (None, "") else 1.0
+        except (TypeError, ValueError, ZeroDivisionError):
+            return False
+        return self.tree_scale(node, fw, fh)
 
     @rpc
     def tree_tint(self, node, hex_color, alpha=100):

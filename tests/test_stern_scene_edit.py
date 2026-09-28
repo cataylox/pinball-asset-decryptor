@@ -154,3 +154,26 @@ def test_a_scene_that_grows_goes_whole_and_not_to_a_card_directly(tmp_path, devi
         assert any("image build" in m for _l, m in msgs)
     else:
         assert n == 1 and list(whole) == [CARD]
+
+
+def test_a_stretch_scales_width_and_height_apart_and_both_sides_agree():
+    """PAD-251 follow-up: a picture's width and height set on their own."""
+    op = [{"op": "scale", "node": 50, "s": 2.0, "sy": 0.5, "px": 8, "py": 4}]
+    man = _man()
+    before = [d for d in E.draw_list(man, 1) if d["path"][-1] == "Art"][0]["m"]
+    preview = X.apply_manifest(man, op)[0]
+    after = [d for d in E.draw_list(preview, 1) if d["path"][-1] == "Art"][0]["m"]
+    assert after[0] == pytest.approx(before[0] * 2.0)
+    assert after[3] == pytest.approx(before[3] * 0.5)
+    sc = T.parse(scene())
+    X.apply_scene(sc, op, names=X.names_of(man))
+    assert _draws(preview) == _draws(E.manifest(T.parse(T.serialize(sc))))
+    assert X.describe(op[0]) == "200 x 50 %"
+
+
+def test_stretches_fold_into_one_op(tmp_path):
+    a = str(tmp_path)
+    X.add(a, CARD, {"op": "scale", "node": 5, "s": 2.0, "px": 0, "py": 0})
+    X.add(a, CARD, {"op": "scale", "node": 5, "s": 1.0, "sy": 3.0, "px": 0, "py": 0})
+    assert X.ops_for(a, CARD) == [{"op": "scale", "node": 5, "s": 2.0, "sy": 6.0,
+                                   "px": 0, "py": 0}]

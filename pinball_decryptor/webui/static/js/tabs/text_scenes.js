@@ -411,8 +411,12 @@ function TreeSide({ t, wide, setWide }) {
         ${num("Y", p.y, (v) => call("text_scenes.tree_move", p.id, 0, Number(v) - p.y), "Top edge on the glass (px)")}
       </div>` : html`<div class="small muted">Not on the glass at this moment.</div>`}
       <div class="tree-row">
-        ${num("Size %", p.scale, (v) => call("text_scenes.tree_set_scale", p.id, v), "100 = the size the game ships")}
+        ${num("Size %", p.scale === p.scale_y ? p.scale : "", (v) => call("text_scenes.tree_set_scale", p.id, v), "Both ways at once; 100 = the size the game ships")}
         <span class="small muted">${p.w != null ? `${p.w} x ${p.h} px` : ""}</span>
+      </div>
+      <div class="tree-row">
+        ${num("Width %", p.scale, (v) => call("text_scenes.tree_set_size", p.id, v, null), "Stretch it sideways only")}
+        ${num("Height %", p.scale_y, (v) => call("text_scenes.tree_set_size", p.id, null, v), "Stretch it up and down only")}
       </div>
       <div class="tree-row">
         <span class="lbl">Tint</span>

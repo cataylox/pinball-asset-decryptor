@@ -14,7 +14,8 @@ an edit made on one code version is never applied to a different node on another
 Operations (``op`` and its fields)::
 
     move    node, dx, dy          add dx, dy to every track of the node (its parent's units)
-    scale   node, s, px, py       scale by s about the node-local point (px, py)
+    scale   node, s, px, py[, sy] scale by s about the node-local point (px, py); with sy, s is
+                                  the width's factor and sy the height's (a picture stretched)
     tint    node, mul             multiply the node's colour transform by *mul* (r g b a): its
                                   colour track, which the game applies to pictures and text
                                   alike (a Text's own rgba is ignored by a styled game font)
@@ -102,8 +103,10 @@ def add(assets_dir, card, op):
             ops.pop()
     elif (last and last.get("node") == op.get("node") and last["op"] == op["op"] == "scale"
           and (last.get("px"), last.get("py")) == (op.get("px"), op.get("py"))):
+        if "sy" in last or "sy" in op:
+            last["sy"] = round(last.get("sy", last["s"]) * op.get("sy", op["s"]), 6)
         last["s"] = round(last["s"] * op["s"], 6)
-        if abs(last["s"] - 1.0) < 1e-6:
+        if abs(last["s"] - 1.0) < 1e-6 and abs(last.get("sy", 1.0) - 1.0) < 1e-6:
             ops.pop()
     else:
         ops.append(op)
@@ -152,6 +155,8 @@ def describe(op):
     if k == "move":
         return "moved %+g,%+g" % (op["dx"], op["dy"])
     if k == "scale":
+        if "sy" in op and abs(op["sy"] - op["s"]) > 1e-6:
+            return "%d x %d %%" % (round(op["s"] * 100), round(op["sy"] * 100))
         return "%d %%" % round(op["s"] * 100)
     if k == "visible":
         return "shown" if op["on"] else "hidden"
@@ -185,12 +190,14 @@ def _moved(m6, dx, dy):
     return (a, b, c, d, tx + dx, ty + dy)
 
 
-def _scaled(m6, s, px, py):
-    """Scale the node's content by *s* about its local point (px, py): the point stays where it
-    was on the glass."""
+def _scaled(m6, s, px, py, sy=None):
+    """Scale the node's content by *s* (width) and *sy* (height, default *s*) about its local
+    point (px, py): the point stays where it was on the glass."""
     a, b, c, d, tx, ty = m6
-    k = 1.0 - s
-    return (a * s, b * s, c * s, d * s, tx + k * (a * px + c * py), ty + k * (b * px + d * py))
+    sy = s if sy is None else sy
+    kx, ky = 1.0 - s, 1.0 - sy
+    return (a * s, b * s, c * sy, d * sy,
+            tx + kx * a * px + ky * c * py, ty + kx * b * px + ky * d * py)
 
 
 def _tint_steps(steps):
@@ -266,7 +273,8 @@ def apply_manifest(man, ops):
                         [[1, [1, 0, 0, 1, op["dx"], op["dy"]]]]
                 elif k == "scale":
                     base = n["tr"] or [[1, [1, 0, 0, 1, 0, 0]]]
-                    n["tr"] = [[f, list(_scaled(m, op["s"], op.get("px", 0), op.get("py", 0)))]
+                    n["tr"] = [[f, list(_scaled(m, op["s"], op.get("px", 0), op.get("py", 0),
+                                                op.get("sy")))]
                                for f, m in base]
                 elif k == "visible":
                     if not op["on"]:
@@ -421,7 +429,8 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
                     if not n.tracks:
                         n.tracks = [(1, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])]
                     n.tracks = [(f, _m16_with(m, _scaled(_m6_of16(m), op["s"],
-                                                         op.get("px", 0), op.get("py", 0))))
+                                                         op.get("px", 0), op.get("py", 0),
+                                                         op.get("sy"))))
                                 for f, m in n.tracks]
                 elif k == "visible":
                     if not op["on"]:

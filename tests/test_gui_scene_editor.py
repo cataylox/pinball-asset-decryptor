@@ -114,6 +114,13 @@ def test_the_editor_draws_the_tree_and_edits_it(tmp_path):
         assert p["scale"] == 150
         assert abs(p["x"] + p["w"] / 2.0 - mid[0]) <= 1 and abs(p["y"] + p["h"] / 2.0 - mid[1]) <= 1
 
+        # width and height apart: a stretch, about the middle too
+        assert w.call("text_scenes.tree_set_size", art["id"], 300, None)
+        p = _tv(w)["props"]
+        assert (p["scale"], p["scale_y"]) == (300, 150)
+        assert w.call("text_scenes.tree_set_size", art["id"], 150, None)
+        assert _tv(w)["props"]["scale"] == 150
+
         # tint, hide, re-layer
         assert w.call("text_scenes.tree_tint", art["id"], "#3366ff", 50)
         p = _tv(w)["props"]
