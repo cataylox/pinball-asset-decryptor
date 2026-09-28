@@ -5910,6 +5910,45 @@ def recovered_names(card, n, build=None):
     return out
 
 
+def rebuild_deltas(card, part, deltas, tree, owners):
+    """The variants of a delta'd image's files rebuilt in the rdump'd `tree` (PAD-240): each
+    file there holds its base blob's bytes, and its delta blob in the card's store puts the
+    variant's ranges over them - what materialize.py does at boot.  Mode and owner become
+    the ones the delta's name carries (the tree's link is the base's inode), and every file
+    must hash to that name, or the extract is refused."""
+    ts = _treesync()
+    mz = ts._materialize()
+    _v, _s, ext4, _a = _stern_plugins()
+    with open(card, "rb") as f:
+        r = ext4.Ext4Reader(f, part.start * SECTOR, part.count * SECTOR)
+        ents = _dir_entries(r, 2)
+        if ts.BLOBS_DIR not in ents:
+            raise Refused("the record names %d delta(s) but p%d has no %s" % (len(deltas), part.num, ts.BLOBS_DIR))
+        blobs = _dir_entries(r, ents[ts.BLOBS_DIR][0])
+        for rel, info in sorted(deltas.items()):
+            name = info["delta"]
+            want = ts.parse_delta_name(name)
+            if name not in blobs or want is None:
+                raise Refused("%s: its delta %s is not in the store" % (rel, name[:20]))
+            dfile = _InodeFile(r, r.read_inode(blobs[name][0]))
+            head = mz.read_header(dfile)
+            path = os.path.join(tree, *rel.split("/"))
+            if not os.path.isfile(path) or os.path.getsize(path) != head["size"]:
+                raise Refused("%s: the tree's file is not the delta's base (%s bytes, the delta wants %d)"
+                              % (rel, os.path.getsize(path) if os.path.isfile(path) else "no", head["size"]))
+            sha, mode, uid, gid = want
+            os.chmod(path, 0o600)
+            with open(path, "r+b") as w:
+                mz.apply_delta(w, dfile, head)
+            os.chmod(path, mode)
+            owners[rel] = (uid, gid)
+            got = mz.hash_file(path)
+            if got != sha:
+                raise Refused("%s: rebuilt from its delta it hashes to %s, not %s" % (rel, got[:12], sha[:12]))
+            say("image: %s rebuilt from its delta (%s of ranges over the base) - sha256 %s"
+                % (rel, _gb(mz.delta_payload_bytes(head)), sha[:12]))
+
+
 def extract_image(card, index, out, workdir=None, force=False, clean=True, plan=None):
     """Image `index` of a multi card written out as a stock-shaped card of its own (sparse):
     the card's p1, p2, p5 and p6 around the games tree as p3 - copied verbatim when the tree is
@@ -5925,21 +5964,15 @@ def extract_image(card, index, out, workdir=None, force=False, clean=True, plan=
         raise Refused("%s holds %d image(s); there is no image %d" % (os.path.basename(card), len(plan.trees), index))
     part, sub = plan.trees[index]
     check_output_path(out, [card], force=force)
-    # A DELTA'D IMAGE COMES OUT WITH THE BASE'S BYTES (item 107, the loose end this pass did
-    # not build): the tree's own file IS the base blob, and only the machine's boot rebuilds
-    # the variant.  Said out loud, so nobody plays the recovered image and hears the wrong
-    # songs without a word about why.
+    # A DELTA'D IMAGE (item 107): the tree's own file IS the base blob on the card, and the
+    # machine rebuilds the variant at boot.  An extract rebuilds it too (PAD-240), from the
+    # delta blob the record names, so what comes out plays its own songs.
     try:
         rec_x = read_trees(card)
     except Refused:
         rec_x = None
     im_x = rec_x.image(index) if rec_x is not None else None
-    if im_x is not None and im_x.deltas:
-        say("WARNING: image %d stores %d file(s) as DELTAS of another image's (%s); the image written "
-            "here carries the BASE's bytes for %s - the machine rebuilds the variant at boot, this "
-            "extract does not (item 107 loose end)"
-            % (index, len(im_x.deltas), ", ".join(sorted(im_x.deltas)[:3]),
-               "them" if len(im_x.deltas) > 1 else "it"))
+    deltas_x = dict(im_x.deltas) if im_x is not None and im_x.deltas else {}
     workdir = workdir or os.path.dirname(os.path.abspath(out))
     os.makedirs(workdir, exist_ok=True)
     G = Geometry.from_file(card)
@@ -5965,6 +5998,8 @@ def extract_image(card, index, out, workdir=None, force=False, clean=True, plan=
             owners = {}
             say("image %d (%s): reading its tree out of p%d%s" % (index, dev, part.num, ("/" + sub) if sub else ""))
             title, nbytes = dump_games_tree(ref, root, tree, owners, skip=skip, what="image %d" % index)
+            if deltas_x:
+                rebuild_deltas(card, part, deltas_x, tree, owners)
             need = multi_size_sectors(nbytes)
             cnt = need if plan.layout == "store" else max(c3, need)
             p3img = os.path.join(tmp, "p3.img")
@@ -8377,15 +8412,16 @@ def selftest(d, selector_file=None):
         ok &= rc == 0 and "nothing to write" in buf.getvalue(), buf.getvalue()
         ok &= read_trees(outd).image(1).deltas is not None
         ok &= json.loads(read_select_file(select_ref(outd), TREES_MANIFEST))["format"] == 2
-        print("== extract of the delta'd image warns, and the image it writes carries the BASE's bytes (the loose end)")
+        print("== extract of the delta'd image rebuilds the variant: its image.bin is the source's, not the base's (PAD-240)")
         xdd = os.path.join(d, "extracted delta")
         os.makedirs(xdd, exist_ok=True)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             extract_image(outd, 1, os.path.join(xdd, "E_out.img"), plan=pland)
-        ok &= "stores 1 file(s) as DELTAS" in buf.getvalue(), buf.getvalue()
+        ok &= "V_title/image.bin rebuilt from its delta" in buf.getvalue(), buf.getvalue()
         xt = source_tree(os.path.join(xdd, "E_out.img"))[0].tree
-        ok &= xt.files["V_title/image.bin"].sha256 == base_rec.sha256
+        ok &= xt.files["V_title/image.bin"].sha256 == v2_rec.sha256 != base_rec.sha256
+        ok &= (xt.files["V_title/image.bin"].mode, xt.files["V_title/image.bin"].uid) == (v2_rec.mode, v2_rec.uid)
     finally:
         os.environ.pop("MKMULTICARD_DELTA_MIN", None)
     print("SELFTEST part 6d (deltas)", "PASS" if ok else "FAIL")
