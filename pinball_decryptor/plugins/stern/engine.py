@@ -1183,6 +1183,9 @@ _GLYPH_SCOPE_MANIFEST = "glyph_scope.txt"
 # Static scene layouts (positions/strings/colors per scene.radium) recorded at
 # extract so the Scenes window can composite a preview from the CURRENT PNGs.
 _SCENE_LAYOUT_MANIFEST = "scene_layout.json"
+# PAD-251: every scene as the TREE the game reads (scene_tree + scene_eval), what the Scenes
+# window draws and edits from; scene_layout.json stays as the fallback for older projects.
+_SCENE_TREE_MANIFEST = "scene_tree.json"
 
 
 def _glyph_png_name(char):
@@ -1334,6 +1337,49 @@ def _scene_layout_entry(lay, off2rel):
     return entry
 
 
+def _scene_asset_rels(output_dir):
+    """``{scene.assets card path: extracted PNG rel}`` from ``scene_textures/manifest.txt`` -
+    the pictures a StreamingFlipbook streams, by the path its frames name."""
+    out = {}
+    path = os.path.join(output_dir, *_TEXTURE_DIR, "manifest.txt")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                cols = line.rstrip("\r\n").split("\t")
+                if len(cols) >= 2 and not line.startswith("#"):
+                    out[cols[1]] = cols[0]
+    except OSError:
+        pass
+    return out
+
+
+def _scene_tree_entry(path, data, imgs, tables, off2rel, asset_rels):
+    """The ``scene_tree.json`` entry of the scene *path* (:func:`scene_eval.manifest`), or
+    ``None`` when it does not walk exactly (it keeps its scene_layout preview)."""
+    from . import scene_eval as _scene_eval
+    from . import scene_tree as _scene_tree
+    try:
+        sc = _scene_tree.parse(data)
+    except _scene_tree.SceneTreeError:
+        return None
+    base = path.rsplit("/", 1)[0] + "/scene.assets/"
+    a2r = {k[len(base):]: v for k, v in asset_rels.items() if k.startswith(base)}
+    try:
+        return _scene_eval.manifest(
+            sc, off2rel, _scene_eval.font_sizes(sc, data, imgs, tables, off2rel), a2r)
+    except Exception:
+        return None
+
+
+def _write_scene_trees(tex_dir, trees, log):
+    import json
+    try:
+        with open(os.path.join(tex_dir, _SCENE_TREE_MANIFEST), "w", encoding="utf-8") as f:
+            json.dump(trees, f, separators=(",", ":"), sort_keys=True)
+    except OSError as e:
+        log("Could not write the scene trees (%s)." % e, "warning")
+
+
 def _write_scene_layouts(tex_dir, layouts, log):
     """Write ``scene_layout.json``.  Returns True on success."""
     import json
@@ -1395,6 +1441,8 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
     manifest = []                 # one row per occurrence
     by_hash = {}                  # content hash -> output rel path (PNG written once)
     layouts = {}                  # radium card path -> static layout
+    trees = {}                    # radium card path -> scene_eval manifest (PAD-251)
+    asset_rels = _scene_asset_rels(output_dir)
     glyph_manifest = []           # one row per unique glyph slice
     sliced_atlases = set()        # atlas out_rel already sliced (content-deduped)
     glyph_rows = set()            # (table key, glyph rel) already in the manifest
@@ -1551,8 +1599,13 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
             entry = _scene_layout_entry(lay, off2rel)
             if entry is not None:
                 layouts[path] = entry
+        tree = _scene_tree_entry(path, data, imgs, tables, off2rel, asset_rels)
+        if tree is not None:
+            trees[path] = tree
     if layouts:
         _write_scene_layouts(tex_dir, layouts, log)
+    if trees:
+        _write_scene_trees(tex_dir, trees, log)
     if not manifest:
         return 0
     try:
@@ -1641,6 +1694,8 @@ def rebuild_scene_layouts(reader, output_dir, log=None, progress=None,
         if path.endswith(_RADIUM_EXT) and node["size"] >= 32:
             radiums.append((path, node))
     layouts = {}
+    trees = {}
+    asset_rels = _scene_asset_rels(output_dir)
     matched = 0
     for ri, (path, node) in enumerate(radiums):
         if cancel():
@@ -1658,6 +1713,9 @@ def rebuild_scene_layouts(reader, output_dir, log=None, progress=None,
             continue
         imgs = parse_radium_images(data)
         tables = _radium.parse_glyph_tables(data, imgs) if imgs else []
+        tree = _scene_tree_entry(path, data, imgs, tables, off2rel, asset_rels)
+        if tree is not None:
+            trees[path] = tree
         lay = _scene_layout.parse_scene_layout(data, imgs, tables)
         if lay is None:
             continue
@@ -1674,14 +1732,16 @@ def rebuild_scene_layouts(reader, output_dir, log=None, progress=None,
             "previews would be missing. Nothing was changed."
             % (matched, len(rels)), "warning")
         return 0
-    if not layouts:
+    if not layouts and not trees:
         log("No drawable scene layouts were found on this card.", "warning")
         return 0
     tex_dir = os.path.join(output_dir, *_TEXTURE_DIR)
     os.makedirs(tex_dir, exist_ok=True)
-    if not _write_scene_layouts(tex_dir, layouts, log):
+    if trees:
+        _write_scene_trees(tex_dir, trees, log)
+    if layouts and not _write_scene_layouts(tex_dir, layouts, log):
         return 0
-    return len(layouts)
+    return max(len(layouts), len(trees))
 
 
 def rebuild_scene_layouts_from_card(image_path, output_dir, log=None,

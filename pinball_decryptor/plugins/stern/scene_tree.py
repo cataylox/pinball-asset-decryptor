@@ -114,6 +114,7 @@ class Scene:
         self.stage = None
         self.root = None
         self.fonts = []         # (entry offset, entry end) of each Font entry
+        self.font_sizes = {}    # size id -> dict(offset, variant, entry, line, ascent, descent)
 
     # --- convenience ----------------------------------------------------------------------
     def walk(self, library=False):
@@ -380,7 +381,12 @@ class _Reader:
                 name = r.string()
                 r.o = save
             if name == "Font":
-                end = _font_end(r.d, at)
+                end, sizes = _font_end(r.d, at)
+                for sid, off, variant in sizes:
+                    # the size record: u32 key | f32 line height | f32 ascent | f32 descent
+                    line, asc, desc = struct.unpack_from("<3f", r.d, off + 4)
+                    s.font_sizes[sid] = dict(offset=off, variant=variant, entry=len(s.fonts),
+                                             line=line, ascent=asc, descent=desc)
                 if v & FLAG:
                     s.classes[cid] = "Font"
                 s.library.append((key, cid, ("font", r.d[at + 4:end])))
@@ -402,7 +408,10 @@ class _Reader:
 
 
 def _font_end(d, at):
-    """Where the Font library entry at *at* ends - :func:`scene_write._walk_font`'s walk
+    """``(end, [(size id, offset, variant)])``: where the Font library entry at *at* ends,
+    and each of its SIZES - the object a Text names as its font - with the offset its record
+    starts at (its glyph table follows) and its style variant ("" = the base sizes).
+    :func:`scene_write._walk_font`'s walk
     (which Modes relies on, with its caps) without the caps: a scene's game font can carry
     30 style variants (Iron Maiden) and long kerning lists."""
     w = _sw._Walk(d, at)
@@ -418,10 +427,11 @@ def _font_end(d, at):
     n = w.take("<Q")           # (not ``w.o += 2 * w.take()``: that reads w.o before take moves it)
     w.o += 2 * n
 
-    def sizes():
+    def sizes(variant):
         for _ in range(w.take("<Q")):
             w.o += 4
             w.new()
+            found.append((w.ids[-1][1], w.o, variant))
             if w.take("<I") != key:
                 raise SceneTreeError("a font size does not name its font at 0x%x" % w.o)
             w.o += 13
@@ -435,17 +445,17 @@ def _font_end(d, at):
                     raise SceneTreeError("a glyph with %d kerning pairs at 0x%x" % (kern, w.o))
                 w.o += 6 * kern
 
+    found = []
     try:
-        sizes()
+        sizes("")
         nv = w.take("<Q")
         if nv > 4096:
             raise SceneTreeError("a font with %d variants at 0x%x" % (nv, w.o))
         for _ in range(nv):
-            w.string()
-            sizes()
+            sizes(w.string().decode("latin1"))
     except (_sw.SceneWriteError, struct.error) as e:
         raise SceneTreeError("the Font at 0x%x does not walk: %s" % (at, e))
-    return w.o
+    return w.o, found
 
 
 def parse(data):
