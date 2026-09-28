@@ -8840,6 +8840,8 @@ static void motor_note(const unsigned char *p, int n)
         motor_say(b);
         return;
     }
+    if (p[2] == 0x55) return;   /* batman's end-stop motor sends 55 too: not
+                                 * ours to play (PAD-237 never did) */
     {
         int end = p[2] == 0x53 ? 0 : 1;
         if (m->going == end || (m->going < 0 && m->at == end)) return;
@@ -12444,9 +12446,21 @@ static void nb_trace(void)
  * fault branch. The item-52 note on the `ff` reply read the stored ZERO as
  * "the previous value is always 0"; it is the game's own count, restarted.
  *
- * So the rig counts what the game counts, per node, and word A says it.
+ * So the rig counts what the game counts, per node - but ANSWERS it only for
+ * a board that carries an ENCODER MOTOR (nb_rx_count_says). Every other board
+ * still says 0 and is still re-initialised at every visit, as before, because
+ * the rest of the rig leans on that artifact and was tuned on it: batman-1.13
+ * (the older, swelf generation) sends cmd 70 - which this file decodes as its
+ * base-layer lamps, and which gamestate.sh counts as its attract light show -
+ * ONLY inside a board init. Counted everywhere, batman sat in a perfectly good
+ * attract that the rig called Tech Alerts, with its lamps frozen (whole-
+ * library sweep, 2026-09-28). Stopping the bus-wide re-init is its own job,
+ * with those two to fix first. The jetpack's board is the one whose re-init is
+ * measured to do harm, and until its encoder motor is configured it too says
+ * 0, so its bring-up inits happen exactly as before.
+ *
  * PAD_NB_SWA and the switch walk still set word A when asked (their sweeps
- * want the flag raised); PAD_NB_RXCOUNT=0 answers 0 again. */
+ * want the flag raised); PAD_NB_RXCOUNT=0 answers 0 everywhere again. */
 static unsigned nb_rx_count[32];
 
 static int nb_rx_count_on(void)
@@ -12468,6 +12482,29 @@ static void nb_rx_count_tx(void)
     nb_rx_count[nid]++;
     if (nb_req_len > 2 && nb_req[2] == 0xf1 && nid != 0)
         nb_rx_count[nid] = 0;            /* reset stats: both sides restart */
+}
+
+/* The count since the last `ff` poll, restarted - taken at EVERY poll, said
+ * or not, so the first poll that is answered is already in step. */
+static unsigned nb_rx_count_poll(unsigned nid)
+{
+    unsigned c;
+    nid &= 31;
+    c = nb_rx_count[nid];
+    nb_rx_count[nid] = 0;
+    return c;
+}
+
+/* Does this board report its count? Only one with an encoder motor on it
+ * (see nb_rx_count): the model plays the motor, so the board must not look
+ * reset every visit, or event 135 re-homes the motor every ~0.7 s. */
+static int nb_rx_count_says(unsigned nid)
+{
+    unsigned k;
+    if (!nb_rx_count_on() || !nb_motor_on() || nid >= 64) return 0;
+    for (k = 0; k < NB_MOTORS; k++)
+        if (nb_motors[nid][k].cfg && nb_motors[nid][k].enc) return 1;
+    return 0;
 }
 
 /* PAD_NB_FLAGWATCH=<node> (PAD-249) - log that board's flag word, board[+4],
@@ -12519,7 +12556,7 @@ static void nb_flagwatch_reply(const unsigned char *p, int n)
     if (!seen[cmd]) { seen[cmd] = 1; same = 0; }      /* the first one, too */
     if (same) return;
     {
-        char line[HEXBUF + 128], h[HEXBUF], q[HEXBUF];
+        char line[2 * HEXBUF + 64], h[HEXBUF], q[HEXBUF];
         hex64(h, p, n);
         hex64(q, nb_req, nb_req_len);
         snprintf(line, sizeof line, "[nbflagw] t=%lu reply to %s: %s\n",
@@ -12973,16 +13010,18 @@ long shim_read(int fd, void *b, unsigned long n)
                 unsigned nid = (unsigned)(nb_req[0] & 0x3f);
                 if (spec == (char *)-1) spec = getenv("PAD_NB_SW");
                 /* PAD-249: word A = the frames this board received since the
-                 * last poll, this one included (see nb_rx_count). The PAD_NB_SWA
-                 * note below predates it: the "previous value" it read as a
-                 * stored zero is the game's frame counter, zeroed per poll. */
-                if (nb_rx_count_on()) {
-                    unsigned c = nb_rx_count[nid & 31];
-                    nb_rx_count[nid & 31] = 0;
-                    p[0] = (unsigned char)c;
-                    p[1] = (unsigned char)(c >> 8);
-                    p[2] = (unsigned char)(c >> 16);
-                    p[3] = (unsigned char)(c >> 24);
+                 * last poll, this one included - on a board with an encoder
+                 * motor (see nb_rx_count). The PAD_NB_SWA note below predates
+                 * it: the "previous value" it read as a stored zero is the
+                 * game's frame counter, zeroed per poll. */
+                {
+                    unsigned c = nb_rx_count_poll(nid);
+                    if (nb_rx_count_says(nid)) {
+                        p[0] = (unsigned char)c;
+                        p[1] = (unsigned char)(c >> 8);
+                        p[2] = (unsigned char)(c >> 16);
+                        p[3] = (unsigned char)(c >> 24);
+                    }
                 }
                 /* PAD_NB_SWA=<hex32> - word A, bytes 0..3.
                  *

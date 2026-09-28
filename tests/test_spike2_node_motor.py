@@ -122,6 +122,8 @@ int main(int argc, char **argv)
             char *e;
             now_ms = strtoul(s + 1, &e, 10);
             motor_tick((unsigned)strtoul(e + 1, 0, 10));
+        } else if (s[0] == 'r') {           /* r<node> - does it say its count */
+            printf("R %%lu %%d\n", now_ms, nb_rx_count_says((unsigned)atoi(s + 1)));
         } else if (s[0] == 's') {           /* s<node>:<motor> - a cmd 52 reply */
             char *e;
             unsigned nid = (unsigned)strtoul(s + 1, &e, 10);
@@ -153,7 +155,8 @@ def cbin(tmp_path_factory):
     body = chr(10).join([_state(), _extract("nb_motor_on"), _extract("motor_ms"),
                          _extract("motor_say"), _extract("motor_pos"),
                          _extract("motor_status"), _extract("motor_tick"),
-                         _extract("motor_note")])
+                         _extract("motor_note"), _extract("nb_rx_count_on"),
+                         _extract("nb_rx_count_says")])
     src = d / "motor.c"
     src.write_text(HARNESS % body, encoding="utf-8")
     exe = d / ("motor.exe" if os.name == "nt" else "motor")
@@ -347,3 +350,43 @@ def test_end_stop_motor_keeps_its_own_reply(cbin):
 def test_encoder_motor_off(cbin):
     assert _replies(cbin, ["t0:9", "f" + JB_CONFIG, "f" + JB_HOME, "t600:9",
                            "s9:0"], PAD_NB_MOTOR="0") == [(600, "none")]
+
+
+def _says(cbin, steps, **env):
+    """nb_rx_count_says() at each r<node> step, as (ms, 0/1)."""
+    e = dict(os.environ)
+    for k in ("PAD_NB_MOTOR", "PAD_MOTOR_MS", "PAD_NB_RXCOUNT"):
+        e.pop(k, None)
+    e.update(env)
+    r = subprocess.run([cbin] + steps, capture_output=True, text=True, env=e)
+    assert r.returncode == 0, r.stderr
+    return [int(line.split()[2]) for line in r.stdout.splitlines()
+            if line.startswith("R ")]
+
+
+def test_only_an_encoder_board_says_its_frame_count(cbin):
+    """The `ff` frame count is answered on the jetpack's board alone.
+
+    Every other board keeps answering 0 - and so keeps being re-initialised at
+    each service visit - because batman's lamps and attract detection lean on
+    the cmd 70 that only a board init sends (see nb_rx_count in hwshim.c)."""
+    assert _says(cbin, ["t0:9", "r9", "f" + JB_CONFIG, "r9", "r10"]) == [0, 1, 0]
+
+
+def test_an_end_stop_board_does_not_say_its_count(cbin):
+    assert _says(cbin, ["t0:9", "f" + CONFIG, "r9"]) == [0]
+
+
+def test_the_count_follows_the_off_switches(cbin):
+    assert _says(cbin, ["t0:9", "f" + JB_CONFIG, "r9"], PAD_NB_RXCOUNT="0") == [0]
+    assert _says(cbin, ["t0:9", "f" + JB_CONFIG, "r9"], PAD_NB_MOTOR="0") == [0]
+
+
+def test_an_end_stop_motor_ignores_cmd_55(cbin):
+    """batman-1.13 sends 55 to its end-stop motor 1; PAD-237 never played it.
+
+    Frames: batman node 9 motor 1, stops 13 and 8 (rig trace 2026-09-28)."""
+    cfg = "891451014d480f0000b33534000080000014000000bd00"
+    to = "89095501480080c800028600"
+    assert _run(cbin, ["t0:9", "f" + cfg, "f" + to, "t5000:9"]) == []
+    assert _replies(cbin, ["t0:9", "f" + cfg, "f" + to, "s9:1"]) == [(0, "none")]

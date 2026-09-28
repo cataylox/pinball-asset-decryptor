@@ -193,10 +193,34 @@ found why, one step at a time (PAD_PASS_HOOK / PAD_REG_HOOK):
    said 0, so every visit read as "this board lost frames".
 
 **The rig now counts what the game counts** (nb_rx_count_tx, per node, byte 0
-& 31, f1 resets it) and word A of the `ff` reply says it. `PAD_NB_RXCOUNT=0`
-restores the zero. This touches every title - it is why the change needed the
-whole-library sweep below - and it corrects the item-52 note on the `ff`
+& 31, f1 resets it) - and answers it in word A of the `ff` reply **only on a
+board that carries an encoder motor** (nb_rx_count_says). `PAD_NB_RXCOUNT=0`
+answers 0 everywhere again. It also corrects the item-52 note on the `ff`
 reply, which read the stored zero as "the previous value is always 0".
+
+### Why only that board
+
+The first version answered the count on every board, and the whole-library
+sweep failed exactly one build: **batman-1.13 read as stuck on Tech Alerts**.
+It was not - pictures at 90/150/210/270 s show its attract cycling (high
+scores, the Stern ad). What stopped was the constant re-init, and two parts of
+the rig turn out to be built on it for batman's (older, swelf) generation:
+
+- **its lamps.** cmd 70 is what this rig decodes as that generation's
+  base-layer lamp write, and cmd 70 is sent ONLY inside a board init (32
+  entries, one per output). batman's "~109/s through attract" (item 79) was
+  the re-init loop re-sending them every visit. Answer the count and the
+  playfield's lamps for that generation stop changing.
+- **its attract detection.** gamestate.sh's `[led] light show running` counts
+  cmd 70 for that generation (item 79), so status.sh, autoattract.sh and
+  bootcheck.sh all called batman's attract "techalerts".
+
+A real board is not re-initialised every 0.7 s, so both are measuring an
+artifact - but fixing them is their own job (decode that generation's real
+show families, 72/8a/96/9a, and detect attract from them). Until then the
+count is said where its absence is measured to do harm: a board with an
+encoder motor, where every re-init re-homes the motor. Before that motor is
+configured the board still says 0, so its bring-up inits happen as before.
 
 `PAD_NB_FLAGWATCH=<node>` is the instrument left behind: that board's flag
 word and every reply the rig sends it, logged on change.
@@ -210,12 +234,16 @@ james_bond_le 1.06, motorcheck.sh, 40 s from Start:
 | zero reply (`PAD_NB_MOTOR=0`) | 20586 / 19958 / 20272 |
 | PAD-237 end-stop model | 136 (a pair every ~0.7 s) |
 | encoder status only | 136 (re-homed by every board re-init) |
-| encoder status + frame count | **2** (the one home the game asks for at Start) |
+| encoder status + frame count on node 9 | **2** (the one home the game asks for at Start) |
 
-With the count right the board re-init (`PAD_PASS_HOOK=34c170`) never fires in
-the run. The jetpack homes twice at boot, once at game start (event 78, by
+With the count right node 9 is not re-initialised once its motor is
+configured. The jetpack homes twice at boot, once at game start (event 78, by
 design), and is then sent to position 10 by cmd 55 - the first position move
 the game has made on the rig.
+
+Also fixed on the way: batman-1.13 sends cmd 55 to its END-STOP motor (node 9
+motor 1); the encoder change briefly let that fall into the end-stop model as
+"go to end 1". An end-stop motor ignores 55 again, as under PAD-237.
 
 ## Not done
 
@@ -224,3 +252,6 @@ the game has made on the rig.
   1..7 and the UP/DOWN-MAG switches as it turns. That is a coil-driven mech
   with position switches - its own model, its own ticket.
 - A motor that faults (0x40) is never simulated; the jetpack never stalls.
+- **The bus-wide re-init.** Every other board is still re-initialised at every
+  service visit (one board per ~101 ms). Stopping it means first giving
+  batman's generation a real lamp decode and attract signal (above).
