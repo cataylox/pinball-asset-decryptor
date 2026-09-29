@@ -616,6 +616,7 @@ def test_a_part_the_game_picks_is_turned_on_in_the_preview_not_greyed(tmp_path):
         assert w.call("text_scenes.tree_force", off["id"], True)
         ly = lay()
         assert ly[off["name"]]["drawn"] and ly[off["name"]]["shown"]
+        assert not ly[off["name"]]["state_off"]         # its eye is on (PAD-280)
         assert ly[on["name"]]["drawn"] and _tv(w)["frame"] == frame
         assert _ops(folder) == []
         assert w.call("text_scenes.tree_force", off["id"], False)
@@ -624,6 +625,7 @@ def test_a_part_the_game_picks_is_turned_on_in_the_preview_not_greyed(tmp_path):
         # clicking its name shows it on top while selected, at this moment
         assert w.call("text_scenes.tree_select", off["id"])
         assert _tv(w)["props"]["peek"] and _tv(w)["frame"] == frame
+        assert lay()[off["name"]]["state_off"]          # a peek does not turn its eye on
         assert w.call("text_scenes.tree_select", None)
         assert lay()[off["name"]]["state_off"]
         w.call("text_scenes.close")
