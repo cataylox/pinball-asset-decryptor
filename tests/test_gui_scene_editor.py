@@ -449,3 +449,50 @@ def test_the_scene_list_is_coloured_by_what_is_not_written_yet(tmp_path):
         assert w.call("text_scenes.tree_move", art, 1, 0)
         assert row(w)["state"] == "edited"
         w.call("text_scenes.close")
+
+
+def test_an_exact_size_in_pixels(tmp_path):
+    """DragonRR: "set the exact size I am after rather than %". W px / H px on the screen;
+    with Keep its shape one sets both, without it only that side stretches."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        art = next(h for h in _tv(w)["hits"] if h["name"] == "Art")["id"]
+        assert w.call("text_scenes.tree_select", art)
+        p = _tv(w)["props"]
+        w0, h0 = p["w"], p["h"]
+        assert w.call("text_scenes.tree_set_pixels", art, w0 * 2, None, True)
+        p = _tv(w)["props"]
+        assert abs(p["w"] - w0 * 2) <= 1 and abs(p["h"] - h0 * 2) <= 1
+        assert w.call("text_scenes.tree_set_pixels", art, None, 50, False)
+        p = _tv(w)["props"]
+        assert abs(p["h"] - 50) <= 1 and abs(p["w"] - w0 * 2) <= 1
+        assert w.call("text_scenes.tree_set_pixels", art, 0, None, True) is False
+        w.call("text_scenes.close")
+
+
+def test_play_draws_each_different_frame_once_and_stops(tmp_path):
+    """DragonRR: "play the animation as well as step through it". Play draws the scene's
+    frames in the background (a held stretch once) and hands them to the page with a map
+    from every frame to its picture; Stop, or an edit, ends it."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        assert w.call("text_scenes.tree_play", True)
+        assert w.state("text_scenes")["tree_play"]["frames"] == 20
+        assert _wait(w, lambda: (w.state("text_scenes").get("tree_play") or {}).get("done"))
+        play = w.state("text_scenes")["tree_play"]
+        assert len(play["map"]) == 20 and 1 <= play["total"] <= 20 and play["fps"] > 0
+        assert len(play["srcs"]) == play["total"] and all(os.path.isfile(p) for p in play["srcs"])
+        assert max(play["map"]) == play["total"] - 1
+        assert w.call("text_scenes.tree_play", False)
+        assert w.state("text_scenes")["tree_play"] is None
+        assert w.call("text_scenes.tree_play", True)
+        art = next(h for h in _tv(w)["hits"] if h["name"] == "Art")["id"]
+        assert w.call("text_scenes.tree_move", art, 5, 0)
+        assert w.state("text_scenes")["tree_play"] is None             # an edit stops it
+        w.call("text_scenes.close")

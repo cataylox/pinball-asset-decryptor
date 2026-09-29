@@ -271,3 +271,65 @@ def test_battle_select_wraps_its_instructions_like_the_machine():
         rows = np.split(ys, np.where(np.diff(ys) > 4)[0] + 1)
         assert len(rows) == 2, (want, [(r[0], r[-1]) for r in rows])
         assert 30 <= rows[1][0] - rows[0][0] <= 42          # one declared line (36) apart
+
+
+def test_a_straight_alpha_replacement_is_premultiplied_like_the_write_does(tmp_path):
+    """DragonRR: a replaced picture with a soft white edge drew a solid white halo in the
+    Scenes preview (and not while dragged). Card pictures are premultiplied and the renderer
+    blends them so; an editor's PNG has straight alpha, which the Write premultiplies
+    (engine._premultiply_like_stock) - the preview now does the same, and leaves card
+    pictures as they are."""
+    assets = _red_project(tmp_path)
+    glow = np.zeros((10, 10, 4), np.uint8)
+    glow[..., :3] = 255                      # white...
+    glow[..., 3] = 20                        # ...but nearly transparent
+    Image.fromarray(glow, "RGBA").save(os.path.join(assets, "images", "scene_textures", "red.png"))
+    m = man([N(1, "Glow", [9], tr=((1, (4, 0, 0, 4, 20, 20)),))], {9: BMP})
+    img = np.asarray(R.render_tree(assets, m, 1))
+    assert img[40, 40].max() < 40                               # a faint glow, not a white box
+    stock = np.zeros((10, 10, 4), np.uint8)
+    stock[..., 0] = stock[..., 3] = 200                        # premultiplied: RGB <= A
+    pic = Image.fromarray(stock, "RGBA")
+    assert R._premultiplied(pic, "k", {}) is pic               # a card picture is untouched
+
+
+def test_a_sprite_that_slides_in_rests_where_it_stops_on_the_screen():
+    """DragonRR: the HUD's power meter drew half off the screen. Its sprite's first label
+    span is its entrance (sliding in from the left); the game holds it at a later label
+    (Energy Meter Onscreen). A sprite still hanging off the screen at its first span's best
+    frame rests on the first later label where it holds still, further on the screen."""
+    slide = [(f, (1, 0, 0, 1, -300 + 70 * (f - 1), 10)) for f in range(1, 5)] + [(5, (1, 0, 0, 1, 10, 10))]
+    meter = {"kind": "Sprite", "frames": 8, "labels": [["Enter Start", 1], ["Onscreen", 5], ["Exit", 7]],
+             "kids": [N(10, "Bar", [9], tr=slide)]}
+    big = dict(BMP, w=100, h=20)
+    m = man([N(1, "Meter", [2])], {2: meter, 9: big}, frames=3)
+    d, = E.draw_list(m, 1)
+    assert E.outline(d)[0][0] == 10                        # at rest where the game keeps it
+    # a sprite whose first span is already on the screen keeps the first-span rule
+    held = {"kind": "Sprite", "frames": 6, "labels": [["A", 1], ["B", 4]],
+            "kids": [N(10, "Bar", [9], tr=((1, (1, 0, 0, 1, 20, 10)), (4, (1, 0, 0, 1, 90, 10))))]}
+    m2 = man([N(1, "Meter", [2])], {2: held, 9: big}, frames=3)
+    d, = E.draw_list(m2, 1)
+    assert E.outline(d)[0][0] == 20
+
+
+def test_an_entrance_rests_where_it_leads_and_plays_from_its_start():
+    """DragonRR: Battle Select never showed the selected kaiju's tile in colour, and the
+    Godzilla logo showed only its first flame. A sprite whose first label begins an entrance
+    (FadeIn / Reveal / Enter ...) rests on the first later label that is not part of it (or
+    the entrance's own end); Play runs the entrance from its start and holds there."""
+    frames = [N(10 + i, "F%d" % i, [9], kf=((1, 0), (i + 1, 1), (i + 2, 0)) if i < 9 else ((1, 0), (10, 1)))
+              for i in range(10)]
+    logo = {"kind": "Sprite", "frames": 10, "labels": [["LogoReveal_Start", 1], ["LogoReveal_End", 10]],
+            "kids": frames}
+    m = man([N(1, "Logo", [2])], {2: logo, 9: BMP}, frames=12)
+    assert E.entrance_rest(logo) == (1, 10)
+    assert [d["path"][-1] for d in E.draw_list(m, 1)] == ["F9"]                    # at rest: whole
+    assert [d["path"][-1] for d in E.draw_list(m, 1, play=True)] == ["F0"]         # playing
+    assert [d["path"][-1] for d in E.draw_list(m, 5, play=True)] == ["F4"]
+    assert [d["path"][-1] for d in E.draw_list(m, 12, play=True)] == ["F9"]        # holds
+    picker = {"labels": [["Ebirah_FadeIn_Start", 1], ["Ebirah_FadeIn_End", 4],
+                         ["Ebirah_Selected_Start", 5], ["Ebirah_Selected_End", 9]]}
+    assert E.entrance_rest(picker) == (1, 5)
+    states = {"labels": [["Locked", 1], ["Completed", 2], ["Tokyo", 3]]}
+    assert E.entrance_rest(states) is None                                          # not an entrance

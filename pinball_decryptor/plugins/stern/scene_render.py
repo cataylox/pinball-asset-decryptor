@@ -730,6 +730,7 @@ def _picture(assets_dir, rel, cache, pictures=None, sizes=None):
     pick = (pictures or {}).get(rel) or {}
     src = pick.get("path")
     img = _load_file(src, "pick:" + src, cache) if src else _load_png(assets_dir, rel, cache)
+    img = _premultiplied(img, src or rel, cache)
     want = (sizes or {}).get(rel)
     if img is None or not want or pick.get("keep") or tuple(img.size) == tuple(want):
         return img
@@ -741,6 +742,39 @@ def _picture(assets_dir, rel, cache, pictures=None, sizes=None):
     fitted = img.resize(tuple(want), Image.LANCZOS)
     cache[key] = (img, tuple(want), fitted)
     return fitted
+
+
+#: engine._PREMULT_TOL / the 0.5 % share: the Write's own test for a straight-alpha picture
+_PREMULT_TOL = 48
+
+
+def _premultiplied(img, key, cache):
+    """*img* as the card will hold it: the pictures on the card are PREMULTIPLIED and the
+    renderer composites them that way, but a replacement saved by an image editor has
+    straight alpha, so the Write multiplies its colour by its alpha
+    (``engine._premultiply_like_stock``).  The preview does the same, or a "transparent" pixel
+    that is not black draws as a solid halo (DragonRR's white box round Battle Select's tile
+    grid, gone while he dragged it because the drag layer is straight-alpha).  A card picture
+    already passes the test and is returned as it is."""
+    if img is None:
+        return None
+    ck = ("premult", key)
+    got = cache.get(ck)
+    if got and got[0] is img:
+        return got[1]
+    import numpy as np
+    from PIL import Image
+    arr = np.asarray(img.convert("RGBA"))
+    a = arr[..., 3].astype(np.int16)
+    straight = float((arr[..., :3].max(axis=2).astype(np.int16) > a + _PREMULT_TOL).mean())
+    out = img
+    if straight > 0.005:
+        pm = arr.copy()
+        a16 = arr[..., 3:4].astype(np.uint16)
+        pm[..., :3] = ((arr[..., :3].astype(np.uint16) * a16 + 127) // 255).astype(np.uint8)
+        out = Image.fromarray(pm, "RGBA")
+    cache[ck] = (img, out)
+    return out
 
 
 def _load_file(path, key, cache):

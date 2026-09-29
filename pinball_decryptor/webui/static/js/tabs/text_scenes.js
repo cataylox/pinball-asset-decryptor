@@ -110,6 +110,8 @@ export function ScenesPage() {
   const s = useNs("text_scenes");
   const [color, setColor] = useState(null);     // {text, start, stock, title}
   const [wide, setWide] = useState(false);      // the scene editor without the scene list
+  const [playFrame, setPlayFrame] = useState(0); // the frame a playback is on
+  useEffect(() => { if (!s.tree_play) setPlayFrame(0); }, [s.tree_play]);
   const [split, setSplit] = useState(loadSplit);
   const splitRef = useRef(split);
   splitRef.current = split;
@@ -224,6 +226,7 @@ export function ScenesPage() {
           class="note warn scenes-warn" role="status"><${Icon} name="warn" /><div class="body-text small">${t}</div></div>`)}
         <div class="scenes-stage" style=${`--ar:${stage[0] / stage[1]}`}>
           ${s.preparing ? html`<${Preparing} p=${s.preparing} />`
+            : editor && s.tree_play ? html`<${TreePlayer} s=${s} onFrame=${setPlayFrame} />`
             : editor ? html`<${TreeCanvas} s=${s} />` : html`<${Preview} s=${s} tip=${tips.preview} />`}
         </div>
         <div class="scenes-stagebar">
@@ -263,9 +266,9 @@ export function ScenesPage() {
       </div>
       <${Divider} k="right" measure=${measureRight} dir=${-1} label="Inspector width" ...${splitProps} />
       <div class="scenes-inspector" ref=${inspRef}>
-        ${editor ? html`<div class="insp-top" ref=${topRef}
+        ${editor ? html`<div class="insp-top" ref=${topRef} data-play=${s.tree_play ? 1 : 0}
             style=${split.top != null ? `flex:0 0 auto;height:${split.top}px;max-height:calc(100% - 120px)` : ""}>
-            <${TreeSide} t=${s.tree_view} /></div>
+            <${TreeSide} t=${s.tree_view} play=${s.tree_play} playFrame=${playFrame} /></div>
           <${Divider} k="top" horizontal measure=${measureTop} label="Selection and Layers" ...${splitProps} />
           <${TreeTop} s=${s} onMenu=${itemMenu} />`
           : s.preparing ? null : html`<${Contents} s=${s} onMenu=${itemMenu} />`}
@@ -477,6 +480,38 @@ function cssTf(ops, W, H) {
     : `translate(${px(o.cx)}, ${py(o.cy)}) scale(${o.f}) translate(${px(-o.cx)}, ${py(-o.cy)})`)).join(" ");
 }
 
+// The scene's animation playing (tree_play): its frames drawn once on the server and played
+// here at the scene's own rate, looping; a frame not drawn yet holds the last one.
+function TreePlayer({ s, onFrame }) {
+  const play = s.tree_play;
+  const t = s.tree_view;
+  const W = t.stage[0], H = t.stage[1];
+  const [f, setF] = useState(0);
+  const srcsRef = useRef(play.srcs || []);
+  srcsRef.current = play.srcs || [];
+  useEffect(() => {
+    let i = 0;
+    const ms = Math.max(15, Math.round(1000 / (play.fps || 30)));
+    const timer = setInterval(() => {
+      const n = srcsRef.current.length;
+      const want = play.map[i];
+      if (want == null || want >= n) {
+        if (play.done || n >= play.total) i = 0;      // (a frame that failed to draw: skip)
+        return;                                      // wait for it to be drawn
+      }
+      setF(i);
+      onFrame(i + 1);
+      i = (i + 1) % play.frames;
+    }, ms);
+    return () => clearInterval(timer);
+  }, [play.map, play.fps, play.frames, play.done]);
+  const src = (play.srcs || [])[play.map[f]] || "";
+  return html`<div class="scenes-canvas tree-canvas" style=${`background:${s.bg_rgb || "#101014"};aspect-ratio:${W} / ${H}`}>
+    ${src ? html`<img src=${mediaUrl(src)} alt="" draggable="false" style="image-rendering:auto" />` : html`<${Drawing} label="Drawing the frames…" />`}
+    <div class="tree-playing small">Frame ${f + 1} of ${play.frames}</div>
+  </div>`;
+}
+
 function TreeCanvas({ s }) {
   const t = s.tree_view;
   const W = t.stage[0], H = t.stage[1];
@@ -648,9 +683,10 @@ function TreeCanvas({ s }) {
   </div>`;
 }
 
-function TreeSide({ t }) {
+function TreeSide({ t, play, playFrame }) {
   const p = t.props;
   const [tint, setTint] = useState(p ? p.tint : "#ffffff");
+  const [keepShape, setKeepShape] = useState(true);
   useEffect(() => { if (p) setTint(p.tint); }, [p && p.id, p && p.tint]);
   const num = (label, value, onCommit, title) => html`<label class="tree-num" ...${tip(title)}>
     <span class="lbl">${label}</span>
@@ -662,10 +698,15 @@ function TreeSide({ t }) {
       title="Which moment of the scene's timeline to show: where it rests, or one of its own labels." />
     <div class="scenes-ctl">
       <span class="lbl">Frame</span>
-      <div class="field sm" style="width:84px"><input type="number" min="1" max=${t.frames} value=${t.frame}
+      <div class="field sm" style="width:84px"><input type="number" min="1" max=${t.frames}
+        value=${playFrame || t.frame} disabled=${!!play}
         onChange=${(e) => call("text_scenes.tree_moment", "f:" + e.target.value)} /></div>
       <span class="small muted">of ${t.frames}</span>
+      ${t.frames > 1 ? html`<${Button} size="xs" kind=${play ? "primary" : ""} icon=${play ? "stop" : "play"}
+        title=${play ? "Stop, and go back to the frame you were on" : "Play the scene's animation at its own speed (it loops)"}
+        onClick=${() => call("text_scenes.tree_play", !play)}>${play ? "Stop" : "Play"}<//>` : null}
     </div>
+    ${play && !play.done ? html`<span class="small muted">${play.total ? `Preparing frames ${(play.srcs || []).length} of ${play.total}…` : "Working out the frames…"}</span>` : null}
     ${(t.states || []).length ? html`<details class="tree-states">
       <summary class="small">States the game picks (${t.states.length})</summary>
       ${t.states.map((st) => html`<label key=${st.node} class="tree-state" title=${st.path}>
@@ -680,9 +721,15 @@ function TreeSide({ t }) {
         ${num("X", p.x, (v) => call("text_scenes.tree_move", p.id, Number(v) - p.x, 0), "Left edge on the glass (px)")}
         ${num("Y", p.y, (v) => call("text_scenes.tree_move", p.id, 0, Number(v) - p.y), "Top edge on the glass (px)")}
       </div>` : html`<div class="small muted">Not on the glass at this moment.</div>`}
+      ${p.w != null ? html`<div class="tree-row">
+        ${num("W px", p.w, (v) => call("text_scenes.tree_set_pixels", p.id, v, null, keepShape), "Its width on the screen, in pixels (the screen is 1360 x 768)")}
+        ${num("H px", p.h, (v) => call("text_scenes.tree_set_pixels", p.id, null, v, keepShape), "Its height on the screen, in pixels")}
+      </div>
+      <label class="tree-row small tree-keep" title="On: a new width or height resizes it both ways, so it keeps its shape. Off: it stretches one way only.">
+        <input type="checkbox" checked=${keepShape} onChange=${(e) => setKeepShape(e.target.checked)} /> Keep its shape
+      </label>` : null}
       <div class="tree-row">
         ${num("Size %", p.scale === p.scale_y ? p.scale : "", (v) => call("text_scenes.tree_set_scale", p.id, v), "Both ways at once; 100 = the size the game ships")}
-        <span class="small muted">${p.w != null ? `${p.w} x ${p.h} px` : ""}</span>
       </div>
       <div class="tree-row">
         ${num("Width %", p.scale, (v) => call("text_scenes.tree_set_size", p.id, v, null), "Stretch it sideways only")}
