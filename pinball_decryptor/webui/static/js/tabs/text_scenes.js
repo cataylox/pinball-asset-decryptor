@@ -21,7 +21,7 @@ if (typeof document !== "undefined" && !document.querySelector(`link[href="${CSS
 const SCENE_COLS = [
   { key: "label", label: "Scene", width: "minmax(0,1fr)", sort: "#0",
     titleOf: (r) => r.label + "\n" + r.d + (r.state ? "\n" + STATE_TIP[r.state] : ""),
-    render: (r) => html`<span class="sc-name">${r.state ? html`<span class=${"sc-dot " + r.state}></span>` : null}<span class="ellip">${r.label}</span></span>` },
+    render: (r) => html`<span class="sc-name"><span class=${"sc-dot " + (r.state || "same")}></span><span class="ellip">${r.label}</span></span>` },
   { key: "imgs", label: "Images", width: "60px", sort: "imgs", num: true },
   { key: "fonts", label: "Fonts", width: "50px", sort: "fonts", num: true },
   { key: "texts", label: "Text", width: "44px", sort: "texts", num: true },
@@ -31,6 +31,7 @@ let sceneWidths = null;         // dragged column widths, kept for the session
 // DragonRR: a scene's colour says where its edits stand - orange: changed and not written to
 // a card yet (the next Write puts them on); green: exactly what the last Write put on the card
 const STATE_TIP = {
+  same: "Not changed: the scene as the game ships it.",
   edited: "Changed since the last Write: the next Write puts it on the card.",
   written: "Written: the last Write put exactly these edits on the card.",
 };
@@ -207,7 +208,8 @@ export function ScenesPage() {
           <${InfoBadge} text=${s.hint} />
         </div>
         ${(s.scenes || []).length ? null : html`<p class="small muted" style="margin:0">${s.hint}</p>`}
-        ${(s.scenes || []).some((r) => r.state) ? html`<div class="row small muted sc-legend">
+        ${(s.scenes || []).length ? html`<div class="row small muted sc-legend">
+          <span class="sc-dot same"></span><span title=${STATE_TIP.same}>not changed</span>
           <span class="sc-dot edited"></span><span title=${STATE_TIP.edited}>not written yet</span>
           <span class="sc-dot written"></span><span title=${STATE_TIP.written}>written to a card</span>
         </div>` : null}
@@ -438,8 +440,14 @@ function TreeLayers({ t }) {
         class=${cx("sc-item", "ly-item", t.sel === l.id && "sel", !l.drawn && "ly-off")}
         style=${`padding-left:${10 + l.depth * 14}px`}
         onClick=${() => call("text_scenes.tree_select", l.id)}>
-      <button type="button" class="ly-eye" title=${l.hidden ? "Hidden — show it again" : "Hide it"}
-        onClick=${(e) => { e.stopPropagation(); call("text_scenes.tree_visible", l.id, l.hidden); }}>
+      <button type="button" class="ly-eye"
+        title=${l.hidden ? "Hidden — show it again" : l.drawn ? "Hide it"
+          : "Not on the screen at this moment: go to where the game shows it"}
+        onClick=${(e) => {
+          e.stopPropagation();
+          if (!l.hidden && !l.drawn) call("text_scenes.tree_show", l.id);
+          else call("text_scenes.tree_visible", l.id, l.hidden);
+        }}>
         <${Icon} name=${l.hidden ? "eye-off" : "eye"} /></button>
       <span class="sc-t ellip" title=${l.name}>${l.name}${l.added ? " (added)" : ""}</span>
       <span class="sc-i small muted ellip" title=${l.edits || l.kind}>${l.edits || l.kind}</span>
