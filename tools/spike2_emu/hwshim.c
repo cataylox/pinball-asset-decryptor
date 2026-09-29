@@ -8590,7 +8590,38 @@ int pad_sw_level(unsigned id)
  * holding a stop switch still overrides the car until its next move.
  *
  * NOT MODELLED: the car's ball optos (front/hold/back). Nothing carries a
- * ball into the car, so they stay open, which is a car with no ball in it. */
+ * ball into the car, so they stay open, which is a car with no ball in it.
+ *
+ * ---- PAD-249: AN ENCODER MOTOR (james_bond_le's JETPACK) ----
+ *
+ * A motor whose cmd 51 names ENCODER inputs (payload bytes 4 and 5 carry the
+ * 0x40 flag: `51 | 00 41 00 00 43 42 ...` = home opto input 1, encoder optos
+ * inputs 3 and 2) is not run to end stops. The game's EncoderMotor class
+ * (JetPackMotor derives from it; james_bond_le 1.06, 0x33b6b8 / 0x1e05b8)
+ * homes it and then sends it to a POSITION, and the board counts the encoder
+ * itself. Read out of the game, not guessed:
+ *
+ *   cmd 53 `53 00 28 20 e8 03`     home: motor, speed, accel, LE16 time ms
+ *   cmd 55 `55 00 0a 00 40 e8 03 00` go to position: motor, LE16 target
+ *                                  (signed), speed, LE16 time ms, flags
+ *   cmd 52 `52 00` -> 4 bytes      THIS MOTOR's status (the request names the
+ *                                  motor): u16 bytes 0-1 = the position the
+ *                                  board has counted, u16 bytes 2-3 = flags
+ *
+ * and the flags the game tests every tick: 0x01 moving, 0x08 homed and done,
+ * 0x40 fault (three and the motor is disabled). A poll with none of the three
+ * set makes the game configure and home it again from scratch - which is
+ * what the zero reply did every tick (20586 x cmd 53 in 40 s from Start) and
+ * what the node's raw switch byte did every ~0.7 s under the end-stop model.
+ * So the board plays the jetpack: 53 homes it (moving, then at position 0
+ * with the home opto made), 55 moves it (moving, the position stepping to
+ * the target, the home opto open while away from 0), and 52 reports it.
+ *
+ * NO ENCODER PULSES. The item that filed this asked for them; the game does
+ * not want them. It never counts the encoder optos - the board does - and
+ * when it configures the motor it sends the node a cmd 71 whose 8-byte mask
+ * is all ones except those two inputs (0x33b4e0 -> 0x5aa5f8): the board is
+ * told to keep them to itself. The position in the reply is the answer. */
 #define NB_MOTORS 4
 
 struct nb_motor {
@@ -8599,6 +8630,12 @@ struct nb_motor {
     signed char at;             /* the end it is at; -1 between             */
     signed char going;          /* the end it is travelling to; -1 idle     */
     unsigned long due;          /* pad_ms() it arrives                     */
+    /* PAD-249: an encoder motor - homed, then sent to positions */
+    unsigned char enc;          /* cmd 51 named encoder inputs              */
+    unsigned char homed;        /* a cmd 53 has finished                    */
+    short pos;                  /* where it is, in encoder counts           */
+    short from, to;             /* the move under way (going >= 0)          */
+    unsigned long start;        /* pad_ms() that move began                 */
 };
 static struct nb_motor nb_motors[64][NB_MOTORS];
 
@@ -8663,6 +8700,47 @@ static void motor_say(const char *s)
     }
 }
 
+/* PAD-249: where an encoder motor is now, in counts - the move under way
+ * pro rata over its travel time, the way the board's count would climb. */
+static short motor_pos(const struct nb_motor *m)
+{
+    unsigned long t = motor_ms(), e;
+    if (m->going < 0) return m->pos;
+    e = pad_ms() - m->start;
+    if (!t || e >= t) return m->to;
+    return (short)(m->from + (long)(m->to - m->from) * (long)e / (long)t);
+}
+
+/* PAD-249: the cmd 52 reply for an encoder motor, into p[0..3]; 0 = not one,
+ * leave the reply alone. Bytes 0-1 the position (LE16), byte 2 the flags the
+ * game's EncoderMotor tests: 0x01 moving, 0x08 homed and done. Byte 3 and the
+ * fault bit (0x40) stay clear: this jetpack never stalls. */
+static int motor_status(unsigned nid, unsigned k, unsigned char *p)
+{
+    const struct nb_motor *m;
+    short pos;
+    if (nid >= 64 || k >= NB_MOTORS || !nb_motor_on()) return 0;
+    m = &nb_motors[nid][k];
+    if (!m->cfg || !m->enc) return 0;
+    pos = motor_pos(m);
+    p[0] = (unsigned char)(pos & 0xff);
+    p[1] = (unsigned char)((pos >> 8) & 0xff);
+    p[2] = m->going >= 0 ? 0x01 : (m->homed ? 0x08 : 0x00);
+    p[3] = 0;
+    {   /* what the game was told, each time the flags change */
+        static unsigned char last[64][NB_MOTORS];
+        if (last[nid][k] != (unsigned char)(p[2] | 0x80)) {
+            char b[96];
+            last[nid][k] = (unsigned char)(p[2] | 0x80);
+            snprintf(b, sizeof b, "[motor] %lu ms node %u motor %u status "
+                     "%02x %02x %02x %02x\n", pad_ms(), nid, k, p[0], p[1],
+                     p[2], p[3]);
+            motor_say(b);
+        }
+    }
+    return 1;
+}
+
 static void motor_tick(unsigned nid)
 {
     unsigned k;
@@ -8670,6 +8748,18 @@ static void motor_tick(unsigned nid)
     for (k = 0; k < NB_MOTORS; k++) {
         struct nb_motor *m = &nb_motors[nid][k];
         if (!m->cfg || m->going < 0 || pad_ms() < m->due) continue;
+        if (m->enc) {                   /* PAD-249: homed, or at a position */
+            char b[96];
+            m->pos = m->to;
+            if (m->going == 0) m->homed = 1;
+            snprintf(b, sizeof b, "[motor] %lu ms node %u motor %u %s "
+                     "position %d\n", pad_ms(), nid, k,
+                     m->going == 0 ? "homed at" : "arrived at", m->pos);
+            m->going = -1;
+            if (m->pos == 0) motor_switch(nid, m->stop[0], 1);
+            motor_say(b);
+            continue;
+        }
         motor_switch(nid, m->stop[(int)m->going], 1);
         m->at = m->going;
         m->going = -1;
@@ -8691,7 +8781,7 @@ static void motor_note(const unsigned char *p, int n)
     struct nb_motor *m;
     char b[128];
     if (n < 5 || !(p[0] & 0x80)) return;
-    if (p[2] != 0x51 && p[2] != 0x53 && p[2] != 0x54) return;
+    if (p[2] != 0x51 && p[2] != 0x53 && p[2] != 0x54 && p[2] != 0x55) return;
     nid = (unsigned)p[0] & 0x3f;
     k = p[3];
     if (nid >= 64 || k >= NB_MOTORS) return;
@@ -8703,15 +8793,55 @@ static void motor_note(const unsigned char *p, int n)
         m->stop[1] = (p[5] & 0x40) ? (signed char)(p[5] & 0x3f) : -1;
         m->at = -1;
         m->going = -1;
+        m->enc = n >= 9 && ((p[7] & 0x40) || (p[8] & 0x40));   /* PAD-249 */
         nb_motor_cfg[nid] = 1;
-        snprintf(b, sizeof b, "[motor] node %u motor %u: cmd 53 stops on input "
-                 "%d, cmd 54 on input %d%s\n", nid, k, m->stop[0], m->stop[1],
-                 nb_motor_on() ? "" : " - PAD_NB_MOTOR=0, not answered");
+        if (m->enc)
+            snprintf(b, sizeof b, "[motor] node %u motor %u: ENCODER motor, "
+                     "home on input %d, encoder inputs %d and %d%s\n", nid, k,
+                     m->stop[0], p[7] & 0x3f, p[8] & 0x3f,
+                     nb_motor_on() ? "" : " - PAD_NB_MOTOR=0, not answered");
+        else
+            snprintf(b, sizeof b, "[motor] node %u motor %u: cmd 53 stops on "
+                     "input %d, cmd 54 on input %d%s\n", nid, k, m->stop[0],
+                     m->stop[1],
+                     nb_motor_on() ? "" : " - PAD_NB_MOTOR=0, not answered");
         motor_say(b);
         return;
     }
     if (!m->cfg || !nb_motor_on()) return;
     motor_tick(nid);
+    if (m->enc) {
+        /* PAD-249: 53 homes it, 55 sends it to a position. A re-send of the
+         * move under way is not a new move, as for the end-stop motor. */
+        short to;
+        int going;
+        if (p[2] == 0x53) {
+            going = 0;
+            to = 0;
+        } else if (p[2] == 0x55 && n >= 6) {
+            going = 1;
+            to = (short)(p[4] | (p[5] << 8));
+        } else {
+            return;
+        }
+        if (m->going == going && m->to == to) return;
+        if (going == 1 && m->going < 0 && m->pos == to) return;  /* there */
+        m->from = motor_pos(m);
+        m->to = to;
+        m->going = (signed char)going;
+        m->start = pad_ms();
+        m->due = m->start + motor_ms();
+        if (going == 0) m->homed = 0;
+        if (m->from == 0 && to != 0) motor_switch(nid, m->stop[0], 0);
+        snprintf(b, sizeof b, "[motor] %lu ms node %u motor %u %s %d (cmd "
+                 "%02x), %lu ms\n", pad_ms(), nid, k,
+                 going ? "sent to position" : "homing from position",
+                 going ? to : m->from, p[2], motor_ms());
+        motor_say(b);
+        return;
+    }
+    if (p[2] == 0x55) return;   /* batman's end-stop motor sends 55 too: not
+                                 * ours to play (PAD-237 never did) */
     {
         int end = p[2] == 0x53 ? 0 : 1;
         if (m->going == end || (m->going < 0 && m->at == end)) return;
@@ -12294,6 +12424,148 @@ static void nb_trace(void)
     logmsg(line);
 }
 
+/* ★ PAD-249: A BOARD COUNTS THE FRAMES IT RECEIVED, and the `ff` status poll
+ * reports that count as WORD A (reply bytes 0..3). Answering 0 made the game
+ * re-initialise EVERY node on EVERY service visit - one board every ~101 ms,
+ * the whole bus every ~0.7 s, on every title - and on james_bond_le each
+ * re-init of node 9 re-homed the jetpack (event 135), which is the pair of
+ * cmd 53 every ~0.7 s PAD-237 left behind.
+ *
+ * Read out of james_bond_le 1.06, not guessed:
+ *   0x5a8068  the bus send path adds 1 to a per-node counter,
+ *             [0x8b8c88 + 900 + (node & 31) * 4], for every ADDRESSED frame
+ *             (byte 0 has 0x80; the `00` poll and broadcasts are not counted)
+ *   0x5ae930  the `ff` poll: after its own frame is sent (and counted), word
+ *             A != that counter sets bit 31 of word B, and the counter is
+ *             zeroed for the next poll
+ *   0x34ea48  word B & 0x8010211f -> the fault branch 0x34edb8: re-init the
+ *             board (0x34c170) and raise event 135 - "this board lost frames"
+ *   0x5ab278  cmd f1 to a node zeroes the counter after sending (reset stats)
+ * Measured with PAD_REG_HOOK=5ae9f0: the counter read 2..167 at every poll
+ * while the rig said 0, and PAD_PASS_HOOK=34c170 fired every 101 ms from the
+ * fault branch. The item-52 note on the `ff` reply read the stored ZERO as
+ * "the previous value is always 0"; it is the game's own count, restarted.
+ *
+ * So the rig counts what the game counts, per node - but ANSWERS it only for
+ * a board that carries an ENCODER MOTOR (nb_rx_count_says). Every other board
+ * still says 0 and is still re-initialised at every visit, as before, because
+ * the rest of the rig leans on that artifact and was tuned on it: batman-1.13
+ * (the older, swelf generation) sends cmd 70 - which this file decodes as its
+ * base-layer lamps, and which gamestate.sh counts as its attract light show -
+ * ONLY inside a board init. Counted everywhere, batman sat in a perfectly good
+ * attract that the rig called Tech Alerts, with its lamps frozen (whole-
+ * library sweep, 2026-09-28). Stopping the bus-wide re-init is its own job,
+ * with those two to fix first. The jetpack's board is the one whose re-init is
+ * measured to do harm, and until its encoder motor is configured it too says
+ * 0, so its bring-up inits happen exactly as before.
+ *
+ * PAD_NB_SWA and the switch walk still set word A when asked (their sweeps
+ * want the flag raised); PAD_NB_RXCOUNT=0 answers 0 everywhere again. */
+static unsigned nb_rx_count[32];
+
+static int nb_rx_count_on(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("PAD_NB_RXCOUNT");
+        v = (e && e[0] == '0') ? 0 : 1;
+    }
+    return v;
+}
+
+/* Every frame the game writes, as the send path counts it. */
+static void nb_rx_count_tx(void)
+{
+    unsigned nid;
+    if (nb_req_len < 1 || !(nb_req[0] & 0x80)) return;
+    nid = (unsigned)nb_req[0] & 31;
+    nb_rx_count[nid]++;
+    if (nb_req_len > 2 && nb_req[2] == 0xf1 && nid != 0)
+        nb_rx_count[nid] = 0;            /* reset stats: both sides restart */
+}
+
+/* The count since the last `ff` poll, restarted - taken at EVERY poll, said
+ * or not, so the first poll that is answered is already in step. */
+static unsigned nb_rx_count_poll(unsigned nid)
+{
+    unsigned c;
+    nid &= 31;
+    c = nb_rx_count[nid];
+    nb_rx_count[nid] = 0;
+    return c;
+}
+
+/* Does this board report its count? Only one with an encoder motor on it
+ * (see nb_rx_count): the model plays the motor, so the board must not look
+ * reset every visit, or event 135 re-homes the motor every ~0.7 s. */
+static int nb_rx_count_says(unsigned nid)
+{
+    unsigned k;
+    if (!nb_rx_count_on() || !nb_motor_on() || nid >= 64) return 0;
+    for (k = 0; k < NB_MOTORS; k++)
+        if (nb_motors[nid][k].cfg && nb_motors[nid][k].enc) return 1;
+    return 0;
+}
+
+/* PAD_NB_FLAGWATCH=<node> (PAD-249) - log that board's flag word, board[+4],
+ * every time it changes, with the frame just sent. Bit 1 clear or bit 18
+ * (0x40000) set is what makes the game's node service re-initialise a board
+ * and raise event 135, which re-homes every encoder motor on it (james_bond
+ * 1.06: 0x34ea9c). A zero-cost compare per frame once the object is found. */
+static void nb_flagwatch(void)
+{
+    static int node = -2;
+    static unsigned last;
+    static int budget = 300;
+    unsigned base, flags;
+    if (node == -2) {
+        char *p = getenv("PAD_NB_FLAGWATCH");
+        node = p && *p ? atoi(p) : -1;
+    }
+    if (node < 0 || node > 31 || budget <= 0) return;
+    base = a_nb_objs();
+    if (!base) return;
+    flags = *(const unsigned *)(unsigned long)(base + (unsigned)node * NB_OBJ_SZ + 4);
+    if (flags != last) {
+        char line[HEXBUF + 128], h[HEXBUF];
+        hex64(h, nb_req, nb_req_len);
+        snprintf(line, sizeof line, "[nbflagw] t=%lu node=%d flags %08x -> "
+                 "%08x after %s\n", pad_ms(), node, last, flags, h);
+        logmsg(line);
+        last = flags;
+        budget--;
+    }
+}
+
+/* ...and every reply this rig sends that board, each time it differs from
+ * the last reply to the same command. */
+static void nb_flagwatch_reply(const unsigned char *p, int n)
+{
+    static unsigned char last[256][24], seen[256];
+    static int budget = 300;
+    char *e = getenv("PAD_NB_FLAGWATCH");
+    unsigned cmd;
+    int k, i, same = 1;
+    if (!e || !*e || budget <= 0 || nb_req_len < 3 || !(nb_req[0] & 0x80)) return;
+    if ((int)(nb_req[0] & 0x3f) != atoi(e)) return;
+    cmd = nb_req[2];
+    if (cmd == 0x52 || cmd == 0x11) return;       /* the motor logs its own */
+    k = n < 24 ? n : 24;
+    for (i = 0; i < k; i++)         /* no memcmp: string.h is not included */
+        if (last[cmd][i] != p[i]) { same = 0; last[cmd][i] = p[i]; }
+    if (!seen[cmd]) { seen[cmd] = 1; same = 0; }      /* the first one, too */
+    if (same) return;
+    {
+        char line[2 * HEXBUF + 64], h[HEXBUF], q[HEXBUF];
+        hex64(h, p, n);
+        hex64(q, nb_req, nb_req_len);
+        snprintf(line, sizeof line, "[nbflagw] t=%lu reply to %s: %s\n",
+                 pad_ms(), q, h);
+        logmsg(line);
+        budget--;
+    }
+}
+
 /* File descriptors are recycled, and the faked[] class table was only ever
  * written on open()/open64(). Scene files are opened with fopen64, which does
  * not go through note(), so a scene that landed on a descriptor number
@@ -12737,6 +13009,20 @@ long shim_read(int fd, void *b, unsigned long n)
                 static char *spec = (char *)-1;
                 unsigned nid = (unsigned)(nb_req[0] & 0x3f);
                 if (spec == (char *)-1) spec = getenv("PAD_NB_SW");
+                /* PAD-249: word A = the frames this board received since the
+                 * last poll, this one included - on a board with an encoder
+                 * motor (see nb_rx_count). The PAD_NB_SWA note below predates
+                 * it: the "previous value" it read as a stored zero is the
+                 * game's frame counter, zeroed per poll. */
+                {
+                    unsigned c = nb_rx_count_poll(nid);
+                    if (nb_rx_count_says(nid)) {
+                        p[0] = (unsigned char)c;
+                        p[1] = (unsigned char)(c >> 8);
+                        p[2] = (unsigned char)(c >> 16);
+                        p[3] = (unsigned char)(c >> 24);
+                    }
+                }
                 /* PAD_NB_SWA=<hex32> - word A, bytes 0..3.
                  *
                  * 0x5a43d0 compares A against a per-node previous value at
@@ -13026,12 +13312,24 @@ long shim_read(int fd, void *b, unsigned long n)
              * game has configured a motor on. What MOVES those switches is
              * the motor model (motor_note / motor_tick); this is only the
              * board telling the truth about them. PAD_NB_MOTOR=0 restores the
-             * zero reply and stops the model. */
+             * zero reply and stops the model.
+             *
+             * PAD-249 read the game's side and found this is really a STATUS
+             * word for the motor the request names (nb_req[3]): 0x08 "done",
+             * 0x01 "moving", 0x40/0x80 faults, in both the EncoderMotor and
+             * john_wick's BidirectionalMotor. The switch byte answers the car
+             * because its stops sit on those bits; it is kept for end-stop
+             * motors because it is measured to work there. An ENCODER motor
+             * gets its own status (motor_status). */
             if (nb_req_len > 3) {
                 unsigned nid = (unsigned)(nb_req[0] & 0x3f);
                 if (nb_req[2] == 0x52 && nid < 64 && plen >= 3 &&
-                    nb_motor_cfg[nid] && nb_motor_in_ok[nid] && nb_motor_on())
-                    p[2] = nb_motor_in[nid][0];
+                    nb_motor_cfg[nid]) {
+                    motor_tick(nid);
+                    if (!(plen >= 4 && motor_status(nid, nb_req[3], p)) &&
+                        nb_motor_in_ok[nid] && nb_motor_on())
+                        p[2] = nb_motor_in[nid][0];
+                }
             }
             /* PAD_NB_CREPLY=<cmd>:<hex bytes>[,...] - ONE command's reply
              * payload, byte for byte from payload[0] (PAD-237). PAD_NB_CFILL
@@ -13061,6 +13359,7 @@ long shim_read(int fd, void *b, unsigned long n)
             for (i = 0; i + 2 < n; i++) sum += p[i];
             p[n - 2] = (unsigned char)((0u - sum) & 0xff);
             p[n - 1] = 0;
+            nb_flagwatch_reply(p, (int)n);           /* PAD-249 */
         }
         nb_log("TX-reply", p, (int)n, 0);
         return (long)n;
@@ -13178,6 +13477,8 @@ long shim_write(int fd, const void *b, unsigned long n)
         lcd_publish(nb_req, nb_req_len);        /* item 83: VILLAIN VISION */
         coil_probe(nb_req, nb_req_len);
         nb_trace();
+        nb_rx_count_tx();        /* PAD-249: the board counts it */
+        nb_flagwatch();          /* PAD-249 */
         nb_maybe_poke();
         nb_watch_flags();
         nb_force_status();      /* item 52: readiness-gate test (per TX) */

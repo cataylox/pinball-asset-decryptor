@@ -231,3 +231,129 @@ the feeder's last lines and the switch edges.
 their TROUGH eject 22 times in 40 s from Start (`coils=TROUGH=22`), and
 jurassic_park_the_pin an unnamed node 8 index 1 coil as often (the eject
 index on most titles); deadpool_le never takes Start on any rig.
+
+# An encoder motor: james_bond_le's JETPACK (PAD-249)
+
+## What was asked, and what turned out to be true
+
+The follow-up above asked for encoder PULSES while the jetpack moves, and for
+where inputs above 7 live in the 52 reply. Reading the game answered both,
+and neither was the fix:
+
+- **The 52 reply is not the board's inputs. It is a status word for the motor
+  the request names** (`52 <motor>`). james_bond_le 1.06 reads it at
+  0x5aa23c as two LE16s: bytes 0-1 = the position the board has counted,
+  bytes 2-3 = flags. john_wick's BidirectionalMotor reads the same four bytes
+  the same way (0x4f2f24, flags 0x08 done / 0x80 fault). PAD-237's "byte 2 =
+  raw inputs" answered the car because its stop switches happen to sit on
+  those bit positions; it is left in place for end-stop motors because it is
+  measured to work there, and nothing past bit 7 needs finding.
+- **No encoder pulses.** The board counts the encoder itself. The game never
+  reads the encoder optos, and when it configures the motor it sends the node
+  a cmd 71 mask with those two inputs cleared (0x33b4e0 -> 0x5aa5f8).
+
+## The jetpack's protocol (EncoderMotor, JetPackMotor derives from it)
+
+| cmd | frame (node 9) | what it is |
+|---|---|---|
+| 51 | `51 00 41 00 00 43 42 00 c0 42 41 20 00 28 01 ...` | configure motor 0: home opto input 1 (`0x40\|1`), ENCODER inputs 3 and 2 (payload bytes 4-5 with 0x40). A reversed variant (`c1 ... 41 42`) is sent for the second home |
+| 53 | `53 00 28 20 e8 03` | home: speed 40, accel 32, LE16 time 1000 ms |
+| 55 | `55 00 0a 00 40 e8 03 00` | go to position: LE16 target (signed), speed, LE16 time, flags |
+| 52 | `52 00` -> 4 bytes | this motor's status: LE16 position, then flags 0x01 moving, 0x08 homed and done, 0x40 fault |
+
+The tick (0x33b6b8 / JetPackMotor 0x1e05b8) is a small state machine: config
++ home, config + home again, then "calibrated" and position moves (the
+play routines at 0x1e0244.. ask for 10, 24, 31..40, 33). Every tick it polls
+52, and a reply with **none of 0x01 / 0x08 / 0x40** makes it configure and
+home the motor from scratch. The zero reply did that every tick: 20586 x cmd
+53 in 40 s from Start.
+
+**hwshim.c now plays an encoder motor** (motor_note / motor_tick /
+motor_status): cmd 51 with encoder inputs marks the motor; 53 homes it
+(moving, then after PAD_MOTOR_MS homed at position 0 with the home opto
+made); 55 sends it to a position (moving, the count climbing pro rata, the
+home opto open while away from 0); 52 is answered from that state.
+
+## The rest of the loop was rig-wide: every board re-initialised every 0.7 s
+
+With the status answered the jetpack still homed twice every ~708 ms. Hooks
+found why, one step at a time (PAD_PASS_HOOK / PAD_REG_HOOK):
+
+1. `33aac4` (EncoderMotor home) called every 708 ms from JetPackMotor v[17],
+   itself called from 0x33aba8 - the listener for **event 135**, "re-home the
+   encoder motors on node N".
+2. Event 135 is raised by the node service loop when it re-initialises a
+   board: `34c170` fired every **101 ms** - one board per visit, the whole bus
+   every ~0.7 s - always from the **fault branch** 0x34edb8.
+3. That branch is taken when the `ff` status poll's word B & 0x8010211f. The
+   rig answers `ff` with zeros; the bit came from the game itself: 0x5ae930
+   sets bit 31 of word B when **word A differs from a per-node counter**, and
+   `PAD_REG_HOOK=5ae9f0` showed that counter at 2..167 on every poll.
+4. The counter is the game's count of ADDRESSED frames sent to the board since
+   the last poll (0x5a8068, +1 per frame with byte 0 & 0x80; zeroed after the
+   poll and by cmd f1). A real board reports how many it received; the rig
+   said 0, so every visit read as "this board lost frames".
+
+**The rig now counts what the game counts** (nb_rx_count_tx, per node, byte 0
+& 31, f1 resets it) - and answers it in word A of the `ff` reply **only on a
+board that carries an encoder motor** (nb_rx_count_says). `PAD_NB_RXCOUNT=0`
+answers 0 everywhere again. It also corrects the item-52 note on the `ff`
+reply, which read the stored zero as "the previous value is always 0".
+
+### Why only that board
+
+The first version answered the count on every board, and the whole-library
+sweep failed exactly one build: **batman-1.13 read as stuck on Tech Alerts**.
+It was not - pictures at 90/150/210/270 s show its attract cycling (high
+scores, the Stern ad). What stopped was the constant re-init, and two parts of
+the rig turn out to be built on it for batman's (older, swelf) generation:
+
+- **its lamps.** cmd 70 is what this rig decodes as that generation's
+  base-layer lamp write, and cmd 70 is sent ONLY inside a board init (32
+  entries, one per output). batman's "~109/s through attract" (item 79) was
+  the re-init loop re-sending them every visit. Answer the count and the
+  playfield's lamps for that generation stop changing.
+- **its attract detection.** gamestate.sh's `[led] light show running` counts
+  cmd 70 for that generation (item 79), so status.sh, autoattract.sh and
+  bootcheck.sh all called batman's attract "techalerts".
+
+A real board is not re-initialised every 0.7 s, so both are measuring an
+artifact - but fixing them is their own job (decode that generation's real
+show families, 72/8a/96/9a, and detect attract from them). Until then the
+count is said where its absence is measured to do harm: a board with an
+encoder motor, where every re-init re-homes the motor. Before that motor is
+configured the board still says 0, so its bring-up inits happen as before.
+
+`PAD_NB_FLAGWATCH=<node>` is the instrument left behind: that board's flag
+word and every reply the rig sends it, logged on change.
+
+## Result
+
+james_bond_le 1.06, motorcheck.sh, 40 s from Start:
+
+| rig | cmd 53 sends |
+|---|---|
+| zero reply (`PAD_NB_MOTOR=0`) | 20586 / 19958 / 20272 |
+| PAD-237 end-stop model | 136 (a pair every ~0.7 s) |
+| encoder status only | 136 (re-homed by every board re-init) |
+| encoder status + frame count on node 9 | **2** (the one home the game asks for at Start) |
+
+With the count right node 9 is not re-initialised once its motor is
+configured. The jetpack homes twice at boot, once at game start (event 78, by
+design), and is then sent to position 10 by cmd 55 - the first position move
+the game has made on the rig.
+
+Also fixed on the way: batman-1.13 sends cmd 55 to its END-STOP motor (node 9
+motor 1); the encoder change briefly let that fall into the end-stop model as
+"go to end 1". An end-stop motor ignores 55 again, as under PAD-237.
+
+## Not done
+
+- **jaws_le's shark is not a board motor.** SharkMotor derives from
+  SingleDirectionCoilMotor: a coil runs it and the game reads SHARK POSITION
+  1..7 and the UP/DOWN-MAG switches as it turns. That is a coil-driven mech
+  with position switches - its own model, its own ticket.
+- A motor that faults (0x40) is never simulated; the jetpack never stalls.
+- **The bus-wide re-init.** Every other board is still re-initialised at every
+  service visit (one board per ~101 ms). Stopping it means first giving
+  batman's generation a real lamp decode and attract signal (above).
