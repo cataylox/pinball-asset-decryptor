@@ -31,6 +31,12 @@ Operations (``op`` and its fields)::
     add_text     parent, index, id, name, text, x, y, like, rgba
                                   a new Text node, a copy of the Text node *like* (its font and
                                   size) with *text*, *rgba*, at (x, y)
+    rotate  node, deg, px, py     turn the node's content *deg* degrees clockwise on the screen
+                                  about its local point (px, py)
+    shadow  node, id, dx, dy, mul a drop shadow for a Text node: a copy of the node drawn just
+                                  beneath it (sharing its Text, as the game's own outline and
+                                  fill pairs do), moved (dx, dy) and its colour multiplied by
+                                  *mul* (black, part see-through)
     remove  node                  drop a node an add_* made (stock nodes are hidden instead:
                                   the game's code finds them by name and must still find them)
 
@@ -41,6 +47,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import os
 
 RELDIR = ("images", "scene_textures")
@@ -108,6 +115,11 @@ def add(assets_dir, card, op):
             last["sy"] = round(last.get("sy", last["s"]) * op.get("sy", op["s"]), 6)
         last["s"] = round(last["s"] * op["s"], 6)
         if abs(last["s"] - 1.0) < 1e-6 and abs(last.get("sy", 1.0) - 1.0) < 1e-6:
+            ops.pop()
+    elif (last and last.get("node") == op.get("node") and last["op"] == op["op"] == "rotate"
+          and (last.get("px"), last.get("py")) == (op.get("px"), op.get("py"))):
+        last["deg"] = round(last["deg"] + op["deg"], 4)
+        if abs(last["deg"] % 360.0) < 1e-6:
             ops.pop()
     else:
         ops.append(op)
@@ -245,6 +257,10 @@ def describe(op):
         return "added picture %s" % os.path.basename(op["image"])
     if k == "add_text":
         return 'added text "%s"' % op["text"]
+    if k == "rotate":
+        return "turned %+g°" % op["deg"]
+    if k == "shadow":
+        return "added a drop shadow"
     if k == "remove":
         return "removed"
     return k
@@ -275,6 +291,17 @@ def _scaled(m6, s, px, py, sy=None):
     kx, ky = 1.0 - s, 1.0 - sy
     return (a * s, b * s, c * sy, d * sy,
             tx + kx * a * px + ky * c * py, ty + kx * b * px + ky * d * py)
+
+
+def _rotated(m6, deg, px, py):
+    """Turn the node's content *deg* degrees clockwise on the screen (y points down) about its
+    local point (px, py): the point stays where it was on the glass."""
+    a, b, c, d, tx, ty = m6
+    r = math.radians(deg)
+    cs, sn = math.cos(r), math.sin(r)
+    rx, ry = cs * px - sn * py, sn * px + cs * py
+    return (a * cs + c * sn, b * cs + d * sn, -a * sn + c * cs, -b * sn + d * cs,
+            tx + a * (px - rx) + c * (py - ry), ty + b * (px - rx) + d * (py - ry))
 
 
 def _tint_steps(steps):
@@ -336,7 +363,7 @@ def apply_manifest(man, ops):
         index = _man_index(man)
         k = op.get("op")
         try:
-            if k in ("move", "scale", "visible", "order", "remove", "tint"):
+            if k in ("move", "scale", "visible", "order", "remove", "tint", "rotate", "shadow"):
                 got = index.get(op["node"])
                 if got is None:
                     notes.append("%s: node %s is not in this scene" % (k, op["node"]))
@@ -353,6 +380,20 @@ def apply_manifest(man, ops):
                     n["tr"] = [[f, list(_scaled(m, op["s"], op.get("px", 0), op.get("py", 0),
                                                 op.get("sy")))]
                                for f, m in base]
+                elif k == "rotate":
+                    base = n["tr"] or [[1, [1, 0, 0, 1, 0, 0]]]
+                    n["tr"] = [[f, list(_rotated(m, op["deg"], op.get("px", 0),
+                                                 op.get("py", 0)))]
+                               for f, m in base]
+                elif k == "shadow":
+                    base = n["tr"] or [[1, [1, 0, 0, 1, 0, 0]]]
+                    sh = {"id": int(op["id"]), "name": n["name"] + "_Shadow",
+                          "kf": copy.deepcopy(n["kf"]),
+                          "col": [[f, [m[i] * op["mul"][i] for i in range(4)], a]
+                                  for f, m, a in _tint_steps(n["col"])],
+                          "tr": [[f, list(_moved(m, op["dx"], op["dy"]))] for f, m in base],
+                          "comps": copy.deepcopy(n["comps"]), "added": True}
+                    sibs.insert(sibs.index(n), sh)
                 elif k == "visible":
                     if not op["on"]:
                         n.setdefault("_kf", n["kf"])
@@ -485,7 +526,7 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
         k = op.get("op")
         index = _tree_index(scene)
         try:
-            if k in ("move", "scale", "visible", "order", "remove", "tint"):
+            if k in ("move", "scale", "visible", "order", "remove", "tint", "rotate", "shadow"):
                 nid = fresh.get(op["node"], op["node"])
                 got = index.get(nid)
                 want = names.get(op["node"])
@@ -509,6 +550,24 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
                                                          op.get("px", 0), op.get("py", 0),
                                                          op.get("sy"))))
                                 for f, m in n.tracks]
+                elif k == "rotate":
+                    if not n.tracks:
+                        n.tracks = [(1, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])]
+                    n.tracks = [(f, _m16_with(m, _rotated(_m6_of16(m), op["deg"],
+                                                          op.get("px", 0), op.get("py", 0))))
+                                for f, m in n.tracks]
+                elif k == "shadow":
+                    base = n.tracks or [(1, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])]
+                    sh = T.Node(alloc(), n.name + "_Shadow", n.flag, list(n.keyframes),
+                                [(f, [m[i] * op["mul"][i] for i in range(4)], list(a))
+                                 for f, m, a in _tint_steps(n.colors)],
+                                [(f, _m16_with(m, _moved(_m6_of16(m), op["dx"], op["dy"])))
+                                 for f, m in base],
+                                # the same Text object: the game draws its outline and fill
+                                # pairs from one Text the same way
+                                [T.Component(c.start, c.cls, c.obj) for c in n.components])
+                    fresh[int(op["id"])] = sh.id
+                    sibs.insert(sibs.index(n), sh)
                 elif k == "visible":
                     if not op["on"]:
                         n.keyframes = [(1, 0)]

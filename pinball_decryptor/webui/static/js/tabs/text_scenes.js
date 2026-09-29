@@ -745,6 +745,11 @@ function TreeSide({ t, play, playFrame }) {
         ${num("Height %", p.scale_y, (v) => call("text_scenes.tree_set_size", p.id, null, v), "Stretch it up and down only")}
       </div>
       <div class="tree-row">
+        ${num("Turn °", p.rotate, (v) => call("text_scenes.tree_set_rotation", p.id, v), "How far it is turned from as shipped, in degrees clockwise (0 = as shipped)")}
+        <${Button} size="xs" title="Turn it 90° anticlockwise" onClick=${() => call("text_scenes.tree_rotate", p.id, -90)}>⟲ 90°<//>
+        <${Button} size="xs" title="Turn it 90° clockwise" onClick=${() => call("text_scenes.tree_rotate", p.id, 90)}>⟳ 90°<//>
+      </div>
+      <div class="tree-row">
         <span class="lbl">Tint</span>
         <input type="color" class="tree-color" value=${tint} onInput=${(e) => setTint(e.target.value)}
           onChange=${(e) => call("text_scenes.tree_tint", p.id, e.target.value, p.alpha)} aria-label="Tint" />
@@ -761,6 +766,10 @@ function TreeSide({ t, play, playFrame }) {
         <${Button} size="xs" onClick=${() => call("text_scenes.tree_order", p.id, "back")}>To back<//>
         <${Button} size="xs" onClick=${() => call("text_scenes.tree_reset", p.id)}>${p.added ? "Remove" : "As shipped"}<//>
       </div>
+      ${p.kind === "Text" ? html`<div class="tree-row">
+        <${Button} size="xs" title="A dark copy of this text just beneath it, a few pixels down and right. It is selected after, to move, tint or remove."
+          onClick=${() => call("text_scenes.tree_shadow", p.id)}>Add a drop shadow<//>
+      </div>` : null}
     </div>` : html`<div class="small muted">Click a picture or a line of text in the preview, or a row in Layers.</div>`}
     ${(t.notes || []).length ? html`<div class="small warn-ink">${t.notes.join("; ")}</div>` : null}
   </div>`;
