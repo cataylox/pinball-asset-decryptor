@@ -143,6 +143,9 @@ class BOFManufacturer(Manufacturer):
     games = _GAMES
     capabilities = Capabilities(
         extract=True, write=True, modpack=True, apply_delta=False, iso=False,
+        # Emulate tab (PAD-257): run the .fun's game on this PC against the
+        # emulated boards in tools/bof_emu.
+        emulate_bof=True,
         # Surfaces the "Update version date" control on the Write tab — the
         # game only applies a .fun dated newer than what's installed.
         write_version_date=True,

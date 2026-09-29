@@ -36,7 +36,6 @@ import os
 import select
 import socket
 import time
-import tty
 
 NET, EXP, BICS, AUDIO = "net", "exp", "bics", "audio"
 
@@ -59,6 +58,7 @@ NAMED_POS = {"HOME": 0, "DOWN": 1, "FLUSH": 2, "UP": 3}
 
 class Port:
     def __init__(self, name, spec):
+        import tty      # Linux only; the tests load this module on Windows
         self.name, self.role, self.spec = name, spec["role"], spec
         self.master, slave = os.openpty()
         tty.setraw(slave)

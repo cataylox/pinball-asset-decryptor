@@ -79,8 +79,11 @@ ZONES = [
      ["test_jjp_*.py", "test_webui_emulate_jjp.py", "test_plugins.py",
       "test_rig_leaf_imports.py"]),
     # -- The small plugins -------------------------------------------------
-    ("bof",     ["pinball_decryptor/plugins/bof/"],
-     ["test_bof_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
+    ("bof",     ["pinball_decryptor/plugins/bof/", "tools/bof_emu/",
+                 "pinball_decryptor/webui/emulate_bof_core.py",
+                 "pinball_decryptor/webui/tabs/emulate_bof.py"],
+     ["test_bof_*.py", "test_webui_emulate_bof.py", "test_plugins.py",
+      "test_rig_leaf_imports.py"]),
     ("cgc",     ["pinball_decryptor/plugins/cgc/"],
      ["test_cgc_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
     ("spooky",  ["pinball_decryptor/plugins/spooky/"],

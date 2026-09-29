@@ -1533,6 +1533,39 @@ HELP_CONTENT = {
          "test tone — the audio path is known to pass a plain tone cleanly "
          "while distorting music."),
     ],
+    "Emulate BoF": [
+        ("What it does",
+         "Runs the real Barrels of Fun game on this PC - Dune, Winchester "
+         "Mystery House or Labyrinth - in its own window. The game is a "
+         "native Linux program, so nothing is emulated but the machine's "
+         "boards: the emulator answers the game the way the FAST controller, "
+         "its lighting boards and (on Dune and Winchester) BoF's own mechanism "
+         "board would, so it boots through its hardware check into attract "
+         "mode."),
+        ("Which file to pick",
+         "The .fun update file - the one the machine installs from a USB "
+         "stick. That can be the official file, or one the Write tab built "
+         "from your edits: emulating it first is the quick way to check a mod "
+         "before it goes on a stick. The file is only read."),
+        ("Playing",
+         "While the game runs, the Cabinet card on this tab is the machine's "
+         "buttons and switches: Start, Coin, the flippers (hold the button), "
+         "Launch, the service buttons, and every switch on the playfield. "
+         "Click a switch to press it the way a ball would; right-click to "
+         "hold it. Plunge puts the ball in the shooter lane into play, and "
+         "Drain sends a ball back to the trough. With this tab focused, Z and "
+         "/ (or the Shift keys) are the flippers, 1 is Start, 5 a coin and "
+         "Space Launch."),
+        ("First start is slower",
+         "The first Start on a file unpacks it (2-4 GB) inside the app's "
+         "Linux, which takes a minute or two. The last two builds are kept, "
+         "so starting the same file again is quick; a rebuilt mod is "
+         "unpacked fresh."),
+        ("Settings and high scores",
+         "Each game keeps its own settings, audits and high scores between "
+         "runs, as a machine does. Sound follows Mute; the game's own volume "
+         "is in its service menu."),
+    ],
     "Emulate": [
         ("What it does",
          "Runs the real Stern Spike 2 game binary on this PC — in its own "

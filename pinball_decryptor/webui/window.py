@@ -44,7 +44,7 @@ PHASE_ROW_BY_KEY = {
     "Extract": "extract", "Compare": "extract", "Mod Pack": "extract",
     "Write": "write", "Modes": "write",
     "Emulate": "emulate", "Emulate JJP": "emulate",
-    "Emulate Spike1": "emulate",
+    "Emulate Spike1": "emulate", "Emulate BoF": "emulate",
     "Multi-boot": "multiboot",
     "Replace Audio": None, "Replace Video": None,
     "Replace Images": None, "Replace Text": None, "Scenes": None,
@@ -181,7 +181,8 @@ class WebWindow:
         # to "Ready" when their tab is left.
         self.stop_all_preview_playback()
         if not self._running:
-            emu = ("Emulate", "Emulate JJP", "Emulate Spike1")
+            emu = ("Emulate", "Emulate JJP", "Emulate Spike1",
+                   "Emulate BoF")
             if ((prev_key in emu and svc.key not in emu)
                     or (prev_key == "Multi-boot" and svc.key != "Multi-boot")):
                 self._set_footer(pct=0, busy=False, index=-1,
@@ -389,6 +390,7 @@ class WebWindow:
             "Emulate": g("emulate"),
             "Emulate JJP": g("emulate_jjp"),
             "Emulate Spike1": g("emulate_spike1"),
+            "Emulate BoF": g("emulate_bof"),
             "Multi-boot": g("multiboot"),
             "Modes": self.modes_preview_on(mfr),
         }
@@ -681,7 +683,8 @@ class WebWindow:
         if self._running:
             return
         key = self.current_tab_key()
-        if key not in ("Emulate", "Emulate JJP", "Emulate Spike1"):
+        if key not in ("Emulate", "Emulate JJP", "Emulate Spike1",
+                       "Emulate BoF"):
             return
         if tab is not None and key != tab:
             return
