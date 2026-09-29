@@ -47,6 +47,8 @@ class TreeEditMixin:
         self._tsels = []             # every selected node, in the order picked (PAD-279)
         self._tanchor = None         # where a Shift-click range in Layers starts
         self._tpeek = None           # a selected layer the game is not drawing now, drawn on top
+        self._tforce = {}            # {card: node ids turned on in the preview only} (PAD-276)
+        self._tstate_off = set()     # layers off only because of a switchable part's pick
         self._tdraws = []            # the draw list of the last render
         self._tworlds = {}
         self._tparents = {}
@@ -136,12 +138,20 @@ class TreeEditMixin:
         frame = self._tree_frame(card, stock)
         pins = dict(self._tpins.get(card) or {})
         worlds = {}
-        peek = self._tpeek if self._tpeek is not None and self._tpeek == self._tsel else None
-        draws = scene_eval.draw_list(man, frame, pins=pins, worlds=worlds, show=peek)
-        self._fit_kept(draws, worlds)
-        self._tdraws, self._tworlds, self._tman = draws, worlds, man
         self._tparents = {n["id"]: (par["id"] if par else None)
                           for n, par, _d in _walk_man(man)}
+        peek = self._tpeek if self._tpeek is not None and self._tpeek == self._tsel else None
+        force = self._tree_force_set(card, peek)
+        draws = scene_eval.draw_list(man, frame, pins=pins, worlds=worlds, show=peek,
+                                     force=force)
+        self._fit_kept(draws, worlds)
+        if force or peek is not None:
+            plain = {}
+            scene_eval.draw_list(man, frame, pins=pins, worlds=plain)
+        else:
+            plain = worlds
+        self._tstate_off = self._state_off(man, plain)
+        self._tdraws, self._tworlds, self._tman = draws, worlds, man
         new_scene = card != self._tshown_card
         state = {"tree": True, "animated": False, "screens": []}
         if new_scene:
@@ -168,6 +178,56 @@ class TreeEditMixin:
             self._trunning = True
         if start:
             threading.Thread(target=self._tree_worker, daemon=True, name="scene-tree").start()
+
+    def _tree_force_set(self, card, peek=None):
+        """The layers turned on in the preview (and a selected layer that is off only because
+        of a switchable part's pick), with the sprites they sit in: a picture inside a sprite
+        that is off has to have that sprite on to be seen."""
+        hidden = {op.get("node") for op in self._tree_ops(card) if op["op"] == "visible"}
+        want = set(self._tforce.get(card) or ()) - hidden
+        if peek is not None and peek in self._tstate_off:
+            want.add(peek)
+        out = set()
+        for nid in want:
+            p, hops = nid, 0
+            while p is not None and hops < 256:
+                out.add(p)
+                p, hops = self._tparents.get(p), hops + 1
+        return out - hidden
+
+    def _state_off(self, man, worlds):
+        """Layers the game is not drawing at this moment only because a switchable part (a
+        sprite the game's code picks a look of: the energy meter's Level 0..6) shows another
+        of its looks - there at every moment, unlike a layer the timeline has not reached
+        (DragonRR, PAD-276: "PAD is choosing, not the game")."""
+        from ..plugins.stern import scene_eval
+        seek = {nid for nid, _p, _l, _f in scene_eval.seekable(man)}
+        out = set()
+        for n, par, _d in _walk_man(man):
+            if n["id"] in worlds or par is None:
+                continue
+            if par["id"] in worlds:
+                if par["id"] in seek and any(v for _f, v in n["kf"]):
+                    out.add(n["id"])
+            elif par["id"] in out:
+                out.add(n["id"])
+        return out
+
+    @rpc
+    def tree_force(self, node, on):
+        """Turn a layer that is off only because of a switchable part's pick on (or back off)
+        in the preview, where it sits in the layers; the card is not changed."""
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        node = int(node)
+        got = self._tforce.setdefault(card, set())
+        if on:
+            got.add(node)
+        else:
+            got.discard(node)
+        self._render_tree_preview(self._sel)
+        return True
 
     def _missing_note(self, draws):
         """DragonRR's missing background: pictures the scene draws that this project folder
@@ -429,6 +489,8 @@ class TreeEditMixin:
             kind = _kind_of(man, n)
             layers.append({"id": n["id"], "name": n["name"], "depth": depth, "kind": kind,
                            "drawn": n["id"] in drawn or n["id"] in self._tworlds,
+                           "state_off": n["id"] in self._tstate_off,
+                           "shown": n["id"] in (self._tforce.get(card) or ()),
                            "added": bool(n.get("added")),
                            "hidden": any(op["op"] == "visible" and op.get("node") == n["id"]
                                          for op in ops),

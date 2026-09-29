@@ -22,13 +22,13 @@ pytest.importorskip("PIL")
 CARD = "/g/scene1/scene.radium"
 
 
-def _seed(folder):
+def _seed(folder, data=None):
     """A project with one scene the editor can draw: the synthetic scene of
-    tests/test_stern_scene_tree.py, its manifest, PNGs for its pictures."""
+    tests/test_stern_scene_tree.py (or *data*), its manifest, PNGs for its pictures."""
     from PIL import Image
     from pinball_decryptor.plugins.stern import scene_eval, scene_tree
     from tests.test_stern_scene_tree import scene
-    sc = scene_tree.parse(scene())
+    sc = scene_tree.parse(data or scene())
     tex = folder / "images" / "scene_textures"
     tex.mkdir(parents=True)
     tex2rel = {}
@@ -572,6 +572,60 @@ def test_a_greyed_layer_is_shown_on_top_where_it_is_while_selected(tmp_path):
         assert w.call("text_scenes.tree_select", None)
         tv = _tv(w)
         assert tv["frame"] == 12 and {l["id"] for l in tv["layers"] if l["drawn"]} == on
+        w.call("text_scenes.close")
+
+
+def _meter_scene():
+    """Godzilla's energy meter in small: a sprite the game picks a look of (Level 0, Level 1),
+    one picture per level, and a picture the timeline only reaches at frame 10."""
+    from tests.test_stern_scene_tree import (FLAG, bitmap, cls, node, sprite, texture, u8,
+                                             u32, u64, fs)
+    lib = [
+        u32(3) + cls(1, "Bitmap") + u32(FLAG | 10) + bitmap(3, 8, 4, texture(20)),
+        u32(4) + cls(2, "Sprite") + u32(FLAG | 11) + sprite(4, "", 2, [
+            node(40, "Level0_Art", [u32(1) + cls(1) + u32(10)], kf=((1, 1), (2, 0))),
+            node(41, "Level1_Art", [u32(2) + cls(1) + u32(10)], kf=((1, 0), (2, 1)))],
+            labels=[("Level 0", 1), ("Level 1", 2)]),
+    ]
+    root_kids = [node(50, "Meter", [u32(1) + cls(2) + u32(11)]),
+                 node(51, "Late", [u32(1) + cls(1) + u32(10)], kf=((1, 0), (10, 1)))]
+    root = sprite(2, "", 20, root_kids, labels=[("Start", 1)])
+    return (u8(1) + u64(len(lib)) + b"".join(lib) + u64(0)
+            + u32(1360) + u32(768) + fs(30.0) + fs(0.2, 0.2, 0.2, 1.0) + root)
+
+
+def test_a_part_the_game_picks_is_turned_on_in_the_preview_not_greyed(tmp_path):
+    """DragonRR (PAD-276): the meter's levels are there at every moment - PAD picks which one
+    the preview shows, not the timeline - so they are not greyed: their eye is off, and
+    clicking it turns them on in the preview, where they sit; the card is not changed.  Only
+    a layer the timeline has not reached yet stays greyed."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder, _meter_scene())
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        assert w.call("text_scenes.tree_moment", "f:1")
+        assert _wait(w, lambda: _tv(w)["frame"] == 1)
+        lay = lambda: {l["name"]: l for l in _tv(w)["layers"]}      # noqa: E731
+        ly = lay()
+        on, off = ((ly["Level0_Art"], ly["Level1_Art"]) if ly["Level0_Art"]["drawn"]
+                   else (ly["Level1_Art"], ly["Level0_Art"]))
+        assert not off["drawn"] and off["state_off"] and not on["state_off"]
+        assert not ly["Late"]["drawn"] and not ly["Late"]["state_off"]      # still greyed
+        frame = _tv(w)["frame"]
+        assert w.call("text_scenes.tree_force", off["id"], True)
+        ly = lay()
+        assert ly[off["name"]]["drawn"] and ly[off["name"]]["shown"]
+        assert ly[on["name"]]["drawn"] and _tv(w)["frame"] == frame
+        assert _ops(folder) == []
+        assert w.call("text_scenes.tree_force", off["id"], False)
+        ly = lay()
+        assert not ly[off["name"]]["drawn"] and ly[off["name"]]["state_off"]
+        # clicking its name shows it on top while selected, at this moment
+        assert w.call("text_scenes.tree_select", off["id"])
+        assert _tv(w)["props"]["peek"] and _tv(w)["frame"] == frame
+        assert w.call("text_scenes.tree_select", None)
+        assert lay()[off["name"]]["state_off"]
         w.call("text_scenes.close")
 
 
