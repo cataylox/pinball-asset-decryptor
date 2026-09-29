@@ -8857,6 +8857,129 @@ static void motor_note(const unsigned char *p, int n)
     }
 }
 
+/* ---- PAD-256: A COIL THAT RUNS A MOTOR UNTIL A SWITCH (jaws_le's SHARK) ----
+ *
+ * jaws_le 1.02's shark is not a board motor. SharkMotor derives from
+ * SingleDirectionCoilMotor: an ordinary coil output (SHARK MOTOR UP/DOWN, node
+ * 9 index 0) turns a cam one way round, and two switches say where it is
+ * (SHARK UP-MAG SW input 12, SHARK DOWN-MAG SW input 13). The game does not
+ * time the motor itself - it hands the board a coil RULE and lets the board
+ * stop it. On the wire (rig 2 trace, 2026-09-28):
+ *
+ *   cmd 41 `41 00 5a e8 03 00 .. [26]=00 .. [30]=4c ..`  rule for coil 0:
+ *          power 0x5a, and byte 30 = the input that STOPS it (0x40|12, UP)
+ *   cmd 40 `40 00` (the short, 6-byte frame)             run coil 0 now
+ *   cmd 41 `41 00 00 ...`                                rule cleared
+ *
+ * Byte 26 is the input that FIRES a coil - the same title's RIGHT POP BUMPER
+ * rule carries 0x5d there, input 29, which is that pop bumper's switch - so a
+ * rule with a stop input and no firing input is a motor run to a switch. The
+ * game's move task (0x5134c) then waits up to 10 s for the target switch to
+ * read active (0x571cdc), clears the rule, and retries. Nothing moved the
+ * switches, so from Start it ran the shark for 10 s of every 12.5, for ever:
+ * 11 runs in 120 s, the target DOWN every time after the first two (UP).
+ *
+ * So the board plays the cam: the short 40 starts the coil toward the rule's
+ * stop input; the input the motor last stopped on opens at once (the cam
+ * leaves it) and the stop input closes PAD_MOTOR_MS later, into the MERGE
+ * tagged `m` like PAD-237's car. A rule cleared before that is the coil off:
+ * the move is dropped where it is. The shark starts at neither switch, as the
+ * car starts between its stops.
+ *
+ * NOT this: SHARK POSITION 1..7 (inputs 32..38), which the ticket that asked
+ * for this expected here. They belong to the FIN (FinMotor, the "9g: Serial
+ * Motor Driver Board"), a board-run motor configured by cmd 51 with stops on
+ * inputs 38 and 32 - PAD-237's end-stop model already answers its cmd 53 / 54,
+ * and 90 s from Start the game sent the fin no move at all.
+ *
+ * PAD_COIL_MOTOR=0 turns this off (the comparison run). */
+#define COIL_MOTOR_IDX 16
+
+struct coil_motor {
+    signed char stop;           /* the rule's stop input; -1 = not a motor rule */
+    signed char at;             /* the input it stopped on; -1 = none known     */
+    signed char going;          /* the input it is running to; -1 = idle        */
+    unsigned long due;          /* pad_ms() it gets there                       */
+};
+static struct coil_motor coil_motors[64][COIL_MOTOR_IDX];
+static unsigned char coil_motor_any[64];
+
+static int coil_motor_on(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("PAD_COIL_MOTOR");
+        v = (e && e[0] == '0') ? 0 : 1;
+    }
+    return v;
+}
+
+static void coil_motor_tick(unsigned nid)
+{
+    unsigned k;
+    if (nid >= 64 || !coil_motor_any[nid]) return;
+    for (k = 0; k < COIL_MOTOR_IDX; k++) {
+        struct coil_motor *c = &coil_motors[nid][k];
+        char b[112];
+        if (c->going < 0 || pad_ms() < c->due) continue;
+        motor_switch(nid, c->going, 1);
+        c->at = c->going;
+        c->going = -1;
+        snprintf(b, sizeof b, "[motor] %lu ms node %u coil %u reached its "
+                 "stop switch (input %d made)\n", pad_ms(), nid, k, c->at);
+        motor_say(b);
+    }
+}
+
+/* On the write, beside motor_note: cmd 41 (a coil's rule) and the short
+ * cmd 40 (run that coil now). The 14-byte cmd 40 is coil_publish()'s. */
+static void coil_motor_note(const unsigned char *p, int n)
+{
+    unsigned nid, k;
+    struct coil_motor *c;
+    char b[128];
+    if (n < 6 || !(p[0] & 0x80) || (p[2] != 0x41 && p[2] != 0x40)) return;
+    nid = (unsigned)p[0] & 0x3f;
+    k = p[3];
+    if (nid >= 64 || k >= COIL_MOTOR_IDX || !coil_motor_on()) return;
+    c = &coil_motors[nid][k];
+    if (!coil_motor_any[nid]) {
+        unsigned j;
+        for (j = 0; j < COIL_MOTOR_IDX; j++)
+            coil_motors[nid][j].stop = coil_motors[nid][j].at =
+                coil_motors[nid][j].going = -1;
+        coil_motor_any[nid] = 1;
+    }
+    coil_motor_tick(nid);
+    if (p[2] == 0x41) {
+        signed char stop = -1;
+        if (n >= 31 && (p[30] & 0x40) && !(p[26] & 0x40))
+            stop = (signed char)(p[30] & 0x3f);
+        if (stop == c->stop) return;        /* the board re-init's re-send */
+        if (stop >= 0) {
+            snprintf(b, sizeof b, "[motor] %lu ms node %u coil %u: runs until "
+                     "input %d\n", pad_ms(), nid, k, stop);
+            motor_say(b);
+        } else if (c->going >= 0) {
+            snprintf(b, sizeof b, "[motor] %lu ms node %u coil %u: rule cleared "
+                     "before input %d - stopped\n", pad_ms(), nid, k, c->going);
+            motor_say(b);
+            c->going = -1;
+        }
+        c->stop = stop;
+        return;
+    }
+    if (p[1] != 3 || c->stop < 0) return;   /* only the short 40, on a motor */
+    if (c->going == c->stop || (c->going < 0 && c->at == c->stop)) return;
+    if (c->at >= 0) motor_switch(nid, c->at, 0);         /* the cam leaves it */
+    c->at = -1;
+    c->going = c->stop;
+    c->due = pad_ms() + motor_ms();
+    snprintf(b, sizeof b, "[motor] %lu ms node %u coil %u on, input %d in "
+             "%lu ms\n", pad_ms(), nid, k, c->going, motor_ms());
+    motor_say(b);
+}
+
 /* [sw] - every EDGE in the MERGED switch state, logged at the point the shim
  * consumes it. This is the switch-input instrument the rig lacked: a click on
  * the virtual playfield, a plunge.py sequence and a keyboard flipper all funnel
@@ -13177,6 +13300,7 @@ long shim_read(int fd, void *b, unsigned long n)
                 unsigned char bits[8];
                 if (nid < 64) nb_news[nid] = 0;    /* item 52: news delivered */
                 motor_tick(nid);                   /* PAD-237: a car arriving */
+                coil_motor_tick(nid);              /* PAD-256: the shark */
                 if (sw_scan_bytes(nid, bits)) {
                     if (nid < 64) {            /* PAD-237: the motor status */
                         unsigned q;
@@ -13516,6 +13640,7 @@ long shim_write(int fd, const void *b, unsigned long n)
         led_publish(nb_req, nb_req_len);
         coil_publish(nb_req, nb_req_len);
         motor_note(nb_req, nb_req_len);
+        coil_motor_note(nb_req, nb_req_len);    /* PAD-256 */
         lcd_publish(nb_req, nb_req_len);        /* item 83: VILLAIN VISION */
         coil_probe(nb_req, nb_req_len);
         nb_trace();

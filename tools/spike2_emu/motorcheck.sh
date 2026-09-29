@@ -97,12 +97,23 @@ c40i=$(grep 'cmd=40 ' <<<"$S" | awk '{print substr($NF, 7, 2)}' | sort | uniq -c
        awk '{printf "%s%s:%s", (n++ ? "," : ""), $2, $1}')
 # Every coil on every node, by name, busiest first (PAD-248): a device the
 # game keeps retrying from Start stands out by its count alone.
+# PAD-256: the SHORT cmd 40 (`8N 03 40 <IDX> ..`, 6 bytes; c40 and c40i count
+# it too) runs a coil under its cmd 41 rule until a switch closes - jaws_le's
+# shark motor, a run every 12.5 s from Start (10 s of motor each) while
+# nothing answered it. Split by coil index like c40i.
+c40r=$(grep 'cmd=40 len=6 ' <<<"$S" | awk '{print substr($NF, 7, 2)}' | sort | uniq -c |
+       awk '{printf "%s%s:%s", (n++ ? "," : ""), $2, $1}')
+# ...and the same runs on EVERY node over the whole run, boot and attract
+# included (runs=node:idx:count): jurassic_park_le, led_zeppelin_le,
+# metallica_spike and rush_le run theirs in attract, on nodes 9, 11 and 12.
+runs=$(grep -a '^\[nbts\].* cmd=40 len=6 ' "$GZ" | awk '{sub("node=", "", $3); print $3 ":" substr($NF, 7, 2)}' |
+       sort | uniq -c | awk '{printf "%s%s:%s", (n++ ? "," : ""), $2, $1}')
 coils=$(tail -n +"$L0" "$GZ" | grep -a '^\[nbts\]' | python3 "$RIG/coilcount.py" --min 3)
 bash "$RIG/glshot.sh" "$PAD_LOGDIR/motorcheck.$KEY.png" > /dev/null 2>&1
 # The model's own account, into this build's log (rigbatch keeps the job's
 # output per build; the rig's game log is the next build's by the time anyone
 # reads it). The move frames themselves, first and last few, for the timing.
-grep -a '^\[motor\]' "$GZ" | head -30
+grep -a '^\[motor\]' "$GZ" | head -40
 grep -E 'cmd=5[34] ' <<<"$S" | head -5
 grep -E 'cmd=5[34] ' <<<"$S" | tail -3
 grep -a -i 'drop t' "$PAD_LOGDIR/padball.log" 2>/dev/null | head -20     # PAD-248
@@ -111,7 +122,7 @@ grep -a -i 'drop t' "$PAD_LOGDIR/padball.log" 2>/dev/null | head -20     # PAD-2
 stop
 kill "$WPID" 2>/dev/null
 env=""
-for v in MOTOR_HOLD MOTOR_SETTLE PAD_NB_CREPLY PAD_NB_CFILL PAD_NB_MOTOR PAD_MOTOR_MS PAD_DROP_TARGET PAD_DROP_DOWN; do
+for v in MOTOR_HOLD MOTOR_SETTLE PAD_NB_CREPLY PAD_NB_CFILL PAD_NB_MOTOR PAD_MOTOR_MS PAD_DROP_TARGET PAD_DROP_DOWN PAD_COIL_MOTOR; do
     [ -n "${!v:-}" ] && env="$env $v=${!v}"
 done
-echo "VERDICT $KEY pass started=$started c53=$c53 c54=$c54 c40=$c40 c40i=${c40i:--} coils=$coils$env"
+echo "VERDICT $KEY pass started=$started c53=$c53 c54=$c54 c40=$c40 c40i=${c40i:--} c40r=${c40r:--} runs=${runs:--} coils=$coils$env"

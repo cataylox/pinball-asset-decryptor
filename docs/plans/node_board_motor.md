@@ -420,3 +420,100 @@ attract.** First pass 29 of 33; the four were rerun:
 Motors unchanged (motorcheck.sh, 40 s from Start, every board and `enc`):
 james_bond_le c53 = 2 (the jetpack homes as the game asks), john_wick_le
 c53 = 1, drop target TRIP/RESET c40 = 2 (06:1, 08:1).
+
+# A coil run until a switch: jaws_le's SHARK (PAD-256)
+
+## What was asked, and what turned out to be true
+
+The follow-up above said the shark "reads SHARK POSITION 1..7 and the
+UP/DOWN-MAG switches as it turns". Half right. There are two mechs:
+
+- **The shark** (SharkMotor -> SingleDirectionCoilMotor, jaws_le 1.02): a
+  plain coil output, SHARK MOTOR UP/DOWN (node 9, coil index 0), turns a cam
+  one way round. Its only switches are SHARK UP-MAG SW (input 12) and SHARK
+  DOWN-MAG SW (input 13).
+- **The fin** (FinMotor, "9g: Serial Motor Driver Board"): SHARK POSITION
+  1..7 (inputs 38..32) are its positions. It is a board-run motor - cmd 51
+  configures motor 0 with stops on inputs 38 and 32, the PAD-237 end-stop
+  model already answers its 53 / 54 - and 90 s from Start the game sent it no
+  move at all. Not touched here.
+
+## The shark's protocol (node 9)
+
+| frame | what it is |
+|---|---|
+| `41 00 5a e8 03 00 .. [26]=00 .. [30]=4c ..` (52 bytes) | coil 0's RULE: power 0x5a, byte 30 = the input that STOPS the coil (0x40\|12, UP) |
+| `40 00` (the short, 6-byte cmd 40) | run coil 0 now, under its rule |
+| `41 00 00 ..` | rule cleared |
+
+Byte 26 is the input that FIRES a coil: the same title's RIGHT POP BUMPER
+rule (`41 03 ff 03 .. [14]=18 .. [26]=5d`) carries input 29, the pop
+bumper's own switch. So a rule with a stop input and no firing input is a
+motor run until a switch closes.
+
+The game's move task (0x5134c) builds the rule with a 10 s limit (0x2c0ef4),
+waits for the coil service (0x2c1784) to end the run, then reads the target
+switch (0x571cdc): made = arrived, otherwise it counts an error and tries
+again. On the rig nothing moved either switch, so from Start:
+
+| run (jaws_le 1.02) | shark runs (short cmd 40, coil 0) |
+|---|---|
+| baseline, 120 s from attract | 11 - UP twice, then DOWN every 12.5 s: 10 s of motor, 2.5 s rest |
+| `PAD_COIL_MOTOR=0`, 90 s from Start | 8 |
+| model on, 90 s from Start | **1** (plus the one UP before Start) |
+
+## What the rig does now (hwshim.c, coil_motor_note / coil_motor_tick)
+
+A cmd 41 with byte 30's 0x40 flag set and byte 26's clear marks the coil as a
+motor; the short cmd 40 runs it: the input it last stopped on opens at once
+(the cam leaves it) and the rule's stop input closes `PAD_MOTOR_MS` (600)
+later, into the merge tagged `m` like the car. A rule cleared before that is
+the coil off: nothing arrives. The board re-init's re-send of the same rule
+(PAD-249: every ~0.7 s, until PAD-255 stopped it) and a second run while travelling are not new moves.
+`PAD_COIL_MOTOR=0` turns it off. motorcheck.sh counts the short runs per coil
+(`c40r=`).
+
+On the rig: `[motor] 55136 ms node 9 coil 0 on, input 12 in 600 ms` ...
+`reached its stop switch`, then at 77541 ms the same for input 13 with UP
+opening first (`[sw] 77634 ms -79m`, `78439 ms +80m`). No retry followed.
+
+Proven: `tests/test_spike2_coil_motor.py` (the real functions compiled out of
+hwshim.c, fed jaws_le's frames), the on/off runs above, and the library sweep
+below.
+
+## Every title (library sweep, 2026-09-28)
+
+(Measured before PAD-255 answered the frame count on every board, so the
+re-init was still running; the model does not depend on it either way.)
+
+`rigbatch.sh` over the 33-build list with motorcheck.sh (40 s from Start),
+model on: **33/33 pass**. john_wick_le failed twice on the way (the run ended
+10 s in; then it stalled before the guest started), both before the game ran;
+its rerun passed with the model on and off alike. Five titles send a coil a
+stop-switch rule and run it; `runs=` (motorcheck's new count of the short
+cmd 40 on every node, boot and attract included) on vs `PAD_COIL_MOTOR=0`:
+
+| title | coil (node:index) -> stop inputs | runs on / off |
+|---|---|---|
+| jaws_le 1.02 | 9:0 -> 12 (UP-MAG), 13 (DOWN-MAG) | 1 / 8 after Start (see above) |
+| jurassic_park_le 1.16 | 9:1 -> 22 | 2 / 5 |
+| led_zeppelin_le 1.22 | 9:6 -> 11, then 10 | 1 / 1 |
+| metallica_spike 1.03 | 11:3 -> 5, then 4 | 2 / 2 |
+| rush_le 1.18 | 12:0 -> 4 | 1 / 1 |
+
+So jaws_le and jurassic_park_le were retrying a mech nobody answered; the
+other three move it and do not retry in 40 s either way, and now arrive.
+Which mechs those are was not read out of their games (rush_le's cached
+table names input 4 EXTRA BALL (FRONT LEFT) SWITCH and lists no coil on node
+12, so it is likely stale - PAD-93).
+
+## Not done
+
+- **The game still takes 10 s to see the shark arrive.** It clears each rule
+  exactly 10 s after the run, with or without the model; only then does the
+  move task read the switch. The coil service ends a run on its deadline and
+  nothing found so far ends it sooner - the move task's one early exit waits
+  on a per-position task id (SingleDirectionCoilMotor +32) that was not read
+  out. Whether a real board reports "rule done" in some reply, and where, is
+  open. Cost: anything that waits for the shark hears about it 10 s late.
+- The fin's SHARK POSITION 1..7 between its end stops (above).
