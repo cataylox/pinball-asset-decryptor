@@ -516,9 +516,9 @@ def test_play_draws_each_different_frame_once_and_stops(tmp_path):
         assert w.state("text_scenes")["tree_play"]["frames"] == 20
         assert _wait(w, lambda: (w.state("text_scenes").get("tree_play") or {}).get("done"))
         play = w.state("text_scenes")["tree_play"]
-        assert len(play["map"]) == 20 and 1 <= play["total"] <= 20 and play["fps"] > 0
-        assert len(play["srcs"]) == play["total"] and all(os.path.isfile(p) for p in play["srcs"])
-        assert max(play["map"]) == play["total"] - 1
+        assert len(play["map"]) == 20 and 1 <= len(play["srcs"]) <= 20 and play["fps"] > 0
+        assert all(os.path.isfile(p) for p in play["srcs"]) and play["run"]
+        assert max(play["map"]) == len(play["srcs"]) - 1
         assert w.call("text_scenes.tree_play", False)
         assert w.state("text_scenes")["tree_play"] is None
         assert w.call("text_scenes.tree_play", True)

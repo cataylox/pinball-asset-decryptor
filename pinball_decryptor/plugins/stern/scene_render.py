@@ -805,9 +805,9 @@ def _wraps(d, box_h, step):
     return step > 0 and box_h >= 1.6 * step
 
 
-def _ink_width(fr, font, s):
+def _ink_width(ink_of, s):
     try:
-        return fr.render_text(font, s)[0].size[0]
+        return ink_of(s).size[0]
     except Exception:
         return 0
 
@@ -835,7 +835,7 @@ def text_lines(text, width, wrap, measure):
 
 def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
                 background=None, colors=None, text_edits=None, draws=None, cache=None,
-                split=None, pictures=None, sizes=None):
+                split=None, pictures=None, sizes=None, inks=None):
     """The scene in manifest *man* (:func:`scene_eval.manifest`) at root *frame* as an RGB
     ``PIL.Image`` - every picture with its own place, scale, tilt and fade, in draw order, from
     the project folder's CURRENT PNGs and glyph slices.  *pins* / *hidden* are
@@ -847,7 +847,12 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
     draw order), also returns that node's LAYERS for an editor to move live: a dict of
     ``full`` (the scene, as without *split*), ``under`` (what is drawn before it, over the
     background, RGB), ``sel`` (the node alone) and ``over`` (what is drawn after it), the
-    last two RGBA with straight alpha.  ``full`` is composed from the three, so it is exact."""
+    last two RGBA with straight alpha.  ``full`` is composed from the three, so it is exact.
+
+    *inks*, a dict, keeps every line of text drawn (its glyphs read off disk and laid out) for
+    the next call: a caller drawing many frames of one scene passes the same dict to them all
+    (PAD-261: the Godzilla credits' 98 lines read ~17,000 glyph files per ten frames).  It is
+    the caller's to drop when the glyphs may have changed; without it nothing is kept."""
     try:
         import numpy as np
         from PIL import Image
@@ -902,14 +907,21 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
             align = d.get("align", 1)
             asc = float(d.get("ascent") or font.get("ascent", 0))
             step = float(d.get("line") or 0) or float(font.get("ascent", 0) + font.get("descent", 0))
+            if inks is None:
+                ink_of = lambda s, _f=font: fr.render_text(_f, s)[0]     # noqa: E731
+            else:
+                def ink_of(s, _f=font, _k=(d.get("font") or "", d.get("font_px") or 0)):
+                    if (_k, s) not in inks:
+                        inks[(_k, s)] = fr.render_text(_f, s)[0]
+                    return inks[(_k, s)]
             lines = text_lines(shown, R - L - 2 * _GUTTER, _wraps(d, B - T, step),
-                               lambda s, _f=font: _ink_width(fr, _f, s))
+                               lambda s, _i=ink_of: _ink_width(_i, s))
             mul = tuple(d["mul"][i] * (1.0 if i < 3 else rgba[3]) for i in range(4))
             for k, line in enumerate(lines):
                 if not line.strip():
                     continue
                 try:
-                    ink, _missing = fr.render_text(font, line)
+                    ink = ink_of(line)
                 except Exception:
                     continue
                 ink = _tint(ink, rgba)

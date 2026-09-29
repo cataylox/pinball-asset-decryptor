@@ -75,6 +75,7 @@
 .tree-canvas { position: relative; cursor: default; touch-action: none; outline: none; }
 .tree-canvas:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
 .tree-canvas img { position: absolute; inset: 0; user-select: none; pointer-events: none; }
+.tree-canvas canvas.tree-frame { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .tree-canvas.loading { cursor: progress; }
 .tree-live { transform-origin: 0 0; will-change: transform; }
 /* a redraw on its way: the picture stays, a quiet pill says so (only if it takes a moment) */

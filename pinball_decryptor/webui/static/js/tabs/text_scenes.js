@@ -489,34 +489,62 @@ function cssTf(ops, W, H) {
     : `translate(${px(o.cx)}, ${py(o.cy)}) scale(${o.f}) translate(${px(-o.cx)}, ${py(-o.cy)})`)).join(" ");
 }
 
-// The scene's animation playing (tree_play): its frames drawn once on the server and played
-// here at the scene's own rate, looping; a frame not drawn yet holds the last one.
+// The scene's animation playing (tree_play): its frames drawn on the server one after another
+// and played here at the scene's own rate, looping; a frame not drawn yet holds the last one.
+// Each frame is loaded the moment it is drawn and painted on a canvas only once it has loaded:
+// swapping an <img>'s src at 30 fps showed the old picture while the new one loaded, so a
+// slower machine saw about one frame in five (PAD-261, DragonRR: "plays 22 of the 120").
 function TreePlayer({ s, onFrame }) {
   const play = s.tree_play;
   const t = s.tree_view;
   const W = t.stage[0], H = t.stage[1];
   const [f, setF] = useState(0);
-  const srcsRef = useRef(play.srcs || []);
-  srcsRef.current = play.srcs || [];
+  const [shown, setShown] = useState(false);
+  const cvRef = useRef(null);
+  const imgs = useRef(new Map());                    // frame file -> its Image, loading
+  const playRef = useRef(play);
+  playRef.current = play;
+  useEffect(() => {
+    for (const src of play.srcs || []) {
+      if (src && !imgs.current.has(src)) {
+        const im = new Image();
+        im.src = mediaUrl(src);
+        imgs.current.set(src, im);
+      }
+    }
+  }, [play.srcs]);
   useEffect(() => {
     let i = 0;
     const ms = Math.max(15, Math.round(1000 / (play.fps || 30)));
     const timer = setInterval(() => {
-      const n = srcsRef.current.length;
-      const want = play.map[i];
-      if (want == null || want >= n) {
-        if (play.done || n >= play.total) i = 0;      // (a frame that failed to draw: skip)
-        return;                                      // wait for it to be drawn
+      const p = playRef.current;
+      const want = (p.map || [])[i];
+      if (want == null) {                           // not drawn yet: hold
+        if (p.done) i = 0;                          // (a play cut short loops what it has)
+        return;
+      }
+      const src = (p.srcs || [])[want] || "";
+      const im = src ? imgs.current.get(src) : null;
+      if (src && !(im && im.complete && im.naturalWidth > 0)) return;  // still loading: hold
+      const cv = cvRef.current;
+      if (im && cv) {                               // (a frame that failed to draw: skipped)
+        if (cv.width !== im.naturalWidth || cv.height !== im.naturalHeight) {
+          cv.width = im.naturalWidth;
+          cv.height = im.naturalHeight;
+        }
+        cv.getContext("2d").drawImage(im, 0, 0);
+        cv.setAttribute("data-src", src);
+        setShown(true);
       }
       setF(i);
       onFrame(i + 1);
-      i = (i + 1) % play.frames;
+      i = (i + 1) % p.frames;
     }, ms);
     return () => clearInterval(timer);
-  }, [play.map, play.fps, play.frames, play.done]);
-  const src = (play.srcs || [])[play.map[f]] || "";
+  }, [play.run, play.fps, play.frames]);
   return html`<div class="scenes-canvas tree-canvas" style=${`background:${s.bg_rgb || "#101014"};aspect-ratio:${W} / ${H}`}>
-    ${src ? html`<img src=${mediaUrl(src)} alt="" draggable="false" style="image-rendering:auto" />` : html`<${Drawing} label="Drawing the frames…" />`}
+    <canvas class="tree-frame" ref=${cvRef} style=${shown ? "" : "visibility:hidden"}></canvas>
+    ${shown ? null : html`<${Drawing} label="Drawing the frames…" />`}
     <div class="tree-playing small">Frame ${f + 1} of ${play.frames}</div>
   </div>`;
 }
