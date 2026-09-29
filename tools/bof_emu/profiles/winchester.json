@@ -1,0 +1,1711 @@
+{
+ "title": "Winchester Mystery House",
+ "_source": "GDHarvest_not_harvest_20260429: autoloads/fast.gd, fast_stem.gd (same as Dune's), autoloads/bics.gd (Haunt Handler)",
+ "ports": [
+  {
+   "role": "net",
+   "usb": "1-1",
+   "iface": "1.0",
+   "manufacturer": "FAST Pinball",
+   "product": "Neuron",
+   "vid": "2e8a",
+   "pid": "1074"
+  },
+  {
+   "role": "exp",
+   "usb": "1-1",
+   "iface": "1.2",
+   "manufacturer": "FAST Pinball",
+   "product": "Neuron",
+   "vid": "2e8a",
+   "pid": "1074"
+  },
+  {
+   "role": "bics",
+   "usb": "1-2",
+   "iface": "1.0",
+   "manufacturer": "Arduino LLC",
+   "product": "Arduino Due",
+   "vid": "2341",
+   "pid": "003d",
+   "alias": "bof_worm"
+  }
+ ],
+ "neuron_fw": "02.26",
+ "node_boards": [
+  "0024-2",
+  "3208-2",
+  "3208-2",
+  "0804-2"
+ ],
+ "exp_boards": {
+  "48": "00.44",
+  "b4": "00.44",
+  "84": "00.48",
+  "86": "00.44"
+ },
+ "bics": {
+  "id": "ID:Barrel_of_Interactive_Control_Systems_Haunt_Handler,PAD,EMULATED,v0.6.1",
+  "replies": {
+   "HOME:STEPPER": "HOME:STEPPER ACK",
+   "HOME:STEPPER?": "HOME:STEPPER ACK",
+   "HOME:STEPPER:FAST": "HOME:STEPPER:FAST ACK"
+  },
+  "motors": {
+   "HALL": [
+    "0.0"
+   ]
+  }
+ },
+ "bics_switches": {
+  "98": [
+   "0",
+   "/L"
+  ],
+  "97": [
+   "1",
+   "/L"
+  ],
+  "99": [
+   "2",
+   "/L"
+  ],
+  "100": [
+   "3",
+   "-L"
+  ],
+  "101": [
+   "4",
+   "/L"
+  ],
+  "102": [
+   "5",
+   "/L"
+  ],
+  "19": [
+   "6",
+   "/L"
+  ],
+  "96": [
+   "7",
+   "/L"
+  ]
+ },
+ "balls": 6,
+ "trough_switches": [
+  56,
+  57,
+  58,
+  59,
+  60,
+  61
+ ],
+ "shooter_switch": 63,
+ "coin_door_switch": 12,
+ "trough_eject_driver": 9,
+ "launch_driver": 8,
+ "active_at_boot": [
+  12,
+  56,
+  57,
+  58,
+  59,
+  60,
+  61
+ ],
+ "keys": {
+  "start": 14,
+  "coin": 0,
+  "enter": 4,
+  "exit": 5,
+  "up": 7,
+  "down": 6,
+  "flipper_left": 8,
+  "flipper_right": 21,
+  "flipper_upper_left": 9,
+  "flipper_upper_right": 22,
+  "action": 10,
+  "launch": 20,
+  "tilt": 13,
+  "coin_door": 12
+ },
+ "switches": [
+  {
+   "n": 0,
+   "const": "COIN_1",
+   "tags": [
+    "coin",
+    "history",
+    "cabinet"
+   ],
+   "label": "COIN 1",
+   "opto": false,
+   "x": 85,
+   "y": 645
+  },
+  {
+   "n": 1,
+   "const": "COIN_2",
+   "tags": [
+    "coin",
+    "history",
+    "cabinet"
+   ],
+   "label": "COIN 2",
+   "opto": false,
+   "x": 91,
+   "y": 645
+  },
+  {
+   "n": 2,
+   "const": "COIN_3",
+   "tags": [
+    "coin",
+    "history",
+    "cabinet",
+    "cab_validation"
+   ],
+   "label": "coin_3",
+   "opto": false,
+   "x": 97,
+   "y": 645
+  },
+  {
+   "n": 3,
+   "const": "SWITCH_3",
+   "tags": [
+    "unused"
+   ],
+   "label": "SWITCH 3",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 4,
+   "const": "ENTER",
+   "tags": [
+    "cabinet"
+   ],
+   "label": "ENTER",
+   "opto": false,
+   "x": 57,
+   "y": 645
+  },
+  {
+   "n": 5,
+   "const": "EXIT",
+   "tags": [
+    "cabinet"
+   ],
+   "label": "EXIT",
+   "opto": false,
+   "x": 75,
+   "y": 645
+  },
+  {
+   "n": 6,
+   "const": "DOWN",
+   "tags": [
+    "cabinet"
+   ],
+   "label": "DOWN",
+   "opto": false,
+   "x": 63,
+   "y": 645
+  },
+  {
+   "n": 7,
+   "const": "UP",
+   "tags": [
+    "cabinet"
+   ],
+   "label": "UP",
+   "opto": false,
+   "x": 69,
+   "y": 645
+  },
+  {
+   "n": 8,
+   "const": "FLIPPER_BUTTON_LL",
+   "tags": [
+    "search_refresh_inactive",
+    "cabinet",
+    "cab_validation"
+   ],
+   "label": "LOWER LEFT FLIPPER",
+   "opto": false,
+   "x": 2,
+   "y": 650
+  },
+  {
+   "n": 9,
+   "const": "FLIPPER_BUTTON_UL",
+   "tags": [
+    "cabinet",
+    "cab_validation"
+   ],
+   "label": "UPPER LEFT FLIPPER",
+   "opto": false,
+   "x": 6,
+   "y": 650
+  },
+  {
+   "n": 10,
+   "const": "ACTION_BUTTON",
+   "tags": [
+    "history",
+    "cabinet",
+    "cab_validation"
+   ],
+   "label": "ACTION BUTTON",
+   "opto": false,
+   "x": 142,
+   "y": 645
+  },
+  {
+   "n": 11,
+   "const": "SWITCH_11",
+   "tags": [
+    "unused"
+   ],
+   "label": "SWITCH 11",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 12,
+   "const": "INTERLOCK",
+   "tags": [
+    "history",
+    "cabinet"
+   ],
+   "label": "COIN DOOR INTERLOCK",
+   "opto": false,
+   "x": 44,
+   "y": 645
+  },
+  {
+   "n": 13,
+   "const": "TILT",
+   "tags": [
+    "history",
+    "cabinet",
+    "cab_validation"
+   ],
+   "label": "TILT",
+   "opto": false,
+   "x": 4,
+   "y": 519
+  },
+  {
+   "n": 14,
+   "const": "START",
+   "tags": [
+    "history",
+    "cabinet",
+    "cab_validation"
+   ],
+   "label": "START",
+   "opto": false,
+   "x": 16,
+   "y": 645
+  },
+  {
+   "n": 15,
+   "const": "SWITCH_15",
+   "tags": [
+    "unused"
+   ],
+   "label": "SWITCH 15",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 16,
+   "const": "SWITCH_16",
+   "tags": [
+    "unused"
+   ],
+   "label": "SWITCH 16",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 17,
+   "const": "SWITCH_17",
+   "tags": [
+    "unused"
+   ],
+   "label": "SWITCH 17",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 18,
+   "const": "SWITCH_18",
+   "tags": [
+    "unused"
+   ],
+   "label": "SWITCH 18",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 19,
+   "const": "PLACEBO",
+   "tags": [
+    "unused"
+   ],
+   "label": "PLACEBO",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 20,
+   "const": "LAUNCH",
+   "tags": [
+    "unused"
+   ],
+   "label": "LAUNCH",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 21,
+   "const": "FLIPPER_BUTTON_LR",
+   "tags": [
+    "search_refresh_inactive",
+    "cabinet",
+    "cab_validation"
+   ],
+   "label": "LOWER RIGHT FLIPPER",
+   "opto": false,
+   "x": 303,
+   "y": 650
+  },
+  {
+   "n": 22,
+   "const": "FLIPPER_BUTTON_UR",
+   "tags": [
+    "cabinet",
+    "cab_validation"
+   ],
+   "label": "UPPER RIGHT FLIPPER BUTTON",
+   "opto": false,
+   "x": 307,
+   "y": 650
+  },
+  {
+   "n": 23,
+   "const": "DBV_COIN",
+   "tags": [
+    "history",
+    "cabinet"
+   ],
+   "label": "DOLLAR BILL VALIDATOR",
+   "opto": false,
+   "x": 103,
+   "y": 645
+  },
+  {
+   "n": 24,
+   "const": "ORBIT_LOWER_LEFT",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "LOWER LEFT ORBIT",
+   "opto": false,
+   "x": 21,
+   "y": 305
+  },
+  {
+   "n": 25,
+   "const": "UPPER_LOOP_LOW",
+   "tags": [
+    "search_refresh_active",
+    "history",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "UPPER LOOP - BOTTOM",
+   "opto": false,
+   "x": 46,
+   "y": 94
+  },
+  {
+   "n": 26,
+   "const": "ORBIT_UPPER_LEFT",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "UPPER LEFT ORBIT",
+   "opto": false,
+   "x": 28,
+   "y": 39
+  },
+  {
+   "n": 27,
+   "const": "ORBIT_UPPER_RIGHT",
+   "tags": [
+    "search_refresh_active",
+    "history",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "UPPER RIGHT ORBIT",
+   "opto": false,
+   "x": 240,
+   "y": 24
+  },
+  {
+   "n": 28,
+   "const": "HALL_RIGHT",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "RIGHT HALL ENTRY",
+   "opto": false,
+   "x": 248,
+   "y": 151
+  },
+  {
+   "n": 29,
+   "const": "ORBIT_LOWER_RIGHT",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "LOWER RIGHT ORBIT",
+   "opto": false,
+   "x": 286,
+   "y": 99
+  },
+  {
+   "n": 30,
+   "const": "SWITCH_30",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "unused"
+   ],
+   "label": "SWITCH_30",
+   "opto": true,
+   "x": 0,
+   "y": 0
+  },
+  {
+   "n": 31,
+   "const": "SWITCH_31",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "unused"
+   ],
+   "label": "SWITCH_31",
+   "opto": true,
+   "x": 0,
+   "y": 0
+  },
+  {
+   "n": 32,
+   "const": "RAMP_RIGHT_MADE",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation"
+   ],
+   "label": "RIGHT RAMP MADE",
+   "opto": true,
+   "x": 286,
+   "y": 105
+  },
+  {
+   "n": 33,
+   "const": "ORBIT_MIDDLE_RIGHT",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "ORBIT MIDDLE RIGHT",
+   "opto": false,
+   "x": 283,
+   "y": 66
+  },
+  {
+   "n": 34,
+   "const": "TARGET_HALL_RIGHT",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "RIGHT HALL TARGET",
+   "opto": false,
+   "x": 260,
+   "y": 99
+  },
+  {
+   "n": 35,
+   "const": "SUBWAY_TOWER",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "below",
+    "pf_validation"
+   ],
+   "label": "SUBWAY TOWER",
+   "opto": true,
+   "x": 284,
+   "y": 19
+  },
+  {
+   "n": 36,
+   "const": "TARGET_HALL_TOP",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "TOP HALL TARGET",
+   "opto": false,
+   "x": 204,
+   "y": 39
+  },
+  {
+   "n": 37,
+   "const": "HALL_CENTER",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "CENTER HALL ENTRY",
+   "opto": true,
+   "x": 201,
+   "y": 67
+  },
+  {
+   "n": 38,
+   "const": "TARGET_ANNUNCIATOR",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "ANNUNCIATOR TARGET",
+   "opto": false,
+   "x": 170,
+   "y": 178
+  },
+  {
+   "n": 39,
+   "const": "HALL_LEFT",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "LEFT HALL ENTRY",
+   "opto": true,
+   "x": 158,
+   "y": 147
+  },
+  {
+   "n": 40,
+   "const": "TARGET_HELP",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "HELP TARGET",
+   "opto": false,
+   "x": 243,
+   "y": 438
+  },
+  {
+   "n": 41,
+   "const": "REBOUND_RIGHT",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "RIGHT REBOUND RUBBER",
+   "opto": false,
+   "x": 258,
+   "y": 416
+  },
+  {
+   "n": 42,
+   "const": "FLIPPER_EOS_UR",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "UPPER RIGHT FLIPPER EOS",
+   "opto": false,
+   "x": 241,
+   "y": 283
+  },
+  {
+   "n": 43,
+   "const": "TARGET_HORN",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "HORN TARGET",
+   "opto": false,
+   "x": 244,
+   "y": 336
+  },
+  {
+   "n": 44,
+   "const": "RAMP_RIGHT_SPIRAL_MADE",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation"
+   ],
+   "label": "RIGHT RAMP SPIRAL MADE",
+   "opto": true,
+   "x": 250,
+   "y": 251
+  },
+  {
+   "n": 45,
+   "const": "TARGET_BELL",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "BELL TARGET",
+   "opto": false,
+   "x": 243,
+   "y": 222
+  },
+  {
+   "n": 46,
+   "const": "TARGET_GONG",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "GONG TARGET",
+   "opto": false,
+   "x": 217,
+   "y": 194
+  },
+  {
+   "n": 47,
+   "const": "SUBWAY_HALL",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "below",
+    "pf_validation"
+   ],
+   "label": "SUBWAY HALL",
+   "opto": true,
+   "x": 126,
+   "y": 114
+  },
+  {
+   "n": 48,
+   "const": "OUTLANE_RIGHT",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "ignore_tilted",
+    "pf_validation"
+   ],
+   "label": "RIGHT OUTLANE",
+   "opto": false,
+   "x": 265,
+   "y": 531
+  },
+  {
+   "n": 49,
+   "const": "INLANE_RIGHT",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "ignore_tilted",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "RIGHT INLANE",
+   "opto": false,
+   "x": 241,
+   "y": 512
+  },
+  {
+   "n": 50,
+   "const": "SLING_RIGHT",
+   "tags": [
+    "sling",
+    "ignore_tilted",
+    "history",
+    "search_refresh_active",
+    "ignore_during_search",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "RIGHT SLING",
+   "opto": false,
+   "x": 213,
+   "y": 507
+  },
+  {
+   "n": 51,
+   "const": "FLIPPER_EOS_LR",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "LOWER RIGHT FLIPPER EOS",
+   "opto": false,
+   "x": 170,
+   "y": 583
+  },
+  {
+   "n": 52,
+   "const": "SLING_LEFT",
+   "tags": [
+    "sling",
+    "ignore_tilted",
+    "history",
+    "search_refresh_active",
+    "ignore_during_search",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "LEFT SLING",
+   "opto": false,
+   "x": 71,
+   "y": 510
+  },
+  {
+   "n": 53,
+   "const": "FLIPPER_EOS_LL",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "LOWER LEFT FLIPPER EOS",
+   "opto": false,
+   "x": 119,
+   "y": 583
+  },
+  {
+   "n": 54,
+   "const": "INLANE_LEFT",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "ignore_tilted",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "LEFT INLANE",
+   "opto": false,
+   "x": 41,
+   "y": 511
+  },
+  {
+   "n": 55,
+   "const": "OUTLANE_LEFT",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "ignore_tilted",
+    "pf_validation"
+   ],
+   "label": "LEFT OUTLANE",
+   "opto": false,
+   "x": 16,
+   "y": 512
+  },
+  {
+   "n": 56,
+   "const": "TROUGH1",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "TROUGH 1",
+   "opto": true,
+   "x": 255,
+   "y": 614
+  },
+  {
+   "n": 57,
+   "const": "TROUGH2",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "TROUGH 2",
+   "opto": true,
+   "x": 239,
+   "y": 624
+  },
+  {
+   "n": 58,
+   "const": "TROUGH3",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "TROUGH 3",
+   "opto": true,
+   "x": 221,
+   "y": 634
+  },
+  {
+   "n": 59,
+   "const": "TROUGH4",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "TROUGH 4",
+   "opto": true,
+   "x": 204,
+   "y": 645
+  },
+  {
+   "n": 60,
+   "const": "TROUGH5",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "TROUGH 5",
+   "opto": true,
+   "x": 185,
+   "y": 655
+  },
+  {
+   "n": 61,
+   "const": "TROUGH6",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "TROUGH 6",
+   "opto": true,
+   "x": 168,
+   "y": 665
+  },
+  {
+   "n": 62,
+   "const": "TROUGH_JAM",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "TROUGH_JAM",
+   "opto": true,
+   "x": 255,
+   "y": 604
+  },
+  {
+   "n": 63,
+   "const": "SHOOTER_LANE",
+   "tags": [
+    "search_refresh_inactive",
+    "history",
+    "pf_validation"
+   ],
+   "label": "SHOOTER LANE",
+   "opto": false,
+   "x": 286,
+   "y": 620
+  },
+  {
+   "n": 64,
+   "const": "LOCK2",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "SEANCE LOCK 2",
+   "opto": false,
+   "x": 33,
+   "y": 421
+  },
+  {
+   "n": 65,
+   "const": "LOCK3",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "SEANCE LOCK 3",
+   "opto": false,
+   "x": 34,
+   "y": 404
+  },
+  {
+   "n": 66,
+   "const": "LOCK1",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "SEANCE LOCK 1",
+   "opto": false,
+   "x": 23,
+   "y": 432
+  },
+  {
+   "n": 67,
+   "const": "SWITCH_67",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "unused"
+   ],
+   "label": "SWITCH_67",
+   "opto": true,
+   "x": 0,
+   "y": 0
+  },
+  {
+   "n": 68,
+   "const": "SWITCH_68",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "unused"
+   ],
+   "label": "SWITCH_68",
+   "opto": true,
+   "x": 0,
+   "y": 0
+  },
+  {
+   "n": 69,
+   "const": "SWITCH_69",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "unused"
+   ],
+   "label": "SWITCH_69",
+   "opto": true,
+   "x": 0,
+   "y": 0
+  },
+  {
+   "n": 70,
+   "const": "SWITCH_70",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "unused"
+   ],
+   "label": "SWITCH_70",
+   "opto": true,
+   "x": 0,
+   "y": 0
+  },
+  {
+   "n": 71,
+   "const": "SWITCH_71",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "unused"
+   ],
+   "label": "SWITCH_71",
+   "opto": true,
+   "x": 0,
+   "y": 0
+  },
+  {
+   "n": 72,
+   "const": "INLINE_MIDDLE",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "ignore_during_search",
+    "711",
+    "pf_validation",
+    "echoes",
+    "drop_target"
+   ],
+   "label": "MIDDLE INLINE DROP TARGET",
+   "opto": true,
+   "x": 95,
+   "y": 309
+  },
+  {
+   "n": 73,
+   "const": "INLINE_BACK",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "ignore_during_search",
+    "711",
+    "pf_validation",
+    "echoes",
+    "drop_target"
+   ],
+   "label": "BACK INLINE DROP TARGET",
+   "opto": true,
+   "x": 88,
+   "y": 287
+  },
+  {
+   "n": 74,
+   "const": "INLINE_FRONT",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "ignore_during_search",
+    "711",
+    "pf_validation",
+    "echoes",
+    "drop_target"
+   ],
+   "label": "FRONT INLINE DROP TARGET",
+   "opto": true,
+   "x": 102,
+   "y": 332
+  },
+  {
+   "n": 75,
+   "const": "TARGET_DRUM",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "DRUM TARGET",
+   "opto": false,
+   "x": 88,
+   "y": 349
+  },
+  {
+   "n": 76,
+   "const": "CAPTIVE_BALL",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "CAPTIVE BALL",
+   "opto": false,
+   "x": 49,
+   "y": 381
+  },
+  {
+   "n": 77,
+   "const": "SUBWAY_SEANCE",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "SUBWAY SEANCE",
+   "opto": true,
+   "x": 16,
+   "y": 288
+  },
+  {
+   "n": 78,
+   "const": "VUK_SEANCE",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "ignore_during_search",
+    "below",
+    "pf_validation"
+   ],
+   "label": "SEANCE VUK",
+   "opto": true,
+   "x": 21,
+   "y": 342
+  },
+  {
+   "n": 79,
+   "const": "REBOUND_LEFT",
+   "tags": [
+    "sling",
+    "ignore_tilted",
+    "history",
+    "search_refresh_active",
+    "ignore_during_search",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "LEFT REBOUND RUBBER",
+   "opto": false,
+   "x": 59,
+   "y": 388
+  },
+  {
+   "n": 80,
+   "const": "TARGET_TAMBOURINE",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "TAMBOURINE TARGET",
+   "opto": false,
+   "x": 124,
+   "y": 339
+  },
+  {
+   "n": 81,
+   "const": "DROP_MYSTERY",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "ignore_during_search",
+    "711",
+    "pf_validation",
+    "echoes",
+    "drop_target"
+   ],
+   "label": "MYSTERY DROP TARGET",
+   "opto": true,
+   "x": 139,
+   "y": 283
+  },
+  {
+   "n": 82,
+   "const": "DROP_SPIRITS",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "ignore_during_search",
+    "711",
+    "pf_validation",
+    "echoes",
+    "drop_target"
+   ],
+   "label": "SPIRITS DROP TARGET",
+   "opto": true,
+   "x": 135,
+   "y": 299
+  },
+  {
+   "n": 83,
+   "const": "DROP_ADVANCE13",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "ignore_during_search",
+    "711",
+    "pf_validation",
+    "echoes",
+    "drop_target"
+   ],
+   "label": "ADVANCE 13 DROP TARGET",
+   "opto": true,
+   "x": 130,
+   "y": 318
+  },
+  {
+   "n": 84,
+   "const": "FLIPPER_EOS_UL",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "UPPER LEFT FLIPPER EOS",
+   "opto": false,
+   "x": 102,
+   "y": 193
+  },
+  {
+   "n": 85,
+   "const": "TARGET_TREBEL",
+   "tags": [
+    "search_refresh_active",
+    "history",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "TREBEL TARGET",
+   "opto": false,
+   "x": 101,
+   "y": 260
+  },
+  {
+   "n": 86,
+   "const": "MEMENTO",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "MEMENTO TARGET",
+   "opto": false,
+   "x": 124,
+   "y": 299
+  },
+  {
+   "n": 87,
+   "const": "TARGET_BASS",
+   "tags": [
+    "search_refresh_active",
+    "history",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "BASS TARGET",
+   "opto": false,
+   "x": 116,
+   "y": 267
+  },
+  {
+   "n": 88,
+   "const": "DROP_KEY_Y",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "ignore_during_search",
+    "711",
+    "pf_validation",
+    "echoes",
+    "drop_target"
+   ],
+   "label": "LETTER Y DROP TARGET",
+   "opto": true,
+   "x": 134,
+   "y": 137
+  },
+  {
+   "n": 89,
+   "const": "DROP_KEY_E",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "ignore_during_search",
+    "711",
+    "pf_validation",
+    "echoes",
+    "drop_target"
+   ],
+   "label": "LETTER E DROP TARGET",
+   "opto": true,
+   "x": 116,
+   "y": 131
+  },
+  {
+   "n": 90,
+   "const": "DROP_KEY_K",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "ignore_during_search",
+    "711",
+    "pf_validation",
+    "echoes",
+    "drop_target"
+   ],
+   "label": "LETTER K DROP TARGET",
+   "opto": true,
+   "x": 99,
+   "y": 124
+  },
+  {
+   "n": 91,
+   "const": "UPPER_LOOP_HIGH",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "UPPER LOOP - TOP",
+   "opto": false,
+   "x": 66,
+   "y": 65
+  },
+  {
+   "n": 92,
+   "const": "VUK_HALL",
+   "tags": [
+    "history",
+    "search_refresh_inactive",
+    "ignore_during_search",
+    "below",
+    "pf_validation"
+   ],
+   "label": "HALL VUK",
+   "opto": true,
+   "x": 82,
+   "y": 96
+  },
+  {
+   "n": 93,
+   "const": "TARGET_ENERGY",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "USE ENERGY TARGET",
+   "opto": false,
+   "x": 74,
+   "y": 127
+  },
+  {
+   "n": 94,
+   "const": "SPINNER",
+   "tags": [
+    "711",
+    "pf_validation"
+   ],
+   "label": "SPINNER",
+   "opto": true,
+   "x": 246,
+   "y": 174
+  },
+  {
+   "n": 95,
+   "const": "ORBIT_POST_LEFT",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "LEFT ORBIT POST",
+   "opto": false,
+   "x": 16,
+   "y": 212
+  },
+  {
+   "n": 96,
+   "const": "HALL_HOME",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "no_config",
+    "bics"
+   ],
+   "label": "HALL HOME SWITCH",
+   "opto": true,
+   "x": 171,
+   "y": 98
+  },
+  {
+   "n": 97,
+   "const": "RAMP_SIDE_ENTER",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "no_config",
+    "bics",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "SIDE RAMP ENTER",
+   "opto": true,
+   "x": 59,
+   "y": 209
+  },
+  {
+   "n": 98,
+   "const": "STAIRS",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "no_config",
+    "bics",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "STAIRS TO NOWHERE",
+   "opto": true,
+   "x": 111,
+   "y": 95
+  },
+  {
+   "n": 99,
+   "const": "RAMP_RIGHT_ENTER",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "no_config",
+    "bics",
+    "711",
+    "pf_validation"
+   ],
+   "label": "RIGHT RAMP ENTER",
+   "opto": true,
+   "x": 276,
+   "y": 320
+  },
+  {
+   "n": 100,
+   "const": "RAMP_SIDE_MADE",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "no_config",
+    "bics",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "SIDE RAMP MADE",
+   "opto": false,
+   "x": 16,
+   "y": 110
+  },
+  {
+   "n": 101,
+   "const": "MAGNET_WEB",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "no_config",
+    "bics",
+    "711",
+    "pf_validation"
+   ],
+   "label": "MAGNET_WEB",
+   "opto": true,
+   "x": 126,
+   "y": 30
+  },
+  {
+   "n": 102,
+   "const": "RAMP_LEFT_MADE",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "no_config",
+    "bics",
+    "711",
+    "pf_validation",
+    "echoes"
+   ],
+   "label": "LEFT RAMP MADE",
+   "opto": true,
+   "x": 70,
+   "y": 268
+  }
+ ],
+ "coils": [
+  {
+   "n": 2,
+   "const": "SHAKER",
+   "label": "SHAKER"
+  },
+  {
+   "n": 3,
+   "const": "START_LED",
+   "label": "START BUTTON LED"
+  },
+  {
+   "n": 7,
+   "const": "KNOCKER",
+   "label": "KNOCKER"
+  },
+  {
+   "n": 8,
+   "const": "AUTOPLUNGER",
+   "label": "AUTOPLUNGER"
+  },
+  {
+   "n": 9,
+   "const": "TROUGH_EJECT",
+   "label": "TROUGH EJECT"
+  },
+  {
+   "n": 10,
+   "const": "SLING_RIGHT",
+   "label": "RIGHT SLING"
+  },
+  {
+   "n": 11,
+   "const": "FLIPPER_MAIN_LR",
+   "label": "RIGHT FLIPPER MAIN"
+  },
+  {
+   "n": 12,
+   "const": "FLIPPER_HOLD_LR",
+   "label": "RIGHT FLIPPER HOLD"
+  },
+  {
+   "n": 13,
+   "const": "SLING_LEFT",
+   "label": "LEFT SLING"
+  },
+  {
+   "n": 14,
+   "const": "FLIPPER_MAIN_LL",
+   "label": "LEFT FLIPPER MAIN"
+  },
+  {
+   "n": 15,
+   "const": "FLIPPER_HOLD_LL",
+   "label": "LEFT FLIPPER HOLD"
+  },
+  {
+   "n": 16,
+   "const": "KICKBACK",
+   "label": "KICKBACK"
+  },
+  {
+   "n": 17,
+   "const": "VUK_SEANCE",
+   "label": "SEANCE TABLE VUK"
+  },
+  {
+   "n": 18,
+   "const": "INLINE_DROP_UP",
+   "label": "INLINE DROP BANK UP"
+  },
+  {
+   "n": 19,
+   "const": "LOWER_DROP_BANK_UP",
+   "label": "LOWER DROP BANK UP"
+  },
+  {
+   "n": 20,
+   "const": "FLIPPER_MAIN_UR",
+   "label": "UPPER RIGHT FLIPPER MAIN"
+  },
+  {
+   "n": 21,
+   "const": "FLIPPER_HOLD_UR",
+   "label": "UPPER RIGHT FLIPPER HOLD"
+  },
+  {
+   "n": 22,
+   "const": "FLIPPER_MAIN_UL",
+   "label": "UPPER LEFT FLIPPER MAIN"
+  },
+  {
+   "n": 23,
+   "const": "FLIPPER_HOLD_UL",
+   "label": "UPPER LEFT FLIPPER HOLD"
+  },
+  {
+   "n": 24,
+   "const": "VUK_HALL",
+   "label": "HALL VUK"
+  },
+  {
+   "n": 25,
+   "const": "UPPER_DROP_BANK_UP",
+   "label": "UPPER DROP BANK UP"
+  },
+  {
+   "n": 26,
+   "const": "INLINE_DROP_DOWN",
+   "label": "INLINE DROP BANK DOWN"
+  },
+  {
+   "n": 27,
+   "const": "ORBIT_LEFT_POST",
+   "label": "LEFT ORBIT UP POST"
+  },
+  {
+   "n": 28,
+   "const": "MAGNET_STAIRS",
+   "label": "STAIRS MAGNET"
+  },
+  {
+   "n": 29,
+   "const": "DOOR_PEG",
+   "label": "DOOR TO NOWHERE RELEASE"
+  },
+  {
+   "n": 30,
+   "const": "SEANCE_TABLE_PEG",
+   "label": "SEANCE TABLE DOWN POST"
+  },
+  {
+   "n": 31,
+   "const": "MAGNET_WEB",
+   "label": "SPIDER WEB MAGNET"
+  },
+  {
+   "n": 32,
+   "const": "RAMP_RIGHT_DIVERTER",
+   "label": "RIGHT RAMP DIVERTER"
+  },
+  {
+   "n": 33,
+   "const": "FLASHER_MAIN",
+   "label": "FLASHER BY UPPER LOOP"
+  }
+ ]
+}

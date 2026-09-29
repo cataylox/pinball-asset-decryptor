@@ -107,6 +107,13 @@ Source: "{#ProjectDir}\tools\spike1_emu\*"; DestDir: "{app}\tools\spike1_emu"; \
 Source: "{#ProjectDir}\tools\jjp_emu\*"; DestDir: "{app}\tools\jjp_emu"; \
     Flags: recursesubdirs ignoreversion; \
     Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.raw,*.iso,*.img"
+; The Barrels of Fun rig (tools/bof_emu, PAD-257): the Emulate BoF tab.
+; Unlike the two above it carries one BUILT file, bofhwshim.so - users never
+; compile anything - so .so must never join the excludes.  The decrypted game
+; lives under /var/tmp inside WSL, never here.
+Source: "{#ProjectDir}\tools\bof_emu\*"; DestDir: "{app}\tools\bof_emu"; \
+    Flags: recursesubdirs ignoreversion; \
+    Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.fun"
 
 ; --- Entry point + bundled launcher --------------------------------------
 Source: "{#ProjectDir}\Pinball Asset Decryptor.pyw"; DestDir: "{app}"; Flags: ignoreversion

@@ -1533,6 +1533,46 @@ HELP_CONTENT = {
          "test tone — the audio path is known to pass a plain tone cleanly "
          "while distorting music."),
     ],
+    "Emulate BoF": [
+        ("What it does",
+         "Runs the real Barrels of Fun game on this PC - Dune, Winchester "
+         "Mystery House or Labyrinth - in its own window. The game is a "
+         "native Linux program, so nothing is emulated but the machine's "
+         "boards: the emulator answers the game the way the FAST controller, "
+         "its lighting boards and (on Dune and Winchester) BoF's own mechanism "
+         "board would, so it boots through its hardware check into attract "
+         "mode."),
+        ("Which file to pick",
+         "The .fun update file - the one the machine installs from a USB "
+         "stick. That can be the official file, or one the Write tab built "
+         "from your edits: emulating it first is the quick way to check a mod "
+         "before it goes on a stick. The file is only read."),
+        ("Playing",
+         "When the game is ready its switch window opens beside it: the "
+         "game's own playfield drawing with every switch on it, and a list "
+         "of them all by name. Hold a switch with the mouse (a flipper, a "
+         "ball resting in a scoop); right-click to latch it until you "
+         "right-click again. Plunge puts the ball in the shooter lane into "
+         "play, Drain sends one back to the trough, and Coin door opens or "
+         "closes it. With that window focused, Z and / (or the Shift keys) "
+         "are the flippers, 1 is Start, 5 a coin, Space Launch, P Plunge and "
+         "D Drain. Closed it? \"Switches window\" on this tab brings it "
+         "back. The game's own window can be moved and resized like any "
+         "other; the picture scales to fit."),
+        ("Cancel",
+         "While a game is starting the Start button is Cancel. A build on a "
+         "slow or busy drive can take a long time to unpack; Cancel stops "
+         "it and throws the half-unpacked copy away."),
+        ("First start is slower",
+         "The first Start on a file unpacks it (2-4 GB) inside the app's "
+         "Linux, which takes a minute or two. The last two builds are kept, "
+         "so starting the same file again is quick; a rebuilt mod is "
+         "unpacked fresh."),
+        ("Settings and high scores",
+         "Each game keeps its own settings, audits and high scores between "
+         "runs, as a machine does. Sound follows Mute; the game's own volume "
+         "is in its service menu."),
+    ],
     "Emulate": [
         ("What it does",
          "Runs the real Stern Spike 2 game binary on this PC — in its own "

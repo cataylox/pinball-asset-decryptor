@@ -47,6 +47,7 @@ PROJECT_FIELDS = (
     ("emulate_topper", "emulate._topper_var", "bool", True),
     ("jjp_emulate_iso", "jjp_emulate_iso_var", "path", ""),
     ("spike1_emulate_card", "spike1_emulate_card_var", "path", ""),
+    ("bof_emulate_fun", "bof_emulate_fun_var", "path", ""),
     ("compare_a", "compare_a_var", "path", ""),
     ("compare_b", "compare_b_var", "path", ""),
     ("partition_image", "partition_image_var", "path", ""),
@@ -776,7 +777,8 @@ class App:
         settings = getattr(self, "_settings", None) or {}
         out = {k: settings[k] for k in (
             "emulate_card", "emulate_savestates", "emulate_overrides",
-            "jjp_emulate_iso", "spike1_emulate_card") if k in settings}
+            "jjp_emulate_iso", "spike1_emulate_card",
+            "bof_emulate_fun") if k in settings}
         mfr = getattr(self, "_current_mfr", None)
         section = (settings.get("manufacturers") or {}).get(
             getattr(mfr, "key", ""), {}) if mfr is not None else {}
@@ -5280,6 +5282,13 @@ class App:
         if s1_var is not None:
             try:
                 self._settings["spike1_emulate_card"] = s1_var.get().strip()
+            except Exception:
+                pass
+        # The BoF emulator's .fun, its own key likewise (PAD-257).
+        bof_var = getattr(self.window, "bof_emulate_fun_var", None)
+        if bof_var is not None:
+            try:
+                self._settings["bof_emulate_fun"] = bof_var.get().strip()
             except Exception:
                 pass
         # Every per-project field, globally: the fallback for having no

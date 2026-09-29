@@ -94,6 +94,12 @@ class Capabilities:
     # it is era-gated within the Stern plugin (Spike 2 sets ``emulate``, the
     # Spike 1 era sets this).  See gui/spike1_emulate_tab.py and tools/spike1_emu.
     emulate_spike1: bool = False
+    # Emulate tab for Barrels of Fun.  Its own flag for the same reason as
+    # the two above: a fourth rig (tools/bof_emu) - a native x86-64 Godot game
+    # whose only missing piece is the USB serial hardware (FAST Neuron,
+    # expansion LED bus, BoF's BICS board), which the rig answers.  No key,
+    # no CPU emulation.  See webui/tabs/emulate_bof.py.
+    emulate_bof: bool = False
     # Multi-boot tab (item 90): build ONE SD card that carries several
     # complete game images and a boot-time menu (the code selector in
     # tools/spike2_emu/codeselect) - stock code and a custom build on the

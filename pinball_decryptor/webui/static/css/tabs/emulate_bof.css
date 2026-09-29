@@ -1,0 +1,3 @@
+/* Emulate (Barrels of Fun): the shared Emulate layout.  The switches live in
+   their own window (tools/bof_emu/bofpf.py). */
+@import url("./emulate_jjp.css");
