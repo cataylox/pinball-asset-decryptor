@@ -8741,6 +8741,128 @@ static int motor_status(unsigned nid, unsigned k, unsigned char *p)
     return 1;
 }
 
+/* ---- PAD-259: A SPINNING DISC (james_bond_60th_le's ODDJOB DISC) ---------
+ *
+ * The disc is read by an absolute angle sensor on a node board, and the game
+ * never reads its ten `Angle Sensor 0..9` switch rows - driving those (item
+ * 86's disc.py) moved nothing. It asks the board, and only when the board
+ * says there is something to read. Read out of james_bond_60th_le 1.11:
+ *
+ *   cmd 61 `61 20 0f 00`  -> 4 bytes    builder 0x4b0164: the payload is the
+ *                                       sensor's first input BIT on that node
+ *                                       and a u16 threshold (15, clamped 4..512)
+ *     reply u16 w0: & 0x3ff the angle, 1024 counts a turn (the test screen
+ *                   shows w0 * 360 / 1024); 0xc00 set = throw the reading away
+ *     reply s16 w1: speed; the test screen's Rpm is its peak * 4.6875
+ *
+ *   input bit+11 (Angle Sensor Threshold): 0x3ab37c, on every switch scan,
+ *     compares it with the level it saw last; a 0->1 edge while the module is
+ *     idle is "the angle moved past the threshold - read it", one cmd 61. It
+ *     then forces the bit to 1 in its own copy, so the board has to drop it
+ *     and raise it again for the next reading.
+ *   input bit+10 (Weak): any change = resync, no motion. Left alone here.
+ *   0x3ab498: a reading counts as motion only when the circular |angle - last|
+ *     is over 15 counts, and 0xc0fec turns motion into disc steps (DISC SPIN
+ *     DIFFICULTY / DISC SENSITIVITY THRESHOLD): about 250 counts a step at
+ *     the defaults.
+ *
+ * So the board is played by the Threshold input: RIP it (swspin.py, or a
+ * right-hold on it in the playfield window) and it toggles every scan of the
+ * node; every rising edge is one cmd 61, and every cmd 61 that follows an edge
+ * turns the disc PAD_DISC_STEP counts (default 24, so 15 < step: every read is
+ * motion) and reports it. A cmd 61 with no edge before it is the game's
+ * field-strength refresh (7 reads at boot with the FS output set) and keeps
+ * the zero reply it always had, which the test screen reads as Field Strength
+ * 0 (Normal).
+ *
+ * The node and bit come from the game's own request, so nothing here is per
+ * title. PAD_DISC=0 restores the zero reply. */
+static struct {
+    unsigned char on;           /* a cmd 61 has named the sensor           */
+    unsigned char nid, bit;     /* where: the node and its first input bit */
+    unsigned char thr;          /* bit+11 as the last scan reported it     */
+    unsigned char owed;         /* a rising edge went out, not yet read    */
+    unsigned short angle;       /* 0..1023                                 */
+    unsigned long reads, edges;
+} nb_disc;
+
+static int nb_disc_on(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("PAD_DISC");
+        v = !(e && e[0] == '0');
+    }
+    return v;
+}
+
+static int nb_disc_step(void)
+{
+    static int v;
+    if (!v) {
+        const char *e = getenv("PAD_DISC_STEP");
+        v = e && *e ? atoi(e) : 24;
+        if (v == 0) v = 24;
+        if (v > 511) v = 511;
+        if (v < -511) v = -511;
+    }
+    return v;
+}
+
+/* The scan of the disc's node just went out: did the Threshold input rise? */
+static void disc_scan(unsigned nid, const unsigned char bits[8])
+{
+    unsigned b;
+    unsigned char lvl;
+    if (!nb_disc.on || nid != nb_disc.nid) return;
+    b = (unsigned)nb_disc.bit + 11;
+    if (b >= 64) return;
+    lvl = (unsigned char)((bits[b >> 3] >> (b & 7)) & 1);
+    if (lvl && !nb_disc.thr) {
+        nb_disc.owed = 1;
+        nb_disc.edges++;
+    }
+    nb_disc.thr = lvl;
+}
+
+/* The cmd 61 reply, into p[0..3]. */
+static void disc_reply(unsigned nid, const unsigned char *req, unsigned char *p)
+{
+    int step = nb_disc_step();
+    if (!nb_disc_on() || nid >= 64) return;
+    if (!nb_disc.on || nb_disc.nid != nid || nb_disc.bit != req[3]) {
+        char b[128];
+        nb_disc.on = 1;
+        nb_disc.nid = (unsigned char)nid;
+        nb_disc.bit = req[3];
+        nb_disc.thr = 0;
+        nb_disc.owed = 0;
+        snprintf(b, sizeof b, "[disc] %lu ms node %u: angle sensor from input "
+                 "%u, threshold input %u, step %d counts\n", pad_ms(), nid,
+                 req[3], req[3] + 11u, step);
+        logmsg(b);
+    }
+    nb_disc.reads++;
+    if (!nb_disc.owed) return;          /* field-strength read: zeros */
+    nb_disc.owed = 0;
+    nb_disc.angle = (unsigned short)((nb_disc.angle + 1024 + step) & 0x3ff);
+    p[0] = (unsigned char)(nb_disc.angle & 0xff);
+    p[1] = (unsigned char)(nb_disc.angle >> 8);
+    p[2] = (unsigned char)(step & 0xff);
+    p[3] = (unsigned char)((step >> 8) & 0xff);
+    {
+        static int budget = 64;
+        if (budget > 0 || (nb_disc.reads & 1023) == 0) {
+            char b[112];
+            if (budget > 0) budget--;
+            snprintf(b, sizeof b, "[disc] %lu ms angle %u (read %lu, edge %lu)"
+                     "\n", pad_ms(), nb_disc.angle, nb_disc.reads,
+                     nb_disc.edges);
+            logmsg(b);
+        }
+    }
+}
+
 static void motor_tick(unsigned nid)
 {
     unsigned k;
@@ -13306,6 +13428,7 @@ long shim_read(int fd, void *b, unsigned long n)
                         unsigned q;
                         for (q = 0; q < 8; q++) nb_motor_in[nid][q] = bits[q];
                         nb_motor_in_ok[nid] = 1;
+                        disc_scan(nid, bits);  /* PAD-259: the Oddjob disc */
                     }
                     /* Same trace as [cabchg], for the node bus half. A burst of
                      * 27 playfield switches was seen flipping together at 35 s
@@ -13496,6 +13619,9 @@ long shim_read(int fd, void *b, unsigned long n)
                         nb_motor_in_ok[nid] && nb_motor_on())
                         p[2] = nb_motor_in[nid][0];
                 }
+                /* PAD-259: a spinning disc's angle sensor */
+                if (nb_req[2] == 0x61 && nid < 64 && plen >= 4)
+                    disc_reply(nid, nb_req, p);
             }
             /* PAD_NB_CREPLY=<cmd>:<hex bytes>[,...] - ONE command's reply
              * payload, byte for byte from payload[0] (PAD-237). PAD_NB_CFILL

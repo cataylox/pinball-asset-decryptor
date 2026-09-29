@@ -1100,6 +1100,21 @@ def load_switch_list():
     return trough.load_list(os.path.join(TDIR, "switch_list.txt"))
 
 
+#: PAD-259: a spinning disc (james_bond_60th_le's Oddjob disc) is read by an
+#: angle sensor whose board raises this input when the angle moved. It has no
+#: playfield position, so the key panel offers a hold-to-spin button that RIPS
+#: it (hwshim.c nb_disc turns the disc on every edge). Found by name.
+DISC_SWITCH = "angle sensor threshold"
+
+
+def disc_switch_id():
+    """The title's disc Threshold switch id, or None for a title with no disc."""
+    for r in load_switch_list():
+        if r["name"].strip().lower() == DISC_SWITCH:
+            return r["id"]
+    return None
+
+
 def inventory(switch_list=None, positioned=None, leds=None, fixtures=None,
               coils=None):
     """THE TITLE'S INVENTORY, BOTH VIEWS: how many switches, lamps and coils
@@ -2018,6 +2033,7 @@ class KeyPanel:
         self.clear_action = (next(a for a in WINDOW_ACTIONS
                                   if a[1] == "swexercise.py")
                              if on_action is not None else None)
+        self.disc_id = disc_switch_id()
         self.dirty = True
 
     # ---- what the page draws ------------------------------------------------
@@ -2044,7 +2060,8 @@ class KeyPanel:
                 "trough_keys": ("/".join(self._trough_row["keys"])
                                 + " = all six in / out"
                                 if self._trough_row else None),
-                "balls": self.ball_dots.spec() if self.ball_dots else None}
+                "balls": self.ball_dots.spec() if self.ball_dots else None,
+                "disc": self.disc_id}
 
     def dyn(self):
         return {"rows": self._drawn, "svc": self._svc_drawn,

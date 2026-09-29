@@ -84,7 +84,8 @@ def main(argv=None):
         "RIGHT INLANE", "LEFT OUTLANE", "RIGHT OUTLANE", "POP BUMPER 1",
         "POP BUMPER 2", "LEFT RAMP ENTER", "RIGHT RAMP ENTER", "RIGHT SCOOP",
         "SPINNER", "TARGET 1", "TARGET 2", "TARGET 3", "TARGET 4",
-        "CENTER LOOP", "START BUTTON", "ACTION BUTTON", "COIN DOOR CLOSED"]
+        "CENTER LOOP", "START BUTTON", "ACTION BUTTON", "COIN DOOR CLOSED",
+        "ANGLE SENSOR THRESHOLD"]   # PAD-259: a spinning disc, no position
     rows, nid = [], 40
     for i, name in enumerate(names):
         if name.startswith("TROUGH"):
@@ -102,7 +103,8 @@ def main(argv=None):
                 f.write("%d %d %d %d %s\n" % r)
     dev, img = [], "Test/scaled_playfield"
     for k, (sid, num, node, bit, name) in enumerate(rows):
-        if name in ("START BUTTON", "ACTION BUTTON", "COIN DOOR CLOSED"):
+        if name in ("START BUTTON", "ACTION BUTTON", "COIN DOOR CLOSED",
+                    "ANGLE SENSOR THRESHOLD"):
             continue
         if name.startswith("TROUGH"):
             x, y = 190 + int(name.split()[1]) * 12, H - 40
