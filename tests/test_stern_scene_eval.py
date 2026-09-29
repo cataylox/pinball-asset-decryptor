@@ -311,3 +311,25 @@ def test_a_sprite_that_slides_in_rests_where_it_stops_on_the_screen():
     m2 = man([N(1, "Meter", [2])], {2: held, 9: big}, frames=3)
     d, = E.draw_list(m2, 1)
     assert E.outline(d)[0][0] == 20
+
+
+def test_an_entrance_rests_where_it_leads_and_plays_from_its_start():
+    """DragonRR: Battle Select never showed the selected kaiju's tile in colour, and the
+    Godzilla logo showed only its first flame. A sprite whose first label begins an entrance
+    (FadeIn / Reveal / Enter ...) rests on the first later label that is not part of it (or
+    the entrance's own end); Play runs the entrance from its start and holds there."""
+    frames = [N(10 + i, "F%d" % i, [9], kf=((1, 0), (i + 1, 1), (i + 2, 0)) if i < 9 else ((1, 0), (10, 1)))
+              for i in range(10)]
+    logo = {"kind": "Sprite", "frames": 10, "labels": [["LogoReveal_Start", 1], ["LogoReveal_End", 10]],
+            "kids": frames}
+    m = man([N(1, "Logo", [2])], {2: logo, 9: BMP}, frames=12)
+    assert E.entrance_rest(logo) == (1, 10)
+    assert [d["path"][-1] for d in E.draw_list(m, 1)] == ["F9"]                    # at rest: whole
+    assert [d["path"][-1] for d in E.draw_list(m, 1, play=True)] == ["F0"]         # playing
+    assert [d["path"][-1] for d in E.draw_list(m, 5, play=True)] == ["F4"]
+    assert [d["path"][-1] for d in E.draw_list(m, 12, play=True)] == ["F9"]        # holds
+    picker = {"labels": [["Ebirah_FadeIn_Start", 1], ["Ebirah_FadeIn_End", 4],
+                         ["Ebirah_Selected_Start", 5], ["Ebirah_Selected_End", 9]]}
+    assert E.entrance_rest(picker) == (1, 5)
+    states = {"labels": [["Locked", 1], ["Completed", 2], ["Tokyo", 3]]}
+    assert E.entrance_rest(states) is None                                          # not an entrance

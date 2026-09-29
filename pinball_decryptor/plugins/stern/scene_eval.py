@@ -30,6 +30,7 @@ A transform here is the 2-D affine ``(a, b, c, d, tx, ty)``: ``x' = a x + c y + 
 from __future__ import annotations
 
 import os
+import re
 
 IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
 NO_TINT = ((1.0, 1.0, 1.0, 1.0), (0.0, 0.0, 0.0, 0.0))
@@ -211,7 +212,7 @@ def first_visible(node):
 
 
 def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=None,
-              worlds=None, _settled=None):
+              worlds=None, _settled=None, play=False):
     """Every picture and line of text *man* draws at root frame *frame* (default:
     :func:`default_frame`), in draw order.  *pins* ``{node id: frame}`` seeks a nested sprite
     (what the game's code does with labels); *hidden* node ids are not drawn (what code
@@ -257,6 +258,12 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
         if n["id"] in pins:
             return max(1, min(frames, int(pins[n["id"]])))
         if o.get("labels"):
+            if play:
+                # the scene PLAYING (the Scenes tab's Play): an entrance runs from its start
+                # as the scene's time passes and holds where it leads
+                ent = entrance_rest(o)
+                if ent is not None:
+                    return max(1, min(frames, min(ent[0] + (f - first_visible(n)), ent[1])))
             key = (id(o), tuple(round(v, 1) for v in w_of[n["id"]]))
             if key not in settled:
                 settled[key] = settled_frame(man, o, world=w_of[n["id"]], _settled=settled)
@@ -325,6 +332,28 @@ def _score(man, drawn):
 _SETTLE_TRIES = 40
 
 
+#: a label that begins an ENTRANCE (a fade in, a slide in, a reveal): the game plays it and
+#: then goes on to the sprite's real resting state
+_ENTRANCE = re.compile(r"fade.?in|enter|reveal|intro|appear|slide.?in", re.I)
+
+
+def entrance_rest(o):
+    """``(start, rest)`` when *o*'s first label begins an entrance (``Ebirah_FadeIn_Start``,
+    ``Enter Animation Start``, ``LogoReveal_Start``): *rest* is the first later label that is
+    not part of it (``Ebirah_Selected_Start``, ``Energy Meter Onscreen``), or the entrance's
+    own last label when nothing follows (``LogoReveal_End``).  ``None`` otherwise."""
+    named = sorted(((f, n) for n, f in o.get("labels") or ()), key=lambda x: x[0])
+    if len(named) < 2 or not _ENTRANCE.search(named[0][1] or ""):
+        return None
+    start = named[0][0]
+    last = start
+    for f, n in named[1:]:
+        if not _ENTRANCE.search(n or ""):
+            return start, f
+        last = f
+    return start, last
+
+
 def settled_frame(man, o, world=None, _settled=None):
     """The frame a labelled sprite rests on when nothing seeks it: within its FIRST label's
     span, the frame where the most of its elements are fully drawn (Battle Select's kaiju
@@ -334,10 +363,18 @@ def settled_frame(man, o, world=None, _settled=None):
     entrance (the HUD's power meter sliding in from the left, DragonRR): it rests instead on
     the first later label where it holds still, fully on the screen, with as much drawn -
     frame 15, ``Energy Meter Onscreen``, where the game keeps it, not frame 7 half off the
-    glass."""
+    glass.
+
+    A first label that NAMES an entrance (a fade in, a reveal) says the same outright: the
+    sprite rests where the entrance leads (:func:`entrance_rest`) - Battle Select's picker on
+    ``Ebirah_Selected_Start`` (the selected kaiju's tile in colour, as on the machine), the
+    Godzilla logo on ``LogoReveal_End`` (the whole logo, not the first flame of it)."""
     labels = sorted(f for _n, f in o.get("labels") or ())
     if not labels:
         return 1
+    ent = entrance_rest(o)
+    if ent is not None:
+        return ent[1]
     frames = max(1, int(o.get("frames") or 1))
     lo = labels[0]
     hi = next((f for f in labels if f > lo), frames + 1)

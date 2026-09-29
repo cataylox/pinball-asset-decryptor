@@ -255,7 +255,7 @@ class TreeEditMixin:
             for f in range(1, job["frames"] + 1):
                 if state["cancel"]:
                     return
-                d = scene_eval.draw_list(job["man"], f, pins=job["pins"])
+                d = scene_eval.draw_list(job["man"], f, pins=job["pins"], play=True)
                 if not (uniq and scene_eval._same(d, uniq[-1])):
                     uniq.append(d)
                 index.append(len(uniq) - 1)
