@@ -444,7 +444,7 @@ HELP_CONTENT = {
          "handed to the running game on the fly: a scene the game loads each time it shows "
          "it (most mode and message screens) changes the next time it comes up, and the tag "
          "under the preview says so; one the game loads when it starts (the score display, "
-         "Battle Select) changes after a restart. Lines of W's (or AAA) are the game's own placeholders "
+         "Battle Select) changes after a restart. Untick \"Include my Scenes tab edits\" (under \"Apply my replaced assets on top\") to run the card with your other replacements but the scenes as they were. Lines of W's (or AAA) are the game's own placeholders "
          "for text it fills in while it runs, such as high score initials: the game writes the "
          "player's letters there, so they are as wide as the widest name can be."),
         ("Size limits",
