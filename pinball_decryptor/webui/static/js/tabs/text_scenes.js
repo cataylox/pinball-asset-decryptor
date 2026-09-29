@@ -743,7 +743,7 @@ function TreeSide({ t, play, playFrame }) {
         title=${play ? "Stop, and go back to the frame you were on" : "Play the scene's animation at its own speed (it loops)"}
         onClick=${() => call("text_scenes.tree_play", !play)}>${play ? "Stop" : "Play"}<//>` : null}
     </div>
-    ${play && !play.done ? html`<span class="small muted">${play.total ? `Preparing frames ${(play.srcs || []).length} of ${play.total}…` : "Working out the frames…"}</span>` : null}
+    ${play && !play.done ? html`<span class="small muted">${(play.map || []).length ? `Drawing frame ${play.map.length} of ${play.frames}…` : "Working out the frames…"}</span>` : null}
     ${(t.states || []).length ? html`<details class="tree-states">
       <summary class="small">States the game picks (${t.states.length})</summary>
       ${t.states.map((st) => html`<label key=${st.node} class="tree-state" title=${st.path}>
