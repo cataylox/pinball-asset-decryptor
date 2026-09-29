@@ -3,8 +3,8 @@
     python scripts/shot_pad279.py <repo> <project> <out_dir> <prefix>
 
 Serves <repo> on a settings copy whose Stern project is <project> (only read: the rig selects,
-never edits), opens Scenes on Godzilla's KAIJU BATTLE SELECT, clicks one picture in the Layers
-list, Ctrl-clicks a second and Shift-clicks a third further down, and writes:
+never edits), opens Scenes on Godzilla's KAIJU BATTLE SELECT, clicks one line of text in the Layers
+list and Ctrl-clicks the other lines of text on the screen, and writes:
 
 - <prefix>_multiselect.png  the page after the clicks
 - <prefix>_notes.txt        what the page reports as selected
@@ -52,23 +52,23 @@ def main():
                       state()["text_scenes"].get("frames"), 90)
             time.sleep(1.5)
             tv = state()["text_scenes"]["tree_view"]
-            hit_ids = {h["id"] for h in tv["hits"]}
-            picks = [l["id"] for l in tv["layers"]
-                     if l["id"] in hit_ids and l["kind"] in ("Bitmap", "Text")]
-            a, b, c = picks[0], picks[1], picks[min(4, len(picks) - 1)]
-            notes.append("rows clicked: %s, ctrl %s, shift %s" % (a, b, c))
+            texts = []
+            for h in tv["hits"]:
+                if h["kind"] == "text" and h["id"] not in texts:
+                    texts.append(h["id"])
+            picks = texts[:4]
+            notes.append("text rows clicked (the first plain, the rest with Ctrl): %s" % picks)
 
             def row(n):
                 r = page.locator('.tree-layers [data-node="%d"] .sc-t' % n)
                 r.scroll_into_view_if_needed()
                 return r
-            row(a).click()
-            rig._wait(lambda: state()["text_scenes"]["tree_view"]["sel"] == a, 20)
+            row(picks[0]).click()
+            rig._wait(lambda: state()["text_scenes"]["tree_view"]["sel"] == picks[0], 20)
             time.sleep(0.8)
-            row(b).click(modifiers=["Control"])
-            time.sleep(1.2)
-            row(c).click(modifiers=["Shift"])
-            time.sleep(1.2)
+            for n in picks[1:]:
+                row(n).click(modifiers=["Control"])
+                time.sleep(1.2)
             rig._wait(lambda: not state()["text_scenes"].get("tree_busy"), 30)
             time.sleep(1.5)
             page.mouse.move(5, 995)                     # no tooltip over the list
