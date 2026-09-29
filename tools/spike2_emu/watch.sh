@@ -458,7 +458,16 @@ if [ "$(id -u)" != 0 ]; then
     nv_bad=""
     for p in "$ROOT/data/nv/$GAME" "$ROOT/data/nvram-$GAME.bin"; do
         [ -e "$p" ] || continue
-        [ -O "$p" ] || nv_bad="$nv_bad $p"
+        [ -O "$p" ] || { nv_bad="$nv_bad $p"; continue; }
+        # THE FILES INSIDE, NOT ONLY THE FOLDER (PAD-259). The game writes its
+        # own record files mode 000 and gets past that as root in its namespace
+        # - which overrides permissions only on files this user owns. One
+        # root-owned mode-000 00000008.crc32 left in LKRAM by an elevated run
+        # was enough for FATAL 256 on james_bond_60th_le, under a folder this
+        # check passed. Only a file the game cannot even READ is refused: a
+        # root-owned but readable one has not been seen to stop a title.
+        f=$(find "$p" ! -user "$(id -u)" ! -readable -print -quit 2>/dev/null)
+        [ -n "$f" ] && nv_bad="$nv_bad $f"
     done
     if [ -n "$nv_bad" ]; then
         echo "[watch] REFUSING: this title's NVRAM is not owned by $(id -un):$nv_bad" >&2
