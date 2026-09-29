@@ -216,3 +216,58 @@ def test_a_long_idle_loop_settles_without_drawing_every_frame():
     draws = E.draw_list(m, rest)
     assert time.time() - t < 5.0
     assert 1 <= rest <= 40 and draws and all(d["path"][-1] == "Blink" for d in draws)
+
+
+
+def test_a_line_wraps_in_its_box_where_its_flag_says_and_breaks_at_newlines():
+    """DragonRR's Battle Select: the machine draws "USE FLIPPERS TO / CHANGE BATTLE" on two
+    lines inside a box too narrow for one; the preview drew one long line.  A Text whose first
+    flag byte is set wraps at its rect's width (at spaces; a too-long word stays whole), every
+    Text breaks at a \\n, and a manifest from before the flags were recorded wraps a box tall
+    enough for two lines."""
+    measure = len
+    assert R.text_lines("USE FLIPPERS TO CHANGE MONSTER", 16, True, measure) == \
+        ["USE FLIPPERS TO", "CHANGE MONSTER"]
+    assert R.text_lines("USE FLIPPERS TO CHANGE MONSTER", 16, False, measure) == \
+        ["USE FLIPPERS TO CHANGE MONSTER"]
+    assert R.text_lines("PARTICIPATE IN\nLOCAL TOURNAMENTS!", 99, False, measure) == \
+        ["PARTICIPATE IN", "LOCAL TOURNAMENTS!"]
+    assert R.text_lines("A SUPERCALIFRAGILISTIC B", 5, True, measure) == \
+        ["A", "SUPERCALIFRAGILISTIC", "B"]
+    assert R._wraps({"flags": [1, 1]}, 30, 36) and not R._wraps({"flags": [0, 0]}, 300, 36)
+    assert R._wraps({}, 82, 36) and not R._wraps({}, 51, 36)       # older manifests
+
+
+def test_the_manifest_carries_a_texts_flags_to_the_draw():
+    from pinball_decryptor.plugins.stern import scene_tree
+    from tests.test_stern_scene_tree import scene
+    sc = scene_tree.parse(scene())
+    m = E.manifest(sc, {})
+    assert m["v"] == E.MANIFEST_VERSION >= 3
+    texts = [o for o in m["objects"].values() if o.get("kind") == "Text"]
+    assert texts and all(isinstance(o.get("flags"), list) and len(o["flags"]) == 2 for o in texts)
+    draws = [d for d in E.draw_list(m, 1) if d["kind"] == "text"]
+    assert draws and all("flags" in d for d in draws)
+
+
+def test_battle_select_wraps_its_instructions_like_the_machine():
+    """On the real card (skipped without it): the two instruction lines each take two rows
+    inside their boxes, as DragonRR's emulator screenshot shows."""
+    import json
+    proj = r"C:\tmp\pad251\projL"
+    path = os.path.join(proj, "images", "scene_textures", "scene_tree.json")
+    if not os.path.isfile(path):
+        pytest.skip("needs the PAD-251 Godzilla project copy")
+    trees = json.load(open(path, encoding="utf-8"))
+    man = next((m for c, m in trees.items() if "cac32730" in c), None)
+    if man is None or man.get("v", 0) < 3:
+        pytest.skip("the project copy's manifest predates the text flags")
+    draws = E.draw_list(man, E.default_frame(man))
+    fonts = fontrender.load_fonts(proj)
+    for want in ("USE FLIPPERS TO CHANGE MONSTER", "USE ACTION BUTTON TO SELECT"):
+        d = next(x for x in draws if x["kind"] == "text" and x["text"] == want)
+        img = np.asarray(R.render_tree(proj, man, draws=[d], fonts=fonts))
+        ys = np.where(img[..., :3].max(axis=2).max(axis=1) > 120)[0]
+        rows = np.split(ys, np.where(np.diff(ys) > 4)[0] + 1)
+        assert len(rows) == 2, (want, [(r[0], r[-1]) for r in rows])
+        assert 30 <= rows[1][0] - rows[0][0] <= 42          # one declared line (36) apart

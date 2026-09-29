@@ -33,7 +33,7 @@ import os
 
 IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
 NO_TINT = ((1.0, 1.0, 1.0, 1.0), (0.0, 0.0, 0.0, 0.0))
-MANIFEST_VERSION = 2
+MANIFEST_VERSION = 3              # 3: a Text's two flag bytes (the first wraps)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -104,7 +104,10 @@ def manifest(scene, tex2rel=None, font_of=None, asset2rel=None):
                    # a styled game-font VARIANT (GameFont_Primary ...) draws its atlas's own
                    # colours: the Text's rgba is ignored (emulator, every flag combination);
                    # the node's colour track still tints it
-                   "styled": bool(size.get("variant"))}
+                   "styled": bool(size.get("variant")),
+                   # the Text's two flag bytes: the first set = the line WRAPS at its rect's
+                   # width (Battle Select's "USE FLIPPERS TO / CHANGE BATTLE", on the machine)
+                   "flags": [int(v) for v in (b.get("flags") or (0, 0))]}
         elif k == "Shape":
             out = {"kind": k, "rect": [round(v, 3) for v in b["rect"]],
                    "fill": obj(b["bitmap"])}
@@ -289,7 +292,8 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
                             align=o["align"], rgba=o["rgba"], font=o.get("font", ""),
                             font_px=o.get("font_px", 0), font_name=o.get("font_name", ""),
                             spacing=o.get("spacing", [0, 0]), ascent=o.get("ascent", 0),
-                            line=o.get("line", 0), styled=o.get("styled", False)))
+                            line=o.get("line", 0), styled=o.get("styled", False),
+                            flags=o.get("flags")))
         elif k == "Video":
             out.append(dict(common, kind="video", name=o["name"], w=o["w"], h=o["h"]))
         elif k == "Spine":

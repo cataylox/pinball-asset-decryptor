@@ -187,12 +187,17 @@ OVR_ON = ("Your edits are patched into copies of just the card files they "
 #: edits reached the emulator).  The mode maker's part is only named while its preview is on.
 OVR_CARRIES = ("It carries everything a Write would put on the card: replaced files, text, "
                "and the scene edits made on the Scenes tab{modes}.")
+OVR_CARRIES_NO_SCENES = ("It carries what a Write would put on the card{modes2}, except the "
+                         "Scenes tab's edits (their tick is off).")
 OVR_CARRIES_MODES = ", and this project's modes"
 
 
-def ovr_carries(scene_edits=0, scenes=0, modes_on=False):
+def ovr_carries(scene_edits=0, scenes=0, modes_on=False, scenes_on=True):
     """The line under the opt-in naming what Start applies, with this project's scene edit
     count when it has any."""
+    if not scenes_on:
+        return OVR_CARRIES_NO_SCENES.format(
+            modes2=" (replaced files, text%s)" % (OVR_CARRIES_MODES if modes_on else ""))
     text = OVR_CARRIES.format(modes=OVR_CARRIES_MODES if modes_on else "")
     if scene_edits:
         text += " This project has %d scene edit%s in %d scene%s." % (

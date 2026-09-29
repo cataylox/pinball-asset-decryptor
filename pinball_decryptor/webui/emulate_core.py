@@ -417,7 +417,7 @@ def _is_card(rec, st, path):
 
 
 def overrides_reason(manifest, card_path, assets_dir, fingerprint,
-                     run_card=None):
+                     run_card=None, scene_edits=True):
     """Why the staged override set cannot be reused, or ``""`` if it can.
 
     A sentence rather than a bool: every one of these is worth saying out loud
@@ -451,6 +451,9 @@ def overrides_reason(manifest, card_path, assets_dir, fingerprint,
         return "it was built from a different assets folder"
     if str(manifest.get("assets_fingerprint") or "") != fingerprint:
         return "your assets folder has changed since it was built"
+    if bool(manifest.get("scene_edits", True)) != bool(scene_edits):
+        return ("the Scenes tab's edits were switched %s since it was built"
+                % ("on" if scene_edits else "off"))
     return ""
 
 

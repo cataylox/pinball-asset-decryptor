@@ -448,6 +448,9 @@ _KEEP_EXTRACTS = threading.local()
 # with every other writer's patches), so the Scenes tab can rebuild that one scene for a
 # running game (:func:`scene_live_bytes`).  Unset outside write_overrides.
 _SCENE_BASES = threading.local()
+# PAD-251: the Emulate tab can run a set WITHOUT the Scenes tab's edits (its own tick); set only
+# around write_overrides' patch computation.
+_SKIP_SCENE_EDITS = threading.local()
 
 
 class keep_card_extracts:
@@ -6098,7 +6101,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     layout_edits = _changed_radium_text_layouts(assets_dir)
     # PAD-251: the Scenes window's tree edits (move, resize, layer, hide, add)
     from . import scene_edit as _scene_edit
-    tree_edits = _scene_edit.load(assets_dir)
+    tree_edits = ({} if getattr(_SKIP_SCENE_EDITS, "on", False)
+                  else _scene_edit.load(assets_dir))
     # The game's own modes (item 145): staged timers / awards of the modes the
     # game shipped with - word patches in the game ELF, and the table's
     # operator-setting defaults (a battle timer) in the same ELF.
@@ -8856,7 +8860,7 @@ def card_title_index(path):
 
 
 def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
-                    cancel=None, label=None, run_card=None, sound_ok=None):
+                    cancel=None, label=None, run_card=None, sound_ok=None, scene_edits=True):
     """Build an OVERRIDE SET: the card files the user's edits touch, patched,
     and nothing else — so the emulator can run those edits without a rebuild.
 
@@ -8939,6 +8943,7 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         # for the next one (_extract_inputs_kept)
         _KEEP_EXTRACTS.on = bool(getattr(_KEEP_EXTRACTS, "wanted", False))
         _SCENE_BASES.store = scene_bases = {}
+        _SKIP_SCENE_EDITS.on = not scene_edits
         try:
             writes, counts, grow_plan, audio_mode, valpatch_mode = _compute_patches(
                 disk_f, parts, assets_dir, log, progress, cancel, label=label,
@@ -8950,6 +8955,7 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         finally:
             _KEEP_EXTRACTS.on = False
             _SCENE_BASES.store = None
+            _SKIP_SCENE_EDITS.on = False
         if writes is None:                  # cancelled mid-compute
             _rmtree_grow_plan(grow_plan)
             return None, None, None, None
@@ -9171,6 +9177,8 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         "valpatch": valpatch_mode[0] if valpatch_mode else "",
         "files": records,
         "removed": removed,
+        # PAD-251: whether the Scenes tab's edits are in this set (the Emulate tab's tick)
+        "scene_edits": bool(scene_edits),
     }
     if modes_out:
         manifest["modes"] = modes_out

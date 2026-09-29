@@ -236,3 +236,20 @@ def test_a_running_game_gets_its_scene_rebuilt_from_the_sets_base(tmp_path):
     assert n == 1 and got == want and got != data
     assert engine.scene_loads_on_demand(card)
     assert not engine.scene_loads_on_demand("/godzilla_le/assets/lcd/auto_loaded/x/scene.radium")
+
+
+def test_each_scene_says_whether_its_edits_are_on_a_card_yet(tmp_path):
+    """DragonRR: colour the scene list by what is changed and not written yet (orange) and
+    what the last Write put on the card (green)."""
+    from pinball_decryptor.plugins.stern import scene_edit as E
+    a = str(tmp_path)
+    E.add(a, "c1", {"op": "move", "node": 1, "dx": 5, "dy": 0})
+    assert E.scene_states(a) == {"c1": "edited"}                      # no Write yet
+    E.mark_built(a)
+    assert E.scene_states(a) == {"c1": "written"}
+    E.add(a, "c2", {"op": "visible", "node": 2, "on": False})
+    assert E.scene_states(a) == {"c1": "written", "c2": "edited"}
+    E.clear(a, "c1")                                                   # back as shipped...
+    assert E.scene_states(a)["c1"] == "edited"                        # ...not on the card yet
+    E.mark_built(a)
+    assert E.scene_states(a) == {"c2": "written"}

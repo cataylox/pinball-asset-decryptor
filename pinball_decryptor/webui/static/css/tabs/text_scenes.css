@@ -135,3 +135,13 @@ html.bph-760 .scenes-page, html.bp-1180 .scenes-page { overflow: auto; }
 html.bph-760 .scenes-card { flex: 0 0 auto; height: 780px; }
 html.bp-1180 .scenes-card { flex: 0 0 auto; height: 980px; }
 .scenes-prep-bar .prog { background: var(--line); }
+.scenes-warn { flex: 0 0 auto; margin: 0; padding: 7px 10px; }
+/* a scene's state (DragonRR): orange = changed, not written to a card yet; green = written */
+.sc-name { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.sc-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; vertical-align: middle; }
+.sc-dot.edited { background: var(--warn); }
+.sc-dot.written { background: var(--ok); }
+.scenes-list .tr.sc-edited { box-shadow: inset 3px 0 0 var(--warn); }
+.scenes-list .tr.sc-written { box-shadow: inset 3px 0 0 var(--ok); }
+.sc-legend { gap: 6px; align-items: center; margin-top: -2px; }
+.sc-legend .sc-dot.written { margin-left: 8px; }

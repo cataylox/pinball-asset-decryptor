@@ -335,7 +335,8 @@ class TextScenesService(TreeEditMixin):
                  exporting=False, bulk=False, rebuilding=False,
                  rebuild_msg="", layout_dialog=None, tips=TIPS,
                  tree=False, tree_view=None, tree_layers=None, tree_busy=False,
-                 tree_loading=False, tree_img_rev=0, preparing=None, tree_live=None)
+                 tree_loading=False, tree_img_rev=0, preparing=None, tree_live=None,
+                 card_note="", pic_note="")
 
     def is_open(self):
         return self._alive
@@ -444,9 +445,49 @@ class TextScenesService(TreeEditMixin):
         self._tree_reset()
         self._fonts = None
         self._text_changes = None
-        self.set(hint=HINT if self._scenes else HINT_EMPTY)
+        self.set(hint=HINT if self._scenes else HINT_EMPTY, card_note="")
         self._refresh_list(preselect, focus_text)
         self._auto_trees()
+        self._check_card()
+
+    def _project_games(self):
+        """The game folder(s) this project's scenes are on (``godzilla_le``), from their
+        card paths."""
+        return {d.replace("\\", "/").strip("/").split("/")[0].lower()
+                for d in self._scenes if d.strip("/")}
+
+    def _check_card(self):
+        """DragonRR: the Extract tab can name one game (Godzilla) while the project folder
+        holds another's extract (Kong), and nothing said so.  The Extract tab's card is read
+        for its title (its .sidx names, milliseconds) off the UI thread; a project of another
+        game gets a warning over the preview."""
+        card = self.card_image_path()
+        games = self._project_games()
+        if not card or not os.path.isfile(card) or not games:
+            return
+        assets = self.assets_dir
+
+        def work():
+            try:
+                from ..plugins.stern import engine
+                names = engine.card_title_index(card)
+            except Exception:                        # noqa: BLE001
+                names = ()
+            titles = {n.lower().rsplit(".", 1)[0].split("-")[0] for n in names}
+            self.ctx.loop.post(self._card_checked, assets, card, games, titles)
+
+        threading.Thread(target=work, daemon=True, name="scene-card").start()
+
+    def _card_checked(self, assets, card, games, titles):
+        if assets != self.assets_dir or not titles or games & titles:
+            return
+        self.set(card_note=(
+            "This project folder holds the scenes of %s, but the card on the Extract tab is "
+            "%s (%s). What you see and edit here is %s's. To work on %s, open its own "
+            "project folder (the project menu at the top), or extract that card into a new "
+            "one." % (" / ".join(sorted(games)), " / ".join(sorted(titles)),
+                      os.path.basename(card), " / ".join(sorted(games)),
+                      " / ".join(sorted(titles)))))
 
     def _auto_trees(self):
         """PAD-251: a project extracted before the scene editor has previews but no
@@ -456,11 +497,18 @@ class TextScenesService(TreeEditMixin):
         if self._rebuild is not None or not self._scenes:
             return
         tex = os.path.join(self.assets_dir, "images", "scene_textures")
+        upgrade = False
         if os.path.isfile(os.path.join(tex, "scene_tree.json")):
-            return
+            # a manifest from an older editor (before text flags, say) still draws, a little
+            # less like the machine: re-read it quietly when the card is at hand
+            if self._tree_version() >= self._tree_version_now():
+                return
+            upgrade = True
         if not os.path.isfile(os.path.join(tex, "radium_images.txt")):
             return
         card = self.card_image_path()
+        if upgrade and (not card or not os.path.isfile(card)):
+            return
         if not card or not os.path.isfile(card):
             self.set(rebuild_msg="To edit the scenes, set the Extract tab's Input to this "
                                  "project's card image and press Re-read from card.")
@@ -468,7 +516,39 @@ class TextScenesService(TreeEditMixin):
         if self._auto_tried == (self.assets_dir, card):
             return                  # read once already (it failed: its message is showing)
         self._auto_tried = (self.assets_dir, card)
-        self.rebuild(quiet=True)
+        self.rebuild(quiet="upgrade" if upgrade else True)
+
+    def _tree_version(self):
+        trees = self._load_trees() or {}
+        for man in trees.values():
+            try:
+                return int(man.get("v") or 0)
+            except (TypeError, ValueError, AttributeError):
+                return 0
+        return 0
+
+    @staticmethod
+    def _tree_version_now():
+        from ..plugins.stern import scene_eval
+        return scene_eval.MANIFEST_VERSION
+
+    def _scene_states(self):
+        """``{scene dir: "edited" | "written"}`` (DragonRR: colour the list by what is not
+        written to a card yet and what is)."""
+        try:
+            from ..plugins.stern import scene_edit
+            return {card.replace("\\", "/").rsplit("/", 1)[0]: st
+                    for card, st in scene_edit.scene_states(self.assets_dir).items()}
+        except Exception:                            # noqa: BLE001
+            return {}
+
+    def _restate_list(self):
+        """The list's colours again (after an edit, a Reset, a Write), rows unchanged."""
+        rows = self.store.get(self.ns, "scenes") or []
+        states = self._scene_states()
+        new = [dict(r, state=states.get(r["d"], "")) for r in rows]
+        if new != rows:
+            self.set(scenes=new)
 
     def _sorted_dirs(self):
         key = _SORT_KEYS.get(self._sort_col, _SORT_KEYS["#0"])
@@ -498,6 +578,7 @@ class TextScenesService(TreeEditMixin):
             self._search = ""
             q = ""
         rows = []
+        states = self._scene_states()
         for d in self._sorted_dirs():
             sc = self._scenes[d]
             if q and q not in self._haystack(d):
@@ -505,7 +586,8 @@ class TextScenesService(TreeEditMixin):
             rows.append({"d": d, "label": sc["label"],
                          "imgs": len(sc["images"]), "fonts": len(sc["fonts"]),
                          "texts": len(sc["texts"]),
-                         "vids": len(sc["videos"])})
+                         "vids": len(sc["videos"]),
+                         "state": states.get(d, "")})
         self._listed = [r["d"] for r in rows]
         want = preselect if preselect in self._listed else (
             self._listed[0] if self._listed else None)
@@ -1188,7 +1270,7 @@ class TextScenesService(TreeEditMixin):
         self._tshown_card = None
         self.set(tree=False, tree_view=None, tree_layers=None, tree_busy=False,
                  tree_loading=False)
-        if self._rebuild is not None and self._rebuild.get("quiet"):
+        if self._rebuild is not None and self._rebuild.get("quiet") is True:
             self._render_preview_idle()
             return
         card, layout = scene_render.layout_for_scene_dir(self._layouts,
@@ -1508,6 +1590,8 @@ class TextScenesService(TreeEditMixin):
             if self._fonts is None:
                 from ..plugins.stern import fontrender as fr
                 self._fonts = fr.load_fonts(self.assets_dir)
+            pictures = scene_render.pending_pictures(self.assets_dir)
+            sizes = scene_render.picture_sizes(self.assets_dir)
             for i, d in enumerate(dirs):
                 if state["cancel"]:
                     break
@@ -1524,7 +1608,8 @@ class TextScenesService(TreeEditMixin):
                         img = scene_render.render_tree(
                             self.assets_dir, man, fonts=self._fonts, background=bg,
                             colors=self._pending_colors(tcard),
-                            text_edits=self._pending_texts(tcard, None))
+                            text_edits=self._pending_texts(tcard, None),
+                            pictures=pictures, sizes=sizes)
                     except Exception:                # noqa: BLE001
                         img = None
                     layout = None
@@ -1607,9 +1692,11 @@ class TextScenesService(TreeEditMixin):
                 "folder was extracted from — the scene layouts are read back "
                 "off the card.")
             return False
-        state = self._rebuild = {"cancel": False, "quiet": bool(quiet)}
-        self.set(rebuilding=True, rebuild_msg="" if quiet else "Reading the card…")
-        if quiet:
+        state = self._rebuild = {"cancel": False, "quiet": quiet or False}
+        self.set(rebuilding=True, rebuild_msg=(
+            "Re-reading the scenes for the latest editor…" if quiet == "upgrade"
+            else "" if quiet else "Reading the card…"))
+        if quiet is True:
             # the page shows this in place of the preview until the editor can take over
             self.set(preparing={"cur": 0, "total": 0})
             self._render_preview_idle()
@@ -1640,7 +1727,7 @@ class TextScenesService(TreeEditMixin):
     def _rebuild_tick(self, state, cur, total):
         if state is not self._rebuild:
             return
-        if state.get("quiet"):
+        if state.get("quiet") is True:
             self.set(preparing={"cur": cur, "total": total})
         else:
             self.set(rebuild_msg="Scene %d of %d…" % (cur, total))

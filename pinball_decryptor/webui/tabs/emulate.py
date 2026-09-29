@@ -127,6 +127,8 @@ class EmulateTab(TabService):
         self.emulate_card_var = self.var("card", "str", "")
         self.emulate_savestates_var = self.var("savestates", "bool", True)
         self.emulate_overrides_var = self.var("overrides", "bool", False)
+        # PAD-251 (DragonRR): the Scenes tab's edits have their own on/off under the opt-in
+        self.emulate_scene_edits_var = self.var("scene_edits", "bool", True)
         self.emulate_country_var = self.var("country", "str",
                                             rig.COUNTRY_GAME)
         self.emulate_power_var = self.var("power", "str",
@@ -217,6 +219,8 @@ class EmulateTab(TabService):
         # PAD-173: the note belongs to the pair (card, Power), so both move it.
         self.emulate_power_var.trace_add("write", lambda *_a: self._mains_kick())
         self.emulate_overrides_var.trace_add(
+            "write", lambda *_a: self._overrides_paint())
+        self.emulate_scene_edits_var.trace_add(
             "write", lambda *_a: self._overrides_paint())
         self._volume_var.trace_add("write", self._on_volume_change)
         self._mute_var.trace_add("write", self._on_volume_change)
@@ -714,7 +718,16 @@ class EmulateTab(TabService):
         # (Start re-encodes first) and that a Replace-tab pick is written
         # into the project folder at Start, and neither may hide behind a
         # hover (must survive #4).
-        self.set(assets=assets, ovr_hint=text, ovr_refused=False)
+        self.set(assets=assets, ovr_hint=text, ovr_refused=False,
+                 scene_edits_offer=bool(assets) and self._project_has_scene_edits(assets))
+
+    def _project_has_scene_edits(self, assets):
+        try:
+            from ...plugins.stern import scene_edit
+            return bool(scene_edit.load(assets)) or os.path.isfile(
+                os.path.join(assets, *scene_edit.RELDIR, scene_edit.BUILT_FILENAME))
+        except Exception:                                # noqa: BLE001
+            return False
 
     def _ovr_carries(self, assets):
         """PAD-251: say that scene edits (and modes, when the mode maker is on) ride along."""
@@ -732,7 +745,7 @@ class EmulateTab(TabService):
                 modes_on = bool(fn())
             except Exception:                            # noqa: BLE001
                 modes_on = False
-        return rig.ovr_carries(n, scenes, modes_on)
+        return rig.ovr_carries(n, scenes, modes_on, scenes_on=self._scene_edits_on())
 
     def _overrides_wanted(self):
         if not self.emulate_overrides_var.get() or self._assets_var is None:
@@ -1700,7 +1713,9 @@ class EmulateTab(TabService):
         out = rig.overrides_dir()
         fp = rig.assets_fingerprint(assets)
         manifest = stern_engine.read_override_manifest(out)
-        why = rig.overrides_reason(manifest, card, assets, fp, run_card=picked)
+        scenes_on = self._scene_edits_on()
+        why = rig.overrides_reason(manifest, card, assets, fp, run_card=picked,
+                                   scene_edits=scenes_on)
         if not why:
             why = rig.preview_modes_reason(manifest, assets)
         if not why:
@@ -1714,7 +1729,7 @@ class EmulateTab(TabService):
         self._post(self._repaint_preparing)
         try:
             counts, _mode, _val, files = stern_engine.write_overrides(
-                card, assets, out,
+                card, assets, out, scene_edits=scenes_on,
                 log=lambda msg, level="info": self._log("[emulate] " + msg),
                 cancel=lambda: (self._stopping or self._stopped
                                 or self._cancel_prepare),
@@ -1747,8 +1762,14 @@ class EmulateTab(TabService):
     # -- PAD-251: scene edits reaching the running game ("on the fly") -----
     def _live_ready(self, assets, out, env):
         self._live_ovr = ({"assets": os.path.normcase(os.path.abspath(assets)), "out": out}
-                          if env is not None else None)
+                          if env is not None and self._scene_edits_on() else None)
         return env
+
+    def _scene_edits_on(self):
+        try:
+            return bool(self.emulate_scene_edits_var.get())
+        except Exception:                                # noqa: BLE001
+            return True
 
     def live_scene_target(self, assets):
         """The override folder of the game running NOW over *assets*' edits, or None (no game
