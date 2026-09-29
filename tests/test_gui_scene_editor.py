@@ -545,6 +545,36 @@ def test_a_greyed_layer_is_brought_into_view_where_the_game_shows_it(tmp_path):
         w.call("text_scenes.close")
 
 
+def test_a_greyed_layer_is_shown_on_top_where_it_is_while_selected(tmp_path):
+    """DragonRR (PAD-276): clicking a greyed layer went to another moment and greyed the one
+    that was showing.  Selecting it now draws it on top at THIS moment, for as long as it stays
+    selected; selecting nothing puts the scene back as the game draws it."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        assert w.call("text_scenes.tree_moment", "f:12")
+        assert _wait(w, lambda: _tv(w)["frame"] == 12)
+        on = {l["id"] for l in _tv(w)["layers"] if l["drawn"]}
+        off = [l for l in _tv(w)["layers"] if not l["drawn"]]
+        nid = off[0]["id"]
+        assert w.call("text_scenes.tree_select", nid)
+        tv = _tv(w)
+        assert tv["frame"] == 12 and tv["sel"] == nid and tv["props"]["peek"]
+        now = {l["id"] for l in tv["layers"] if l["drawn"]}
+        assert now == on | {nid}                   # nothing that was showing greyed out
+        assert tv["hits"][-1]["id"] == nid         # on top
+        assert _ops(folder) == []
+        x0 = tv["props"]["x"]
+        assert w.call("text_scenes.tree_move", nid, 25, 0)
+        assert _tv(w)["props"]["peek"] and abs(_tv(w)["props"]["x"] - (x0 + 25)) <= 1
+        assert w.call("text_scenes.tree_select", None)
+        tv = _tv(w)
+        assert tv["frame"] == 12 and {l["id"] for l in tv["layers"] if l["drawn"]} == on
+        w.call("text_scenes.close")
+
+
 def test_play_draws_each_different_frame_once_and_stops(tmp_path):
     """DragonRR: "play the animation as well as step through it". Play draws the scene's
     frames in the background (a held stretch once) and hands them to the page with a map

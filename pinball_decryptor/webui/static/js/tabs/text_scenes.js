@@ -439,14 +439,14 @@ function TreeLayers({ t }) {
     ${(t.layers || []).map((l) => html`<div key=${l.id} data-node=${l.id}
         class=${cx("sc-item", "ly-item", t.sel === l.id && "sel", !l.drawn && "ly-off")}
         style=${`padding-left:${10 + l.depth * 14}px`}
-        title=${!l.drawn && !l.hidden ? "Not on the screen at this moment: click to go to where the game shows it, and edit it there" : null}
-        onClick=${() => call(!l.drawn && !l.hidden ? "text_scenes.tree_show" : "text_scenes.tree_select", l.id)}>
+        title=${!l.drawn && !l.hidden ? "Not on the screen at this moment: click to see it on top while it is selected, and edit it" : null}
+        onClick=${() => call("text_scenes.tree_select", l.id)}>
       <button type="button" class="ly-eye"
         title=${l.hidden ? "Hidden — show it again" : l.drawn ? "Hide it"
-          : "Not on the screen at this moment: go to where the game shows it"}
+          : "Not on the screen at this moment: see it on top while it is selected"}
         onClick=${(e) => {
           e.stopPropagation();
-          if (!l.hidden && !l.drawn) call("text_scenes.tree_show", l.id);
+          if (!l.hidden && !l.drawn) call("text_scenes.tree_select", l.id);
           else call("text_scenes.tree_visible", l.id, l.hidden);
         }}>
         <${Icon} name=${l.hidden ? "eye-off" : "eye"} /></button>
@@ -754,6 +754,7 @@ function TreeSide({ t, play, playFrame }) {
     <span class="eyebrow">Selected</span>
     ${p ? html`<div class="tree-props">
       <div class="small ellip" title=${p.name}><b>${p.name}</b> <span class="muted">${p.kind}${p.added ? ", added" : ""}</span></div>
+      ${p.peek ? html`<div class="small muted">The game does not draw this at this moment. It is shown on top while it is selected; an edit holds wherever the game shows it.</div>` : null}
       ${p.pic ? html`<div class="tree-row">
         <span class="small muted" ...${tip("The picture's own size, and how much the game scales it to draw it here. Anything but 100% is resized by the game as it draws, which can leave jagged edges: make the picture at the size it shows, replace it on the Images tab with \"Keep this picture's own size\" ticked, then press Draw 1:1.")}>
           Picture ${p.pic.w} x ${p.pic.h} px, drawn at ${p.pic.sx === p.pic.sy ? p.pic.sx : `${p.pic.sx} x ${p.pic.sy}`}%</span>
