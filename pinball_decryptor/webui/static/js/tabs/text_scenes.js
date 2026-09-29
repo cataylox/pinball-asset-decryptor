@@ -745,8 +745,13 @@ function TreeSide({ t, play, playFrame }) {
     </div>
     ${play && !play.done ? html`<span class="small muted">${(play.map || []).length ? `Drawing frame ${play.map.length} of ${play.frames}…` : "Working out the frames…"}</span>` : null}
     ${(t.states || []).length ? html`<details class="tree-states">
-      <summary class="small">States the game picks (${t.states.length})</summary>
-      ${t.states.map((st) => html`<label key=${st.node} class="tree-state" title=${st.path}>
+      <summary title="Parts of this scene that can look more than one way. The game's code picks which one shows; the list lets you preview each.">
+        <span class="eyebrow">Switchable parts</span>
+        <span class="small muted">${t.states.length} ${t.states.length === 1 ? "part" : "parts"}, click to <span class="ts-shut">show</span><span class="ts-open">hide</span></span>
+      </summary>
+      <div class="small muted tree-states-hint">Each part below can look more than one way, and the game picks which while it runs (which monster, Locked or open). Pick one to see it here. This only changes the preview, not the card.</div>
+      ${t.states.map((st, i) => html`<label key=${st.node} class="tree-state" title=${st.path}>
+        <span class="small muted tree-state-n">${i + 1}.</span>
         <span class="small ellip">${st.name}</span>
         <${Select} sm value=${st.value} options=${st.options} onChange=${(v) => call("text_scenes.tree_state", st.node, v)} />
       </label>`)}

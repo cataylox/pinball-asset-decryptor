@@ -112,8 +112,17 @@
 .tree-num .lbl { width: auto; }
 .tree-color { width: 40px; height: 28px; border: 1px solid var(--line-2); border-radius: 5px; background: transparent; padding: 1px; cursor: pointer; }
 .tree-props { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: var(--panel-2); width: 100%; box-sizing: border-box; }
-.tree-states summary { cursor: pointer; }
-.tree-state { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 6px; align-items: center; margin: 3px 0; }
+.tree-states summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; border: 1px solid var(--line-2); border-radius: 6px; padding: 5px 8px; background: var(--panel-2); }
+.tree-states summary::-webkit-details-marker { display: none; }
+.tree-states summary::before { content: "▸"; color: var(--ink-2); font-size: 15px; line-height: 1; }
+.tree-states[open] summary::before { content: "▾"; }
+.tree-states summary:hover { border-color: var(--ink-3); }
+.tree-states summary .eyebrow { margin: 0; }
+.tree-states .ts-open, .tree-states[open] .ts-shut { display: none; }
+.tree-states[open] .ts-open { display: inline; }
+.tree-states-hint { margin: 6px 0; }
+.tree-state { display: grid; grid-template-columns: 22px minmax(0, 1fr) 150px; gap: 6px; align-items: center; margin: 3px 0; }
+.tree-state-n { text-align: right; }
 .ly-item { grid-template-columns: 20px minmax(0, 1.2fr) minmax(0, 1fr); cursor: pointer; }
 .ly-off { opacity: .5; }
 .ly-eye { all: unset; cursor: pointer; display: inline-flex; color: var(--ink-3); }
