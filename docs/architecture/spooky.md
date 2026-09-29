@@ -10,18 +10,20 @@
 
 ### Supported games
 
+"Warden" below is Spooky's USB-serial playfield board (`/dev/WARDEN`, seen on Beetlejuice); Halloween uses a different board, "Pinotaur".
+
 Game DB lives in [games.py:52-123](../../pinball_decryptor/plugins/spooky/games.py#L52). `supported=False` is set only for Total Nuclear Annihilation ([manufacturer.py:14-27](../../pinball_decryptor/plugins/spooky/manufacturer.py#L14)).
 
 | key | display | supported? | engine / format | notes |
 |---|---|---|---|---|
-| `rick_and_morty` | Rick and Morty | yes | P-ROC / pyprocgame, `rm_pkg` (AES) | also raw-ext4 Clonezilla path |
+| `rick_and_morty` | Rick and Morty | yes | P-ROC / pyprocgame, `rm_pkg` (AES) | also raw-ext4 Clonezilla path (`rick_and_morty_autoflash_usb.iso` is a bare ext4, not a partclone image) |
 | `evil_dead` | Evil Dead | yes | Warden, `tar_gz` (`.ed`) | plain tar.gz |
 | `scooby_doo` | Scooby-Doo | yes | Unity, `tar_gz` (`.scooby`) | |
 | `beetlejuice` | Beetlejuice | yes | Unity, `gpg_tar_gz` (`.beetlejuice`) | GPG-**signed** (not encrypted) |
 | `texas_chainsaw` | Texas Chainsaw Massacre | yes | Unity, `tar_gz` (`tcm-*.pkg`) | |
 | `alice_cooper` | Alice Cooper's Nightmare Castle | yes | P-ROC, `ac_pkg` (AES) | key known |
 | `total_nuclear` | Total Nuclear Annihilation | **no** | P-ROC, `aes_pkg` | AES-256-CBC key unknown; no Clonezilla image either |
-| `halloween_78` | Halloween | yes | Warden loose assets, `h78_pkg` (GPG symmetric) | game tree is `assets/` + `config/` (242 loose `.webm`, 801 `.wav`); the Unity build under `uptest/` is the **updater app**, not the game — it is what `UNITY_GAMES` membership actually points UnityPy at |
+| `halloween_78` | Halloween | yes | Unity 2022.3.36f1 (Mono, x86-64), `h78_pkg` (GPG symmetric) | the Unity build under `uptest/` **is the game** (`Assembly-CSharp` `staticVars.gameName = "Halloween"`, v1.18.1, all modes; on the machine `/game/code/{uptest,assets,config}`) — that is what `UNITY_GAMES` membership points UnityPy at. Its media are loose files beside it in `assets/` + `config/` (242 `.webm`, 801 `.wav`). Talks to a "Pinotaur" playfield board on `/dev/pinheck` (USB `cafe:4001`), not Warden |
 | `ultraman` | Ultraman | yes | Unity, `um_pkg` (GPG symmetric) | |
 | `americas_most_haunted` | America's Most Haunted | yes | P3 DMD, `plain_zip` | `.VID` 4bpp |
 | `rob_zombie` | Rob Zombie's Spookshow International | yes | P3 DMD, `plain_zip` | `.VID` 8bpp |
@@ -112,7 +114,7 @@ No crypto. `.ed`/`.scooby`/TCM are plain tar.gz; `.looney` is a plain (uncompres
 
 ### Clonezilla restore images (`clonezilla`)
 
-`.iso` (always), or `.zip`/`.iso` whose archive contains `partimag`/`ptcl-img` members ([formats.py:120-128](../../pinball_decryptor/plugins/spooky/formats.py#L120)). These hold `partclone` partition images (gzip- or zstd-compressed), or a bare ext4 filesystem for the R&M autoflash ISO. Partition layouts per game/hardware-variant in [clonezilla.py:35-172](../../pinball_decryptor/plugins/spooky/clonezilla.py#L35) (`PARTITION_MAP`); see [Extract pipeline → Clonezilla](#clonezilla-path).
+`.iso` (always), or `.zip`/`.iso` whose archive contains `partimag`/`ptcl-img` members ([formats.py:120-128](../../pinball_decryptor/plugins/spooky/formats.py#L120)). These hold `partclone` partition images (gzip- or zstd-compressed), or a bare ext4 filesystem for the R&M autoflash ISO. Partition layouts per game/hardware-variant in [clonezilla.py:35-172](../../pinball_decryptor/plugins/spooky/clonezilla.py#L35) (`PARTITION_MAP`). Checked 2026-09-29: every current factory restore image name picks the right layout — `bj_production_base_image_2026.04.10.zip`, `ED_clonezilla_base_image_2025_02_27.iso`, `LT_AK3V_CLONEZILLA_A.zip` / `_B.zip`, `LT_clonezilla_kamrui.zip`, `H78_*108a*.zip`, `UM_*108a*.zip`, `clonezilla-live-tcm_prod_base_image_2024_02_10.zip`, `clonezilla-live-scooby_base.zip`, `ACNC_image.zip` (detection only; extraction of these was not run); see [Extract pipeline → Clonezilla](#clonezilla-path).
 
 ### Engine containers
 
