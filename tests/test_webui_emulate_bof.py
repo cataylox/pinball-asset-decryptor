@@ -244,3 +244,18 @@ def test_quit_stops_only_a_run_this_app_started(rig, monkeypatch, tmp_path):
         svc._started_here = True
         svc.emulate_shutdown()
         assert len(ran) == 1 and "stop.sh" in " ".join(ran[0][0])
+
+
+def test_an_empty_field_uses_the_fun_picked_on_select_card(tmp_path):
+    with web_app(tmp_path, mfr="bof") as w:
+        svc = _svc(w)
+        assert svc.fun_path() == ""
+        w.window.extract_input_var.set(r"D:\Pinball\images\BoF\dune.fun")
+        assert svc.fun_path() == r"D:\Pinball\images\BoF\dune.fun"
+        # its own field wins
+        w.window.bof_emulate_fun_var.set(r"C:\mods\dune_mod.fun")
+        assert svc.fun_path() == r"C:\mods\dune_mod.fun"
+        # a non-.fun card is not a game file for this tab
+        w.window.bof_emulate_fun_var.set("")
+        w.window.extract_input_var.set(r"D:\somewhere\else.img")
+        assert svc.fun_path() == ""

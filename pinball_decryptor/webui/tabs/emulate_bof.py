@@ -176,7 +176,18 @@ class EmulateBoFTab(RigTabMixin, TabService):
         self._ctl.close()
 
     def fun_path(self):
-        return (self.bof_emulate_fun_var.get() or "").strip()
+        """This tab's own .fun, else the one picked on Select card (the
+        Extract input) - that page lists Emulate as working "straight from
+        the card", so a card already picked must not be asked for again."""
+        own = (self.bof_emulate_fun_var.get() or "").strip()
+        if own:
+            return own
+        card = getattr(self.window, "extract_input_var", None)
+        try:
+            path = (card.get() or "").strip() if card is not None else ""
+        except Exception:                                  # noqa: BLE001
+            path = ""
+        return path if path.lower().endswith(".fun") else ""
 
     # ------------------------------------------------------------------
     # the page's calls
