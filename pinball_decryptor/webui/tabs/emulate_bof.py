@@ -128,6 +128,9 @@ class EmulateBoFTab(RigTabMixin, TabService):
         self.bof_emulate_fun_var = self.var("fun")
         self._init_rig_state()
         self._ctl = _CtlStream(self._log)
+        #: a Start is in flight (the button is Cancel) / its cancel is
+        self._starting = False
+        self._cancelling = False
         self._panel_title = None
         ok = bof.rig_available()
         if not ok:
@@ -204,12 +207,43 @@ class EmulateBoFTab(RigTabMixin, TabService):
 
     @rpc
     def toggle(self):
+        """Start / Stop - and Cancel while a start is in flight (the button
+        says so: unpacking a 4 GB build off a busy disk can take a long
+        time, and nothing else could end it)."""
+        if self._starting and not self._cancelling:
+            return self.cancel()
         if self._busy:
             return False
         if self._last_up:
             self._stop_async()
         else:
             self._start_async()
+        return True
+
+    @rpc
+    def cancel(self):
+        """End the start in flight: tools/bof_emu/cancel.sh ends watch.sh and
+        everything it started (the decrypt included), drops the half-unpacked
+        build and stops any game that had come up."""
+        if not self._starting or self._cancelling:
+            return False
+        self._cancelling = True
+        self._set_go("Cancelling…", False)
+        self._log("BoF: cancelling the start…")
+
+        def work():
+            try:
+                out = subprocess.run(
+                    bof.rig_cmd_root("cancel.sh"),
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    timeout=120, creationflags=_rig.CREATE_FLAGS)
+                self._log("BoF: " + out.stdout.decode("utf-8", "replace")
+                          .strip())
+            except Exception as exc:                       # noqa: BLE001
+                self._log("BoF: cancel failed: %s" % exc)
+
+        threading.Thread(target=work, daemon=True,
+                         name="pad-bof-cancel").start()
         return True
 
     @rpc
@@ -255,6 +289,7 @@ class EmulateBoFTab(RigTabMixin, TabService):
             kw["go_enabled"] = bool(enabled)
         kw["busy"] = self._busy
         kw["go_busy"] = self._go_busy
+        kw["starting"] = self._starting
         self.set(**kw)
 
     def _start_async(self):
@@ -272,9 +307,13 @@ class EmulateBoFTab(RigTabMixin, TabService):
         if self._refuse_off():
             return
         self._busy = True
-        self._go_busy = True
+        # No spinner on the button while starting: it is the Cancel button
+        # now, and the footer ladder shows the progress.
+        self._go_busy = False
+        self._starting = True
+        self._cancelling = False
         self._started_here = True
-        self._set_go("Starting…", False)
+        self._set_go("Cancel", True)
         _vol, muted = load_audio_ctl()
 
         def work():
@@ -289,7 +328,10 @@ class EmulateBoFTab(RigTabMixin, TabService):
                              "PAD_VISIBLE=1",
                              "PAD_AUDIO=%d" % (0 if muted else 1)]),
                     timeout=1800, on_line=self._footer_line)
-                if rc not in (0, None):
+                if self._cancelling:
+                    self._started_here = False
+                    self._log("BoF: start cancelled.")
+                elif rc not in (0, None):
                     self._log("BoF: start failed (exit %d). %s"
                               % (rc, bof.EXIT_TEXT.get(rc, "")))
             except Exception as exc:                       # noqa: BLE001
@@ -339,6 +381,8 @@ class EmulateBoFTab(RigTabMixin, TabService):
         def done():
             self._busy = False
             self._go_busy = False
+            self._starting = False
+            self._cancelling = False
             self._set_go(enabled=bof.rig_available())
             self._poll_now()
         self._post(done)
@@ -421,6 +465,7 @@ class EmulateBoFTab(RigTabMixin, TabService):
             self._footer_from_info()
         kw["busy"] = self._busy
         kw["go_busy"] = self._go_busy
+        kw["starting"] = self._starting
         self.set(**kw)
 
     # ------------------------------------------------------------------

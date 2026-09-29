@@ -23,6 +23,11 @@ FUN=${1:-}
 [ "$(id -u)" = 0 ] || { echo "watch.sh: run as root" >&2; exit 2; }
 [ -f "$FUN" ] || { echo "watch.sh: no such .fun file: $FUN" >&2; exit 2; }
 
+# cancel.sh ends this run by its process group; it finds it here.
+mkdir -p "$BOF_ROOT"
+echo $$ > "$BOF_ROOT/watch$BOF_SLOT.pid"
+trap 'rm -f "$BOF_ROOT/watch$BOF_SLOT.pid"' EXIT
+
 key_for() {     # <title> -> passphrase from BOF_KEYS
     echo "${BOF_KEYS:-}" | tr ',' '\n' | awk -F: -v t="$1" '$1==t {print $2; exit}'
 }

@@ -259,3 +259,39 @@ def test_an_empty_field_uses_the_fun_picked_on_select_card(tmp_path):
         w.window.bof_emulate_fun_var.set("")
         w.window.extract_input_var.set(r"D:\somewhere\else.img")
         assert svc.fun_path() == ""
+
+
+def test_while_starting_the_button_is_cancel(rig, monkeypatch, tmp_path):
+    """A start unpacking a big build off a slow disk must be cancellable:
+    the Start button turns into Cancel, and pressing it runs cancel.sh."""
+    import subprocess
+    from pinball_decryptor.webui import emulate_bof_core as core
+    ran = []
+    monkeypatch.setattr(core, "rig_cmd_root",
+                        lambda *a, **k: ["bash"] + list(a))
+    monkeypatch.setattr(subprocess, "run",
+                        lambda cmd, **k: ran.append(cmd) or
+                        subprocess.CompletedProcess(cmd, 0, b"cancelled=1", b""))
+    with web_app(tmp_path, mfr="bof") as w:
+        svc = _svc(w)
+        # as _start_async leaves it while watch.sh runs
+        svc._busy = True
+        svc._starting = True
+        svc._set_go("Cancel", True)
+        s = w.state(NS)
+        assert s["go_label"] == "Cancel" and s["go_enabled"] and s["starting"]
+        assert not s["go_busy"]
+        assert w.call(NS + ".toggle")
+        assert w.state(NS)["go_label"] == "Cancelling…"
+        assert not w.state(NS)["go_enabled"]
+        end = time.time() + 5
+        while not ran and time.time() < end:
+            time.sleep(0.02)
+        assert ran and ran[0][-1] == "cancel.sh"
+        # a second press does nothing while the cancel runs
+        assert not w.call(NS + ".cancel")
+
+
+def test_cancel_does_nothing_when_nothing_is_starting(rig, tmp_path):
+    with web_app(tmp_path, mfr="bof") as w:
+        assert not w.call(NS + ".cancel")

@@ -82,9 +82,11 @@ export default function EmulateBoF() {
   const up = !!s.up;
   const cells = s.cells || [];
   const hist = (shell.path_history && shell.path_history.bof_emulate_fun) || [];
-  const goKind = s.go_busy ? "" : up ? "danger" : "primary";
+  // while a start is in flight the button is Cancel
+  const stopish = up || !!s.starting;
+  const goKind = s.go_busy ? "" : stopish ? "danger" : "primary";
   const footer = html`
-    <${Button} kind=${goKind} size="big" icon=${up ? "stop" : "play"} busy=${s.go_busy}
+    <${Button} kind=${goKind} size="big" icon=${stopish ? "stop" : "play"} busy=${s.go_busy}
       disabled=${!s.go_enabled} onClick=${() => call("emulate_bof.toggle")}>${s.go_label || "Start"}<//>
     <span class="emu-sp"></span>
     <${Check} ns="emulate_bof" k="mute" checked=${!!s.mute} label="Mute" title=${s.sound_tip} />`;
