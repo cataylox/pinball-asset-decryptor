@@ -251,3 +251,30 @@ def test_pending_texts_decodes_program_rows_and_caches_the_manifest(tmp_path):
     os.remove(os.path.join(assets, "text", "strings.tsv"))
     stub._text_changes = None
     assert SceneBrowserWindow._pending_texts(stub, CARD) == {}
+
+
+def test_render_tree_keeps_each_line_of_text_for_the_next_frame(tmp_path, monkeypatch):
+    """PAD-261: Play draws a scene's frames one after another, and Godzilla's credits read
+    ~17,000 glyph files per ten frames.  Given *inks*, render_tree lays each line out once and
+    the next frame reuses it; the picture is the same as without."""
+    from pinball_decryptor.plugins.stern import fontrender, scene_eval
+    assets = _seed(tmp_path, "AB")
+    fonts = fontrender.load_fonts(assets)
+    man = {"stage": [200, 100, 30.0]}
+    draw = {"kind": "text", "node": 1, "path": ["Line1"], "m": scene_eval.IDENTITY,
+            "mul": (1.0, 1.0, 1.0, 1.0), "add": (0.0, 0.0, 0.0, 0.0), "text": "AB",
+            "rect": [0, 0, 200, 100], "align": 1, "rgba": [1, 1, 1, 1], "font": FONT,
+            "font_px": 0}
+    plain = np.asarray(scene_render.render_tree(assets, man, draws=[draw], fonts=fonts))
+    assert len(_ink_cols(plain)) == 12
+    calls = []
+    real = fontrender.render_text
+    monkeypatch.setattr(fontrender, "render_text",
+                        lambda *a, **k: calls.append(a[1]) or real(*a, **k))
+    inks = {}
+    for dx in (0, 10, 20):                                   # three frames, the line moving
+        moved = dict(draw, m=(1.0, 0.0, 0.0, 1.0, float(dx), 0.0))
+        img = np.asarray(scene_render.render_tree(assets, man, draws=[moved], fonts=fonts,
+                                                  inks=inks))
+        assert np.array_equal(img, np.roll(plain, dx, axis=1))
+    assert calls == ["AB"]

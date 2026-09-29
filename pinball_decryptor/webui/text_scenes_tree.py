@@ -240,8 +240,8 @@ class TreeEditMixin:
                "text_edits": self._pending_texts(card, None), "colors": self._pending_colors(card),
                "pictures": self._tree_pictures(), "sizes": self._tree_sizes(),
                "tmp": self._tmpdir(), "assets": self.assets_dir, "cache": self._tcache}
-        self.set(tree_play={"fps": fps, "frames": frames, "map": [], "srcs": [],
-                            "total": 0, "done": False})
+        self.set(tree_play={"run": "p%d" % id(state), "fps": fps, "frames": frames,
+                            "map": [], "srcs": [], "done": False})
         threading.Thread(target=self._play_draw, args=(state, job), daemon=True,
                          name="scene-play").start()
         return True
@@ -253,60 +253,51 @@ class TreeEditMixin:
         w, h = job["man"]["stage"][0], job["man"]["stage"][1]
         small = dict(job["man"], stage=[round(w * s), round(h * s)] + list(job["man"]["stage"][2:]))
         shrink = (s, 0.0, 0.0, s, 0.0, 0.0)
-        tag = "p%d" % id(state)
-        srcs, last = [], 0.0
+        tag = "p%d" % id(state)                     # = tree_play's "run"
+        srcs, index, last, prev = [], [], 0.0, None
+        inks = {}                    # every line of text laid out once for the whole play
         try:
-            # which frames differ (a held stretch is drawn once): seconds on a big scene, so
-            # here on the worker, never on the page's thread
-            uniq, index = [], []
-            for f in range(1, job["frames"] + 1):
-                if state["cancel"]:
-                    return
-                d = scene_eval.draw_list(job["man"], f, pins=job["pins"], play=True)
-                if not (uniq and scene_eval._same(d, uniq[-1])):
-                    uniq.append(d)
-                index.append(len(uniq) - 1)
-            job["draws"] = uniq
-            self.ctx.loop.post(self._play_map, state, index, len(uniq))
             if self._fonts is None:
                 from ..plugins.stern import fontrender as fr
                 self._fonts = fr.load_fonts(job["assets"])
-            for i, draws in enumerate(job["draws"]):
+            # each frame drawn as soon as it is worked out (a held stretch is drawn once), so
+            # the first is on the page at once, not after the whole timeline is (PAD-261:
+            # Godzilla's credits waited ~5 s for all 120)
+            for f in range(1, job["frames"] + 1):
                 if state["cancel"]:
                     return
-                scaled = [dict(d, m=scene_eval.compose(shrink, d["m"])) for d in draws]
-                img = scene_render.render_tree(
-                    job["assets"], small, draws=scaled, fonts=self._fonts, background=job["bg"],
-                    colors=job["colors"], text_edits=job["text_edits"], cache=job["cache"],
-                    pictures=job["pictures"], sizes=job["sizes"])
-                path = os.path.join(job["tmp"], "%s_%d.png" % (tag, i))
-                if img is not None:
-                    img.save(path, compress_level=1)
-                srcs.append(path if img is not None else "")
+                draws = scene_eval.draw_list(job["man"], f, pins=job["pins"], play=True)
+                if prev is None or not scene_eval._same(draws, prev):
+                    prev = draws
+                    scaled = [dict(d, m=scene_eval.compose(shrink, d["m"])) for d in draws]
+                    img = scene_render.render_tree(
+                        job["assets"], small, draws=scaled, fonts=self._fonts,
+                        background=job["bg"], colors=job["colors"],
+                        text_edits=job["text_edits"], cache=job["cache"],
+                        pictures=job["pictures"], sizes=job["sizes"], inks=inks)
+                    path = os.path.join(job["tmp"], "%s_%d.png" % (tag, len(srcs)))
+                    if img is not None:
+                        img.save(path, compress_level=1)
+                    srcs.append(path if img is not None else "")
+                index.append(len(srcs) - 1)
                 now = time.time()
-                if now - last > 0.4 or i == len(job["draws"]) - 1:
+                if f == 1 or now - last > 0.4 or f == job["frames"]:
                     last = now
-                    self.ctx.loop.post(self._play_publish, state, list(srcs),
-                                       i == len(job["draws"]) - 1)
+                    self.ctx.loop.post(self._play_publish, state, list(index), list(srcs),
+                                       f == job["frames"])
         except Exception:                            # noqa: BLE001
+            if state["cancel"]:
+                return                               # stopped (a close drops the folder)
             log.exception("scene play")
-            self.ctx.loop.post(self._play_publish, state, list(srcs), True)
+            self.ctx.loop.post(self._play_publish, state, list(index), list(srcs), True)
 
-    def _play_map(self, state, index, total):
-        if state is not self._tplay or state["cancel"]:
-            return
-        cur = dict(self.store.get(self.ns, "tree_play") or {})
-        if cur:
-            cur.update(map=index, total=total)
-            self.set(tree_play=cur)
-
-    def _play_publish(self, state, srcs, done):
+    def _play_publish(self, state, index, srcs, done):
         if state is not self._tplay or state["cancel"]:
             return
         cur = dict(self.store.get(self.ns, "tree_play") or {})
         if not cur:
             return
-        cur.update(srcs=srcs, done=done)
+        cur.update(map=index, srcs=srcs, done=done)
         self.set(tree_play=cur)
 
     def _tree_split(self, draws, nid):
