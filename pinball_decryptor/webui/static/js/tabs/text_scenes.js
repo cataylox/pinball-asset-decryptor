@@ -755,6 +755,13 @@ function TreeSide({ t, play, playFrame }) {
     ${p ? html`<div class="tree-props">
       <div class="small ellip" title=${p.name}><b>${p.name}</b> <span class="muted">${p.kind}${p.added ? ", added" : ""}</span></div>
       ${p.peek ? html`<div class="small muted">The game does not draw this at this moment. It is shown on top while it is selected; an edit holds wherever the game shows it.</div>` : null}
+      ${p.pic ? html`<div class="tree-row">
+        <span class="small muted" ...${tip("The picture's own size, and how much the game scales it to draw it here. Anything but 100% is resized by the game as it draws, which can leave jagged edges: make the picture at the size it shows, replace it on the Images tab with \"Keep this picture's own size\" ticked, then press Draw 1:1.")}>
+          Picture ${p.pic.w} x ${p.pic.h} px, drawn at ${p.pic.sx === p.pic.sy ? p.pic.sx : `${p.pic.sx} x ${p.pic.sy}`}%</span>
+        <${Button} size="xs" disabled=${p.pic.sx === 100 && p.pic.sy === 100}
+          title="Draw the picture pixel for pixel (100%), keeping its top-left corner where it is"
+          onClick=${() => call("text_scenes.tree_one_to_one", p.id)}>Draw 1:1<//>
+      </div>` : null}
       ${p.x != null ? html`<div class="tree-row">
         ${num("X", p.x, (v) => call("text_scenes.tree_move", p.id, Number(v) - p.x, 0), "Left edge on the glass (px)")}
         ${num("Y", p.y, (v) => call("text_scenes.tree_move", p.id, 0, Number(v) - p.y), "Top edge on the glass (px)")}
