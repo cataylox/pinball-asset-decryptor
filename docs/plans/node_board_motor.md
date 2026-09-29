@@ -354,6 +354,69 @@ motor 1); the encoder change briefly let that fall into the end-stop model as
   1..7 and the UP/DOWN-MAG switches as it turns. That is a coil-driven mech
   with position switches - its own model, its own ticket.
 - A motor that faults (0x40) is never simulated; the jetpack never stalls.
-- **The bus-wide re-init.** Every other board is still re-initialised at every
-  service visit (one board per ~101 ms). Stopping it means first giving
-  batman's generation a real lamp decode and attract signal (above).
+- ~~**The bus-wide re-init.**~~ Stopped by PAD-255, below.
+
+## PAD-255: the count on every board
+
+The frame count is now answered on every board (`PAD_NB_RXCOUNT=enc` keeps
+PAD-249's encoder-only rule, `=0` answers 0 everywhere), so no board is
+re-initialised at each service visit.
+
+**The premise above was half wrong.** batman's lamps never leaned on the
+re-init. With the count answered everywhere, batman-1.13 at 150 s sends no
+cmd 70 and none of the rest of the init set (14 / 51 / 60), and its lamp plane
+moves exactly as much as with the re-init running (20 s at 10 Hz):
+
+| rig | cmd 70 per 10 s | cells changing | per node (8 / 9 / 10 / 12 / 13) |
+|---|---|---|---|
+| encoder-only (`enc`) | ~1100 | 128 | 50 / 37 / 6 / 10 / 25 |
+| every board | 0 | 128 | 50 / 37 / 6 / 10 / 25 |
+
+The show is the swelf family (8a / 96 / 9a / 86 ...: 0x80..0xbf) that the wide
+decoders already read (led_wide_publish, led_node_wide_publish). No new
+decode was needed; cmd 70 had only been "the base layer" because the re-init
+kept re-sending it. The same goes for the Home Editions: their `cmd 70`
+"refresh every ~100 ms" (PAD-129) was this re-init of their one board.
+
+**What did lean on it was the attract signal.** The light-show announcer
+counted cmd 70 for this generation; the wide family was never in its set. So
+the wide decoders now feed it (led_show_note) once a frame is PUBLISHED,
+weighted by the lamps it wrote. By lamps and not frames because a Home
+Edition's show is few and wide: jurassic_park_the_pin sends one cmd 86 every
+~135 ms, Tech Alerts and attract alike (22 frames in 3 s, never the 30 the rate
+half asks for). The rate half only ever said "a board is being talked to";
+the moving half (200 changed lamp writes in 3 s, PAD-129) decides, and is
+unchanged. Attract declared, count on everywhere (hidden rigs, 150 s runs):
+
+| title | declared | screen at 150 s |
+|---|---|---|
+| batman-1.13 | 118 s / 139 s | attract |
+| jurassic_park_the_pin-1.05 | 69 s (frames only: never) | attract ("PLAYER 1 00") |
+| star_wars_elg-1.10 | 107 s | attract (the crawl) |
+
+Tech Alerts length varies run to run on these titles (star_wars_elg's `enc`
+run in the same batch never left it inside 158 s), so the times are not a
+comparison between rigs.
+
+Side finding, not fixed here: under rigbatch, autoattract.sh logs "the game is
+not running; nothing to do" and exits at once, so a hidden sweep reaches
+attract only where a title's own Tech Alerts time out.
+
+**Whole library (bootcheck.sh, rigbatch, 2026-09-28): 33 of 33 builds boot to
+attract.** First pass 29 of 33; the four were rerun:
+
+- led_zeppelin_pro-1.22 and metallica_spike-1.03 were harness casualties (a
+  run killed by hand; a staged card that could not be moved into place). Both
+  pass rerun, metallica booted unstaged.
+- turtles_le-1.59 sat on Tech Alerts past 420 s once; rerun it passes both
+  ways (130 s every board, 133 s `enc`).
+- elvira3-1.13 is load-sensitive: its own dispatch watchdog fires at 134-139 s,
+  just as attract begins, on a title that runs at 4 fps. Branch 3 pass / 3
+  fail (the fails with 3-4 rigs busy, `enc` included), main 5 of 5; PAD-249's
+  own passes landed at 134-135 s, the same edge. A 150 s run of each with the
+  shim log shows the same attract (124.3 s branch, 124.5 s main) and neither
+  dies. Watch it on the next sweep.
+
+Motors unchanged (motorcheck.sh, 40 s from Start, every board and `enc`):
+james_bond_le c53 = 2 (the jetpack homes as the game asks), john_wick_le
+c53 = 1, drop target TRIP/RESET c40 = 2 (06:1, 08:1).
