@@ -280,3 +280,26 @@ def test_a_panel_without_a_view_has_no_clear_button():
     # ...and with one, it is the swexercise.py action, under its new name
     with_view = _panel(FakeDrv(), on_action=lambda *a: None)
     assert with_view.spec()["clear"] == "Clear switch alerts"
+
+
+def test_a_spinning_disc_gets_a_hold_button_that_rips_its_sensor(
+        with_binds, monkeypatch):
+    """PAD-259: Bond 60th's Oddjob disc has no position on the artwork, so
+    the BALLS section offers "Spin disc (hold)" - the page sends api_rip on
+    the title's `Angle Sensor Threshold` switch, found by name - and a title
+    without that switch offers nothing."""
+    playfield = with_binds
+    pf = _window(playfield, monkeypatch)
+    assert pf.state("main")["panel"]["spec"]["disc"] is None
+
+    rows = _switch_rows() + [dict(id=109, num=82, node=9, bit=43,
+                                  name="Angle Sensor Threshold")]
+    monkeypatch.setattr(playfield, "load_switch_list", lambda: rows)
+    spun = []
+    monkeypatch.setattr(FakeDrv, "spin", lambda self, sw, on: spun.append(
+        (sw, on)), raising=True)
+    pf = _window(playfield, monkeypatch)
+    disc = pf.state("main")["panel"]["spec"]["disc"]
+    assert disc == 109
+    assert pf.api_rip(disc, True) and pf.api_rip(disc, False)
+    assert spun == [(109, True), (109, False)]

@@ -728,6 +728,15 @@ function startMain() {
       bs.append(btn("Plunge", () => api("ball", "plunge")));
       drain = btn("Drain", () => api("ball", "drain"));
       bs.append(drain, btn("Reset balls", () => api("ball", "reset")));
+      // PAD-259: a spinning disc has no position on the artwork; holding
+      // this rips its angle sensor, which turns the disc
+      if (spec.disc != null) {
+        const disc = btn("Spin disc (hold)", () => {});
+        disc.addEventListener("pointerdown", (e) =>
+          holdWith(disc, e, () => api("rip", spec.disc, true),
+            () => api("rip", spec.disc, false)));
+        bs.append(disc);
+      }
       sec.append(bs);
       note = el("div", "kp-note");
       sec.append(note);
