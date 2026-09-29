@@ -188,6 +188,11 @@ function CardSource({ s }) {
     <div class=${cx("note emu-ovr", s.ovr_refused && "warn")}>
       <${Check} ns="emulate" k="overrides" checked=${s.overrides} wrap
         label="Apply my replaced assets on top, without rebuilding the card" />
+      ${s.overrides && s.scene_edits_offer ? html`<div class="emu-ovr-sub">
+        <${Check} ns="emulate" k="scene_edits" checked=${s.scene_edits !== false}
+          label="Include my Scenes tab edits"
+          title="On: the game runs with what you changed on the Scenes tab (and takes further edits there while it runs, for the screens it loads each time it shows them). Off: the scenes run as the card has them; everything else you replaced still applies." />
+      </div>` : null}
       <div class="row emu-ovr-row">
         <span class="lbl nw">Assets folder</span>
         <${Field} value=${s.assets} readOnly mono sm cls="grow" placeholder="(none)"

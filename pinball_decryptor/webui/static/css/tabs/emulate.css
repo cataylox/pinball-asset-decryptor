@@ -83,3 +83,6 @@
 html.bp-1020 .emu-vol { margin-left: 0; }
 /* was @media (max-width: 720px) */
 html.bp-720 .emu-kv { grid-template-columns: 120px minmax(0, 1fr); }
+
+/* PAD-251: the Scenes tab's edits, their own tick under the opt-in */
+.emu-ovr-sub { padding-left: 26px; }

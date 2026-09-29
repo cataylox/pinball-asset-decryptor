@@ -1304,3 +1304,40 @@ def test_a_scene_edit_is_handed_to_the_running_game(tmp_path, monkeypatch):
         svc._live_ready(str(tmp_path), out, None)                       # a refused set
         assert svc.live_scene_target(str(tmp_path)) is None
         svc._last_up = False
+
+
+def test_the_scenes_tab_edits_have_their_own_tick_under_the_opt_in(tmp_path, monkeypatch):
+    """PAD-251 (DragonRR: "there is no separate on off checkbox"): with the opt-in on, a
+    project with Scenes tab edits offers "Include my Scenes tab edits"; off, the set is built
+    without them, a set built the other way is not reused, and nothing is handed to a running
+    game live."""
+    from pinball_decryptor.plugins.stern import scene_edit
+    from pinball_decryptor.webui import emulate_core
+    with web_app(tmp_path, mfr="stern") as w:
+        from pinball_decryptor.webui import emulate_rig as rig
+        svc = _svc(w)
+        assets = _own_assets(w, svc)
+        w.run(lambda: assets.set(str(tmp_path)))
+        assert not w.state(NS).get("scene_edits_offer")
+        scene_edit.add(str(tmp_path), "/g/a/scene.radium", {"op": "move", "node": 1, "dx": 4, "dy": 0})
+        w.call("ui.set", NS, "overrides", True)
+        s = w.state(NS)
+        assert s["scene_edits_offer"] and s["scene_edits"] is True
+        assert "the scene edits made on the Scenes tab" in s["ovr_hint"]
+        w.call("ui.set", NS, "scene_edits", False)
+        assert "except the Scenes tab's edits" in w.state(NS)["ovr_hint"]
+        assert svc._live_ready(str(tmp_path), str(tmp_path / "set"), ["x"]) == ["x"]
+        svc._last_up = True
+        assert svc.live_scene_target(str(tmp_path)) is None           # nothing live when off
+        svc._last_up = False
+    card = tmp_path / "c.raw"
+    card.write_bytes(b"\0" * 64)
+    st = os.stat(str(card))
+    man = {"card": {"path": os.path.abspath(str(card)), "size": st.st_size, "mtime": int(st.st_mtime)},
+           "assets": os.path.abspath(str(tmp_path)), "assets_fingerprint": "fp", "scene_edits": True}
+    assert emulate_core.overrides_reason(man, str(card), str(tmp_path), "fp") == ""
+    assert "switched off" in emulate_core.overrides_reason(man, str(card), str(tmp_path), "fp",
+                                                          scene_edits=False)
+    old = dict(man)
+    old.pop("scene_edits")                                           # a set from before the tick
+    assert emulate_core.overrides_reason(old, str(card), str(tmp_path), "fp") == ""
