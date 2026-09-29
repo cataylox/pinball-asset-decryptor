@@ -473,6 +473,48 @@ def test_an_exact_size_in_pixels(tmp_path):
         w.call("text_scenes.close")
 
 
+def test_a_pictures_own_size_and_scale_and_draw_it_1_to_1(tmp_path):
+    """DragonRR (PAD-277): Stern ships Credits_Text at 1044 x 264 and lets the game shrink it,
+    which leaves jagged edges.  The panel shows a picture's own size and the scale it is drawn
+    at; a picture made at the size it shows (kept at its own size on the Images tab) is then
+    drawn pixel for pixel with Draw 1:1, its top-left corner where it was."""
+    from PIL import Image
+    from pinball_decryptor.core import staged_changes
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    man = _seed(folder)
+    rel = next(o for o in man["objects"].values()
+               if o.get("kind") == "Bitmap" and o.get("image"))["image"]
+    stock = Image.open(str(folder / "images" / rel)).size
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        art = next(h for h in _tv(w)["hits"] if h["name"] == "Art")["id"]
+        assert w.call("text_scenes.tree_select", art)
+        assert w.call("text_scenes.tree_set_scale", art, 40)
+        p = _tv(w)["props"]
+        assert (p["pic"]["w"], p["pic"]["h"]) == stock
+        s0 = p["pic"]["sx"]
+        assert abs(p["w"] - stock[0] * s0 / 100.0) <= 1.5
+        x0, y0 = p["x"], p["y"]
+        # the Images tab's pick, made at the size it shows, keeping its own size
+        small = tmp_path / "small.png"
+        Image.new("RGBA", (round(p["w"]), round(p["h"])), (20, 220, 40, 255)).save(str(small))
+        staged_changes.save(str(folder), {"image": {"images/" + rel: str(small)},
+                                          "image_keep_size": ["images/" + rel]})
+        w.call("text_scenes.tree_moment", "f:%d" % _tv(w)["frame"])
+        p = _tv(w)["props"]
+        assert (p["pic"]["w"], p["pic"]["h"]) == Image.open(str(small)).size
+        assert p["pic"]["sx"] == s0 and p["w"] < stock[0] * s0 / 100.0 / 2
+        assert w.call("text_scenes.tree_one_to_one", art)
+        p = _tv(w)["props"]
+        assert p["pic"]["sx"] == 100 and p["pic"]["sy"] == 100
+        assert abs(p["w"] - p["pic"]["w"]) <= 1 and abs(p["h"] - p["pic"]["h"]) <= 1
+        assert abs(p["x"] - x0) <= 1 and abs(p["y"] - y0) <= 1
+        # already 1:1: nothing to do
+        assert w.call("text_scenes.tree_one_to_one", art) is False
+        w.call("text_scenes.close")
+
+
 def test_a_greyed_layer_is_brought_into_view_where_the_game_shows_it(tmp_path):
     """DragonRR: the greyed eyes, "force them to show".  A layer the game is not drawing at
     this moment: tree_show goes to a moment where it is drawn and selects it; no edit."""

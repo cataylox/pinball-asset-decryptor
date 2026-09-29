@@ -14,6 +14,7 @@ The page's half is ``TreeCanvas`` / ``TreeSide`` / ``TreeLayers`` in
 
 import json
 import logging
+import math
 import os
 import re
 import threading
@@ -133,6 +134,7 @@ class TreeEditMixin:
         pins = dict(self._tpins.get(card) or {})
         worlds = {}
         draws = scene_eval.draw_list(man, frame, pins=pins, worlds=worlds)
+        self._fit_kept(draws, worlds)
         self._tdraws, self._tworlds, self._tman = draws, worlds, man
         self._tparents = {n["id"]: (par["id"] if par else None)
                           for n, par, _d in _walk_man(man)}
@@ -467,7 +469,51 @@ class TreeEditMixin:
                 "alpha": round(mul[3] * 100),
                 "hidden": any(op["op"] == "visible" and op.get("node") == nid for op in ops),
                 "layer": sibs.index(n) + 1, "layers": len(sibs),
-                "drawn": nid in self._tworlds}
+                "drawn": nid in self._tworlds, "pic": self._tree_pic_props(nid)}
+
+    def _tree_picture(self, nid):
+        """``(draw, (w, h))``: the one picture node *nid* itself draws now and the picture's
+        own pixel size (a pick that keeps its own size, else the card's texture), or None."""
+        pics = [d for d in self._tdraws
+                if d["node"] == nid and d["kind"] in ("bitmap", "flip") and d.get("image")]
+        if len(pics) != 1:
+            return None
+        d = pics[0]
+        size = _kept_size(self._tree_pictures().get(d["image"]) or {})
+        if size is None:
+            size = self._tree_sizes().get(d["image"])
+        if size is None:
+            size = _file_size(os.path.join(self.assets_dir, "images", *d["image"].split("/")))
+        if size is None:
+            size = (d["w"], d["h"])
+        return d, (int(size[0]), int(size[1]))
+
+    def _tree_pic_props(self, nid):
+        """DragonRR (PAD-277): a picture's own size and the scale the game draws it at - Stern
+        often ships a big picture and lets the game shrink it (Credits_Text: 1044 x 264 drawn
+        near 40%), which leaves jagged edges."""
+        got = self._tree_picture(nid)
+        if got is None:
+            return None
+        d, (w, h) = got
+        a, b, c, dd = d["m"][:4]
+        return {"w": w, "h": h, "sx": round(math.hypot(a, b) * 100, 1),
+                "sy": round(math.hypot(c, dd) * 100, 1)}
+
+    def _fit_kept(self, draws, worlds):
+        """A pick that keeps its own size is written at that size (the Write regrows the
+        picture's record and every sprite that names it, PAD-154), so the box it draws on the
+        glass is the pick's size, not the stock one.  Only a Bitmap drawn by its own node: a
+        Shape's fill is stretched to the shape's rect whatever its size."""
+        picks = self._tree_pictures()
+        for d in draws:
+            own = (worlds.get(d["node"]) or (None, None))[1]
+            if d["kind"] != "bitmap" or not d.get("image") or own is None \
+                    or tuple(d["m"]) != tuple(own):
+                continue
+            size = _kept_size(picks.get(d["image"]) or {})
+            if size is not None:
+                d["w"], d["h"] = size
 
     def _tree_box(self, nid):
         """The glass box ``(x0, y0, x1, y1)`` of everything node *nid* draws now."""
@@ -796,6 +842,33 @@ class TreeEditMixin:
         return self.tree_scale(node, fw, fh)
 
     @rpc
+    def tree_one_to_one(self, node):
+        """Draw the picture pixel for pixel (DragonRR, PAD-277: the game's own shrinking of a
+        big picture leaves jagged edges; a picture made at the size it shows, kept at its own
+        size on the Images tab, then needs the scene's scale taken off).  Its top-left corner
+        stays where it is."""
+        from ..plugins.stern import scene_eval
+        node = int(node)
+        got = self._tree_picture(node)
+        if got is None:
+            return False
+        d = got[0]
+        a, b, c, dd = d["m"][:4]
+        sx, sy = math.hypot(a, b), math.hypot(c, dd)
+        if sx < 1e-6 or sy < 1e-6 or (abs(sx - 1.0) < 1e-3 and abs(sy - 1.0) < 1e-3):
+            return False
+        world = (self._tworlds.get(node) or (None, scene_eval.IDENTITY))[1]
+        inv = scene_eval.invert(world)
+        if inv is None:
+            return False
+        px, py = scene_eval.apply(inv, *scene_eval.apply(d["m"], 0.0, 0.0))
+        op = {"op": "scale", "node": node, "s": round(1.0 / sx, 6),
+              "px": round(px, 3), "py": round(py, 3)}
+        if abs(sx - sy) > 1e-6:
+            op["sy"] = round(1.0 / sy, 6)
+        return self._tree_add(op)
+
+    @rpc
     def tree_tint(self, node, hex_color, alpha=100):
         """Tint (the node's colour track) to *hex_color* at *alpha* %, replacing its tint."""
         from ..plugins.stern import scene_edit
@@ -1108,6 +1181,21 @@ def _built_state(built, ops):
     if built is None:
         return "none"
     return "same" if built == ops else "changed"
+
+
+def _file_size(path):
+    """A picture file's pixel size (its header only), or None."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            return im.size
+    except Exception:                                # noqa: BLE001
+        return None
+
+
+def _kept_size(pick):
+    """The size an Images-tab pick is written at when it keeps its own size, else None."""
+    return _file_size(pick["path"]) if pick.get("keep") and pick.get("path") else None
 
 
 def _walk_man(man):
