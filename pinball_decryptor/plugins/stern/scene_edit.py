@@ -172,6 +172,37 @@ def mark_built(assets_dir):
     return True
 
 
+def built_all(assets_dir):
+    """Every scene's ops as the last Write built them (``{card: [op]}``), or ``None`` when no
+    Write has been recorded."""
+    try:
+        with open(_built_path(assets_dir), "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    edits = data.get("edits") if isinstance(data, dict) else None
+    return edits if isinstance(edits, dict) else None
+
+
+def scene_states(assets_dir):
+    """``{card: "edited" | "written"}`` for every scene with edits now or at the last Write:
+    *edited* = its edits differ from what the last Write put on the card (not written yet),
+    *written* = the last Write put exactly these edits on the card.  A scene as shipped both
+    now and then is absent."""
+    now = load(assets_dir)
+    built = built_all(assets_dir)
+    out = {}
+    for card in set(now) | set(built or {}):
+        ops = now.get(card) or []
+        was = [op for op in ((built or {}).get(card) or ()) if isinstance(op, dict)]
+        if built is not None and ops == was:
+            if ops:
+                out[card] = "written"
+        else:
+            out[card] = "edited"
+    return out
+
+
 def built_ops(assets_dir, card):
     """*card*'s ops as the last Write built them, or ``None`` when no Write has been recorded."""
     try:

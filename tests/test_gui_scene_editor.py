@@ -429,3 +429,23 @@ def test_an_older_manifest_is_re_read_quietly_when_the_card_is_there(tmp_path, m
         assert _wait(w, lambda: w.state("text_scenes").get("tree") is True)
         assert calls == [str(card)]                                       # once
         w.call("text_scenes.close")
+
+
+def test_the_scene_list_is_coloured_by_what_is_not_written_yet(tmp_path):
+    from pinball_decryptor.plugins.stern import scene_edit
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    row = lambda w: next(r for r in w.state("text_scenes")["scenes"] if r["d"] == "/g/scene1")  # noqa: E731
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        assert row(w)["state"] == ""
+        art = next(h for h in _tv(w)["hits"] if h["name"] == "Art")["id"]
+        assert w.call("text_scenes.tree_move", art, 5, 0)
+        assert row(w)["state"] == "edited"
+        w.run(scene_edit.mark_built, str(folder))                      # a Write
+        w.run(w.window.service("text").scenes.refresh_view)           # the tab comes forward
+        assert row(w)["state"] == "written" and _tv(w)["built"] == "same"
+        assert w.call("text_scenes.tree_move", art, 1, 0)
+        assert row(w)["state"] == "edited"
+        w.call("text_scenes.close")

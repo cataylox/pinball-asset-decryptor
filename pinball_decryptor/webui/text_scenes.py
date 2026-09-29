@@ -532,6 +532,24 @@ class TextScenesService(TreeEditMixin):
         from ..plugins.stern import scene_eval
         return scene_eval.MANIFEST_VERSION
 
+    def _scene_states(self):
+        """``{scene dir: "edited" | "written"}`` (DragonRR: colour the list by what is not
+        written to a card yet and what is)."""
+        try:
+            from ..plugins.stern import scene_edit
+            return {card.replace("\\", "/").rsplit("/", 1)[0]: st
+                    for card, st in scene_edit.scene_states(self.assets_dir).items()}
+        except Exception:                            # noqa: BLE001
+            return {}
+
+    def _restate_list(self):
+        """The list's colours again (after an edit, a Reset, a Write), rows unchanged."""
+        rows = self.store.get(self.ns, "scenes") or []
+        states = self._scene_states()
+        new = [dict(r, state=states.get(r["d"], "")) for r in rows]
+        if new != rows:
+            self.set(scenes=new)
+
     def _sorted_dirs(self):
         key = _SORT_KEYS.get(self._sort_col, _SORT_KEYS["#0"])
         scenes = self._scenes
@@ -560,6 +578,7 @@ class TextScenesService(TreeEditMixin):
             self._search = ""
             q = ""
         rows = []
+        states = self._scene_states()
         for d in self._sorted_dirs():
             sc = self._scenes[d]
             if q and q not in self._haystack(d):
@@ -567,7 +586,8 @@ class TextScenesService(TreeEditMixin):
             rows.append({"d": d, "label": sc["label"],
                          "imgs": len(sc["images"]), "fonts": len(sc["fonts"]),
                          "texts": len(sc["texts"]),
-                         "vids": len(sc["videos"])})
+                         "vids": len(sc["videos"]),
+                         "state": states.get(d, "")})
         self._listed = [r["d"] for r in rows]
         want = preselect if preselect in self._listed else (
             self._listed[0] if self._listed else None)

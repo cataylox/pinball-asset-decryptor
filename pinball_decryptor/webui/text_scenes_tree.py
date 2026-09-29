@@ -190,6 +190,7 @@ class TreeEditMixin:
             return
         self._fonts = None
         self._tsizes = None
+        self._restate_list()                     # a Write since: its scenes are written now
         if self._tree_available(self._sel):
             self._render_tree_preview(self._sel, quiet=True)
         else:
@@ -378,6 +379,7 @@ class TreeEditMixin:
     def _tree_refresh(self):
         self._trev += 1
         self._folder_state_written()
+        self._restate_list()
         if self._sel:
             self._render_tree_preview(self._sel)
             self._live_kick()

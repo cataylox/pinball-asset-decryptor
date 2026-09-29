@@ -19,13 +19,21 @@ if (typeof document !== "undefined" && !document.querySelector(`link[href="${CSS
 // not stretch.  The last one is a minmax(n,n) track so the Table keeps its
 // width (a plain px width on the last column is turned into "the rest").
 const SCENE_COLS = [
-  { key: "label", label: "Scene", width: "minmax(0,1fr)", sort: "#0", titleOf: (r) => r.label + "\n" + r.d },
+  { key: "label", label: "Scene", width: "minmax(0,1fr)", sort: "#0",
+    titleOf: (r) => r.label + "\n" + r.d + (r.state ? "\n" + STATE_TIP[r.state] : ""),
+    render: (r) => html`<span class="sc-name">${r.state ? html`<span class=${"sc-dot " + r.state}></span>` : null}<span class="ellip">${r.label}</span></span>` },
   { key: "imgs", label: "Images", width: "60px", sort: "imgs", num: true },
   { key: "fonts", label: "Fonts", width: "50px", sort: "fonts", num: true },
   { key: "texts", label: "Text", width: "44px", sort: "texts", num: true },
   { key: "vids", label: "Video", width: "minmax(50px,50px)", sort: "vids", num: true },
 ];
 let sceneWidths = null;         // dragged column widths, kept for the session
+// DragonRR: a scene's colour says where its edits stand - orange: changed and not written to
+// a card yet (the next Write puts them on); green: exactly what the last Write put on the card
+const STATE_TIP = {
+  edited: "Changed since the last Write: the next Write puts it on the card.",
+  written: "Written: the last Write put exactly these edits on the card.",
+};
 // The count columns the scene list has room for: a narrow list keeps the scene NAMES
 // readable and drops the counts, least useful first (Video, Fonts, then Text and Images).
 const COLS_BY_WIDTH = [[470, ["imgs", "fonts", "texts", "vids"]], [330, ["imgs", "texts"]],
@@ -197,8 +205,13 @@ export function ScenesPage() {
           <${InfoBadge} text=${s.hint} />
         </div>
         ${(s.scenes || []).length ? null : html`<p class="small muted" style="margin:0">${s.hint}</p>`}
+        ${(s.scenes || []).some((r) => r.state) ? html`<div class="row small muted sc-legend">
+          <span class="sc-dot edited"></span><span title=${STATE_TIP.edited}>not written yet</span>
+          <span class="sc-dot written"></span><span title=${STATE_TIP.written}>written to a card</span>
+        </div>` : null}
         <div class="scenes-list-wrap" ref=${listRef} ...${tip(tips.list)}>
-          <${Table} key=${sceneCols(listW).length} cls="scenes-list" columns=${sceneCols(listW)} rows=${s.scenes || []} rowKey=${(r) => r.d}
+          <${Table} key=${sceneCols(listW).length} cls="scenes-list" columns=${sceneCols(listW)}
+            rowClass=${(r) => (r.state ? "sc-" + r.state : "")} rows=${s.scenes || []} rowKey=${(r) => r.d}
             selected=${s.sel} onSelect=${(r) => call("text_scenes.select", r.d)} rowHeight=${30}
             sort=${{ key: (s.sort || {}).col, desc: (s.sort || {}).rev }}
             onSort=${(k) => call("text_scenes.sort_by", k)}
@@ -725,7 +738,9 @@ function TreeActions({ t }) {
           title: "Put every scene in this project back the way the game shipped it.",
           onClick: () => call("text_scenes.tree_clear_all") },
       ])}>Reset<//>
-    ${t.edits ? html`<span class="small muted nw" title="Edits are kept as you make them; there is nothing to save. Write puts them on the card.">${t.edits} edit${t.edits === 1 ? "" : "s"} kept, Write puts ${t.edits === 1 ? "it" : "them"} on the card</span>` : null}
+    ${t.built === "same" && t.edits ? html`<span class="small nw ok-ink" title=${STATE_TIP.written}><span class="sc-dot written"></span> Written to a card</span>`
+      : t.edits || t.built === "changed" ? html`<span class="small nw warn-ink" title="Edits are kept as you make them; there is nothing to save. The next Write puts them on the card.">
+          <span class="sc-dot edited"></span> ${t.edits ? `${t.edits} edit${t.edits === 1 ? "" : "s"}` : "Back as shipped"}, not written yet</span>` : null}
     ${adding ? html`<${Modal} title="Add a line of text" onClose=${() => setAdding(false)}
         footer=${html`<${Button} onClick=${() => setAdding(false)}>Cancel<//><${Button} kind="primary"
           disabled=${!words.trim()} onClick=${() => { setAdding(false); call("text_scenes.tree_add_text", words); }}>Add<//>`}>
