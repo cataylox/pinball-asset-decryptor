@@ -136,19 +136,64 @@ class TreeEditMixin:
             state.update(tree_busy=True)
         self.set(**state)
         self._tree_publish(card, man, frame, notes)
+        self.set(pic_note=self._missing_note(draws))
         sel = self._tsel
         split = self._tree_split(draws, sel) if sel is not None else set()
         job = {"token": token, "rev": self._trev, "card": card, "man": man, "frame": frame,
                "pins": pins, "draws": draws, "bg": self._bg, "sel": sel if split else None,
                "split": split, "text_edits": self._pending_texts(card, None),
                "colors": self._pending_colors(card), "tmp": self._tmpdir(),
-               "cache": self._tcache, "assets": self.assets_dir}
+               "cache": self._tcache, "assets": self.assets_dir,
+               "pictures": self._tree_pictures(), "sizes": self._tree_sizes()}
         with self._tlock:
             self._tjob = job
             start = not self._trunning
             self._trunning = True
         if start:
             threading.Thread(target=self._tree_worker, daemon=True, name="scene-tree").start()
+
+    def _missing_note(self, draws):
+        """DragonRR's missing background: pictures the scene draws that this project folder
+        does not have (an extract without Images) are left out of the preview - say so."""
+        picks = self._tree_pictures()
+        missing = set()
+        for d in draws:
+            rel = d.get("image") if d["kind"] in ("bitmap", "flip") else None
+            if not rel or (picks.get(rel) or {}).get("path"):
+                continue
+            if not os.path.isfile(os.path.join(self.assets_dir, "images", *rel.split("/"))):
+                missing.add(rel)
+        if not missing:
+            return ""
+        n = len(missing)
+        return ("%d picture%s this scene draws %s not in this project folder, so the preview "
+                "leaves %s out (a background can be one of them). Extract the card again with "
+                "Images ticked on the Extract tab to see %s." % (
+                    n, "" if n == 1 else "s", "is" if n == 1 else "are",
+                    "it" if n == 1 else "them", "it" if n == 1 else "them"))
+
+    def _tree_pictures(self):
+        """The Images tab's picks (read each time: they change on another tab)."""
+        from ..plugins.stern import scene_render
+        return scene_render.pending_pictures(self.assets_dir)
+
+    def _tree_sizes(self):
+        from ..plugins.stern import scene_render
+        if getattr(self, "_tsizes", None) is None or self._tsizes[0] != self.assets_dir:
+            self._tsizes = (self.assets_dir, scene_render.picture_sizes(self.assets_dir))
+        return self._tsizes[1]
+
+    def refresh_view(self):
+        """The Scenes tab came forward again: another tab may have replaced a picture or
+        imported a font since this scene was drawn, so draw it again (fonts re-read)."""
+        if not self._alive or not self._sel:
+            return
+        self._fonts = None
+        self._tsizes = None
+        if self._tree_available(self._sel):
+            self._render_tree_preview(self._sel, quiet=True)
+        else:
+            self._render_preview(self._sel)
 
     def _tree_split(self, draws, nid):
         """The indices of *draws* node *nid* draws (itself and what is inside it): they run
@@ -189,7 +234,8 @@ class TreeEditMixin:
             got = scene_render.render_tree(
                 job["assets"], job["man"], job["frame"], pins=job["pins"], fonts=self._fonts,
                 background=job["bg"], colors=job["colors"], text_edits=job["text_edits"],
-                draws=job["draws"], cache=job["cache"], split=job["split"] or None)
+                draws=job["draws"], cache=job["cache"], split=job["split"] or None,
+                pictures=job.get("pictures"), sizes=job.get("sizes"))
         except Exception:                            # noqa: BLE001
             log.exception("scene tree render")
         if got is None:

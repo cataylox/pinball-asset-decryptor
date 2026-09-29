@@ -68,6 +68,9 @@ class ScenesTab(TabService):
         self.set(empty="", folder=assets)
         if svc.is_open() and os.path.normcase(os.path.abspath(svc.assets_dir)) == \
                 os.path.normcase(os.path.abspath(assets)):
+            # the same project: redraw the scene, since another tab may have changed a
+            # picture or a font since it was drawn (DragonRR: "auto update")
+            svc.refresh_view()
             return True
         return bool(svc.open(assets))
 

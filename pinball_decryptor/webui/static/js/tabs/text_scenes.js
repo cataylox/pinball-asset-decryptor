@@ -207,6 +207,8 @@ export function ScenesPage() {
       </div>
       <${Divider} k="left" measure=${measureLeft} label="Scene list width" ...${splitProps} />
       <div class="scenes-center">
+        ${[s.card_note, editor && s.pic_note].filter(Boolean).map((t, i) => html`<div key=${"w" + i}
+          class="note warn scenes-warn" role="status"><${Icon} name="warn" /><div class="body-text small">${t}</div></div>`)}
         <div class="scenes-stage" style=${`--ar:${stage[0] / stage[1]}`}>
           ${s.preparing ? html`<${Preparing} p=${s.preparing} />`
             : editor ? html`<${TreeCanvas} s=${s} />` : html`<${Preview} s=${s} tip=${tips.preview} />`}

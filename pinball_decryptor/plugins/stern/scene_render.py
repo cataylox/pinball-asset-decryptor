@@ -678,11 +678,77 @@ def _load_png(assets_dir, rel, cache):
     """*rel*'s picture, from *cache* while the file is unchanged (an editor keeps one cache
     for many renders; a picture replaced on the Images tab is read again)."""
     path = os.path.join(assets_dir, "images", *rel.split("/")) if rel else ""
+    return _load_file(path, rel, cache)
+
+
+def picture_sizes(assets_dir):
+    """``{picture rel: (w, h)}``: each scene texture's size on the card (``radium_images.txt``
+    pad_w / pad_h, which is the stock PNG's size) - the size a build scales a replacement to
+    unless the Images tab's "keep its own size" is ticked."""
+    out = {}
+    path = os.path.join(assets_dir, "images", "scene_textures", "radium_images.txt")
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("#"):
+                    continue
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) >= 6:
+                    try:
+                        out.setdefault(parts[0], (int(parts[4]), int(parts[5])))
+                    except ValueError:
+                        pass
+    except OSError:
+        pass
+    return out
+
+
+def pending_pictures(assets_dir):
+    """The Images tab's picks, as a scene render uses them: ``{picture rel: {"path":
+    replacement file or None, "keep": keep its own size}}``.  A pick not built yet is drawn
+    from its own file, so a replacement shows in the Scenes tab the moment it is picked."""
+    try:
+        from ...core import staged_changes
+        data = staged_changes.load(assets_dir) or {}
+    except Exception:
+        return {}
+    keep = set(data.get("image_keep_size") or ())
+    out = {}
+    for rel, src in (data.get("image") or {}).items():
+        if not isinstance(rel, str) or not rel.startswith("images/"):
+            continue
+        out[rel[len("images/"):]] = {
+            "path": src if isinstance(src, str) and os.path.isfile(src) else None,
+            "keep": rel in keep}
+    return out
+
+
+def _picture(assets_dir, rel, cache, pictures=None, sizes=None):
+    """The picture a bitmap draws: the Images tab's pick when there is one, else the project
+    folder's file; scaled to the card texture's size as a build would, unless the pick keeps
+    its own size (a stock picture already is that size)."""
+    pick = (pictures or {}).get(rel) or {}
+    src = pick.get("path")
+    img = _load_file(src, "pick:" + src, cache) if src else _load_png(assets_dir, rel, cache)
+    want = (sizes or {}).get(rel)
+    if img is None or not want or pick.get("keep") or tuple(img.size) == tuple(want):
+        return img
+    key = ("fit", src or rel)
+    got = cache.get(key)
+    if got and got[0] is img and got[1] == tuple(want):
+        return got[2]
+    from PIL import Image
+    fitted = img.resize(tuple(want), Image.LANCZOS)
+    cache[key] = (img, tuple(want), fitted)
+    return fitted
+
+
+def _load_file(path, key, cache):
     try:
         stamp = os.stat(path).st_mtime_ns if path else None
     except OSError:
         stamp = None
-    got = cache.get(rel)
+    got = cache.get(key)
     if got is not None and got[0] == stamp:
         return got[1]
     from PIL import Image
@@ -692,13 +758,50 @@ def _load_png(assets_dir, rel, cache):
             img = Image.open(path).convert("RGBA")
         except (OSError, ValueError):
             img = None
-    cache[rel] = (stamp, img)
+    cache[key] = (stamp, img)
     return img
+
+
+def _wraps(d, box_h, step):
+    """Does this line of text wrap at its rect's width?  The Text's first flag byte says so
+    (a manifest from before it was recorded: a rect tall enough for two lines does)."""
+    flags = d.get("flags")
+    if flags:
+        return bool(flags[0])
+    return step > 0 and box_h >= 1.6 * step
+
+
+def _ink_width(fr, font, s):
+    try:
+        return fr.render_text(font, s)[0].size[0]
+    except Exception:
+        return 0
+
+
+def text_lines(text, width, wrap, measure):
+    """*text* as the lines a scene draws it in: broken at every ``\\n``, and, when *wrap*,
+    at the last space that keeps a line within *width* (a word longer than the width
+    stays whole on its own line, as a word processor does)."""
+    out = []
+    for para in str(text).replace("\r", "").split("\n"):
+        if not wrap or width <= 0 or measure(para) <= width:
+            out.append(para)
+            continue
+        cur = ""
+        for word in para.split(" "):
+            cand = word if not cur else cur + " " + word
+            if cur and measure(cand) > width:
+                out.append(cur)
+                cur = word
+            else:
+                cur = cand
+        out.append(cur)
+    return out
 
 
 def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
                 background=None, colors=None, text_edits=None, draws=None, cache=None,
-                split=None):
+                split=None, pictures=None, sizes=None):
     """The scene in manifest *man* (:func:`scene_eval.manifest`) at root *frame* as an RGB
     ``PIL.Image`` - every picture with its own place, scale, tilt and fade, in draw order, from
     the project folder's CURRENT PNGs and glyph slices.  *pins* / *hidden* are
@@ -737,7 +840,7 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
         if d["mul"][3] <= 0.0:
             continue
         if d["kind"] in ("bitmap", "flip"):
-            img = _load_png(assets_dir, d.get("image"), cache)
+            img = _picture(assets_dir, d.get("image"), cache, pictures, sizes)
             if img is None:
                 continue
             got = _warp(img, d["m"], w, h)
@@ -755,32 +858,40 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
             if font is None or not d["text"]:
                 continue
             shown = (text_edits or {}).get(d["text"]) or d["text"]
-            try:
-                ink, _missing = fr.render_text(font, shown)
-            except Exception:
-                continue
             rgba = list(d.get("rgba") or (1, 1, 1, 1))
             if d.get("styled"):
                 rgba = [1.0, 1.0, 1.0, rgba[3]]          # the game ignores it (see scene_eval)
             pick = (colors or {}).get(d["text"])
             if pick:
                 rgba = [c / 255.0 for c in pick[:3]] + [rgba[3]]
-            ink = _tint(ink, rgba)
-            L, T, R, _B = (list(d.get("rect") or (0, 0, w, h)) + [0, 0, 0, 0])[:4]
+            L, T, R, B = (list(d.get("rect") or (0, 0, w, h)) + [0, 0, 0, 0])[:4]
             align = d.get("align", 1)
-            iw = ink.size[0]
-            # A text field keeps a 2 px gutter inside its rect (every stock rect starts at
-            # -2, -2), and the first baseline sits the font size's DECLARED ascent below it -
-            # measured against the emulator's language screen to the pixel.
-            x = (L + _GUTTER if align == 0 else
-                 (R - _GUTTER - iw if align == 2 else L + (R - L - iw) / 2.0))
             asc = float(d.get("ascent") or font.get("ascent", 0))
-            local = (1.0, 0.0, 0.0, 1.0, x, T + _GUTTER + asc - font.get("ascent", 0))
+            step = float(d.get("line") or 0) or float(font.get("ascent", 0) + font.get("descent", 0))
+            lines = text_lines(shown, R - L - 2 * _GUTTER, _wraps(d, B - T, step),
+                               lambda s, _f=font: _ink_width(fr, _f, s))
             mul = tuple(d["mul"][i] * (1.0 if i < 3 else rgba[3]) for i in range(4))
-            got = _warp(ink, ev.compose(d["m"], local), w, h)
-            if got is not None:
-                _composite(canvas, got[0], got[1], got[2], mul, d["add"], premultiplied=False,
-                           additive=(fr.font_fmt(font) == 4))
+            for k, line in enumerate(lines):
+                if not line.strip():
+                    continue
+                try:
+                    ink, _missing = fr.render_text(font, line)
+                except Exception:
+                    continue
+                ink = _tint(ink, rgba)
+                iw = ink.size[0]
+                # A text field keeps a 2 px gutter inside its rect (every stock rect starts at
+                # -2, -2), and the first baseline sits the font size's DECLARED ascent below
+                # it - measured against the emulator's language screen to the pixel; each
+                # further line is the size's declared line height lower.
+                x = (L + _GUTTER if align == 0 else
+                     (R - _GUTTER - iw if align == 2 else L + (R - L - iw) / 2.0))
+                local = (1.0, 0.0, 0.0, 1.0, x,
+                         T + _GUTTER + asc - font.get("ascent", 0) + k * step)
+                got = _warp(ink, ev.compose(d["m"], local), w, h)
+                if got is not None:
+                    _composite(canvas, got[0], got[1], got[2], mul, d["add"],
+                               premultiplied=False, additive=(fr.font_fmt(font) == 4))
         elif d["kind"] in ("video", "spine"):
             # no picture of its own in the project: outline where it plays
             outline = Image.new("RGBA", (max(1, int(d.get("w") or 64)),

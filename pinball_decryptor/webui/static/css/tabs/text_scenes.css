@@ -135,3 +135,4 @@ html.bph-760 .scenes-page, html.bp-1180 .scenes-page { overflow: auto; }
 html.bph-760 .scenes-card { flex: 0 0 auto; height: 780px; }
 html.bp-1180 .scenes-card { flex: 0 0 auto; height: 980px; }
 .scenes-prep-bar .prog { background: var(--line); }
+.scenes-warn { flex: 0 0 auto; margin: 0; padding: 7px 10px; }

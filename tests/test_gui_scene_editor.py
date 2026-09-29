@@ -333,3 +333,99 @@ def test_an_edit_reaches_a_running_emulator_on_the_fly(tmp_path, monkeypatch):
         assert w.call("text_scenes.tree_move", art, 1, 0)
         assert w.state("text_scenes")["tree_live"] is None
         w.call("text_scenes.close")
+
+
+
+def test_a_picture_picked_on_the_images_tab_shows_at_the_size_the_build_gives_it(tmp_path):
+    """DragonRR: a replaced picture whose "keep its own size" is NOT ticked showed at its own
+    size.  The Images tab's pick is drawn (not yet built, too), scaled to the card texture's
+    size (radium_images.txt), unless keep-size is ticked."""
+    import numpy as np
+    from PIL import Image
+    from pinball_decryptor.core import staged_changes
+    from pinball_decryptor.plugins.stern import scene_render as R
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    man = _seed(folder)
+    art = next(o for o in man["objects"].values() if o.get("kind") == "Bitmap" and o.get("image"))
+    rel = art["image"]
+    stock = Image.open(str(folder / "images" / rel)).size
+    big = tmp_path / "big.png"
+    Image.new("RGBA", (stock[0] * 3, stock[1] * 3), (20, 220, 40, 255)).save(str(big))
+    data = staged_changes.load(str(folder)) or {}
+    data["image"] = {"images/" + rel: str(big)}
+    staged_changes.save(str(folder), data)
+    pics = R.pending_pictures(str(folder))
+    sizes = R.picture_sizes(str(folder))
+    assert pics["scene_textures/" + rel.split("/")[-1]]["path"] == str(big)
+    assert sizes[rel] == stock
+    cache = {}
+    got = R._picture(str(folder), rel, cache, pics, sizes)
+    assert got.size == stock and np.asarray(got)[..., 1].mean() > 150
+    data["image_keep_size"] = ["images/" + rel]
+    staged_changes.save(str(folder), data)
+    got = R._picture(str(folder), rel, {}, R.pending_pictures(str(folder)), sizes)
+    assert got.size == (stock[0] * 3, stock[1] * 3)
+    # a stock picture already is its texture's size: untouched
+    assert R._picture(str(folder), rel, {}, {}, sizes).size == stock
+
+
+def test_the_scenes_tab_warns_of_missing_pictures_and_another_games_project(tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.stern import engine
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    man = _seed(folder)
+    rel = next(o["image"] for o in man["objects"].values() if o.get("kind") == "Bitmap" and o.get("image"))
+    os.remove(str(folder / "images" / rel))
+    card = tmp_path / "kong_le.raw"
+    card.write_bytes(b"\0" * 16)
+    monkeypatch.setattr(engine, "card_title_index", lambda path: ("kong_le-1_0_0.sidx",))
+    with web_app(tmp_path, mfr="stern") as w:
+        def _set():
+            w.window.write_assets_var.set(str(folder))
+            w.window.extract_input_var.set(str(card))
+        w.run(_set)
+        text = w.window.service("text")
+        assert w.run(text.open_scene_browser, str(folder)) is True
+        w.call("text_scenes.select", "/g/scene1")
+        assert _wait(w, lambda: w.state("text_scenes").get("pic_note"))
+        assert "not in this project folder" in w.state("text_scenes")["pic_note"]
+        assert _wait(w, lambda: w.state("text_scenes").get("card_note"))
+        note = w.state("text_scenes")["card_note"]
+        assert "kong_le" in note and "g" in note
+        w.call("text_scenes.close")
+
+
+def test_an_older_manifest_is_re_read_quietly_when_the_card_is_there(tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.stern import engine, scene_eval
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    man = _seed(folder)
+    tree_path = folder / "images" / "scene_textures" / "scene_tree.json"
+    old = dict(man, v=2)
+    tree_path.write_text(json.dumps({CARD: old}), encoding="utf-8")
+    card = tmp_path / "card.raw"
+    card.write_bytes(b"\0" * 16)
+    calls = []
+
+    def fake_rebuild(image, assets, log=None, progress=None, cancel=None, **kw):
+        calls.append(image)
+        tree_path.write_text(json.dumps({CARD: dict(man, v=scene_eval.MANIFEST_VERSION)}),
+                             encoding="utf-8")
+        return 1
+
+    monkeypatch.setattr(engine, "rebuild_scene_layouts_from_card", fake_rebuild)
+    monkeypatch.setattr(engine, "card_title_index", lambda path: ())
+    with web_app(tmp_path, mfr="stern") as w:
+        def _set():
+            w.window.write_assets_var.set(str(folder))
+            w.window.extract_input_var.set(str(card))
+        w.run(_set)
+        text = w.window.service("text")
+        assert w.run(text.open_scene_browser, str(folder)) is True
+        assert _wait(w, lambda: calls == [str(card)] and not w.state("text_scenes")["rebuilding"])
+        assert w.state("text_scenes").get("preparing") is None         # the editor stayed up
+        w.call("text_scenes.select", "/g/scene1")
+        assert _wait(w, lambda: w.state("text_scenes").get("tree") is True)
+        assert calls == [str(card)]                                       # once
+        w.call("text_scenes.close")
