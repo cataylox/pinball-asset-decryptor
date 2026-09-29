@@ -253,3 +253,69 @@ def test_each_scene_says_whether_its_edits_are_on_a_card_yet(tmp_path):
     assert E.scene_states(a)["c1"] == "edited"                        # ...not on the card yet
     E.mark_built(a)
     assert E.scene_states(a) == {"c2": "written"}
+
+
+def test_a_turn_rotates_about_the_middle_and_both_sides_agree():
+    """DragonRR: "graphics can be rotated".  90 degrees clockwise about its own point: the
+    point stays put on the glass, and the card draws what the preview draws."""
+    man = _man()
+    art = lambda m: [d for d in E.draw_list(m, 1) if d["path"][-1] == "Art"][0]["m"]
+    before = art(man)
+    op = [{"op": "rotate", "node": 50, "deg": 90, "px": 8, "py": 4}]
+    preview = X.apply_manifest(man, op)[0]
+    after = art(preview)
+    # the linear part is the old one turned a quarter
+    assert after[0] == pytest.approx(before[2]) and after[1] == pytest.approx(before[3])
+    assert after[2] == pytest.approx(-before[0]) and after[3] == pytest.approx(-before[1])
+    # the pivot stays where it was on the glass
+    assert E.apply(after, 8, 4) == pytest.approx(E.apply(before, 8, 4))
+    sc = T.parse(scene())
+    X.apply_scene(sc, op, names=X.names_of(man))
+    assert _draws(preview) == _draws(E.manifest(T.parse(T.serialize(sc))))
+    assert X.describe(op[0]) == "turned +90°"
+
+
+def test_turns_fold_into_one_op_and_a_full_turn_is_none(tmp_path):
+    a = str(tmp_path)
+    X.add(a, CARD, {"op": "rotate", "node": 5, "deg": 30, "px": 1, "py": 2})
+    X.add(a, CARD, {"op": "rotate", "node": 5, "deg": 15, "px": 1, "py": 2})
+    assert X.ops_for(a, CARD) == [{"op": "rotate", "node": 5, "deg": 45, "px": 1, "py": 2}]
+    X.add(a, CARD, {"op": "rotate", "node": 5, "deg": -45, "px": 1, "py": 2})
+    assert X.ops_for(a, CARD) == []
+
+
+def test_a_drop_shadow_is_a_dark_copy_of_the_text_just_beneath_it():
+    """DragonRR: "can text have drop shadows?".  A Text has no shadow setting; the game draws
+    outlines as a second node on the SAME Text object beneath the first, so a shadow is that:
+    the copy draws the same words, moved, darkened, one layer below.  The card agrees, keeps
+    ONE Text object for both, and a later move or remove of the shadow reaches it."""
+    man = _man()
+    sid = X.FIRST_ADDED_ID
+    ops = [{"op": "shadow", "node": 53, "id": sid, "dx": 4, "dy": 4, "mul": [0, 0, 0, 0.6]}]
+    preview = X.apply_manifest(man, ops)[0]
+    texts = [d for d in E.draw_list(preview, 1) if d["kind"] == "text"]
+    assert [d["path"][-1] for d in texts] == ["Title_Shadow", "Title"]
+    sh, ti = texts
+    assert sh["text"] == ti["text"]
+    assert (sh["m"][4] - ti["m"][4], sh["m"][5] - ti["m"][5]) == pytest.approx((4, 4))
+    assert sh["m"][:4] == pytest.approx(ti["m"][:4])
+    assert sh["mul"][:3] == pytest.approx([0, 0, 0]) and sh["mul"][3] == pytest.approx(0.6 * ti["mul"][3])
+    sc = T.parse(scene())
+    n, notes = X.apply_scene(sc, ops, names=X.names_of(man))
+    assert n == 1 and notes == []
+    data = T.serialize(sc)
+    card = E.manifest(T.parse(data))
+    assert _draws(preview) == _draws(card)
+    title = [c.obj for nd, *_ in T.parse(data).walk() if nd.name in ("Title", "Title_Shadow")
+             for c in nd.components]
+    assert len(title) == 2 and title[0].id == title[1].id
+    # the shadow is a layer like any other: moved, then removed, on both sides
+    more = ops + [{"op": "move", "node": sid, "dx": 2, "dy": 0}]
+    sc = T.parse(scene())
+    X.apply_scene(sc, more, names=X.names_of(man))
+    assert _draws(X.apply_manifest(man, more)[0]) == _draws(E.manifest(T.parse(T.serialize(sc))))
+    gone = ops + [{"op": "remove", "node": sid}]
+    sc = T.parse(scene())
+    X.apply_scene(sc, gone, names=X.names_of(man))
+    assert T.serialize(sc) == scene()
+    assert X.describe(ops[0]) == "added a drop shadow"

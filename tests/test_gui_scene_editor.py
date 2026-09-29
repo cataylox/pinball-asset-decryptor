@@ -526,3 +526,40 @@ def test_play_draws_each_different_frame_once_and_stops(tmp_path):
         assert w.call("text_scenes.tree_move", art, 5, 0)
         assert w.state("text_scenes")["tree_play"] is None             # an edit stops it
         w.call("text_scenes.close")
+
+
+def test_turn_a_picture_and_give_text_a_drop_shadow(tmp_path):
+    """DragonRR: "graphics can be rotated" and "can text have drop shadows?"."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        art = next(h for h in _tv(w)["hits"] if h["name"] == "Art")["id"]
+        assert w.call("text_scenes.tree_select", art)
+        p = _tv(w)["props"]
+        mid = (p["x"] + p["w"] / 2.0, p["y"] + p["h"] / 2.0)
+        w0, h0 = p["w"], p["h"]
+        assert p["rotate"] == 0
+        assert w.call("text_scenes.tree_rotate", art, 90)
+        p = _tv(w)["props"]
+        assert p["rotate"] == 90
+        # a quarter turn about its middle: the box swaps sides and the middle stays put
+        assert abs(p["w"] - h0) <= 1 and abs(p["h"] - w0) <= 1
+        assert abs(p["x"] + p["w"] / 2.0 - mid[0]) <= 1 and abs(p["y"] + p["h"] / 2.0 - mid[1]) <= 1
+        # the Turn box sets how far from as shipped; back to 0 leaves no edit
+        assert w.call("text_scenes.tree_set_rotation", art, 0)
+        assert _tv(w)["props"]["rotate"] == 0 and _ops(folder) == []
+
+        title = next(h for h in _tv(w)["hits"] if h["name"] == "Title")["id"]
+        assert w.call("text_scenes.tree_shadow", art) is False       # text only
+        assert w.call("text_scenes.tree_shadow", title)
+        tv = _tv(w)
+        sh = tv["props"]
+        assert sh["added"] and sh["kind"] == "Text" and sh["name"] == "Title_Shadow"
+        names = [l["name"] for l in tv["layers"]]
+        assert names.index("Title_Shadow") == names.index("Title") - 1
+        # it is removed like anything added
+        assert w.call("text_scenes.tree_reset", sh["id"])
+        assert _ops(folder) == []
+        w.call("text_scenes.close")

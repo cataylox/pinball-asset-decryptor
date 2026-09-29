@@ -452,10 +452,13 @@ class TreeEditMixin:
         index = scene_edit._man_index(man)
         n, sibs = index[nid]
         scale = scale_y = 1.0
+        rotate = 0.0
         mul = [1.0, 1.0, 1.0, 1.0]
         for op in ops:
             if op.get("node") != nid:
                 continue
+            if op["op"] == "rotate":
+                rotate += op["deg"]
             if op["op"] == "scale":
                 scale *= op["s"]
                 scale_y *= op.get("sy", op["s"])
@@ -468,6 +471,7 @@ class TreeEditMixin:
                 "w": round(box[2] - box[0]) if box else None,
                 "h": round(box[3] - box[1]) if box else None,
                 "scale": round(scale * 100), "scale_y": round(scale_y * 100),
+                "rotate": round(rotate, 2),
                 "tint": "#%02x%02x%02x" % tuple(int(round(min(1, c) * 255)) for c in mul[:3]),
                 "alpha": round(mul[3] * 100),
                 "hidden": any(op["op"] == "visible" and op.get("node") == nid for op in ops),
@@ -678,6 +682,71 @@ class TreeEditMixin:
         if abs(fy - factor) > 1e-6:
             op["sy"] = round(fy, 6)
         return self._tree_add(op)
+
+    def _tree_pivot(self, node):
+        """The middle of what *node* draws now, in the node's own units (0, 0 if nothing)."""
+        from ..plugins.stern import scene_eval
+        box = self._tree_box(node)
+        world = (self._tworlds.get(node) or (None, scene_eval.IDENTITY))[1]
+        if box is not None:
+            inv = scene_eval.invert(world)
+            if inv is not None:
+                return scene_eval.apply(inv, (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0)
+        return 0.0, 0.0
+
+    @rpc
+    def tree_rotate(self, node, deg):
+        """Turn it *deg* degrees clockwise about the middle of what it draws (DragonRR:
+        "graphics can be rotated"): the scene's own transform, as the game's tilted tiles."""
+        node = int(node)
+        try:
+            deg = float(deg)
+        except (TypeError, ValueError):
+            return False
+        if abs(deg % 360.0) < 1e-4:
+            return False
+        px, py = self._tree_pivot(node)
+        return self._tree_add({"op": "rotate", "node": node, "deg": round(deg, 4),
+                               "px": round(px, 3), "py": round(py, 3)})
+
+    @rpc
+    def tree_set_rotation(self, node, deg):
+        """The Turn box: *deg* is how far from as shipped it should be turned."""
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        try:
+            want = float(deg)
+        except (TypeError, ValueError):
+            return False
+        cur = self._tree_props(card, self._tman, int(node), self._tree_ops(card))["rotate"]
+        return self.tree_rotate(node, want - cur)
+
+    #: a new drop shadow: this far down and right on the screen, black at this opacity
+    _SHADOW_PX = 4.0
+    _SHADOW_ALPHA = 0.6
+
+    @rpc
+    def tree_shadow(self, node):
+        """A drop shadow under a line of text (DragonRR: "can text have drop shadows?"): the
+        Text has no shadow setting, so it is drawn the way the game draws its outlines - a
+        second copy of the same text just beneath it, here moved a few pixels down and right
+        and darkened.  The shadow is selected, to move, tint or remove like any layer."""
+        from ..plugins.stern import scene_edit, scene_eval
+        card, _man = self._tree_card()
+        if card is None or self._tman is None:
+            return False
+        node = int(node)
+        got = scene_edit._man_index(self._tman).get(node)
+        if got is None or _kind_of(self._tman, got[0]) != "Text":
+            return False
+        parent = (self._tworlds.get(node) or (scene_eval.IDENTITY,))[0]
+        dx, dy = scene_eval.to_parent(parent, self._SHADOW_PX, self._SHADOW_PX)
+        nid = scene_edit.new_id(self._tman, self._tree_ops(card))
+        self._tsel = nid
+        return self._tree_add({"op": "shadow", "node": node, "id": nid,
+                               "dx": round(dx, 3), "dy": round(dy, 3),
+                               "mul": [0.0, 0.0, 0.0, self._SHADOW_ALPHA]})
 
     @rpc
     def tree_set_scale(self, node, pct):
