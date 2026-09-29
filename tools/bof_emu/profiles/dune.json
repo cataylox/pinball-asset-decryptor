@@ -1,0 +1,16 @@
+{
+  "title": "Dune",
+  "_source": "switches.gd / coils.gd / fast.gd / bics.gd of GDHarvest_202600513 (decompiled)",
+  "neuron_fw": "02.26",
+  "node_boards": ["0024-2", "3208-2", "1616-2", "3208-2"],
+  "exp_fw": {"48": "00.44", "b4": "00.44", "84": "00.44", "86": "00.44"},
+  "bics_fw": "1.0.0",
+  "active_at_boot": [12, 72, 73, 74, 75, 76, 77],
+  "trough_switches": [72, 73, 74, 75, 76, 77],
+  "shooter_switch": 79,
+  "trough_eject_driver": 39,
+  "bics_switches": {"49": "0", "50": "1", "51": "2", "52": "3"},
+  "keys": {"start": 14, "coin": 0, "enter": 4, "exit": 5, "down": 6, "up": 7,
+           "flipper_left": 8, "flipper_right": 22, "action": 10, "launch": 20,
+           "tilt": 13, "coin_door": 12}
+}
