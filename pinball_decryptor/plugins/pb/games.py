@@ -14,14 +14,14 @@ GAME_DB = {
         "display": "ABBA",
         "internal_dir": "game/abba",
         "filename_prefixes": ["pbap"],
-        "platform": "Custom C++ on FAST Pinball hardware",
+        "platform": "Linux PC + Pinball Brothers' own I/O and driver boards (Heighway lineage)",
         "iso": None,
     },
     "alien": {
         "display": "Alien",
         "internal_dir": "game/alien",
         "filename_prefixes": ["pbap"],
-        "platform": "Custom C++ on FAST Pinball hardware",
+        "platform": "Linux PC + Pinball Brothers' own I/O and driver boards (Heighway lineage)",
         "iso": {
             "image_name": "alien40",
             "partition": "sda2",
@@ -33,7 +33,7 @@ GAME_DB = {
         "display": "Queen",
         "internal_dir": "game/queen",
         "filename_prefixes": ["pbq"],
-        "platform": "Custom C++ on FAST Pinball hardware",
+        "platform": "Linux PC + Pinball Brothers' own I/O and driver boards (Heighway lineage)",
         "iso": {
             "image_name": "queen20d",
             "partition": "sda2",

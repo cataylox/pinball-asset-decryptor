@@ -1,6 +1,6 @@
 # Pinball Brothers (`pb`) — Architecture
 
-> Pinball Brothers ships four games (ABBA, Alien, Queen, Predator), all running custom C++ on FAST Pinball hardware. Their update format is the dead-simple `.upd` file: a **plain gzip+tar archive with no encryption** that the GUI extracts and repacks using nothing but the Python standard library. There is also an optional `.iso` path for the Alien/Queen Clonezilla restore images, which *does* need WSL + e2fsprogs/debugfs. Write is fully supported (untar → edit → re-tar with baseline-checksum change detection), and the plugin also exposes Mod Pack, Apply Delta, and Replace-Audio. The headline gotcha: there are two completely different extract code paths (`.upd` stdlib vs `.iso` Clonezilla), and the `.iso` path silently requires Linux tooling the `.upd` path never touches.
+> Pinball Brothers ships four games (ABBA, Alien, Queen, Predator). Only Predator (2025) runs custom C++ on FAST Pinball hardware; Alien, Queen and ABBA run on PB's own electronics inherited from Heighway Pinball (a Linux PC motherboard, custom I/O boards - PIC32 per Pinside, with `.uf2` firmware on current boards suggesting RP2040 - and a custom driver board). See [Hardware](#hardware). Their update format is the dead-simple `.upd` file: a **plain gzip+tar archive with no encryption** that the GUI extracts and repacks using nothing but the Python standard library. There is also an optional `.iso` path for the Alien/Queen Clonezilla restore images, which *does* need WSL + e2fsprogs/debugfs. Write is fully supported (untar → edit → re-tar with baseline-checksum change detection), and the plugin also exposes Mod Pack, Apply Delta, and Replace-Audio. The headline gotcha: there are two completely different extract code paths (`.upd` stdlib vs `.iso` Clonezilla), and the `.iso` path silently requires Linux tooling the `.upd` path never touches.
 
 ## At a glance
 
@@ -16,10 +16,19 @@ The game list is built from `GAME_DB` and sorted by display name — [manufactur
 |---|---|---|---|
 | `abba` | ABBA | Yes (`.upd` only) | `internal_dir = game/abba`, prefix `pbap`; no `iso` block, so no Clonezilla path — [games.py:13](../../pinball_decryptor/plugins/pb/games.py#L13) |
 | `alien` | Alien | Yes (`.upd` + `.iso`) | `internal_dir = game/alien`, prefix `pbap`; Clonezilla image `alien40`, partition `sda2` — [games.py:20](../../pinball_decryptor/plugins/pb/games.py#L20) |
-| `queen` | Queen | Yes (`.upd` + `.iso`) | `internal_dir = game/queen`, prefix `pbq`; Clonezilla image `queen20d`, partition `sda2` — [games.py:32](../../pinball_decryptor/plugins/pb/games.py#L32) |
+| `queen` | Queen | Yes (`.upd` + `.iso`) | `internal_dir = game/queen`, prefix `pbq`; Clonezilla image `queen20d` (restore ISO `clonezilla-live-queen20d.iso`), partition `sda2` — [games.py:32](../../pinball_decryptor/plugins/pb/games.py#L32) |
 | `predator` | Predator | Yes (`.upd` only) | `internal_dir = opt/game`, prefix `pbpp`; no `iso` block — [games.py:44](../../pinball_decryptor/plugins/pb/games.py#L44) |
 
 All four are marked supported (the `Game` objects are built without `supported=False`); `Game.supported` defaults to `True` — [registry.py:48](../../pinball_decryptor/core/registry.py#L48). Note `predator`'s `internal_dir` is `opt/game` (no game-name subfolder), unlike the others under `game/<name>`.
+
+### Hardware
+
+The four games sit on two different platforms, which matters for anything that talks to the machine (emulation above all) but not for this plugin, which only handles files:
+
+- **Predator (2025)** — custom C++ on FAST Pinball hardware; PB's first FAST machine ([Kineticist](https://www.kineticist.com/news/pinball-brothers-launch-predator-pinball), [Retro Refurbs](https://www.retrorefurbs.com/pinball-brothers-predator-revealed/)).
+- **Alien, Queen, ABBA** — PB's own electronics inherited from Heighway Pinball: a PC motherboard running Linux, custom I/O boards (PIC32 per Pinside; the `.uf2` firmware files on current boards suggest RP2040), and a custom driver board ([PinWiki: Heighway Pinball Repair](https://pinwiki.com/wiki/index.php?title=Heighway_Pinball_Repair)).
+
+`GAME_DB`'s `platform` field says the same per game.
 
 ### Input extensions / `InputSpec`
 
