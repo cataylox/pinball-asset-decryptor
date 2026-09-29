@@ -43,6 +43,7 @@ class TreeEditMixin:
         self._tframe = {}            # card -> root frame shown
         self._tpins = {}             # card -> {node id: frame}
         self._tsel = None            # selected node id
+        self._tpeek = None           # a selected layer the game is not drawing now, drawn on top
         self._tdraws = []            # the draw list of the last render
         self._tworlds = {}
         self._tparents = {}
@@ -132,7 +133,8 @@ class TreeEditMixin:
         frame = self._tree_frame(card, stock)
         pins = dict(self._tpins.get(card) or {})
         worlds = {}
-        draws = scene_eval.draw_list(man, frame, pins=pins, worlds=worlds)
+        peek = self._tpeek if self._tpeek is not None and self._tpeek == self._tsel else None
+        draws = scene_eval.draw_list(man, frame, pins=pins, worlds=worlds, show=peek)
         self._tdraws, self._tworlds, self._tman = draws, worlds, man
         self._tparents = {n["id"]: (par["id"] if par else None)
                           for n, par, _d in _walk_man(man)}
@@ -467,7 +469,8 @@ class TreeEditMixin:
                 "alpha": round(mul[3] * 100),
                 "hidden": any(op["op"] == "visible" and op.get("node") == nid for op in ops),
                 "layer": sibs.index(n) + 1, "layers": len(sibs),
-                "drawn": nid in self._tworlds}
+                "drawn": nid in self._tworlds,
+                "peek": nid == self._tpeek and nid in self._tworlds}
 
     def _tree_box(self, nid):
         """The glass box ``(x0, y0, x1, y1)`` of everything node *nid* draws now."""
@@ -611,11 +614,32 @@ class TreeEditMixin:
 
     @rpc
     def tree_select(self, node=None):
+        """Select a layer.  One the game is not drawing at this moment is drawn on top, where
+        it sits, for as long as it stays selected (DragonRR, PAD-276: clicking a greyed layer
+        went to another moment of the scene, and greyed the one that was showing); only when
+        the sprite it sits in is off now too does the preview go to where the game shows it."""
         card, _man = self._tree_card()
         if card is None:
             return False
-        self._tsel = int(node) if node not in (None, "") else None
-        if self._tsel is not None and self._tsel in self._tworlds:
+        node = int(node) if node not in (None, "") else None
+        peeked, self._tpeek = self._tpeek, None
+        self._tsel = node
+        if node is not None and node == peeked:
+            self._tpeek = node
+            self._render_tree_preview(self._sel, quiet=True)
+            return True
+        if node is not None and node not in self._tworlds and not any(
+                op["op"] == "visible" and op.get("node") == node
+                for op in self._tree_ops(card)):
+            self._tpeek = node
+            self._render_tree_preview(self._sel)
+            if node in self._tworlds:
+                return True
+            self._tpeek = None
+            return self.tree_show(node)
+        if peeked is not None:
+            self._render_tree_preview(self._sel)
+        elif self._tsel is not None and self._tsel in self._tworlds:
             # the picture is unchanged; the selection's own layers are drawn for live dragging
             self._render_tree_preview(self._sel, quiet=True)
         else:
