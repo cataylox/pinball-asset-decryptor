@@ -212,7 +212,7 @@ def first_visible(node):
 
 
 def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=None,
-              worlds=None, _settled=None, play=False):
+              worlds=None, _settled=None, play=False, show=None):
     """Every picture and line of text *man* draws at root frame *frame* (default:
     :func:`default_frame`), in draw order.  *pins* ``{node id: frame}`` seeks a nested sprite
     (what the game's code does with labels); *hidden* node ids are not drawn (what code
@@ -225,7 +225,11 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
 
     *worlds*, when a dict, receives ``{node id: (parent affine, node affine)}`` for every node
     drawn at that moment - what an editor needs to turn a drag on the glass into the node's own
-    units (:func:`to_parent`)."""
+    units (:func:`to_parent`).
+
+    *show*, a node id, is drawn even where the timeline has it off at that moment, on top of
+    everything else (the editor's look at a layer the game is not drawing now, PAD-276); it
+    is only reached when the sprite it sits in is drawn."""
     if frame is None:
         frame = default_frame(man)
     # a labelled sprite's resting frame is found by drawing it (settled_frame), and nested
@@ -240,18 +244,26 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
 
     def run(kids, f, world, tint, path):
         for n in kids:
-            if n["id"] in hidden or not visible_at(n, f):
+            forced = n["id"] == show
+            if n["id"] in hidden or not (forced or visible_at(n, f)):
                 continue
             w = compose(world, transform_at(n, f))
             t = compose_tint(tint, tint_at(n, f))
             if worlds is not None:
                 worlds[n["id"]] = (world, w)
             here = path + [n["name"]]
-            for start, oid in n["comps"]:
+            comps = n["comps"]
+            if forced and comps and all(start > f for start, _oid in comps):
+                comps = comps[:1]                   # what it shows when it comes on
+            at = len(out)
+            for start, oid in comps:
                 o = objects.get(str(oid))
-                if o is None or start > f:
+                if o is None or (start > f and not forced):
                     continue
                 emit(n, o, w, t, here, f)
+            if forced:
+                on_top.extend(out[at:])
+                del out[at:]
 
     def local_frame(n, o, f):
         frames = max(1, int(o.get("frames") or 1))
@@ -271,6 +283,7 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
         return (f - first_visible(n)) % frames + 1
 
     w_of = {}
+    on_top = []
 
     def emit(n, o, w, t, path, f):
         k = o["kind"]
@@ -307,7 +320,7 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
             out.append(dict(common, kind="spine", name=o["name"]))
 
     run(man["root"]["kids"], frame, base, NO_TINT, [])
-    return out
+    return out + on_top
 
 
 def on_glass(d, stage):
