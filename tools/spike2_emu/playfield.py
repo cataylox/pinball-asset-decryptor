@@ -1830,15 +1830,34 @@ def raise_existing():
     afternoon of runs, all reading the same shared memory, all equally live, and
     only the top one visible. Matching on the title needs no lock file and so
     leaves nothing stale behind after a crash.
+
+    ...BUT NOT EVERY WINDOW WITH THE TITLE IS OURS (PAD-260). Explorer keeps a
+    `Windows.Internal.Shell.TabProxyWindow` for the titles of windows it has
+    seen, and LEAKS them: David's PC held hundreds, one per PAD window title
+    back to v1.0.3, until Explorer restarts. FindWindowW returned the dead
+    'godzilla_le - virtual playfield' proxy, this "raised" it, and no Godzilla
+    run on that PC got a playfield again. EnumWindows does not list these;
+    FindWindowW does. So walk every window with the title and count only a
+    real one.
     """
     if sys.platform != "win32":
         return False
     try:
         import ctypes
+        from ctypes import wintypes
         u = ctypes.windll.user32
-        h = u.FindWindowW(None, WINDOW_TITLE)
-        if not h:
-            return False
+        u.FindWindowExW.restype = wintypes.HWND
+        u.FindWindowExW.argtypes = [wintypes.HWND, wintypes.HWND,
+                                    wintypes.LPCWSTR, wintypes.LPCWSTR]
+        cls = ctypes.create_unicode_buffer(256)
+        h = None
+        while True:
+            h = u.FindWindowExW(None, h, None, WINDOW_TITLE)
+            if not h:
+                return False
+            u.GetClassNameW(h, cls, 256)
+            if not cls.value.startswith("Windows.Internal.Shell."):
+                break
         u.ShowWindow(h, 9)                  # SW_RESTORE
         u.SetForegroundWindow(h)
         return True
