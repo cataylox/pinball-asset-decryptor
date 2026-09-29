@@ -439,7 +439,8 @@ function TreeLayers({ t }) {
     ${(t.layers || []).map((l) => html`<div key=${l.id} data-node=${l.id}
         class=${cx("sc-item", "ly-item", t.sel === l.id && "sel", !l.drawn && "ly-off")}
         style=${`padding-left:${10 + l.depth * 14}px`}
-        onClick=${() => call("text_scenes.tree_select", l.id)}>
+        title=${!l.drawn && !l.hidden ? "Not on the screen at this moment: click to go to where the game shows it, and edit it there" : null}
+        onClick=${() => call(!l.drawn && !l.hidden ? "text_scenes.tree_show" : "text_scenes.tree_select", l.id)}>
       <button type="button" class="ly-eye"
         title=${l.hidden ? "Hidden — show it again" : l.drawn ? "Hide it"
           : "Not on the screen at this moment: go to where the game shows it"}

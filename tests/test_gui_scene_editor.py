@@ -490,6 +490,16 @@ def test_a_greyed_layer_is_brought_into_view_where_the_game_shows_it(tmp_path):
         assert tv["frame"] != 12 and tv["sel"] == off[0]["id"]
         assert next(l for l in tv["layers"] if l["id"] == off[0]["id"])["drawn"]
         assert _ops(folder) == []
+        # and it is edited there like any other layer (DragonRR: "place/move/change all of
+        # the greyed out stuff"); the edit holds whatever moment is shown
+        nid = off[0]["id"]
+        x0 = tv["props"]["x"]
+        assert w.call("text_scenes.tree_move", nid, 25, 0)
+        assert _ops(folder) == [{"op": "move", "node": nid, "dx": 25.0, "dy": 0.0}]
+        assert abs(_tv(w)["props"]["x"] - (x0 + 25)) <= 1
+        assert w.call("text_scenes.tree_moment", "f:12")
+        assert _wait(w, lambda: _tv(w)["frame"] == 12)
+        assert len(_ops(folder)) == 1
         w.call("text_scenes.close")
 
 
