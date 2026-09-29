@@ -409,7 +409,7 @@ HELP_CONTENT = {
          "some other way (a file copied over it by hand, or a build from "
          "before the app kept a saved original) keeps what it has — "
          "\"Revert all changes…\" on the Write tab is what restores those."),
-        ("Scene editor (move, resize, tint, layers, add)",
+        ("Scene editor (move, resize, turn, tint, layers, add)",
          "When the project has a scene's tree (Extract or \"Re-read from card…\" "
          "records it), the Scenes tab draws that scene the way the machine does - "
          "every picture and line of text in its own place, size, tilt and fade, at one "
@@ -417,8 +417,11 @@ HELP_CONTENT = {
          "preview (or its row under Layers) to select it; drag it to move it, drag a "
          "corner to resize it about its middle, or use the arrow keys to nudge it (Shift "
          "for 10 px). The panel beside the preview sets its position and size exactly "
-         "(W px / H px, keeping its shape or not), tints it (a colour and an opacity), hides it, and moves it forward or back "
-         "among the layers beside it - later layers draw on top. \"Picture…\" and "
+         "(W px / H px, keeping its shape or not), turns it (\"Turn °\" is degrees clockwise "
+         "from as shipped; the 90° buttons turn it a quarter), tints it (a colour and an opacity), hides it, and moves it forward or back "
+         "among the layers beside it - later layers draw on top. A line of text also has "
+         "\"Add a drop shadow\": a dark copy of the text just beneath it, a few pixels down "
+         "and right, selected after so you can move, tint or remove it. \"Picture…\" and "
          "\"Text…\" add something new (text is written in the font and size of the "
          "selected line). \"Moment\" picks where in the scene's own timeline to look "
          "(Play runs the animation at its own speed; Stop goes back), "
