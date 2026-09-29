@@ -458,25 +458,49 @@ persisted in `$S1_WORK/s1eep.bin`), so the next boot validates.
 4. **The audio rate.** The mixer writes 128-frame stereo s16 blocks at 24000
    Hz (`S1_PCM_RATE` for the i2s pacing; the game's WAVs are 24000/12000 Hz).
 
-5. **The ball lock's optos.** `LOCKUP 1-3` (switches 32-34, negative-logic)
-   are optos whose CLOSED state means "no ball". Read open, the game counted
-   three locked balls, kicked the ramp lock (coil 4) every 3 s from attract
-   on and never fired the trough eject — its ball count was already full.
-   The keeper holds every `LOCKUP` switch closed like the trough; with that,
-   START fires coil 3, the keeper serves and launches, and the game is on
-   `PLAYER 1 BALL 1`.
+5. **The ball lock's optos** were never the wall they looked like. With the
+   switch polarity applied in game-id order instead of physical order
+   (PAD-101), `LOCKUP 1-3` read closed-for-empty and the keeper held them to
+   make the game serve. Built per physical position, they idle open, which
+   already means "no ball locked"; the keeper holds only the trough now.
 
-6. **The ball is not yet counted in play.** `ValidPlayfield_Update` (@0xecac)
-   sets the ball valid only after three playfield-switch turn-on edges since
-   the ball-start reset — `SWITCH_IsTurningOn(11)` or the "any playfield
-   switch on" group (`g_switchesBelowAllegiance` 5/6/7/19,
-   `g_switchesMegatron` 41/42/43/44). A plunge trips two of them (SHOOTER
-   LANE EXIT, the SKILL SHOT lane); the keeper pulses the lane-exit sensor on
-   launch. The third edge is a real scoring hit, so forcing the gate would
-   invent an award — reaching it honestly needs a playfield ball model (the
-   item-88 mech-feedback shape). The drop-target reset (coil 7) also retries
-   seven times after launch and gives up. Both are queue item 91; everything
-   up to the plunge is modelled.
+### Playing a game (PAD-235, all measured live)
+
+START serves, the keeper launches (pulsing SHOOTER LANE EXIT on the way
+out), and a game plays out to the high-score entry: three playfield hits make
+`g_bValidPlayfield` true (`ValidPlayfield_Update` @0xecac counts turn-on edges
+of RIGHT OUT LANE and the playfield groups; the lane exit is the first), a
+drain inside the ball-save time says BALL SAVED, a later one serves BALL 2.
+
+**Ball search and TROUGH EJECT.** `BallSearch_Update` pulses the coils in
+`C.93` = 0, 5, 6, 7 (slings, both pops, the drop-target reset) - never the
+eject. After three fruitless rounds (`nBallSearchTries`) it takes one off
+`g_nBallsValid` (never below 1), sets `g_bBallSaved` and the game serves a
+replacement, retrying TROUGH EJECT every few seconds until the shooter lane
+closes. It counts a ball back in only when it FINDS more than
+`g_nBallsValid` (trough + locks + shooter lane). So on this era the eject
+always means "serve": the keeper serves on every fire, arm window or not,
+and when the game has written a ball off (read out of guest memory) the
+unplayed ball rolls back to the trough first - the search knocked it loose.
+Left idle, a game cycles search → replacement every ~33 s with the trough
+steady; `g_nBallsValid` dips and heals within a second. Before this the
+keeper read the replacement eject as a search, pulled the ball in play back
+into the trough INSTEAD of serving, ignored every retry, and the game sat on
+its score with the eject firing for ever.
+
+**Drop targets.** 16-18 idle open (= up). The game reads their level
+(`Megatron_GetNumDropTargetsDown`), and all three down starts MEGATRON. A
+click only closes a switch for a moment, so the responder latches a hit
+target DOWN until DROP TARGET RESET (coil 7) fires; held down through a
+reset, the game fires it seven times in a row and gives up - the "retries
+seven times" of the old filing was that, plus ball search, whose round
+includes coil 7.
+
+**Lamps.** `node_ledmsg` sends `[0x80|node, n+1, 0x80|c, d0..dn-1]`: channel
+*c* onward, one level byte per channel, 64 channels on node 8 (levels 0x58
+and 0xff in attract). The responder writes them - with the switches it is
+telling the game are closed and the coils it fires - into `s1hw.state`,
+the block the switch window paints; nothing wrote it on this era before.
 
 ### Service / test mode on the early era
 
