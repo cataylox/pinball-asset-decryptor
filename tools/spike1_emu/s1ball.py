@@ -336,6 +336,39 @@ class Keeper:
             return ev[1] & 0x7F, ev[2][1], ev[2][2]
         return None, None, 0
 
+    # -- what the early game itself believes ---------------------------------
+    def on_playfield(self):
+        """Balls neither in the trough nor in the shooter lane."""
+        return self.nballs - self.balls - (1 if self.in_shooter else 0)
+
+    def balls_written_off(self):
+        """How many balls the running game has given up for lost.
+
+        BallSearch_Update, after three fruitless rounds, takes one off
+        g_nBallsValid (the balls it believes the machine holds; never below
+        1) and serves a replacement; it counts a ball back in only when it
+        FINDS more than that.  A multiball eject leaves it alone, which is
+        what tells the two apart.  Read out of guest memory, the way s1early
+        reads the switch map; 0 when it cannot be read, which leaves the
+        balls where they were."""
+        try:
+            from s1elf import _Elf
+            from s1swmap import Guest, game_pid
+            if getattr(self, "_valid_addr", None) is None:
+                game = os.path.join(self.work, "game")
+                try:
+                    with open(os.path.join(game, ".game_exe")) as f:
+                        exe = f.read().strip() or "game"
+                except OSError:
+                    exe = "game"
+                with open(os.path.join(game, exe), "rb") as f:
+                    self._valid_addr = _Elf(f.read()).syms["g_nBallsValid"]
+            valid = Guest(game_pid(self.work)).u32(self._valid_addr)
+        except Exception as exc:      # noqa: BLE001 - any failure = unknown
+            print("ball count unreadable (%s)" % exc, flush=True)
+            return 0
+        return max(0, self.nballs - valid)
+
     # -- coil reactions ------------------------------------------------------
     def arm(self, why):
         self.armed_until = time.monotonic() + ARM_WINDOW
@@ -345,7 +378,18 @@ class Keeper:
         if (node, idx) not in self.trough_coils or not power:
             return
         now = time.monotonic()
-        if now >= self.armed_until:
+        # The 2012 home models fire TROUGH EJECT for one reason only: to put a
+        # ball in the shooter lane.  Their ball search never pulses it
+        # (BallSearch_Update's coil list is slings, both pops and the drop
+        # target reset), and after three fruitless rounds it gives the ball
+        # up (g_nBallsValid-1, g_bBallSaved) and serves a replacement, which
+        # it retries every few seconds until the shooter lane closes.  Gating
+        # that on the arm window read the replacement as a search, put the
+        # ball in play back in the trough INSTEAD of serving, and ignored
+        # every retry after it: the eject fired for ever and the game sat on
+        # the score with no ball (PAD-235).  So on this era a fire serves
+        # whenever there is a ball to serve.
+        if now >= self.armed_until and not self._early():
             # Disarmed trough fire = the game hunting for balls (boot audit,
             # attract ball search).  If our invisible ball is out, the search
             # "finds" it: put it back so the count heals to full.
@@ -355,6 +399,20 @@ class Keeper:
                       flush=True)
                 self.write_state()
             return
+        lost = (min(self.on_playfield(), self.balls_written_off())
+                if self._early() else 0)
+        if lost:
+            # The replacement for a ball the search gave up on.  A real ball
+            # nobody plays does not stay lost: the search's pops and slings
+            # knock it loose and it rolls down to the trough, and the game,
+            # finding more balls than it thought it had, counts it back in.
+            # Without this every unplayed ball stayed "on the playfield" here,
+            # g_nBallsValid ran down to 1 - where the game stops serving
+            # replacements and searches for ever - and the trough ran dry.
+            self.balls += lost
+            print("ball search gave up: the lost ball rolls to the trough "
+                  "(%d)" % self.balls, flush=True)
+            self.write_state()
         if (not self.in_shooter and self.balls > 0
                 and now >= self.no_serve_until):
             self.balls -= 1

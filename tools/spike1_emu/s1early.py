@@ -152,9 +152,9 @@ def read_switch_names(g, syms, node=NODE):
     return names
 
 
-def trough_coils(elf, syms):
-    """[[node, coil], …] for the trough-eject coil(s), from the game's static
-    coil table (node, index, …, name at +12)."""
+def coils_named(elf, syms, *words):
+    """[[node, coil], …] for every coil whose name in the game's static coil
+    table (node, index, …, name at +12) carries all of *words*."""
     base = syms.get("__coil_table")
     out = []
     if not base:
@@ -165,9 +165,163 @@ def trough_coils(elf, syms):
         except ValueError:
             break
         name = ent[COIL_NAME_OFF:].split(b"\0")[0].decode("latin1", "replace")
-        if "TROUGH" in name.upper() and "EJECT" in name.upper():
+        if all(w in name.upper() for w in words):
             out.append([int(ent[0]), int(ent[1])])
     return out
+
+
+def trough_coils(elf, syms):
+    """[[node, coil], …] for the trough-eject coil(s)."""
+    return coils_named(elf, syms, "TROUGH", "EJECT")
+
+
+def drop_target_slots(names):
+    """The switch indexes of the drop targets themselves (not their reset)."""
+    return {i for i, n in names.items()
+            if n.upper().startswith("DROP TARGET") and "RESET" not in n.upper()}
+
+
+class DropBank:
+    """A drop-target bank: a hit target STAYS DOWN until the reset coil fires.
+
+    A click in the switch window (or a keeper pulse) closes a switch for a
+    fraction of a second, the way a ball brushes a standup.  A drop target is
+    not a standup: once hit it lies down and its switch reads closed until the
+    game pulses DROP TARGET RESET (coil 7 on Transformers The Pin) and the
+    bank springs back up.  The game reads the targets' LEVEL
+    (Megatron_GetNumDropTargetsDown), so without this the bank bounced back
+    up on its own the moment the click ended — and with the targets held
+    down, the reset re-fired seven times in a row and gave up (measured,
+    PAD-235), because nothing ever answered it.
+
+    Latches on the closed EDGE, so a target someone is still holding down
+    after a reset reads closed through the hold, not through a re-latch."""
+
+    def __init__(self, slots=(), reset_coils=()):
+        self.slots = set(slots)
+        self.reset_coils = set(reset_coils)
+        self.down = set()
+        self._prev = set()
+
+    def feed(self, closed):
+        """*closed*: the switch indexes injected closed right now."""
+        now = closed & self.slots
+        self.down |= now - self._prev
+        self._prev = now
+
+    def on_coil(self, coil):
+        """True when *coil* is the bank's reset (and the bank stood up)."""
+        if coil not in self.reset_coils:
+            return False
+        self.down.clear()
+        return True
+
+
+def mask_indexes(mask):
+    """8 closed-bit bytes -> the set of closed switch indexes."""
+    return {b * 8 + i for b in range(len(mask)) for i in range(8)
+            if mask[b] & (1 << i)}
+
+
+def indexes_mask(idx):
+    out = bytearray(8)
+    for i in idx:
+        if 0 <= i < 64:
+            out[i >> 3] |= 1 << (i & 7)
+    return bytes(out)
+
+
+# ---- the switch window's view of the machine (s1hw.state) ------------------
+def _load_state_model():
+    """spike1_emulate's HardwareState/StateBlock, loaded BY PATH: importing it
+    through the package runs the plugin package's __init__, which pulls in
+    the codec stack (Crypto…) the rig's python3 does not have (PAD-100)."""
+    import importlib.util
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, "..", "..", "pinball_decryptor", "plugins",
+                        "stern", "spike1_emulate.py")
+    spec = importlib.util.spec_from_file_location("_s1emulate", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+COIL_SHOW_S = 0.25       # a fired coil stays lit this long in the window
+
+
+class HwStateWriter:
+    """Keeps s1hw.state — the block the switch window paints — in step with
+    the wire: the switches the game is being told are closed, every lamp
+    frame's levels, and the coils it fires.  Nothing wrote it in this era,
+    so the window showed no lamp colour at all (PAD-235).
+
+    Lamp frames (node_ledmsg) are ``[0x80|node, n+1, 0x80|c, d0..dn-1]``:
+    channel *c* onward, one level byte per channel, 64 channels per node — so
+    each byte is lamp (node, c+i) at that level, a mono lamp.  Written at most
+    every *min_interval* seconds and only when something changed."""
+
+    def __init__(self, path, min_interval=0.05, clock=None):
+        import time
+        self.path = path
+        self.min_interval = min_interval
+        self.clock = clock or time.monotonic
+        m = _load_state_model()
+        self._pack = m.StateBlock.pack
+        self.state = m.HardwareState()
+        self.coil_until = {}
+        self.dirty = True
+        self.seq = 0
+        self.written_at = -1e9
+
+    def set_switches(self, node, closed_idx):
+        base = node * 64
+        cur = self.state.switches[base:base + 64]
+        new = bytearray(64)
+        for i in closed_idx:
+            if 0 <= i < 64:
+                new[i] = 1
+        if new != cur:
+            self.state.switches[base:base + 64] = new
+            self.dirty = True
+
+    def lamp_frame(self, node, cmd, data):
+        start = cmd & 0x7F
+        for i, level in enumerate(data):
+            ch = start + i
+            if ch >= 64:
+                break
+            if self.state.get_lamp(node, ch) != (level, level, level):
+                self.state.set_lamp(node, ch, level)
+                self.dirty = True
+
+    def coil_fire(self, node, coil):
+        if 0 <= coil < 64:
+            self.coil_until[(node, coil)] = self.clock() + COIL_SHOW_S
+            if not self.state.get_coil(node, coil):
+                self.state.set_coil(node, coil, True)
+                self.dirty = True
+
+    def flush(self, force=False):
+        now = self.clock()
+        for key, until in list(self.coil_until.items()):
+            if now >= until:
+                del self.coil_until[key]
+                self.state.set_coil(key[0], key[1], False)
+                self.dirty = True
+        if not (self.dirty or force) or \
+                (not force and now - self.written_at < self.min_interval):
+            return False
+        self.seq += 1
+        tmp = self.path + ".tmp"
+        try:
+            with open(tmp, "wb") as f:
+                f.write(self._pack(self.state, self.seq))
+            os.replace(tmp, self.path)
+        except OSError:
+            return False
+        self.dirty = False
+        self.written_at = now
+        return True
 
 
 def sync_from_guest(work, elf_path, out_path):
@@ -184,6 +338,7 @@ def sync_from_guest(work, elf_path, out_path):
         raise NotReady("switch map not populated yet")
     doc = {"%d,%d" % (NODE, i): n for i, n in sorted(names.items())}
     doc["_trough_coils"] = trough_coils(elf, syms)
+    doc["_drop_reset_coils"] = coils_named(elf, syms, "DROP", "TARGET", "RESET")
     doc["_wire_idle"] = negmask.hex()
     import json
     tmp = out_path + ".tmp"
@@ -330,6 +485,12 @@ def main(argv=None):
     logline("early-era responder up: node %d, eeprom %s" % (NODE, eeprom.path))
 
     state = {"idle": SW_IDLE_HIGH, "synced": False, "next_sync": 0.0}
+    bank = DropBank()
+    try:
+        hw = HwStateWriter(os.path.join(work, "s1hw.state"))
+    except (OSError, ImportError, AttributeError) as exc:
+        hw = None
+        logline("s1hw.state: not written (%s)" % exc)
     import time
 
     def maybe_sync():
@@ -345,6 +506,17 @@ def main(argv=None):
         state["synced"] = True
         logline("sync: wire idle %s (physical order), %d switches named -> %s"
                 % (wire_idle.hex(), len(names), names_path))
+        try:
+            with open(elf_path, "rb") as f:
+                elf = _Elf(f.read())
+            resets = [c for n, c in coils_named(elf, elf.syms, "DROP",
+                                                "TARGET", "RESET") if n == NODE]
+        except (OSError, ValueError):
+            resets = []
+        bank.__init__(drop_target_slots(names), resets)
+        if bank.slots:
+            logline("drop targets %s latch down until coil %s fires"
+                    % (sorted(bank.slots), resets))
 
     def injected_now():
         """{node: closed-bit mask} from the viewer + keeper files."""
@@ -367,8 +539,17 @@ def main(argv=None):
                 break
             cap.write(data)
             maybe_sync()
+            closed = injected_now()
+            bank.feed(mask_indexes(closed.get(NODE, SW_IDLE_HIGH)))
+            if bank.down:
+                closed[NODE] = bytes(
+                    a | b for a, b in zip(closed.get(NODE, SW_IDLE_HIGH),
+                                          indexes_mask(bank.down)))
+            if hw:
+                hw.set_switches(NODE, mask_indexes(closed.get(NODE,
+                                                              SW_IDLE_HIGH)))
             switches = {n: wire_bytes(m, state["idle"])
-                        for n, m in injected_now().items()}
+                        for n, m in closed.items()}
             idle = wire_bytes(SW_IDLE_HIGH, state["idle"])
             for ev in parser.feed(data):
                 if ev[0] == "poll":
@@ -394,6 +575,13 @@ def main(argv=None):
                         delivered[node] = switches.get(node, idle)
                     tag = ("COIL" if 0x40 <= cmd < 0x80 else
                            "LAMP" if cmd >= 0x80 and cmd != 0xFF else "REQ")
+                    if tag == "COIL" and any(body):   # all-zero = coil off
+                        if node == NODE and bank.on_coil(cmd & 0x3F):
+                            logline("drop targets reset: bank up")
+                        if hw:
+                            hw.coil_fire(node, cmd & 0x3F)
+                    elif tag == "LAMP" and hw:
+                        hw.lamp_frame(node, cmd, body)
                     logline("%s node=%d cmd=0x%02x data=%s -> %s"
                             % (tag, node, cmd, body.hex(),
                                resp.hex() if resp else "(no reply)"))
@@ -406,6 +594,8 @@ def main(argv=None):
                         os.write(master, resp)
                     except OSError as e:
                         logline("  write failed: %s" % e)
+            if hw:
+                hw.flush()
     finally:
         cap.close()
         if log:
