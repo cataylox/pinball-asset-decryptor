@@ -1,0 +1,1187 @@
+{
+ "title": "Jim Henson's Labyrinth",
+ "_source": "GDCraze_linux_20260130: autoloads/fast.gd, fast_stem.gd (older: every ttyACM except the Audio Controller; exact fw match) (decompiled)",
+ "ports": [
+  {
+   "role": "net",
+   "usb": "1-1",
+   "iface": "1.0",
+   "manufacturer": "FAST Pinball",
+   "product": "Neuron",
+   "vid": "2e8a",
+   "pid": "1074"
+  },
+  {
+   "role": "exp",
+   "usb": "1-1",
+   "iface": "1.2",
+   "manufacturer": "FAST Pinball",
+   "product": "Neuron",
+   "vid": "2e8a",
+   "pid": "1074"
+  },
+  {
+   "role": "audio",
+   "usb": "1-3",
+   "iface": "1.0",
+   "manufacturer": "FAST Pinball",
+   "product": "Audio Controller",
+   "vid": "2e8a",
+   "pid": "1075"
+  }
+ ],
+ "neuron_fw": "02.25",
+ "node_boards": [
+  "0024-2",
+  "0804-2",
+  "3208-2",
+  "1616-2"
+ ],
+ "exp_boards": {
+  "48": "00.44",
+  "b4": "00.44"
+ },
+ "balls": 5,
+ "trough_switches": [
+  32,
+  33,
+  34,
+  35,
+  36,
+  37
+ ],
+ "shooter_switch": 39,
+ "coin_door_switch": 12,
+ "trough_eject_driver": 17,
+ "launch_driver": 16,
+ "active_at_boot": [
+  12,
+  32,
+  33,
+  34,
+  35,
+  36
+ ],
+ "keys": {
+  "start": 14,
+  "coin": 0,
+  "enter": 4,
+  "exit": 5,
+  "up": 7,
+  "down": 6,
+  "flipper_left": 15,
+  "flipper_right": 22,
+  "flipper_upper_right": 23,
+  "launch": 20,
+  "tilt": 13,
+  "coin_door": 12
+ },
+ "switches": [
+  {
+   "n": 0,
+   "const": "COIN_1",
+   "tags": [
+    "coin"
+   ],
+   "label": "COIN 1",
+   "opto": false,
+   "x": 111,
+   "y": 640
+  },
+  {
+   "n": 1,
+   "const": "COIN_2",
+   "tags": [
+    "coin"
+   ],
+   "label": "COIN 2",
+   "opto": false,
+   "x": 116,
+   "y": 640
+  },
+  {
+   "n": 2,
+   "const": "COIN_3",
+   "tags": [
+    "coin"
+   ],
+   "label": "coin_3",
+   "opto": false,
+   "x": 121,
+   "y": 640
+  },
+  {
+   "n": 3,
+   "const": "SWITCH_3",
+   "tags": [],
+   "label": "SWITCH 3",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 4,
+   "const": "ENTER",
+   "tags": [],
+   "label": "ENTER",
+   "opto": false,
+   "x": 72,
+   "y": 621
+  },
+  {
+   "n": 5,
+   "const": "EXIT",
+   "tags": [],
+   "label": "EXIT",
+   "opto": false,
+   "x": 44,
+   "y": 621
+  },
+  {
+   "n": 6,
+   "const": "DOWN",
+   "tags": [],
+   "label": "DOWN",
+   "opto": false,
+   "x": 51,
+   "y": 621
+  },
+  {
+   "n": 7,
+   "const": "UP",
+   "tags": [],
+   "label": "UP",
+   "opto": false,
+   "x": 58,
+   "y": 621
+  },
+  {
+   "n": 8,
+   "const": "SWITCH_8",
+   "tags": [],
+   "label": "SWITCH 8",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 9,
+   "const": "SWITCH_9",
+   "tags": [],
+   "label": "SWITCH 9",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 10,
+   "const": "SWITCH_10",
+   "tags": [],
+   "label": "SWITCH 10",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 11,
+   "const": "SWITCH_11",
+   "tags": [],
+   "label": "SWITCH 11",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 12,
+   "const": "INTERLOCK",
+   "tags": [],
+   "label": "COIN DOOR INTERLOCK",
+   "opto": false,
+   "x": 110,
+   "y": 640
+  },
+  {
+   "n": 13,
+   "const": "TILT",
+   "tags": [
+    "history"
+   ],
+   "label": "TILT",
+   "opto": false,
+   "x": 8,
+   "y": 549
+  },
+  {
+   "n": 14,
+   "const": "START",
+   "tags": [],
+   "label": "START",
+   "opto": false,
+   "x": 7,
+   "y": 640
+  },
+  {
+   "n": 15,
+   "const": "FLIPPER_BUTTON_LL",
+   "tags": [],
+   "label": "LOWER LEFT FLIPPER",
+   "opto": false,
+   "x": -10,
+   "y": 607
+  },
+  {
+   "n": 16,
+   "const": "SWITCH_16",
+   "tags": [],
+   "label": "SWITCH 16",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 17,
+   "const": "SWITCH_17",
+   "tags": [],
+   "label": "SWITCH 17",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 18,
+   "const": "SWITCH_18",
+   "tags": [],
+   "label": "SWITCH 18",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 19,
+   "const": "PLACEBO",
+   "tags": [],
+   "label": "PLACEBO",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 20,
+   "const": "LAUNCH",
+   "tags": [],
+   "label": "LAUNCH",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 21,
+   "const": "DBV_COIN",
+   "tags": [],
+   "label": "DOLLAR BILL VALIDATOR",
+   "opto": false,
+   "x": 106,
+   "y": 640
+  },
+  {
+   "n": 22,
+   "const": "FLIPPER_BUTTON_LR",
+   "tags": [],
+   "label": "LOWER RIGHT FLIPPER",
+   "opto": false,
+   "x": 272,
+   "y": 607
+  },
+  {
+   "n": 23,
+   "const": "FLIPPER_BUTTON_UR",
+   "tags": [],
+   "label": "UPPER RIGHT FLIPPER",
+   "opto": false,
+   "x": 284,
+   "y": 607
+  },
+  {
+   "n": 24,
+   "const": "WISEMAN",
+   "tags": [
+    "search_refresh_active",
+    "ignore_during_search",
+    "history"
+   ],
+   "label": "WISEMAN DROP TARGET",
+   "opto": false,
+   "x": 175,
+   "y": 156
+  },
+  {
+   "n": 25,
+   "const": "WISEMAN_ENTRY_BACK",
+   "tags": [
+    "history"
+   ],
+   "label": "WISEMAN ENTRY BACK",
+   "opto": true,
+   "x": 182,
+   "y": 115
+  },
+  {
+   "n": 26,
+   "const": "SUBWAY_WISEMAN",
+   "tags": [
+    "history"
+   ],
+   "label": "WISEMAN SUBWAY",
+   "opto": true,
+   "x": 207,
+   "y": 138
+  },
+  {
+   "n": 27,
+   "const": "SCOOP_WISEMAN",
+   "tags": [
+    "search_refresh_inactive",
+    "ignore_during_search",
+    "history"
+   ],
+   "label": "WISEMAN SCOOP",
+   "opto": true,
+   "x": 238,
+   "y": 147
+  },
+  {
+   "n": 28,
+   "const": "TARGET_WISEMAN2",
+   "tags": [
+    "search_refresh_active",
+    "target",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "WISEMAN TARGET - RIGHT",
+   "opto": false,
+   "x": 193,
+   "y": 154
+  },
+  {
+   "n": 29,
+   "const": "TARGET_WISEMAN1",
+   "tags": [
+    "search_refresh_active",
+    "target",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "WISEMAN TARGET - LEFT",
+   "opto": false,
+   "x": 162,
+   "y": 144
+  },
+  {
+   "n": 30,
+   "const": "UTURN_RIGHT",
+   "tags": [
+    "search_refresh_active",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "HORSESHOE - RIGHT",
+   "opto": false,
+   "x": 209,
+   "y": 110
+  },
+  {
+   "n": 31,
+   "const": "ORBIT_UPPER_RIGHT",
+   "tags": [
+    "search_refresh_active",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "RIGHT ORBIT PAIR - HIGH",
+   "opto": false,
+   "x": 262,
+   "y": 77
+  },
+  {
+   "n": 32,
+   "const": "TROUGH1",
+   "tags": [
+    "trough",
+    "history"
+   ],
+   "label": "BALL TROUGH 1",
+   "opto": true,
+   "x": 245,
+   "y": 574
+  },
+  {
+   "n": 33,
+   "const": "TROUGH2",
+   "tags": [
+    "trough",
+    "history"
+   ],
+   "label": "BALL TROUGH 2",
+   "opto": true,
+   "x": 229,
+   "y": 580
+  },
+  {
+   "n": 34,
+   "const": "TROUGH3",
+   "tags": [
+    "trough",
+    "history"
+   ],
+   "label": "BALL TROUGH 3",
+   "opto": true,
+   "x": 214,
+   "y": 588
+  },
+  {
+   "n": 35,
+   "const": "TROUGH4",
+   "tags": [
+    "trough",
+    "history"
+   ],
+   "label": "BALL TROUGH 4",
+   "opto": true,
+   "x": 198,
+   "y": 595
+  },
+  {
+   "n": 36,
+   "const": "TROUGH5",
+   "tags": [
+    "trough",
+    "history"
+   ],
+   "label": "BALL TROUGH 5",
+   "opto": true,
+   "x": 183,
+   "y": 602
+  },
+  {
+   "n": 37,
+   "const": "TROUGH6",
+   "tags": [
+    "trough",
+    "history"
+   ],
+   "label": "BALL TROUGH 6",
+   "opto": true,
+   "x": 167,
+   "y": 611
+  },
+  {
+   "n": 38,
+   "const": "TROUGH_JAM",
+   "tags": [
+    "trough",
+    "history"
+   ],
+   "label": "BALL TROUGH JAM",
+   "opto": true,
+   "x": 245,
+   "y": 599
+  },
+  {
+   "n": 39,
+   "const": "SHOOTER_LANE",
+   "tags": [
+    "search_stop",
+    "search_refresh_inactive",
+    "history"
+   ],
+   "label": "SHOOTER LANE",
+   "opto": false,
+   "x": 268,
+   "y": 594
+  },
+  {
+   "n": 40,
+   "const": "TARGET_PILLAR",
+   "tags": [
+    "search_refresh_active",
+    "target",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "ELLO TARGET",
+   "opto": false,
+   "x": 231,
+   "y": 379
+  },
+  {
+   "n": 41,
+   "const": "SLING_UPPER_RIGHT",
+   "tags": [
+    "search_refresh_active",
+    "sling",
+    "ignore_during_search",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "UPPER RIGHT SLING PAIR",
+   "opto": false,
+   "x": 236,
+   "y": 346
+  },
+  {
+   "n": 42,
+   "const": "ELLO_LANE",
+   "tags": [
+    "search_refresh_active",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "ELLO LANE",
+   "opto": false,
+   "x": 268,
+   "y": 349
+  },
+  {
+   "n": 43,
+   "const": "FLIPPER_EOS_UR",
+   "tags": [],
+   "label": "UPPER RIGHT FLIPPER EOS",
+   "opto": false,
+   "x": 236,
+   "y": 288
+  },
+  {
+   "n": 44,
+   "const": "ORBIT_LOWER_RIGHT",
+   "tags": [
+    "search_refresh_active",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "RIGHT ORBIT - LOW",
+   "opto": true,
+   "x": 263,
+   "y": 213
+  },
+  {
+   "n": 45,
+   "const": "RAMP_RIGHT_MADE",
+   "tags": [
+    "search_refresh_active",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "RIGHT RAMP MADE",
+   "opto": true,
+   "x": 215,
+   "y": 125
+  },
+  {
+   "n": 46,
+   "const": "SWITCH_46",
+   "tags": [],
+   "label": "SWITCH 46",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 47,
+   "const": "SWITCH_47",
+   "tags": [],
+   "label": "SWITCH_47",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 48,
+   "const": "TARGET_WALL",
+   "tags": [
+    "search_refresh_active",
+    "target",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "WALL TARGET",
+   "opto": false,
+   "x": 21,
+   "y": 414
+  },
+  {
+   "n": 49,
+   "const": "OUTLANE_UPPER_LEFT",
+   "tags": [
+    "search_refresh_active",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "LEFT OUTLANE - HIGH",
+   "opto": false,
+   "x": 8,
+   "y": 408
+  },
+  {
+   "n": 50,
+   "const": "SCOOP_HANDS",
+   "tags": [
+    "search_refresh_inactive",
+    "ignore_during_search",
+    "history"
+   ],
+   "label": "HELPING HANDS SCOOP",
+   "opto": true,
+   "x": 15,
+   "y": 348
+  },
+  {
+   "n": 51,
+   "const": "TARGET_JUNK",
+   "tags": [
+    "search_refresh_active",
+    "target",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "JUNK LADY TARGET",
+   "opto": false,
+   "x": 16,
+   "y": 320
+  },
+  {
+   "n": 52,
+   "const": "TARGET_FAIRY1",
+   "tags": [
+    "search_refresh_active",
+    "target",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "FAIRY TARGET LOW LEFT",
+   "opto": false,
+   "x": 54,
+   "y": 291
+  },
+  {
+   "n": 53,
+   "const": "TARGET_FAIRY2",
+   "tags": [
+    "search_refresh_active",
+    "target",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "FAIRY TARGET LOW RIGHT",
+   "opto": false,
+   "x": 91,
+   "y": 270
+  },
+  {
+   "n": 54,
+   "const": "TARGET_MODE",
+   "tags": [
+    "search_refresh_active",
+    "target",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "CHANGE MODE TARGET",
+   "opto": false,
+   "x": 98,
+   "y": 262
+  },
+  {
+   "n": 55,
+   "const": "ORBIT_LOWER_LEFT",
+   "tags": [
+    "search_refresh_active",
+    "target",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "LEFT ORBIT - LOW",
+   "opto": true,
+   "x": 28,
+   "y": 278
+  },
+  {
+   "n": 56,
+   "const": "OUTLANE_LEFT",
+   "tags": [
+    "search_refresh_active",
+    "early_save",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "LEFT OUTLANE - LOW",
+   "opto": false,
+   "x": 6,
+   "y": 500
+  },
+  {
+   "n": 57,
+   "const": "INLANE_LEFT",
+   "tags": [
+    "search_refresh_active",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "LEFT RETURN LANE",
+   "opto": false,
+   "x": 30,
+   "y": 483
+  },
+  {
+   "n": 58,
+   "const": "SLING_LEFT",
+   "tags": [
+    "search_refresh_active",
+    "sling",
+    "ignore_during_search",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "LEFT SLING PAIR",
+   "opto": false,
+   "x": 54,
+   "y": 478
+  },
+  {
+   "n": 59,
+   "const": "FLIPPER_EOS_LL",
+   "tags": [],
+   "label": "LEFT FLIPPER EOS",
+   "opto": false,
+   "x": 102,
+   "y": 503
+  },
+  {
+   "n": 60,
+   "const": "FLIPPER_EOS_LR",
+   "tags": [],
+   "label": "LOWER RIGHT FLIPPER EOS",
+   "opto": false,
+   "x": 144,
+   "y": 503
+  },
+  {
+   "n": 61,
+   "const": "SLING_RIGHT",
+   "tags": [
+    "search_refresh_active",
+    "sling",
+    "ignore_during_search",
+    "ignore_tilted"
+   ],
+   "label": "RIGHT SLING PAIR",
+   "opto": false,
+   "x": 194,
+   "y": 478
+  },
+  {
+   "n": 62,
+   "const": "INLANE_RIGHT",
+   "tags": [
+    "search_refresh_active",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "RIGHT RETURN LANE",
+   "opto": false,
+   "x": 219,
+   "y": 483
+  },
+  {
+   "n": 63,
+   "const": "OUTLANE_RIGHT",
+   "tags": [
+    "search_refresh_active",
+    "early_save",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "RIGHT OUTLANE",
+   "opto": false,
+   "x": 242,
+   "y": 500
+  },
+  {
+   "n": 64,
+   "const": "UTURN_LEFT",
+   "tags": [
+    "search_refresh_active",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "HORSESHOE - LEFT",
+   "opto": false,
+   "x": 152,
+   "y": 94
+  },
+  {
+   "n": 65,
+   "const": "SPINNER",
+   "tags": [],
+   "label": "SPINNER",
+   "opto": false,
+   "x": 23,
+   "y": 261
+  },
+  {
+   "n": 66,
+   "const": "RAMP_CENTER_MADE",
+   "tags": [
+    "search_refresh_active",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "CENTER RAMP MADE",
+   "opto": true,
+   "x": 9,
+   "y": 113
+  },
+  {
+   "n": 67,
+   "const": "RAMP_LEFT_MADE",
+   "tags": [
+    "search_refresh_active",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "LEFT RAMP MADE",
+   "opto": true,
+   "x": 131,
+   "y": 107
+  },
+  {
+   "n": 68,
+   "const": "TARGET_FAIRY4",
+   "tags": [
+    "search_refresh_active",
+    "target",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "FAIRY TARGET HIGH RIGHT",
+   "opto": false,
+   "x": 129,
+   "y": 132
+  },
+  {
+   "n": 69,
+   "const": "RAMP_LEFT_ENTER",
+   "tags": [
+    "search_refresh_active",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "LEFT RAMP ENTER",
+   "opto": true,
+   "x": 69,
+   "y": 273
+  },
+  {
+   "n": 70,
+   "const": "SWITCH_70",
+   "tags": [],
+   "label": "SWITCH 46",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 71,
+   "const": "SWITCH_71",
+   "tags": [],
+   "label": "SWITCH 71",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 72,
+   "const": "VILLAGE_ENTRY_SIDE",
+   "tags": [
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "VILLAGE ENTRY SIDE",
+   "opto": true,
+   "x": 78,
+   "y": 135
+  },
+  {
+   "n": 73,
+   "const": "TARGET_FAIRY3",
+   "tags": [
+    "search_refresh_active",
+    "target",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "FAIRY TARGET HIGH LEFT",
+   "opto": false,
+   "x": 93,
+   "y": 173
+  },
+  {
+   "n": 74,
+   "const": "CITY_GATE",
+   "tags": [
+    "ignore_during_search",
+    "history"
+   ],
+   "label": "HUMONGOUS DROP TARGET",
+   "opto": false,
+   "x": 14,
+   "y": 220
+  },
+  {
+   "n": 75,
+   "const": "SCOOP_VILLAGE",
+   "tags": [
+    "search_refresh_inactive",
+    "ignore_during_search",
+    "history"
+   ],
+   "label": "VILLAGE SCOOP",
+   "opto": true,
+   "x": 46,
+   "y": 208
+  },
+  {
+   "n": 76,
+   "const": "ORBIT_INNER",
+   "tags": [
+    "search_refresh_active",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "INNER LOOP",
+   "opto": false,
+   "x": 62,
+   "y": 104
+  },
+  {
+   "n": 77,
+   "const": "VILLAGE_ENTRY_BACK",
+   "tags": [
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "VILLAGE ENTRY BACK",
+   "opto": true,
+   "x": 39,
+   "y": 119
+  },
+  {
+   "n": 78,
+   "const": "ORBIT_UPPER_LEFT",
+   "tags": [
+    "search_refresh_active",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "LEFT ORBIT PAIR - HIGH",
+   "opto": false,
+   "x": 6,
+   "y": 91
+  },
+  {
+   "n": 79,
+   "const": "ORBIT_TOP",
+   "tags": [
+    "search_refresh_active",
+    "ignore_tilted",
+    "history"
+   ],
+   "label": "ORBIT - TOP",
+   "opto": false,
+   "x": 104,
+   "y": 6
+  }
+ ],
+ "coils": [
+  {
+   "n": 0,
+   "const": "LV_GI",
+   "label": "LOW VOLTAGE GI"
+  },
+  {
+   "n": 1,
+   "const": "LV_FLASH",
+   "label": "LOW VOLTAGE FLASHER"
+  },
+  {
+   "n": 2,
+   "const": "SHAKER",
+   "label": "SHAKER (OPTIONAL ADD-ON)"
+  },
+  {
+   "n": 3,
+   "const": "START_LED",
+   "label": "START BUTTON LED"
+  },
+  {
+   "n": 4,
+   "const": "TICKET",
+   "label": "TICKET"
+  },
+  {
+   "n": 5,
+   "const": "COIL5",
+   "label": "COIL 5 <NOT USED>"
+  },
+  {
+   "n": 6,
+   "const": "COIL6",
+   "label": "COIL 6 <NOT USED>"
+  },
+  {
+   "n": 7,
+   "const": "KNOCKER",
+   "label": "KNOCKER"
+  },
+  {
+   "n": 8,
+   "const": "MAGNET_ORBIT",
+   "label": "ORBIT MAGNET - TOP"
+  },
+  {
+   "n": 9,
+   "const": "RAMP_LIFT",
+   "label": "LEFT RAMP LIFTER"
+  },
+  {
+   "n": 10,
+   "const": "MAGNET_BEGGAR",
+   "label": "BEGGAR MAGNET - CENTER"
+  },
+  {
+   "n": 11,
+   "const": "SLING_UPPER_RIGHT",
+   "label": "UPPER RIGHT SLING"
+  },
+  {
+   "n": 12,
+   "const": "FLIPPER_MAIN_LR",
+   "label": "RIGHT FLIPPER POWER"
+  },
+  {
+   "n": 13,
+   "const": "FLIPPER_HOLD_LR",
+   "label": "RIGHT FLIPPER HOLD"
+  },
+  {
+   "n": 14,
+   "const": "FLIPPER_MAIN_LL",
+   "label": "LEFT FLIPPER POWER"
+  },
+  {
+   "n": 15,
+   "const": "FLIPPER_HOLD_LL",
+   "label": "LEFT FLIPPER HOLD"
+  },
+  {
+   "n": 16,
+   "const": "AUTOPLUNGER",
+   "label": "AUTO-LAUNCH"
+  },
+  {
+   "n": 17,
+   "const": "TROUGH_EJECT",
+   "label": "TROUGH EJECT"
+  },
+  {
+   "n": 18,
+   "const": "SLING_RIGHT",
+   "label": "RIGHT SLING"
+  },
+  {
+   "n": 19,
+   "const": "SLING_LEFT",
+   "label": "LEFT SLING"
+  },
+  {
+   "n": 20,
+   "const": "UTURN_DIVERTER_KNOCKDOWN",
+   "label": "HORESEHOE DIVERTER DOWN"
+  },
+  {
+   "n": 21,
+   "const": "UTURN_DIVERTER_RESET",
+   "label": "HORSESHOE DIVERTER UP"
+  },
+  {
+   "n": 22,
+   "const": "WISEMAN_RESET",
+   "label": "WISEMAN DROP TARGET UP"
+  },
+  {
+   "n": 23,
+   "const": "SCOOP_WISEMAN",
+   "label": "WISEMAN SCOOP EJECT"
+  },
+  {
+   "n": 24,
+   "const": "WISEMAN_KNOCKDOWN",
+   "label": "WISEMAN DROP TARGET DOWN"
+  },
+  {
+   "n": 25,
+   "const": "FLIPPER_MAIN_UR",
+   "label": "UPPER RIGHT FLIPPER POWER"
+  },
+  {
+   "n": 26,
+   "const": "FLIPPER_HOLD_UR",
+   "label": "UPPER RIGHT FLIPPER HOLD"
+  },
+  {
+   "n": 27,
+   "const": "POST_ELLO_LANE",
+   "label": "ELLO LANE POST"
+  },
+  {
+   "n": 28,
+   "const": "POST_OUTLANE",
+   "label": "OUTLANE POST"
+  },
+  {
+   "n": 29,
+   "const": "SCOOP_HANDS",
+   "label": "HELPING HANDS SCOOP EJECT"
+  },
+  {
+   "n": 30,
+   "const": "ORBIT_FORK_KNOCKDOWN",
+   "label": "FORK BALL CATCH DOWN"
+  },
+  {
+   "n": 31,
+   "const": "CITY_GATE_KNOCKDOWN",
+   "label": "HUMONGOUS DROP TARGET DOWN"
+  },
+  {
+   "n": 32,
+   "const": "ORBIT_FORK_RESET",
+   "label": "FORKS BALL CATCH UP"
+  },
+  {
+   "n": 33,
+   "const": "CITY_GATE_RESET",
+   "label": "ORBIT DROP TARGET UP"
+  },
+  {
+   "n": 34,
+   "const": "SCOOP_VILLAGE",
+   "label": "VILLAGE SCOOP EJECT"
+  },
+  {
+   "n": 35,
+   "const": "COIL_23",
+   "label": "COIL 23 <NOT USED>"
+  }
+ ]
+}

@@ -1,0 +1,23 @@
+{
+ "title": "Dune",
+ "_source": "GDHarvest_202600513: autoloads/fast.gd, cooper/autoload_stems/fast_stem.gd, autoloads/bics.gd (decompiled)",
+ "ports": [
+  {"role": "net",  "usb": "1-1", "iface": "1.0", "manufacturer": "FAST Pinball", "product": "Neuron", "vid": "2e8a", "pid": "1074"},
+  {"role": "exp",  "usb": "1-1", "iface": "1.2", "manufacturer": "FAST Pinball", "product": "Neuron", "vid": "2e8a", "pid": "1074"},
+  {"role": "bics", "usb": "1-2", "iface": "1.0", "manufacturer": "Arduino LLC", "product": "Arduino Due", "vid": "2341", "pid": "003d", "alias": "bof_worm"}
+ ],
+ "neuron_fw": "02.26",
+ "node_boards": ["0024-2", "3208-2", "1616-2", "3208-2"],
+ "exp_boards": {"48": "00.44", "b4": "00.44", "84": "00.44", "86": "00.44"},
+ "bics": {
+  "id": "ID:WORM WRANGLER,PAD,EMULATED,v1.0.0",
+  "replies": {
+   "HOME:STEPPER ALL": "HOME:STEPPER ALL,ACK",
+   "HOME:STEPPER?": "HOME:STEPPER ACK",
+   "HOME:EDGES?": "HOME:EDGES ACK",
+   "HOME:EDGES": "HOME:EDGES ACK"
+  },
+  "motors": {"WORM": ["5.0", "0.0", "3.50", "87.0"], "MOUTH": ["-5.0", "0.0", "42.50", "125.0"]}
+ },
+ "bics_switches": {"49": ["0", "/L"], "50": ["1", "/L"], "51": ["2", "/L"], "52": ["3", "/L"]}
+}

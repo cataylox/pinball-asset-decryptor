@@ -1,16 +1,1511 @@
 {
-  "title": "Dune",
-  "_source": "switches.gd / coils.gd / fast.gd / bics.gd of GDHarvest_202600513 (decompiled)",
-  "neuron_fw": "02.26",
-  "node_boards": ["0024-2", "3208-2", "1616-2", "3208-2"],
-  "exp_fw": {"48": "00.44", "b4": "00.44", "84": "00.44", "86": "00.44"},
-  "bics_fw": "1.0.0",
-  "active_at_boot": [12, 72, 73, 74, 75, 76, 77],
-  "trough_switches": [72, 73, 74, 75, 76, 77],
-  "shooter_switch": 79,
-  "trough_eject_driver": 39,
-  "bics_switches": {"49": "0", "50": "1", "51": "2", "52": "3"},
-  "keys": {"start": 14, "coin": 0, "enter": 4, "exit": 5, "down": 6, "up": 7,
-           "flipper_left": 8, "flipper_right": 22, "action": 10, "launch": 20,
-           "tilt": 13, "coin_door": 12}
+ "title": "Dune",
+ "_source": "GDHarvest_202600513: autoloads/fast.gd, cooper/autoload_stems/fast_stem.gd, autoloads/bics.gd (decompiled)",
+ "ports": [
+  {
+   "role": "net",
+   "usb": "1-1",
+   "iface": "1.0",
+   "manufacturer": "FAST Pinball",
+   "product": "Neuron",
+   "vid": "2e8a",
+   "pid": "1074"
+  },
+  {
+   "role": "exp",
+   "usb": "1-1",
+   "iface": "1.2",
+   "manufacturer": "FAST Pinball",
+   "product": "Neuron",
+   "vid": "2e8a",
+   "pid": "1074"
+  },
+  {
+   "role": "bics",
+   "usb": "1-2",
+   "iface": "1.0",
+   "manufacturer": "Arduino LLC",
+   "product": "Arduino Due",
+   "vid": "2341",
+   "pid": "003d",
+   "alias": "bof_worm"
+  }
+ ],
+ "neuron_fw": "02.26",
+ "node_boards": [
+  "0024-2",
+  "3208-2",
+  "1616-2",
+  "3208-2"
+ ],
+ "exp_boards": {
+  "48": "00.44",
+  "b4": "00.44",
+  "84": "00.44",
+  "86": "00.44"
+ },
+ "bics": {
+  "id": "ID:WORM WRANGLER,PAD,EMULATED,v1.0.0",
+  "replies": {
+   "HOME:STEPPER ALL": "HOME:STEPPER ALL,ACK",
+   "HOME:STEPPER?": "HOME:STEPPER ACK",
+   "HOME:EDGES?": "HOME:EDGES ACK",
+   "HOME:EDGES": "HOME:EDGES ACK"
+  },
+  "motors": {
+   "WORM": [
+    "5.0",
+    "0.0",
+    "3.50",
+    "87.0"
+   ],
+   "MOUTH": [
+    "-5.0",
+    "0.0",
+    "42.50",
+    "125.0"
+   ]
+  }
+ },
+ "bics_switches": {
+  "49": [
+   "0",
+   "/L"
+  ],
+  "50": [
+   "1",
+   "/L"
+  ],
+  "51": [
+   "2",
+   "/L"
+  ],
+  "52": [
+   "3",
+   "/L"
+  ]
+ },
+ "balls": 6,
+ "trough_switches": [
+  72,
+  73,
+  74,
+  75,
+  76,
+  77
+ ],
+ "shooter_switch": 79,
+ "coin_door_switch": 12,
+ "trough_eject_driver": 39,
+ "launch_driver": 38,
+ "active_at_boot": [
+  12,
+  72,
+  73,
+  74,
+  75,
+  76,
+  77
+ ],
+ "keys": {
+  "start": 14,
+  "coin": 0,
+  "enter": 4,
+  "exit": 5,
+  "up": 7,
+  "down": 6,
+  "flipper_left": 8,
+  "flipper_right": 22,
+  "flipper_upper_left": 9,
+  "action": 10,
+  "launch": 20,
+  "tilt": 13,
+  "coin_door": 12
+ },
+ "switches": [
+  {
+   "n": 0,
+   "const": "COIN_1",
+   "tags": [
+    "coin",
+    "history"
+   ],
+   "label": "COIN ENTRY SWITCH 1",
+   "opto": false,
+   "x": 85,
+   "y": 645
+  },
+  {
+   "n": 1,
+   "const": "COIN_2",
+   "tags": [
+    "coin",
+    "history"
+   ],
+   "label": "COIN ENTRY SWITCH 2",
+   "opto": false,
+   "x": 91,
+   "y": 645
+  },
+  {
+   "n": 2,
+   "const": "COIN_3",
+   "tags": [
+    "coin",
+    "history",
+    "cab_validation",
+    "cabinet"
+   ],
+   "label": "COIN ENTRY SWITCH 3",
+   "opto": false,
+   "x": 97,
+   "y": 645
+  },
+  {
+   "n": 3,
+   "const": "SWITCH_3",
+   "tags": [],
+   "label": "SWITCH 3",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 4,
+   "const": "ENTER",
+   "tags": [
+    "cabinet"
+   ],
+   "label": "MENU BUTTON BLACK (ENTER)",
+   "opto": false,
+   "x": 57,
+   "y": 645
+  },
+  {
+   "n": 5,
+   "const": "EXIT",
+   "tags": [
+    "cabinet"
+   ],
+   "label": "MENU BUTTON GREEN (EXIT)",
+   "opto": false,
+   "x": 75,
+   "y": 645
+  },
+  {
+   "n": 6,
+   "const": "DOWN",
+   "tags": [
+    "cabinet"
+   ],
+   "label": "MENU BUTTON RED (DOWN)",
+   "opto": false,
+   "x": 63,
+   "y": 645
+  },
+  {
+   "n": 7,
+   "const": "UP",
+   "tags": [
+    "cabinet"
+   ],
+   "label": "MENU BUTTON RED (UP)",
+   "opto": false,
+   "x": 69,
+   "y": 645
+  },
+  {
+   "n": 8,
+   "const": "FLIPPER_BUTTON_LL",
+   "tags": [
+    "cab_validation",
+    "cabinet"
+   ],
+   "label": "LEFT FLIPPER",
+   "opto": false,
+   "x": 4,
+   "y": 636
+  },
+  {
+   "n": 9,
+   "const": "FLIPPER_BUTTON_UL",
+   "tags": [
+    "cab_validation",
+    "cabinet"
+   ],
+   "label": "UPPER LEFT FLIPPER",
+   "opto": false,
+   "x": 4,
+   "y": 626
+  },
+  {
+   "n": 10,
+   "const": "ACTION_BUTTON",
+   "tags": [
+    "history",
+    "cab_validation",
+    "cabinet"
+   ],
+   "label": "LOCKDOWN BAR ACTION BUTTON",
+   "opto": false,
+   "x": 142,
+   "y": 645
+  },
+  {
+   "n": 11,
+   "const": "SWITCH_11",
+   "tags": [],
+   "label": "SWITCH 11",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 12,
+   "const": "INTERLOCK",
+   "tags": [
+    "history",
+    "cabinet"
+   ],
+   "label": "COIN DOOR OPEN",
+   "opto": false,
+   "x": 44,
+   "y": 645
+  },
+  {
+   "n": 13,
+   "const": "TILT",
+   "tags": [
+    "history",
+    "cab_validation",
+    "cabinet"
+   ],
+   "label": "PLUMB BOB TILT",
+   "opto": false,
+   "x": 4,
+   "y": 519
+  },
+  {
+   "n": 14,
+   "const": "START",
+   "tags": [
+    "history",
+    "cab_validation",
+    "cabinet"
+   ],
+   "label": "START BUTTON",
+   "opto": false,
+   "x": 16,
+   "y": 645
+  },
+  {
+   "n": 15,
+   "const": "SWITCH_15",
+   "tags": [],
+   "label": "SWITCH 15",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 16,
+   "const": "SWITCH_16",
+   "tags": [],
+   "label": "SWITCH 16",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 17,
+   "const": "SWITCH_17",
+   "tags": [],
+   "label": "SWITCH 17",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 18,
+   "const": "SWITCH_18",
+   "tags": [],
+   "label": "SWITCH 18",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 19,
+   "const": "PLACEBO",
+   "tags": [],
+   "label": "PLACEBO",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 20,
+   "const": "LAUNCH",
+   "tags": [],
+   "label": "LAUNCH",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 21,
+   "const": "DBV_COIN",
+   "tags": [
+    "history"
+   ],
+   "label": "DOLLAR BILL VALIDATOR",
+   "opto": false,
+   "x": 103,
+   "y": 645
+  },
+  {
+   "n": 22,
+   "const": "FLIPPER_BUTTON_LR",
+   "tags": [
+    "cab_validation",
+    "cabinet"
+   ],
+   "label": "RIGHT FLIPPER",
+   "opto": false,
+   "x": 303,
+   "y": 636
+  },
+  {
+   "n": 23,
+   "const": "SWITCH_23",
+   "tags": [],
+   "label": "SWITCH 23",
+   "opto": false,
+   "x": 300,
+   "y": 0
+  },
+  {
+   "n": 32,
+   "const": "RAMP_SIDE_ENTER",
+   "tags": [
+    "time",
+    "history",
+    "pf_validation"
+   ],
+   "label": "SIDE RAMP ENTER",
+   "opto": true,
+   "x": 213,
+   "y": 173
+  },
+  {
+   "n": 33,
+   "const": "SUBWAY_ENTRY_TOP",
+   "tags": [
+    "history",
+    "pf_validation",
+    "below"
+   ],
+   "label": "SUBWAY ENTRY (RIGHT)",
+   "opto": true,
+   "x": 194,
+   "y": 92
+  },
+  {
+   "n": 34,
+   "const": "TARGET9",
+   "tags": [
+    "time",
+    "history",
+    "kill_sandwalk",
+    "train",
+    "pf_validation"
+   ],
+   "label": "WORM TARGET - INNER RIGHT",
+   "opto": false,
+   "x": 122,
+   "y": 89
+  },
+  {
+   "n": 35,
+   "const": "JUMP_RAMP",
+   "tags": [
+    "search_refresh_active",
+    "time",
+    "history",
+    "kill_sandwalk",
+    "pf_validation"
+   ],
+   "label": "WORM JUMP RAMP",
+   "opto": true,
+   "x": 76,
+   "y": 43
+  },
+  {
+   "n": 36,
+   "const": "TARGET8",
+   "tags": [
+    "search_refresh_active",
+    "time",
+    "history",
+    "kill_sandwalk",
+    "train",
+    "pf_validation"
+   ],
+   "label": "WORM TARGET - INNER LEFT",
+   "opto": false,
+   "x": 86,
+   "y": 94
+  },
+  {
+   "n": 37,
+   "const": "HARVESTER",
+   "tags": [
+    "search_refresh_inactive",
+    "ignore_during_search",
+    "time",
+    "history",
+    "pf_validation"
+   ],
+   "label": "HARVESTER TUNNEL",
+   "opto": true,
+   "x": 34,
+   "y": 44
+  },
+  {
+   "n": 38,
+   "const": "RAMP_LEFT_ENTER",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "LEFT RAMP ENTER",
+   "opto": true,
+   "x": 18,
+   "y": 174
+  },
+  {
+   "n": 40,
+   "const": "RAMP_RIGHT_MADE_BOTTOM",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "RIGHT/SIDE RAMP MADE - WIREFORM",
+   "opto": true,
+   "x": 222,
+   "y": 91
+  },
+  {
+   "n": 41,
+   "const": "ORBIT_UPPER_RIGHT",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "RIGHT ORBIT HIGH",
+   "opto": true,
+   "x": 262,
+   "y": 53
+  },
+  {
+   "n": 42,
+   "const": "PIT_ENTRY_TOP",
+   "tags": [
+    "search_stop",
+    "time",
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "POWERFIELD TOP ENTRY",
+   "opto": true,
+   "x": 205,
+   "y": 133
+  },
+  {
+   "n": 43,
+   "const": "TARGET3",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "kill_sandwalk",
+    "train",
+    "pf_validation"
+   ],
+   "label": "CENTER TARGET",
+   "opto": false,
+   "x": 178,
+   "y": 133
+  },
+  {
+   "n": 44,
+   "const": "RAMP_RIGHT_MADE_TOP",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "RIGHT/SIDE RAMP MADE - TOP",
+   "opto": true,
+   "x": 204,
+   "y": 25
+  },
+  {
+   "n": 45,
+   "const": "ORBIT_TOP",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "ORBIT TOP",
+   "opto": true,
+   "x": 173,
+   "y": 23
+  },
+  {
+   "n": 46,
+   "const": "SPINNER_CENTER",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "CENTER SPINNER",
+   "opto": true,
+   "x": 154,
+   "y": 73
+  },
+  {
+   "n": 47,
+   "const": "RAMP_LEFT_MADE",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "LEFT RAMP MADE",
+   "opto": true,
+   "x": 122,
+   "y": 56
+  },
+  {
+   "n": 49,
+   "const": "WORM_ZERO",
+   "tags": [
+    "no_config"
+   ],
+   "label": "WORM OPTO LADDER 0",
+   "opto": false,
+   "x": 107,
+   "y": 122
+  },
+  {
+   "n": 50,
+   "const": "WORM_ONE",
+   "tags": [
+    "no_config"
+   ],
+   "label": "WORM OPTO LADDER 1",
+   "opto": false,
+   "x": 107,
+   "y": 122
+  },
+  {
+   "n": 51,
+   "const": "WORM_ENTER",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "no_config",
+    "pf_validation"
+   ],
+   "label": "WORM AREA ENTRY",
+   "opto": false,
+   "x": 113,
+   "y": 156
+  },
+  {
+   "n": 52,
+   "const": "WORM_MOUTH",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "no_config",
+    "ignore_during_search",
+    "pf_validation"
+   ],
+   "label": "WORM MOUTH",
+   "opto": false,
+   "x": 107,
+   "y": 122
+  },
+  {
+   "n": 56,
+   "const": "POP_BUMPER",
+   "tags": [
+    "time",
+    "history",
+    "ignore_tilted",
+    "ignore_during_search",
+    "train",
+    "pf_validation"
+   ],
+   "label": "THUMPER BUMPER",
+   "opto": false,
+   "x": 41,
+   "y": 352
+  },
+  {
+   "n": 57,
+   "const": "RAMP_LEFT_HOLD",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "ignore_during_search",
+    "pf_validation"
+   ],
+   "label": "LEFT RAMP HOLD",
+   "opto": true,
+   "x": 15,
+   "y": 416
+  },
+  {
+   "n": 58,
+   "const": "OUTLANE_UPPER_LEFT",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "ignore_tilted",
+    "pf_validation"
+   ],
+   "label": "LEFT OUTLANE - HIGH",
+   "opto": false,
+   "x": 16,
+   "y": 488
+  },
+  {
+   "n": 59,
+   "const": "SLING_LEFT",
+   "tags": [
+    "sling",
+    "ignore_tilted",
+    "time",
+    "history",
+    "search_refresh_active",
+    "kill_sandwalk",
+    "train",
+    "ignore_during_search",
+    "pf_validation"
+   ],
+   "label": "LEFT SLINGSHOT PAIR",
+   "opto": false,
+   "x": 71,
+   "y": 508
+  },
+  {
+   "n": 60,
+   "const": "OUTLANE_LOWER_LEFT",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "ignore_tilted",
+    "pf_validation"
+   ],
+   "label": "LOWER LEFT - LOW",
+   "opto": false,
+   "x": 16,
+   "y": 545
+  },
+  {
+   "n": 61,
+   "const": "INLANE_LEFT",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "ignore_tilted",
+    "pf_validation"
+   ],
+   "label": "LEFT RETURN LANE",
+   "opto": false,
+   "x": 41,
+   "y": 512
+  },
+  {
+   "n": 62,
+   "const": "PAIN_BOX",
+   "tags": [
+    "search_refresh_inactive",
+    "ignore_during_search",
+    "history",
+    "pf_validation"
+   ],
+   "label": "PAIN BOX LOADED",
+   "opto": true,
+   "x": 19,
+   "y": 592
+  },
+  {
+   "n": 63,
+   "const": "FLIPPER_EOS_LL",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "LEFT FLIPPER EOS",
+   "opto": false,
+   "x": 105,
+   "y": 595
+  },
+  {
+   "n": 64,
+   "const": "SPINNER_LEFT",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "LEFT SPINNER",
+   "opto": true,
+   "x": 34,
+   "y": 401
+  },
+  {
+   "n": 65,
+   "const": "SCOOP",
+   "tags": [
+    "search_refresh_inactive",
+    "ignore_during_search",
+    "history",
+    "pf_validation",
+    "below"
+   ],
+   "label": "SCOOP",
+   "opto": true,
+   "x": 75,
+   "y": 284
+  },
+  {
+   "n": 66,
+   "const": "FLIPPER_EOS_UL",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "UPPER LEFT FLIPPER EOS",
+   "opto": false,
+   "x": 69,
+   "y": 246
+  },
+  {
+   "n": 67,
+   "const": "SUBWAY_ENTRY_BACK",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "pf_validation",
+    "below"
+   ],
+   "label": "SUBWAY EXIT",
+   "opto": true,
+   "x": 66,
+   "y": 252
+  },
+  {
+   "n": 68,
+   "const": "ORBIT_LOWER_LEFT",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "LEFT ORBIT - LOW",
+   "opto": true,
+   "x": 72,
+   "y": 185
+  },
+  {
+   "n": 69,
+   "const": "TARGET1",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "kill_sandwalk",
+    "train",
+    "pf_validation"
+   ],
+   "label": "WORM TARGET - OUTER LEFT",
+   "opto": false,
+   "x": 98,
+   "y": 192
+  },
+  {
+   "n": 70,
+   "const": "SUBWAY_ENTRY_WORM",
+   "tags": [
+    "history",
+    "search_refresh_active",
+    "pf_validation",
+    "below"
+   ],
+   "label": "SUBWAY ENTRY - WORM",
+   "opto": true,
+   "x": 121,
+   "y": 186
+  },
+  {
+   "n": 71,
+   "const": "TARGET2",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "kill_sandwalk",
+    "train",
+    "pf_validation"
+   ],
+   "label": "WORM TARGET - OUTER RIGHT",
+   "opto": false,
+   "x": 137,
+   "y": 170
+  },
+  {
+   "n": 72,
+   "const": "TROUGH1",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "BALL TROUGH 1",
+   "opto": true,
+   "x": 262,
+   "y": 609
+  },
+  {
+   "n": 73,
+   "const": "TROUGH2",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "BALL TROUGH 2",
+   "opto": true,
+   "x": 247,
+   "y": 617
+  },
+  {
+   "n": 74,
+   "const": "TROUGH3",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "BALL TROUGH 3",
+   "opto": true,
+   "x": 235,
+   "y": 622
+  },
+  {
+   "n": 75,
+   "const": "TROUGH4",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "BALL TROUGH 4",
+   "opto": true,
+   "x": 223,
+   "y": 628
+  },
+  {
+   "n": 76,
+   "const": "TROUGH5",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "BALL TROUGH 5",
+   "opto": true,
+   "x": 210,
+   "y": 634
+  },
+  {
+   "n": 77,
+   "const": "TROUGH6",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "BALL TROUGH 6",
+   "opto": true,
+   "x": 196,
+   "y": 641
+  },
+  {
+   "n": 78,
+   "const": "TROUGH_JAM",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "BALL TROUGH JAM",
+   "opto": true,
+   "x": 262,
+   "y": 598
+  },
+  {
+   "n": 79,
+   "const": "SHOOTER_LANE",
+   "tags": [
+    "search_refresh_inactive",
+    "history",
+    "pf_validation"
+   ],
+   "label": "SHOOTER LANE",
+   "opto": false,
+   "x": 290,
+   "y": 617
+  },
+  {
+   "n": 80,
+   "const": "TARGET4",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "kill_sandwalk",
+    "train",
+    "pf_validation"
+   ],
+   "label": "LEFT POWER FIELD TARGET",
+   "opto": false,
+   "x": 187,
+   "y": 294
+  },
+  {
+   "n": 81,
+   "const": "TARGET5",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "kill_sandwalk",
+    "train",
+    "pf_validation"
+   ],
+   "label": "RIGHT POWER FIELD TARGET",
+   "opto": false,
+   "x": 218,
+   "y": 323
+  },
+  {
+   "n": 82,
+   "const": "SAND_TRAP_TRIGGER",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "kill_sandwalk",
+    "pf_validation"
+   ],
+   "label": "SAND TRAP TRIGGER",
+   "opto": false,
+   "x": 295,
+   "y": 312
+  },
+  {
+   "n": 83,
+   "const": "SAND_TRAP_BEHIND_TARGET",
+   "tags": [
+    "history",
+    "search_refresh_inactive",
+    "pf_validation"
+   ],
+   "label": "SAND TRAP ENTRY",
+   "opto": true,
+   "x": 272,
+   "y": 345
+  },
+  {
+   "n": 84,
+   "const": "DROP_BOTTOM",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "train",
+    "pf_validation",
+    "drop_target"
+   ],
+   "label": "3-BANK DROP TARGET 1",
+   "opto": true,
+   "x": 179,
+   "y": 274
+  },
+  {
+   "n": 85,
+   "const": "DROP_MIDDLE",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "train",
+    "pf_validation",
+    "drop_target"
+   ],
+   "label": "3-BANK DROP TARGET 2",
+   "opto": true,
+   "x": 175,
+   "y": 256
+  },
+  {
+   "n": 86,
+   "const": "DROP_TOP",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "train",
+    "pf_validation",
+    "drop_target"
+   ],
+   "label": "3-BANK DROP TARGET 3",
+   "opto": true,
+   "x": 172,
+   "y": 236
+  },
+  {
+   "n": 88,
+   "const": "PIT_ENTRY_BOTTOM",
+   "tags": [
+    "history",
+    "search_refresh_inactive",
+    "ignore_during_search",
+    "pf_validation"
+   ],
+   "label": "FORKS ROLLOVER",
+   "opto": false,
+   "x": 206,
+   "y": 302
+  },
+  {
+   "n": 89,
+   "const": "PIT_WALL_LEFT_INSIDE",
+   "tags": [
+    "search_stop",
+    "time",
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "POWER FIELD PAIR - INNER LEFT",
+   "opto": false,
+   "x": 193,
+   "y": 255
+  },
+  {
+   "n": 90,
+   "const": "PIT_WALL_LEFT_OUTSIDE",
+   "tags": [
+    "search_stop",
+    "time",
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "POWER FIELD PAIR - OUTER LEFT",
+   "opto": false,
+   "x": 182,
+   "y": 256
+  },
+  {
+   "n": 91,
+   "const": "PIT_WALL_BOTTOM",
+   "tags": [
+    "search_stop",
+    "time",
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "POWER FIELD PAIR - RIGHT",
+   "opto": false,
+   "x": 232,
+   "y": 266
+  },
+  {
+   "n": 92,
+   "const": "PIT_WALL_TOP",
+   "tags": [
+    "search_stop",
+    "time",
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "POWER FIELD PAIR - HIGH",
+   "opto": false,
+   "x": 208,
+   "y": 210
+  },
+  {
+   "n": 93,
+   "const": "ORBIT_LOWER_RIGHT",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "RIGHT ORBIT - LOW",
+   "opto": true,
+   "x": 273,
+   "y": 226
+  },
+  {
+   "n": 94,
+   "const": "SPINNER_RIGHT",
+   "tags": [
+    "time",
+    "search_refresh_active",
+    "pf_validation"
+   ],
+   "label": "RIGHT SPINNER",
+   "opto": true,
+   "x": 244,
+   "y": 201
+  },
+  {
+   "n": 96,
+   "const": "SAND_TRAP_TARGET",
+   "tags": [
+    "time",
+    "history",
+    "ignore_during_search",
+    "kill_sandwalk",
+    "train",
+    "search_refresh_active",
+    "pf_validation",
+    "drop_target"
+   ],
+   "label": "SAND TRAP DROP TARGET",
+   "opto": false,
+   "x": 265,
+   "y": 361
+  },
+  {
+   "n": 97,
+   "const": "TARGET6",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "kill_sandwalk",
+    "train",
+    "pf_validation"
+   ],
+   "label": "LEFT SAND TRAP TARGET",
+   "opto": false,
+   "x": 253,
+   "y": 351
+  },
+  {
+   "n": 98,
+   "const": "SAND_TRAP_KICKER",
+   "tags": [
+    "search_refresh_inactive",
+    "ignore_during_search",
+    "history",
+    "kill_sandwalk",
+    "pf_validation"
+   ],
+   "label": "SAND TRAP KICKER",
+   "opto": false,
+   "x": 295,
+   "y": 385
+  },
+  {
+   "n": 99,
+   "const": "TARGET7",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "kill_sandwalk",
+    "train",
+    "pf_validation"
+   ],
+   "label": "RIGHT SAND TRAP TARGET",
+   "opto": false,
+   "x": 265,
+   "y": 405
+  },
+  {
+   "n": 100,
+   "const": "OUTLANE_RIGHT",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "ignore_tilted",
+    "pf_validation"
+   ],
+   "label": "RIGHT OUTLANE",
+   "opto": false,
+   "x": 268,
+   "y": 530
+  },
+  {
+   "n": 101,
+   "const": "SLING_RIGHT",
+   "tags": [
+    "sling",
+    "ignore_tilted",
+    "time",
+    "history",
+    "search_refresh_active",
+    "train",
+    "ignore_during_search",
+    "pf_validation"
+   ],
+   "label": "RIGHT SLINGSHOT PAIR",
+   "opto": false,
+   "x": 213,
+   "y": 507
+  },
+  {
+   "n": 102,
+   "const": "INLANE_RIGHT",
+   "tags": [
+    "time",
+    "history",
+    "search_refresh_active",
+    "ignore_tilted",
+    "pf_validation"
+   ],
+   "label": "RIGHT RETURN LANE",
+   "opto": false,
+   "x": 243,
+   "y": 511
+  },
+  {
+   "n": 103,
+   "const": "FLIPPER_EOS_LR",
+   "tags": [
+    "pf_validation"
+   ],
+   "label": "RIGHT FLIPPER EOS",
+   "opto": false,
+   "x": 180,
+   "y": 595
+  }
+ ],
+ "coils": [
+  {
+   "n": 2,
+   "const": "SHAKER",
+   "label": "SHAKER MOTOR"
+  },
+  {
+   "n": 3,
+   "const": "START_LED",
+   "label": "START BUTTON LED"
+  },
+  {
+   "n": 7,
+   "const": "KNOCKER",
+   "label": "KNOCKER (OPTIONAL ADD ON)"
+  },
+  {
+   "n": 8,
+   "const": "RAMP_RIGHT_DIVERTER_UP",
+   "label": "RIGHT RAMP DIVERTER UP"
+  },
+  {
+   "n": 9,
+   "const": "RAMP_RIGHT_DIVERTER_DOWN",
+   "label": "RIGHT RAMP DIVERTER DOWN"
+  },
+  {
+   "n": 10,
+   "const": "RAMP_RIGHT_POST",
+   "label": "RIGHT RAMP UP/DOWN POST"
+  },
+  {
+   "n": 11,
+   "const": "PIT_TOP_POST",
+   "label": "POWER FIELD TOP ENTRY UP/DOWN POST"
+  },
+  {
+   "n": 12,
+   "const": "RAMP_RIGHT_UP",
+   "label": "RIGHT RAMP LIFTER UP"
+  },
+  {
+   "n": 13,
+   "const": "RAMP_RIGHT_DOWN",
+   "label": "RIGHT RAMP LIFTER DOWN"
+  },
+  {
+   "n": 16,
+   "const": "POP_BUMPER",
+   "label": "THUMPER BUMPER"
+  },
+  {
+   "n": 17,
+   "const": "RAMP_LEFT_POST_MAIN",
+   "label": "LEFT RAMP HOOK POWER"
+  },
+  {
+   "n": 18,
+   "const": "RAMP_LEFT_POST_HOLD",
+   "label": "LEFT RAMP HOOK HOLD (UNUSED)"
+  },
+  {
+   "n": 19,
+   "const": "SLING_LEFT",
+   "label": "LEFT SLINGSHOT"
+  },
+  {
+   "n": 20,
+   "const": "PAIN_BOX_WALL",
+   "label": "PAIN BOX WALL DOWN"
+  },
+  {
+   "n": 21,
+   "const": "PAIN_BOX_KICKER",
+   "label": "PAIN BOX KICKOUT"
+  },
+  {
+   "n": 22,
+   "const": "FLIPPER_MAIN_LL",
+   "label": "LEFT FLIPPER POWER"
+  },
+  {
+   "n": 23,
+   "const": "FLIPPER_HOLD_LL",
+   "label": "LEFT FLIPPER HOLD"
+  },
+  {
+   "n": 24,
+   "const": "PIT_FORK_DOWN",
+   "label": "POWER FIELD FORKS DOWN"
+  },
+  {
+   "n": 25,
+   "const": "PIT_FORK_UP",
+   "label": "POWER FIELD FORKS UP"
+  },
+  {
+   "n": 26,
+   "const": "DROP_BANK_RESET",
+   "label": "3-BANK DROP TARGETS UP"
+  },
+  {
+   "n": 27,
+   "const": "SCOOP",
+   "label": "SCOOP EJECT"
+  },
+  {
+   "n": 28,
+   "const": "FLIPPER_MAIN_UL",
+   "label": "UPPER LEFT FLIPPER POWER"
+  },
+  {
+   "n": 29,
+   "const": "FLIPPER_HOLD_UL",
+   "label": "UPPER LEFT FLIPPER HOLD"
+  },
+  {
+   "n": 30,
+   "const": "HARVESTER_POST",
+   "label": "HARVESTER UP/DOWN POST"
+  },
+  {
+   "n": 32,
+   "const": "SAND_TRAP_DROP_DOWN",
+   "label": "SAND TRAP DROP TARGET DOWN"
+  },
+  {
+   "n": 33,
+   "const": "SAND_TRAP_DROP_UP",
+   "label": "SAND TRAP DROP TARGET UP"
+  },
+  {
+   "n": 34,
+   "const": "SAND_TRAP_KICKER",
+   "label": "SAND TRAP KICKER"
+  },
+  {
+   "n": 35,
+   "const": "SLING_RIGHT",
+   "label": "RIGHT SLINGSHOT"
+  },
+  {
+   "n": 36,
+   "const": "FLIPPER_MAIN_LR",
+   "label": "RIGHT FLIPPER POWER"
+  },
+  {
+   "n": 37,
+   "const": "FLIPPER_HOLD_LR",
+   "label": "RIGHT FLIPPER HOLD"
+  },
+  {
+   "n": 38,
+   "const": "AUTOPLUNGER",
+   "label": "BALL AUTO-LAUNCH"
+  },
+  {
+   "n": 39,
+   "const": "TROUGH_EJECT",
+   "label": "BALL TROUGH EJECT"
+  },
+  {
+   "n": 40,
+   "const": "MAGNET_WORM",
+   "label": "WORM MOUTH MAGNET"
+  },
+  {
+   "n": 41,
+   "const": "MAGNET_ORBIT_LEFT",
+   "label": "LEFT ORBIT MAGNET"
+  },
+  {
+   "n": 42,
+   "const": "MAGNET_ORBIT_TOP",
+   "label": "TOP ORBIT MAGNET"
+  },
+  {
+   "n": 43,
+   "const": "MAGNET_PIT",
+   "label": "POWER FIELD MAGNET"
+  },
+  {
+   "n": 44,
+   "const": "FLASHER_ORBIT",
+   "label": "LEFT ORBIT FLASHER"
+  },
+  {
+   "n": 45,
+   "const": "FLASHER_TRAP",
+   "label": "SAND TRAP FLASHER"
+  },
+  {
+   "n": 46,
+   "const": "FLASHER_FAKE",
+   "label": "FAKE FLASHER"
+  }
+ ]
 }

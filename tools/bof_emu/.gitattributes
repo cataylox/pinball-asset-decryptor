@@ -1,0 +1,7 @@
+# The rig is Linux code run inside WSL - CRLF breaks shebangs and heredocs.
+*.sh text eol=lf
+*.py text eol=lf
+*.c text eol=lf
+*.json text eol=lf
+# Prebuilt shim: never touch its bytes.
+*.so binary

@@ -2,17 +2,19 @@
 """bofhw.py - emulated FAST Neuron + expansion bus + BICS board for a
 Barrels of Fun game.
 
-The game (a native x86-64 Godot export) talks to its hardware over three USB
-CDC serial ports.  This daemon makes a pty for each, presents them as
-/dev/ttyACM0..2 through bofhwshim.so (see that file for how) and answers the
-protocols the game's own scripts speak:
+The game (a native x86-64 Godot export) talks to its hardware over USB CDC
+serial ports.  This daemon makes a pty for each port its title profile lists,
+presents them as /dev/ttyACM0.. through bofhwshim.so (see that file for how)
+and answers the protocols the game's own scripts speak:
 
-  NET  (ttyACM0, FAST Neuron, 921600)  ID: CH: CN: SA: SL: DL: TL: WD:
-                                        -> switch events -L:xx (active) /L:xx
-  EXP  (ttyACM1, FAST expansion bus)    ID@<board>: then ER@/RF@/LM@ config and
-                                        binary RD@/RL@ LED frames
-  BICS (ttyACM2, BoF's own board)       Dune's worm wrangler: ID: HOME: MOVE:
-                                        POSITION: SET: FIRE: ARM: ... \\r\\n
+  net   FAST Neuron, 921600           ID: CH: CN: SA: SL: DL: TL: WD:
+                                      -> switch events -L:xx (active) /L:xx
+  exp   FAST expansion bus            ID@<board>: then ER@/RF@/LM@ config and
+                                      binary RD@/RL@ LED frames
+  bics  BoF's own board (Dune's worm  ID: HOME: MOVE: POSITION: SET: FIRE: ...
+        wrangler, Winchester's        replies end \\r\\n; dialect per profile
+        Haunt Handler)
+  audio FAST audio board (Labyrinth)  AM: AS: AV: AH: AW: - write-only
 
 Nothing here is guessed from FAST documentation: every reply is shaped by the
 parser in the title's fast_stem.gd / bics.gd (decompiled), which is the only
@@ -21,7 +23,10 @@ reader that matters.  See docs/plans/bof_emulator.md.
 Control: a unix socket at <dir>/ctl.sock taking one command per line:
   sw <n> <0|1>      set a switch (logical: 1 = active)
   tap <n> [ms]      press, then release after ms (default 120)
-  state             JSON: switches, driver actions, LED count, board status
+  plunge            the ball in the shooter lane leaves it (into play)
+  drain             one ball in play drains into the trough
+  state             JSON: switches, balls, driver actions, board status
+  leds              JSON: every LED the game has set, "<board>:<index>" -> rrggbb
   quit
 """
 import argparse
@@ -30,30 +35,31 @@ import json
 import os
 import select
 import socket
-import sys
 import time
 import tty
 
-NET, EXP, BICS = "net", "exp", "bics"
+NET, EXP, BICS, AUDIO = "net", "exp", "bics", "audio"
 
-# The USB identity each port shows through the fake sysfs.  The game matches
-# FAST ports on desc containing "FAST Pinball" (desc = "<manufacturer>
-# <product> <serial>") and the BICS board on hw_id containing "PID=2341:"
+# Dune's ports; a profile without "ports" gets these.  The game matches FAST
+# ports on desc containing "FAST Pinball" (desc = "<manufacturer> <product>
+# <serial>") and the BICS board on hw_id containing "PID=2341:"
 # (hw_id = "USB VID:PID=<idVendor>:<idProduct> SNR=<serial>").
-PORTS = [
-    # name,     role,  usb dev, iface, manufacturer,    product,       vid,    pid
-    ("ttyACM0", NET,  "1-1",   "1.0", "FAST Pinball", "Neuron",       "2e8a", "1074"),
-    ("ttyACM1", EXP,  "1-1",   "1.2", "FAST Pinball", "Neuron",       "2e8a", "1074"),
-    ("ttyACM2", BICS, "1-2",   "1.0", "Arduino LLC",  "Arduino Due",  "2341", "003d"),
+DEFAULT_PORTS = [
+    {"role": NET, "usb": "1-1", "iface": "1.0", "manufacturer": "FAST Pinball",
+     "product": "Neuron", "vid": "2e8a", "pid": "1074"},
+    {"role": EXP, "usb": "1-1", "iface": "1.2", "manufacturer": "FAST Pinball",
+     "product": "Neuron", "vid": "2e8a", "pid": "1074"},
+    {"role": BICS, "usb": "1-2", "iface": "1.0", "manufacturer": "Arduino LLC",
+     "product": "Arduino Due", "vid": "2341", "pid": "003d", "alias": "bof_worm"},
 ]
-ALIASES = {"bof_worm": "ttyACM2"}
 
 NUM_SWITCH_BYTES = 16        # SA: reply covers switches 0..127
+NAMED_POS = {"HOME": 0, "DOWN": 1, "FLUSH": 2, "UP": 3}
 
 
 class Port:
-    def __init__(self, name, role):
-        self.name, self.role = name, role
+    def __init__(self, name, spec):
+        self.name, self.role, self.spec = name, spec["role"], spec
         self.master, slave = os.openpty()
         tty.setraw(slave)
         # Keep our own slave fd open so the master never sees EIO while the
@@ -79,49 +85,55 @@ class Emulator:
         self.leds = {}              # (board, index) -> (r, g, b)
         self.exp_config = []
         self.status = {"net_id": False, "configured": False, "nodes": False,
-                       "exp": set(), "bics_id": False, "watchdog": 0}
+                       "exp": set(), "bics_id": False, "watchdog": 0,
+                       "hardware_connected": False}
         self.timers = []
-        self.bics = {
-            "pos": {"WORM": "5.0", "MOUTH": "-5.0"},
-            "offsets": {"WORM": ["5.0", "0.0", "3.50", "87.0"],
-                        "MOUTH": ["-5.0", "0.0", "42.50", "125.0"]},
-        }
+        self.seq = 0
+        motors = profile.get("bics", {}).get("motors", {})
+        self.bics = {"offsets": {m: list(v) for m, v in motors.items()},
+                     "pos": {m: v[0] for m, v in motors.items()}}
         for n in profile.get("active_at_boot", []):
             self.switches[int(n)] = 1
+        self.trough = [int(n) for n in profile.get("trough_switches", [])]
+        self.shooter = profile.get("shooter_switch")
+        self.in_trough = sum(1 for n in self.trough if self.switches.get(n))
+        self.in_play = 0
 
     # ---------------------------------------------------------------- setup
     def build(self):
         dev = os.path.join(self.root, "dev")
         sysroot = os.path.join(self.root, "sys")
         os.makedirs(dev, exist_ok=True)
-        for (name, role, usb, iface, manu, prod, vid, pid) in PORTS:
-            p = Port(name, role)
-            self.ports[role] = p
-            link = os.path.join(dev, name)
-            if os.path.lexists(link):
-                os.unlink(link)
-            os.symlink(p.pts, link)
-            usbdir = os.path.join(sysroot, "devices", "pci0000:00", "usb1", usb)
-            ifdir = os.path.join(usbdir, "%s:%s" % (usb, iface))
+        for i, spec in enumerate(self.profile.get("ports", DEFAULT_PORTS)):
+            name = "ttyACM%d" % i
+            p = Port(name, spec)
+            self.ports[p.role] = p
+            self._link(os.path.join(dev, name), p.pts)
+            if spec.get("alias"):
+                self._link(os.path.join(dev, spec["alias"]), p.pts)
+            usbdir = os.path.join(sysroot, "devices", "pci0000:00", "usb1",
+                                  spec["usb"])
+            ifdir = os.path.join(usbdir, "%s:%s" % (spec["usb"], spec["iface"]))
             os.makedirs(ifdir, exist_ok=True)
-            for fname, val in (("manufacturer", manu), ("product", prod),
-                               ("serial", "PAD%s" % usb.replace("-", "")),
-                               ("idVendor", vid), ("idProduct", pid)):
+            for fname, key in (("manufacturer", "manufacturer"),
+                               ("product", "product"), ("idVendor", "vid"),
+                               ("idProduct", "pid")):
                 with open(os.path.join(usbdir, fname), "w") as f:
-                    f.write(val + "\n")
+                    f.write(spec[key] + "\n")
+            with open(os.path.join(usbdir, "serial"), "w") as f:
+                f.write("PAD%s\n" % spec["usb"].replace("-", ""))
             ttydir = os.path.join(sysroot, "class", "tty", name)
             os.makedirs(ttydir, exist_ok=True)
-            dlink = os.path.join(ttydir, "device")
-            if os.path.lexists(dlink):
-                os.unlink(dlink)
-            os.symlink(os.path.relpath(ifdir, ttydir), dlink)
-        for alias, target in ALIASES.items():
-            link = os.path.join(dev, alias)
-            if os.path.lexists(link):
-                os.unlink(link)
-            os.symlink(os.path.join(dev, target), link)
-        self.log("ports: " + ", ".join("%s=%s" % (p.name, p.pts)
+            self._link(os.path.join(ttydir, "device"),
+                       os.path.relpath(ifdir, ttydir))
+        self.log("ports: " + ", ".join("%s(%s)=%s" % (p.name, p.role, p.pts)
                                        for p in self.ports.values()))
+
+    @staticmethod
+    def _link(link, target):
+        if os.path.lexists(link):
+            os.unlink(link)
+        os.symlink(target, link)
 
     # ---------------------------------------------------------------- utils
     def log(self, msg):
@@ -129,13 +141,15 @@ class Emulator:
         self.logf.flush()
 
     def send(self, role, data):
+        if role not in self.ports:
+            return
         if isinstance(data, str):
             data = data.encode("latin-1")
-        p = self.ports[role]
-        p.tx += data
+        self.ports[role].tx += data
 
     def after(self, secs, fn, *args):
-        heapq.heappush(self.timers, (time.monotonic() + secs, id(fn), fn, args))
+        self.seq += 1
+        heapq.heappush(self.timers, (time.monotonic() + secs, self.seq, fn, args))
 
     # ------------------------------------------------------------- switches
     def set_switch(self, n, active, source="ctl"):
@@ -145,11 +159,13 @@ class Emulator:
         self.switches[n] = active
         self.log("SW %d -> %s (%s)" % (n, "active" if active else "inactive",
                                        source))
-        bics_sw = self.profile.get("bics_switches", {})
-        if str(n) in bics_sw:
-            # BICS reports its own switches with the OPPOSITE prefixes.
-            self.send(BICS, "%s:%s\r\n" % ("/L" if active else "-L",
-                                           bics_sw[str(n)]))
+        bics_sw = self.profile.get("bics_switches", {}).get(str(n))
+        if bics_sw:
+            # A BICS switch: its own index, and the prefix that means active
+            # on that board (they differ per switch on Winchester).
+            index, on = bics_sw
+            off = "-L" if on == "/L" else "/L"
+            self.send(BICS, "%s:%s\r\n" % (on if active else off, index))
         else:
             self.send(NET, "%s:%02X\r" % ("-L" if active else "/L", n))
 
@@ -164,6 +180,51 @@ class Emulator:
                     v |= 1 << bit
             out.append("%02X" % v)
         return "".join(out)
+
+    # ----------------------------------------------------------- ball model
+    # Counting, not physics: the trough reports how many balls it holds
+    # (positions fill from its first switch), the shooter lane holds at most
+    # one, everything else is "in play" until the user drains it.
+    def layout_trough(self):
+        for i, n in enumerate(self.trough):
+            self.set_switch(n, i < self.in_trough, "ball")
+
+    def trough_eject(self):
+        if self.in_trough == 0 or self.shooter is None:
+            return
+        if self.switches.get(self.shooter):
+            return          # lane occupied: the eject bounces back
+        self.in_trough -= 1
+        self.layout_trough()
+        self.after(0.3, self.set_switch, self.shooter, 1, "ball")
+
+    def plunge(self):
+        if self.shooter is None or not self.switches.get(self.shooter):
+            return False
+        self.set_switch(self.shooter, 0, "ball")
+        self.in_play += 1
+        return True
+
+    def drain(self):
+        if self.in_play == 0 or self.in_trough >= len(self.trough):
+            return False
+        self.in_play -= 1
+        self.in_trough += 1
+        self.layout_trough()
+        return True
+
+    def on_driver(self, parts):
+        try:
+            drv = int(parts[0], 16)
+        except ValueError:
+            return
+        mode = parts[1] if len(parts) > 1 else ""
+        if mode not in ("01", "1"):      # one-shot pulse
+            return
+        if drv == self.profile.get("trough_eject_driver"):
+            self.trough_eject()
+        elif drv == self.profile.get("launch_driver"):
+            self.after(0.1, self.plunge)
 
     # ------------------------------------------------------------------ NET
     def on_net_line(self, line):
@@ -187,61 +248,37 @@ class Emulator:
         elif cmd == "CN":
             # One NN line per node board; the game matches each against its
             # node_boards list by substring and reads split(" ")[5].
-            for i, board in enumerate(self.profile.get(
-                    "node_boards", ["0024-2", "3208-2", "1616-2", "3208-2"])):
+            for i, board in enumerate(self.profile.get("node_boards", [])):
                 self.send(NET, "NN:%02X FP-I/O-%s 00 00 00 01.10\r" % (i, board))
             self.status["nodes"] = True
         elif cmd == "SA":
+            self.status["hardware_connected"] = True
             self.send(NET, "SA:%02X,%s\r" % (NUM_SWITCH_BYTES * 8,
                                              self.switch_bytes_hex()))
         elif cmd == "SL":
             parts = arg.split(",")
             try:
-                n = int(parts[0], 16)
-                self.reversed[n] = parts[1].strip() == "2"
+                self.reversed[int(parts[0], 16)] = parts[1].strip() == "2"
             except (ValueError, IndexError):
                 pass
             self.send(NET, "SL:P\r")
         elif cmd == "DL":
-            parts = arg.split(",")
-            self.drivers[parts[0]] = arg
+            self.drivers[arg.split(",")[0]] = arg
             self.send(NET, "DL:P\r")
         elif cmd == "TL":
             parts = arg.split(",")
             self.driver_log.append((round(time.monotonic() - self.t0, 3), arg))
             del self.driver_log[:-200]
-            self.log("NET <- TL:%s" % arg)
             self.send(NET, "TL:P\r")
             self.on_driver(parts)
         else:
             self.send(NET, "%s:P\r" % cmd)
 
-    def on_driver(self, parts):
-        """Hook for the ball model: a driver action from the game."""
-        try:
-            drv = int(parts[0], 16)
-        except ValueError:
-            return
-        mode = parts[1] if len(parts) > 1 else ""
-        eject = self.profile.get("trough_eject_driver")
-        if eject is not None and drv == eject and mode in ("01", "1", "0"):
-            self.trough_eject()
-
-    def trough_eject(self):
-        trough = self.profile.get("trough_switches", [])
-        shooter = self.profile.get("shooter_switch")
-        full = [n for n in trough if self.switches.get(n)]
-        if not full or shooter is None or self.switches.get(shooter):
-            return
-        # The ball leaves the eject position; the rest roll down.
-        self.set_switch(full[0], 0, "ball")
-        self.after(0.25, self.set_switch, shooter, 1, "ball")
-
     # ------------------------------------------------------------------ EXP
     def pump_exp(self, p):
         buf = p.rx
         while buf:
-            if buf[:1] == b"\r":
+            if buf[:1] in (b"\r", b"\n"):
                 buf = buf[1:]
                 continue
             if buf[:3] in (b"RD@", b"RL@"):
@@ -270,91 +307,98 @@ class Emulator:
     def on_exp_line(self, line):
         if line.startswith("ID@"):
             board = line[3:].rstrip(":")
-            self.status["exp"].add(board)
-            self.log("EXP <- %s" % line)
-            fw = self.profile.get("exp_fw", {}).get(board, "00.44")
-            self.send(EXP, "ID:EXP FP-EXP-%s  %s\r" % (board.upper(), fw))
+            fw = self.profile.get("exp_boards", {}).get(board)
+            self.log("EXP <- %s%s" % (line, "" if fw else " (absent)"))
+            if fw:          # an absent board (a topper) simply never answers
+                self.status["exp"].add(board)
+                self.send(EXP, "ID:EXP FP-EXP-%s  %s\r" % (board.upper(), fw))
         elif line.startswith(("ER@", "LM@", "RF@", "em@")):
             self.exp_config.append(line)
         elif line.startswith("RA@"):
             board, _, col = line[3:].partition(":")
-            self.log("EXP <- %s" % line)
+            for key in [k for k in self.leds if k[0] == board]:
+                try:
+                    self.leds[key] = (int(col[0:2], 16), int(col[2:4], 16),
+                                      int(col[4:6], 16))
+                except ValueError:
+                    pass
         elif line:
             self.log("EXP <- %s" % line)
 
     # ----------------------------------------------------------------- BICS
     def on_bics_line(self, line):
-        if ":" not in line:
+        if ":" not in line and not line.endswith("?"):
             return
         self.log("BICS <- %s" % line)
-        cmd, _, arg = line.partition(":")
-        b = self.bics
-        reply = None
-        if cmd == "ID":
-            self.status["bics_id"] = True
-            reply = "ID:WORM WRANGLER,PAD,EMULATED,v%s" % self.profile.get(
-                "bics_fw", "1.0.0")
-        elif cmd == "RESET?" or line.startswith("RESET?"):
-            reply = "RESET:ACK"
-        elif cmd == "HOME":
-            if arg == "STEPPER ALL":
-                b["pos"]["WORM"] = b["offsets"]["WORM"][0]
-                b["pos"]["MOUTH"] = b["offsets"]["MOUTH"][0]
-                reply = "HOME:STEPPER ALL,ACK"
-            elif arg == "STEPPER?":
-                reply = "HOME:STEPPER ACK"
-            elif arg in ("EDGES", "EDGES?"):
-                reply = "HOME:EDGES ACK"
-            elif arg.startswith("FAST "):
-                reply = "HOME:%s,ACK" % arg
-            else:
-                reply = "HOME:%s,ACK" % arg
-        elif cmd == "MOVE":
-            if arg.startswith("STEPPER "):
-                bits = arg[8:].split(",")
-                motor = bits[0]
-                named = {"HOME": 0, "DOWN": 1, "FLUSH": 2, "UP": 3}
-                targets = []
-                if motor == "ALL" and len(bits) >= 3 and bits[1] not in named:
-                    targets = [("WORM", bits[1]), ("MOUTH", bits[2])]
-                elif len(bits) >= 2:
-                    ms = ["WORM", "MOUTH"] if motor == "ALL" else [motor]
-                    targets = [(m, bits[1]) for m in ms]
-                for m, pos in targets:
-                    if m not in b["pos"]:
-                        continue
-                    if pos.upper() in named:
-                        b["pos"][m] = b["offsets"][m][named[pos.upper()]]
-                    else:
-                        b["pos"][m] = pos
-                reply = "MOVE:%s,ACK" % arg
-            else:
-                reply = "MOVE:%s,ACK" % arg
-        elif cmd == "POSITION":
-            m = arg.split()[-1]
-            if m in b["pos"]:
-                reply = "POSITION:STEPPER %s,%s" % (m, b["pos"][m])
-        elif cmd == "SET":
-            if arg.startswith("OFFSETS? "):
-                m = arg.split()[-1]
-                reply = "SET:OFFSETS %s,%s" % (m, ",".join(b["offsets"][m]))
-            elif arg.startswith("OFFSET "):
-                m, _, which = arg[7:].partition(",")
-                idx = {"HOME": 0, "DOWN": 1, "FLUSH": 2, "UP": 3}.get(which)
-                if m in b["offsets"] and idx is not None:
-                    b["offsets"][m][idx] = b["pos"][m]
-                reply = "SET:%s,ACK" % arg
-            else:
-                reply = "SET:%s,ACK" % arg
-        elif cmd in ("FIRE", "ARM", "STOP", "FLASH"):
-            reply = "%s:%s,ACK" % (cmd, arg) if cmd != "FLASH" else None
-        elif cmd == "SYS":
-            reply = "SYS:OK"
+        dialect = self.profile.get("bics", {})
+        reply = dialect.get("replies", {}).get(line)
+        if reply is None:
+            reply = self.bics_generic(line, dialect)
         if reply:
             self.send(BICS, reply + "\r\n")
 
+    def bics_generic(self, line, dialect):
+        cmd, _, arg = line.partition(":")
+        b = self.bics
+        if cmd == "ID":
+            self.status["bics_id"] = True
+            return dialect.get("id", "ID:WORM WRANGLER,PAD,EMULATED,v1.0.0")
+        if cmd.startswith("RESET"):
+            return "RESET:ACK"
+        if cmd.startswith("FLASH"):
+            return None     # never offer a firmware update
+        if cmd == "HOME":
+            for m, offs in b["offsets"].items():
+                b["pos"][m] = offs[0]
+            return "HOME:%s,ACK" % arg
+        if cmd == "MOVE" and arg.startswith("STEPPER "):
+            bits = arg[8:].split(",")
+            motor = bits[0]
+            if motor == "ALL" and len(bits) >= 3 and bits[1].upper() not in NAMED_POS:
+                targets = [("WORM", bits[1]), ("MOUTH", bits[2])]
+            elif len(bits) >= 2:
+                ms = list(b["pos"]) if motor == "ALL" else [motor]
+                targets = [(m, bits[1]) for m in ms]
+            else:
+                targets = []
+            for m, pos in targets:
+                if m in b["pos"]:
+                    idx = NAMED_POS.get(pos.upper())
+                    offs = b["offsets"][m]
+                    # Positions compare as STRINGS against the offsets, so a
+                    # named move reports the offset string exactly.
+                    b["pos"][m] = offs[idx] if idx is not None and idx < len(offs) else pos
+            return "MOVE:%s,ACK" % arg
+        if cmd == "POSITION":
+            m = arg.split()[-1] if arg.split() else ""
+            if m in b["pos"]:
+                return "POSITION:STEPPER %s,%s" % (m, b["pos"][m])
+            return None
+        if cmd == "SET":
+            if arg.startswith("OFFSETS? "):
+                m = arg.split()[-1]
+                if m in b["offsets"]:
+                    return "SET:OFFSETS %s,%s" % (m, ",".join(b["offsets"][m]))
+                return None
+            if arg.startswith("OFFSET "):
+                m, _, which = arg[7:].partition(",")
+                idx = NAMED_POS.get(which)
+                if m in b["offsets"] and idx is not None and idx < len(b["offsets"][m]):
+                    b["offsets"][m][idx] = b["pos"][m]
+            return "SET:%s,ACK" % arg
+        if cmd in ("MOVE", "FIRE", "ARM", "STOP"):
+            return "%s:%s,ACK" % (cmd, arg)
+        if cmd == "SYS":
+            return "SYS:OK"
+        return None
+
+    # ---------------------------------------------------------------- AUDIO
+    def on_audio_line(self, line):
+        self.log("AUDIO <- %s" % line)
+
     # ---------------------------------------------------------------- lines
-    def pump_lines(self, p, handler):
+    @staticmethod
+    def pump_lines(p, handler):
         while b"\r" in p.rx:
             line, _, p.rx = p.rx.partition(b"\r")
             # BICS lines can arrive with a stray leading byte (seen: a space
@@ -366,13 +410,16 @@ class Emulator:
     # -------------------------------------------------------------- control
     def state(self):
         return {
+            "title": self.profile.get("title", ""),
             "switches": {str(k): v for k, v in sorted(self.switches.items()) if v},
             "reversed": sorted(k for k, v in self.reversed.items() if v),
+            "balls": {"trough": self.in_trough, "in_play": self.in_play,
+                      "shooter": bool(self.shooter is not None
+                                      and self.switches.get(self.shooter))},
             "drivers_configured": len(self.drivers),
             "driver_log": self.driver_log[-20:],
             "leds_lit": sum(1 for v in self.leds.values() if any(v)),
             "leds_known": len(self.leds),
-            "exp_config": len(self.exp_config),
             "status": dict(self.status, exp=sorted(self.status["exp"])),
             "bics": self.bics,
         }
@@ -391,6 +438,10 @@ class Emulator:
                 self.set_switch(n, 1)
                 self.after(ms / 1000.0, self.set_switch, n, 0, "ctl")
                 conn.sendall(b"ok\n")
+            elif words[0] == "plunge":
+                conn.sendall(b"ok\n" if self.plunge() else b"err no ball in the shooter lane\n")
+            elif words[0] == "drain":
+                conn.sendall(b"ok\n" if self.drain() else b"err no ball in play\n")
             elif words[0] == "state":
                 conn.sendall((json.dumps(self.state()) + "\n").encode())
             elif words[0] == "leds":
@@ -417,6 +468,10 @@ class Emulator:
         srv.setblocking(False)
         clients = {}
         by_fd = {p.master: p for p in self.ports.values()}
+        handlers = {NET: lambda p: self.pump_lines(p, self.on_net_line),
+                    EXP: self.pump_exp,
+                    BICS: lambda p: self.pump_lines(p, self.on_bics_line),
+                    AUDIO: lambda p: self.pump_lines(p, self.on_audio_line)}
         with open(os.path.join(self.root, "bofhw.pid"), "w") as f:
             f.write(str(os.getpid()))
         self.log("ready")
@@ -474,12 +529,7 @@ class Emulator:
                 # A reply bug must never take the ports down: the game treats
                 # a vanished port as unplugged hardware.
                 try:
-                    if p.role == NET:
-                        self.pump_lines(p, self.on_net_line)
-                    elif p.role == EXP:
-                        self.pump_exp(p)
-                    else:
-                        self.pump_lines(p, self.on_bics_line)
+                    handlers[p.role](p)
                 except Exception as e:      # noqa: BLE001 - logged, loop lives
                     self.log("ERROR handling %s: %r" % (p.role, e))
                     p.rx = b""

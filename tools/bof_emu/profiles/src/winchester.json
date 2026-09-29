@@ -1,0 +1,23 @@
+{
+ "title": "Winchester Mystery House",
+ "_source": "GDHarvest_not_harvest_20260429: autoloads/fast.gd, fast_stem.gd (same as Dune's), autoloads/bics.gd (Haunt Handler)",
+ "ports": [
+  {"role": "net",  "usb": "1-1", "iface": "1.0", "manufacturer": "FAST Pinball", "product": "Neuron", "vid": "2e8a", "pid": "1074"},
+  {"role": "exp",  "usb": "1-1", "iface": "1.2", "manufacturer": "FAST Pinball", "product": "Neuron", "vid": "2e8a", "pid": "1074"},
+  {"role": "bics", "usb": "1-2", "iface": "1.0", "manufacturer": "Arduino LLC", "product": "Arduino Due", "vid": "2341", "pid": "003d", "alias": "bof_worm"}
+ ],
+ "neuron_fw": "02.26",
+ "node_boards": ["0024-2", "3208-2", "3208-2", "0804-2"],
+ "exp_boards": {"48": "00.44", "b4": "00.44", "84": "00.48", "86": "00.44"},
+ "bics": {
+  "id": "ID:Barrel_of_Interactive_Control_Systems_Haunt_Handler,PAD,EMULATED,v0.6.1",
+  "replies": {
+   "HOME:STEPPER": "HOME:STEPPER ACK",
+   "HOME:STEPPER?": "HOME:STEPPER ACK",
+   "HOME:STEPPER:FAST": "HOME:STEPPER:FAST ACK"
+  },
+  "motors": {"HALL": ["0.0"]}
+ },
+ "bics_switches": {"98": ["0", "/L"], "97": ["1", "/L"], "99": ["2", "/L"], "100": ["3", "-L"],
+                   "101": ["4", "/L"], "102": ["5", "/L"], "19": ["6", "/L"], "96": ["7", "/L"]}
+}
