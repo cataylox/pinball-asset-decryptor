@@ -324,9 +324,28 @@ export PAD_GL_DRIVER=${GALLIUM_DRIVER:-mesa-default}
 # territory: a cost that no CPU counter can see, which is exactly the shape of
 # a machine that "feels sluggish" while every throughput number says it is idle.
 #
-# A SUBSTRING of the adapter name. Unset leaves Mesa's own choice alone, so
-# this changes nothing until it is asked for.
-[ -n "${PAD_GL_ADAPTER:-}" ] && export MESA_D3D12_DEFAULT_ADAPTER_NAME="$PAD_GL_ADAPTER"
+# A SUBSTRING of the adapter name.
+#
+# ★ PICKED AUTOMATICALLY INSIDE WSL (PAD-258), for every user, not only this
+# machine: gpupick.py asks DXCore - the library Mesa's d3d12 itself enumerates
+# with - for Windows' own HighPerformance ordering and names the first adapter.
+# It prints nothing when there is only one hardware adapter (nothing to choose,
+# Mesa left exactly as it was) or when DXCore cannot be asked, so the worst
+# case is the behaviour every run had before. ~0.1 s.
+#
+# A CALLER WHO NAMED ONE STILL WINS, the same `:-` rule as GALLIUM_DRIVER above.
+# PAD_GL_ADAPTER=default opts out of the pick and leaves Mesa's own choice.
+# Laptops: the discrete GPU costs battery; Windows' own HighPerformance order is
+# what picks it, the same GPU a game launched on that laptop would get.
+if [ -z "${PAD_GL_ADAPTER:-}" ] && [ "$IS_WSL" = 1 ] \
+        && [ "${GALLIUM_DRIVER:-}" = d3d12 ]; then
+    PAD_GL_ADAPTER=$(python3 "$RIG/gpupick.py" 2>/dev/null)
+    [ -n "$PAD_GL_ADAPTER" ] && echo "[watch] renderer GPU: $PAD_GL_ADAPTER (auto)"
+fi
+[ "${PAD_GL_ADAPTER:-}" = default ] && PAD_GL_ADAPTER=
+if [ -n "${PAD_GL_ADAPTER:-}" ]; then
+    export PAD_GL_ADAPTER MESA_D3D12_DEFAULT_ADAPTER_NAME="$PAD_GL_ADAPTER"
+fi
 
 # WHICH TITLE. PAD_GAME picks it; run_game.sh has the full rule and prints what
 # it chose. Everything below that is per-title reads it from here.
@@ -1760,6 +1779,10 @@ pad_gl_software() {
 pad_gl_gpu() {
     PAD_GL_MODE=gpu
     unset LIBGL_ALWAYS_SOFTWARE
+    # pad_gl_software unset the adapter; the pick at the top is still right.
+    if [ -n "${PAD_GL_ADAPTER:-}" ]; then
+        export MESA_D3D12_DEFAULT_ADAPTER_NAME="$PAD_GL_ADAPTER"
+    fi
     if [ "$PAD_GL_DRIVER" = mesa-default ]; then
         unset GALLIUM_DRIVER
         echo "[watch] cfg GALLIUM_DRIVER=(unset - back on Mesa's own choice)"
