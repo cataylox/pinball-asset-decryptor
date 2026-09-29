@@ -10557,6 +10557,14 @@ static int led_gz_cmd(unsigned cmd)
  * overwrites one - see led_publish's cmd 70 branch for what that costs and
  * why it is not a preference. */
 static unsigned char led_wide_owns[16][96];
+static void led_show_note(unsigned node, unsigned cmd, unsigned weight);
+/* The lamp commands the show announcer counts one per frame - the rest of the
+ * swelf family is counted by the lamps it published (led_show_note). */
+static int led_show_cmd(unsigned cmd)
+{
+    return cmd == 0x70 || cmd == 0x97 || (cmd >= 0xa2 && cmd <= 0xa6) ||
+           cmd == 0xb4 || cmd == 0xb5;
+}
 
 /* DECLARED, because GCC 14 STOPPED GUESSING. `open` and `close` were called
  * here with no declaration in sight, which every compiler up to GCC 13 assumed
@@ -11339,7 +11347,7 @@ static int led_wide_publish(unsigned node, unsigned cmd,
                             const unsigned char *body, unsigned blen)
 {
     unsigned char idx[96], val[96];
-    unsigned cnt = 0, i;
+    unsigned cnt = 0, i, cmd0 = cmd;
     int bank;
 
     /* 0x80..0xbf AND NOTHING ELSE, which is a bound the builder proves rather
@@ -11408,6 +11416,7 @@ static int led_wide_publish(unsigned node, unsigned cmd,
     led_shm->decoded += cnt;
     led_shm->gen++;
     if (led_shm_len >= 8192) led_shm->wide_decoded++;
+    if (!led_show_cmd(cmd0)) led_show_note(node, cmd0, cnt);     /* PAD-255 */
     if (led_dec_log()) {
         char l[256];
         int q = 0;
@@ -11456,7 +11465,7 @@ static int led_node_wide_publish(unsigned node, unsigned cmd,
                                  const unsigned char *body, unsigned blen)
 {
     unsigned char idx[96], val[96];
-    unsigned cnt = 0, i, ok;
+    unsigned cnt = 0, i, ok, cmd0 = cmd;
     int bank;
     if (node >= 16 || (cmd & 0xc0) != 0x80 || blen < 1 || led_wide_settled()) return 0;
     if (led_node_verdict[node] < 0) return 0;
@@ -11496,6 +11505,7 @@ static int led_node_wide_publish(unsigned node, unsigned cmd,
     led_shm->decoded += cnt;
     led_shm->gen++;
     if (led_shm_len >= 8192) led_shm->wide_decoded++;
+    if (!led_show_cmd(cmd0)) led_show_note(node, cmd0, cnt);     /* PAD-255 */
     return 1;
 }
 
@@ -11631,6 +11641,45 @@ static int led_show_gate(unsigned long now, int moving, unsigned long *window)
     return 0;
 }
 
+/* One lamp frame's say in the show announcer (see the caller in led_publish
+ * for the whole history). `weight` is how many lamp WRITES it carried: 1 for
+ * each command of the fixed set, and the lamps a swelf-family frame actually
+ * published for the wide decoders (PAD-255). led_show_gate is fed once per
+ * write, so the rate half reads "30 lamp writes in 3 s". */
+static void led_show_note(unsigned node, unsigned cmd, unsigned weight)
+{
+    if (weight > 30) weight = 30;
+    unsigned long now = pad_ms(), window = 0;
+    int verdict = 0;
+    while (weight-- && !verdict)
+        verdict = led_show_gate(now, led_moving(now), &window);
+    if (verdict == 1) {
+        char m[144];
+        snprintf(m, sizeof m,
+                 "[led] light show running: 30 lamp commands in %lu ms "
+                 "and the picture is moving (last node=%u cmd=%02x, "
+                 "%lu ms)\n", window, node, cmd, now);
+        logmsg(m);
+    } else if (verdict == 2) {
+        /* SAYS SO ONCE, because "the rate is there and the picture is
+         * not moving" is the exact shape of a machine parked on Tech
+         * Alerts, and a run that ends that way should not be silent
+         * about it. It also separates the two ways of not announcing:
+         * nothing has changed at all, or things are changing but far
+         * below show rate. */
+        char m[224];
+        snprintf(m, sizeof m,
+                 "[led] lamp traffic with a STILL picture: 30 commands "
+                 "in %lu ms and %s - a board refresh, not a show "
+                 "(node=%u cmd=%02x, %lu ms)\n", window,
+                 led_moved_recently(now)
+                     ? "the picture is changing below show rate"
+                     : "no lamp has changed value",
+                 node, cmd, now);
+        logmsg(m);
+    }
+}
+
 static void led_publish(const unsigned char *p, int n)
 {
     unsigned node, cmd, blen, i;
@@ -11671,9 +11720,23 @@ static void led_publish(const unsigned char *p, int n)
      * their semantics, and guessed lamp commands are how this detector
      * went wrong twice before. The 30-in-3s rate gate below still guards
      * the star_wars service-menu-entry trap. */
-    if (cmd == 0x70 ||
-        cmd == 0x97 || cmd == 0xa2 || cmd == 0xa3 || cmd == 0xa4 ||
-        cmd == 0xa5 || cmd == 0xa6 || cmd == 0xb4 || cmd == 0xb5) {
+    /* ★ AND THAT cmd 70 WAS THE RE-INIT, NOT THE SHOW (PAD-255). It is sent
+     * only inside a board init, and the rig re-initialised every board at
+     * every service visit because it answered the `ff` frame count with 0
+     * (nb_rx_count). With the count answered batman sends no cmd 70 after
+     * bring-up at all - and its lamps move exactly as much as before (128
+     * cells changing in 20 s of attract, either way), because its show is
+     * the swelf family the wide decoders read (8a/96/9a/86...: 0x80..0xbf).
+     * So those frames now count too - from led_wide_publish and
+     * led_node_wide_publish, once PUBLISHED, weighted by the lamps they
+     * wrote. By lamps and not by frames because a Home Edition's show is few
+     * and wide: jurassic_park_the_pin sends one cmd 86 every ~135 ms, Tech
+     * Alerts and attract alike, so 30 frames in 3 s is never met without the
+     * re-init's cmd 70 padding the rate. The rate half only ever says "a
+     * board is being talked to"; the moving half is what decides (see
+     * led_show_gate), and it is unchanged. cmd 70 stays in the set for the
+     * bring-up inits and the encoder-only comparison run. */
+    if (led_show_cmd(cmd)) {
         /* RATE-QUALIFIED, not a bare count. The first version announced at
          * the 10th lamp command ever, and star_wars_le promptly showed why
          * that is wrong: a press that walks into the SERVICE MENU emits a
@@ -11692,33 +11755,7 @@ static void led_publish(const unsigned char *p, int n)
          * published picture is MOVING AT SHOW RATE inside the same three
          * seconds, which is `led_val` above keeping the last 200 change
          * times. */
-        unsigned long now = pad_ms(), window = 0;
-        int verdict = led_show_gate(now, led_moving(now), &window);
-        if (verdict == 1) {
-            char m[144];
-            snprintf(m, sizeof m,
-                     "[led] light show running: 30 lamp commands in %lu ms "
-                     "and the picture is moving (last node=%u cmd=%02x, "
-                     "%lu ms)\n", window, node, cmd, now);
-            logmsg(m);
-        } else if (verdict == 2) {
-            /* SAYS SO ONCE, because "the rate is there and the picture is
-             * not moving" is the exact shape of a machine parked on Tech
-             * Alerts, and a run that ends that way should not be silent
-             * about it. It also separates the two ways of not announcing:
-             * nothing has changed at all, or things are changing but far
-             * below show rate. */
-            char m[224];
-            snprintf(m, sizeof m,
-                     "[led] lamp traffic with a STILL picture: 30 commands "
-                     "in %lu ms and %s - a board refresh, not a show "
-                     "(node=%u cmd=%02x, %lu ms)\n", window,
-                     led_moved_recently(now)
-                         ? "the picture is changing below show rate"
-                         : "no lamp has changed value",
-                     node, cmd, now);
-            logmsg(m);
-        }
+        led_show_note(node, cmd, 1);
     }
 
     /* The boot enumeration: remember which indices this board really has.
@@ -12446,29 +12483,33 @@ static void nb_trace(void)
  * fault branch. The item-52 note on the `ff` reply read the stored ZERO as
  * "the previous value is always 0"; it is the game's own count, restarted.
  *
- * So the rig counts what the game counts, per node - but ANSWERS it only for
- * a board that carries an ENCODER MOTOR (nb_rx_count_says). Every other board
- * still says 0 and is still re-initialised at every visit, as before, because
- * the rest of the rig leans on that artifact and was tuned on it: batman-1.13
- * (the older, swelf generation) sends cmd 70 - which this file decodes as its
- * base-layer lamps, and which gamestate.sh counts as its attract light show -
- * ONLY inside a board init. Counted everywhere, batman sat in a perfectly good
- * attract that the rig called Tech Alerts, with its lamps frozen (whole-
- * library sweep, 2026-09-28). Stopping the bus-wide re-init is its own job,
- * with those two to fix first. The jetpack's board is the one whose re-init is
- * measured to do harm, and until its encoder motor is configured it too says
- * 0, so its bring-up inits happen exactly as before.
+ * So the rig counts what the game counts, per node, and ANSWERS it on every
+ * board (PAD-255). PAD-249 first answered it only on a board with an ENCODER
+ * MOTOR, because the whole-library sweep with the count on everywhere failed
+ * batman-1.13 as "stuck on Tech Alerts": that generation sends cmd 70 ONLY
+ * inside a board init, and cmd 70 was what the light-show announcer counted
+ * for it. Measured under PAD-255 (batman, 150 s in, 20 s of the lamp plane):
+ * with the count answered cmd 70 and the rest of the init set (14/51/60) stop
+ * after bring-up, and the lamps move EXACTLY as much - 128 cells changing,
+ * the same per node - because batman's show is the swelf family the wide
+ * decoders read. So the lamps never leaned on the re-init; only the attract
+ * signal did, and led_show_note now counts the wide family by the lamps it
+ * publishes. The Home Editions leaned on it the same way: their `cmd 70`
+ * "refresh every ~100 ms" (PAD-129) was this re-init of their one board.
  *
  * PAD_NB_SWA and the switch walk still set word A when asked (their sweeps
- * want the flag raised); PAD_NB_RXCOUNT=0 answers 0 everywhere again. */
+ * want the flag raised); PAD_NB_RXCOUNT=enc answers only on an encoder-motor
+ * board (PAD-249's rule), PAD_NB_RXCOUNT=0 answers 0 everywhere again. */
 static unsigned nb_rx_count[32];
 
+/* 0 = say 0 everywhere, 1 = every board, 2 = only a board with an encoder
+ * motor (PAD-249's gate, kept for the comparison run: PAD_NB_RXCOUNT=enc). */
 static int nb_rx_count_on(void)
 {
     static int v = -1;
     if (v < 0) {
         const char *e = getenv("PAD_NB_RXCOUNT");
-        v = (e && e[0] == '0') ? 0 : 1;
+        v = (e && e[0] == '0') ? 0 : (e && e[0] == 'e') ? 2 : 1;
     }
     return v;
 }
@@ -12495,12 +12536,13 @@ static unsigned nb_rx_count_poll(unsigned nid)
     return c;
 }
 
-/* Does this board report its count? Only one with an encoder motor on it
- * (see nb_rx_count): the model plays the motor, so the board must not look
+/* Does this board report its count? Every board (see nb_rx_count); under
+ * PAD_NB_RXCOUNT=enc only one with an encoder motor on it, which must not look
  * reset every visit, or event 135 re-homes the motor every ~0.7 s. */
 static int nb_rx_count_says(unsigned nid)
 {
     unsigned k;
+    if (nb_rx_count_on() == 1) return 1;
     if (!nb_rx_count_on() || !nb_motor_on() || nid >= 64) return 0;
     for (k = 0; k < NB_MOTORS; k++)
         if (nb_motors[nid][k].cfg && nb_motors[nid][k].enc) return 1;
@@ -13010,8 +13052,8 @@ long shim_read(int fd, void *b, unsigned long n)
                 unsigned nid = (unsigned)(nb_req[0] & 0x3f);
                 if (spec == (char *)-1) spec = getenv("PAD_NB_SW");
                 /* PAD-249: word A = the frames this board received since the
-                 * last poll, this one included - on a board with an encoder
-                 * motor (see nb_rx_count). The PAD_NB_SWA note below predates
+                 * last poll, this one included - on every board since
+                 * PAD-255 (see nb_rx_count). The PAD_NB_SWA note below predates
                  * it: the "previous value" it read as a stored zero is the
                  * game's frame counter, zeroed per poll. */
                 {

@@ -53,7 +53,8 @@ gs_booted() { [ "$(gs_count 'gst\] factory_make' "$1")" -ge 3 ]; }
 
 # PAST TECH ALERTS = THE ATTRACT LIGHT SHOW IS RUNNING. The shim prints
 # `[led] light show running` ONCE, when 30 lamp-class commands (97/a2..a6/
-# b4/b5, any board) land inside 3 seconds - a RATE, not a count, because a
+# b4/b5, any board; each lamp a swelf-family frame writes counts as one
+# since PAD-255) land inside 3 seconds - a RATE, not a count, because a
 # stray press entering the service menu emits a small lamp burst and a bare
 # 10-count tripped on exactly that (star_wars, 2026-08-10). Measured on the
 # full godzilla_pro boot trace: the whole Tech Alerts wait carried 2 such

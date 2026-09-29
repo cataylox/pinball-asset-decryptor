@@ -73,7 +73,12 @@ int main(void)
 def _extract(name):
     """The source text of one static function, straight out of hwshim.c."""
     src = open(SHIM, encoding="utf-8", errors="replace").read()
-    m = re.search(r"^static [^\n]*\b%s\(" % re.escape(name), src, re.M)
+    m = None
+    for c in re.finditer(r"^static [^\n]*\b%s\(" % re.escape(name), src, re.M):
+        brace, semi = src.find("{", c.start()), src.find(";", c.start())
+        if brace >= 0 and (semi < 0 or brace < semi):   # not a declaration
+            m = c
+            break
     assert m, "%s not found in hwshim.c - did it get renamed?" % name
     i = src.index("{", m.start())
     depth, j = 0, i
@@ -279,3 +284,82 @@ def test_a_menu_blip_does_not_fake_it(gate):
     not thirty in three seconds."""
     frames = [(30000 + i * 30, True) for i in range(10)]
     assert _run(gate, frames) == [], "a ten-command burst announced"
+
+
+
+#: led_show_note (PAD-255) with the clock and the moving-picture test stubbed:
+#: stdin is "<ms>:<moving>:<lamps>" per frame. It feeds the gate once per lamp
+#: write, so a swelf-family frame counts by the lamps it published.
+NOTE_HARNESS = r"""
+#include <stdio.h>
+#include <stdlib.h>
+
+static unsigned long g_now;
+static int g_moving;
+static unsigned long pad_ms(void) { return g_now; }
+static int led_moving(unsigned long now) { (void)now; return g_moving; }
+static int led_moved_recently(unsigned long now) { (void)now; return g_moving; }
+static void logmsg(const char *s) { printf("%%lu %%s", g_now, s); }
+
+%s
+
+%s
+
+int main(void)
+{
+    char line[64];
+    while (fgets(line, sizeof line, stdin)) {
+        char *a = line, *b;
+        g_now = strtoul(a, &b, 10);
+        g_moving = b[1] == '1';
+        led_show_note(8, 0x86, (unsigned)strtoul(b + 3, 0, 10));
+    }
+    return 0;
+}
+"""
+
+
+@pytest.fixture(scope="module")
+def note(tmp_path_factory):
+    d = tmp_path_factory.mktemp("shownote")
+    src = d / "note.c"
+    src.write_text(NOTE_HARNESS % (_extract("led_show_gate"),
+                                   _extract("led_show_note")), encoding="utf-8")
+    exe = d / ("note.exe" if os.name == "nt" else "note")
+    r = subprocess.run([CC, "-O1", "-o", str(exe), str(src)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, "led_show_note did not compile:\n" + r.stderr
+    return str(exe)
+
+
+def _note(note, frames):
+    """[(ms, line)] the announcer logged for (ms, moving, lamps) frames."""
+    lines = "".join("%d:%d:%d\n" % (ms, bool(mv), n) for ms, mv, n in frames)
+    r = subprocess.run([note], input=lines, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return [(int(l.split(" ", 1)[0]), l.split(" ", 1)[1])
+            for l in r.stdout.splitlines()]
+
+
+#: jurassic_park_the_pin once no board is re-initialised (PAD-255): one cmd 86
+#: every ~135 ms, ~12 lamps each, Tech Alerts and attract alike. As frames that
+#: is 22 in 3 s, which never met the rate; the re-init's cmd 70 used to.
+HOME_EDITION = [(20000 + i * 135, None, 12) for i in range(200)]
+
+
+def test_a_few_wide_frames_announce_by_their_lamps(note):
+    said = _note(note, [(ms, True, n) for ms, _, n in HOME_EDITION])
+    assert len(said) == 1 and "light show running" in said[0][1], said
+    assert said[0][0] <= 20000 + 3 * 135, "took more than three wide frames"
+
+
+def test_the_same_frames_one_lamp_each_do_not(note):
+    """What the rate half saw before PAD-255 counted a frame's lamps."""
+    assert _note(note, [(ms, True, 1) for ms, _, _ in HOME_EDITION]) == []
+
+
+def test_wide_frames_over_a_still_picture_never_announce(note):
+    """The alerts screen sends those frames too; the moving half decides."""
+    said = _note(note, [(ms, False, n) for ms, _, n in HOME_EDITION])
+    assert [l for _, l in said if "light show running" in l] == [], said
+    assert len(said) == 1 and "STILL picture" in said[0][1], said
