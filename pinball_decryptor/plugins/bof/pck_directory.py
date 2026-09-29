@@ -83,13 +83,23 @@ def _derive_key(sek, token):
 
 
 def _aes_cfb(key, iv, data, encrypt=False):
-    from Crypto.Cipher import AES   # pycryptodome; lazy import
+    try:
+        from Crypto.Cipher import AES   # pycryptodome; lazy import
+    except ImportError:
+        # the app's Linux has no pycryptodome (the emulator reads the
+        # playfield picture there, PAD-257): slow, correct, pure Python
+        from . import aes_py
+        return aes_py.cfb128(key, iv, bytes(data), encrypt=encrypt)
     cipher = AES.new(key, AES.MODE_CFB, iv=iv, segment_size=128)
     return cipher.encrypt(data) if encrypt else cipher.decrypt(data)
 
 
 def _aes_ecb_block(key, block16):
-    from Crypto.Cipher import AES
+    try:
+        from Crypto.Cipher import AES
+    except ImportError:
+        from . import aes_py
+        return aes_py.ecb_encrypt_block(key, bytes(block16))
     return AES.new(key, AES.MODE_ECB).encrypt(block16)
 
 

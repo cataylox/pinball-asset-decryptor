@@ -1548,14 +1548,20 @@ HELP_CONTENT = {
          "from your edits: emulating it first is the quick way to check a mod "
          "before it goes on a stick. The file is only read."),
         ("Playing",
-         "While the game runs, the Cabinet card on this tab is the machine's "
-         "buttons and switches: Start, Coin, the flippers (hold the button), "
-         "Launch, the service buttons, and every switch on the playfield. "
-         "Click a switch to press it the way a ball would; right-click to "
-         "hold it. Plunge puts the ball in the shooter lane into play, and "
-         "Drain sends a ball back to the trough. With this tab focused, Z and "
-         "/ (or the Shift keys) are the flippers, 1 is Start, 5 a coin and "
-         "Space Launch."),
+         "When the game is ready its switch window opens beside it: the "
+         "game's own playfield drawing with every switch on it, and a list "
+         "of them all by name. Hold a switch with the mouse (a flipper, a "
+         "ball resting in a scoop); right-click to latch it until you "
+         "right-click again. Plunge puts the ball in the shooter lane into "
+         "play, Drain sends one back to the trough, and Coin door opens or "
+         "closes it. With that window focused, Z and / (or the Shift keys) "
+         "are the flippers, 1 is Start, 5 a coin, Space Launch, P Plunge and "
+         "D Drain. Closed it? \"Switches window\" on this tab brings it "
+         "back."),
+        ("Cancel",
+         "While a game is starting the Start button is Cancel. A build on a "
+         "slow or busy drive can take a long time to unpack; Cancel stops "
+         "it and throws the half-unpacked copy away."),
         ("First start is slower",
          "The first Start on a file unpacks it (2-4 GB) inside the app's "
          "Linux, which takes a minute or two. The last two builds are kept, "

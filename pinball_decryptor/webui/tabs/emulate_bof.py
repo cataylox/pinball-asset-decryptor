@@ -1,12 +1,14 @@
 """Emulate BoF tab: run a Barrels of Fun game on this PC.
 
 THIN, like the JJP tab: every step of the launch (decrypt, boards, game)
-lives in ``tools/bof_emu/watch.sh``.  This service starts it, stops it, polls
-``status.sh``, and - unlike the other rigs, whose playfields have their own
-windows - carries the switch panel itself: the title's switch table comes
-from its profile, and a press goes to the rig over ONE long-lived
-``ctl.sh --stream`` pipe, because starting wsl.exe per click costs a few
-hundred milliseconds and a flipper cannot wait that long.
+lives in ``tools/bof_emu/watch.sh``.  This service starts it (and cancels
+it), stops it, and polls ``status.sh``.
+
+The machine's switches are a WINDOW of their own, as the Stern and JJP rigs'
+are: ``tools/bof_emu/bofpf.py``, the game's own playfield drawing with every
+switch on it plus a labelled list, run on the app's Windows Python.  This tab
+opens it once the game has found its boards, reopens it on request, and
+closes it on Stop.
 
 Exports ``bof_emulate_fun_var`` (the run logic persists it per project) and
 answers ``emulate_shutdown`` (the app-quit fan-out).  ``launch_fun(path)``
@@ -21,7 +23,8 @@ import threading
 from pinball_decryptor.webui import rig as _rig
 from .. import compat
 from .. import emulate_bof_core as bof
-from ..emulate_jjp_common import RigTabMixin, rig_off, load_audio_ctl
+from ..emulate_jjp_common import (RigTabMixin, rig_off, load_audio_ctl,
+                                  windows_python)
 from .base import TabService, rpc
 
 INTRO = ("Run a Barrels of Fun game on this PC - Dune, Winchester Mystery "
@@ -37,6 +40,10 @@ FUN_TIP = ("A Barrels of Fun update file (.fun). It is only read: the "
 SOUND_TIP = ("Play the game's sound on this PC. Applies when the game starts; "
              "the game's own volume is in its service menu.")
 
+SWITCHES_TIP = ("The machine's switches: the game's own playfield drawing with "
+                "every switch on it, and a labelled list. Hold a switch with "
+                "the mouse, right-click to latch it.")
+
 #: The status grid (label, key into the values _apply computes).
 CELLS = (
     ("Game", "title"),
@@ -47,66 +54,6 @@ CELLS = (
     ("Memory", "rss"),
     ("Uptime", "uptime"),
 )
-
-#: The buttons above the switch list: profile key -> label, in cabinet order.
-QUICK = (("start", "Start"), ("coin", "Coin"), ("launch", "Launch"),
-         ("flipper_left", "Left flipper"), ("flipper_right", "Right flipper"),
-         ("action", "Action"), ("tilt", "Tilt"))
-SERVICE = (("enter", "Enter"), ("exit", "Exit"), ("up", "Up"),
-           ("down", "Down"))
-
-
-class _CtlStream:
-    """One ``ctl.sh --stream`` process, restarted on demand.  Replies are
-    read on a thread and dropped (a refused press is logged)."""
-
-    def __init__(self, log):
-        self._proc = None
-        self._lock = threading.Lock()
-        self._log = log
-
-    def send(self, line):
-        with self._lock:
-            for _attempt in (1, 2):
-                if self._proc is None or self._proc.poll() is not None:
-                    self._start()
-                try:
-                    self._proc.stdin.write(line + "\n")
-                    self._proc.stdin.flush()
-                    return True
-                except (OSError, ValueError, AttributeError):
-                    self._proc = None
-            return False
-
-    def _start(self):
-        self._proc = subprocess.Popen(
-            bof.rig_cmd("ctl.sh", "--stream"),
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, bufsize=1, universal_newlines=True,
-            encoding="utf-8", errors="replace",
-            creationflags=_rig.CREATE_FLAGS)
-        proc = self._proc
-
-        def drain():
-            for reply in proc.stdout:
-                reply = reply.strip()
-                if reply.startswith("err") or reply.startswith("bofctl:"):
-                    self._log("BoF: " + reply)
-        threading.Thread(target=drain, daemon=True,
-                         name="pad-bof-ctl").start()
-
-    def close(self):
-        with self._lock:
-            proc, self._proc = self._proc, None
-        if proc is not None:
-            try:
-                proc.stdin.close()
-                proc.wait(timeout=5)
-            except Exception:                              # noqa: BLE001
-                try:
-                    proc.kill()
-                except Exception:                          # noqa: BLE001
-                    pass
 
 
 class EmulateBoFTab(RigTabMixin, TabService):
@@ -127,11 +74,11 @@ class EmulateBoFTab(RigTabMixin, TabService):
         super().__init__(window)
         self.bof_emulate_fun_var = self.var("fun")
         self._init_rig_state()
-        self._ctl = _CtlStream(self._log)
         #: a Start is in flight (the button is Cancel) / its cancel is
         self._starting = False
         self._cancelling = False
-        self._panel_title = None
+        #: the switch window (bofpf.py), when this app opened one
+        self._sw_proc = None
         ok = bof.rig_available()
         if not ok:
             note = ("The Barrels of Fun emulator is missing from "
@@ -143,13 +90,14 @@ class EmulateBoFTab(RigTabMixin, TabService):
         else:
             note = ""
         self.set(intro=INTRO, fun_tip=FUN_TIP, sound_tip=SOUND_TIP,
+                 switches_tip=SWITCHES_TIP,
                  platform=sys.platform, rig_ok=ok,
                  go_label="Start", go_enabled=ok, busy=False, go_busy=False,
+                 starting=False,
                  state_label="Checking…", state_hint="", tone="",
                  cells=[{"label": lbl, "key": k, "value": "—"}
                         for lbl, k in CELLS],
-                 note=note,
-                 up=False, ready=False, game="", panel=None, active=[])
+                 note=note, up=False, ready=False, game="")
         self._start_polling()
 
     # ------------------------------------------------------------------
@@ -176,7 +124,6 @@ class EmulateBoFTab(RigTabMixin, TabService):
     def on_close(self):
         self._stopped = True
         self._cancel_poll()
-        self._ctl.close()
 
     def fun_path(self):
         """This tab's own .fun, else the one picked on Select card (the
@@ -247,27 +194,17 @@ class EmulateBoFTab(RigTabMixin, TabService):
         return True
 
     @rpc
-    def press(self, n, ms=150):
-        """Tap switch *n* (press, release after *ms*)."""
-        return self._send("tap %d %d" % (int(n), max(30, min(5000, int(ms)))))
-
-    @rpc
-    def hold(self, n, on):
-        """Hold switch *n* down (on) or let it go - flippers, the coin door."""
-        return self._send("sw %d %d" % (int(n), 1 if on else 0))
-
-    @rpc
-    def plunge(self):
-        return self._send("plunge")
-
-    @rpc
-    def drain(self):
-        return self._send("drain")
-
-    def _send(self, line):
+    def switches(self):
+        """Open (or bring back) the switch window for the running game."""
         if rig_off() or not self._last_up:
             return False
-        return self._ctl.send(line)
+        info = dict(self._info)
+
+        def work():
+            self._open_switches(info)
+        threading.Thread(target=work, daemon=True,
+                         name="pad-bof-switches").start()
+        return True
 
     def launch_fun(self, path):
         """Start the rig on *path* (a .fun), exactly as the Start button."""
@@ -277,6 +214,58 @@ class EmulateBoFTab(RigTabMixin, TabService):
         self.bof_emulate_fun_var.set(path)
         self._start_async()
         return True
+
+    # ------------------------------------------------------------------
+    # the switch window
+    # ------------------------------------------------------------------
+    def _switch_window_cmd(self, info):
+        """bofpf.py's command line for the running game, or None."""
+        title = info.get("title")
+        py = windows_python()
+        if not title or not py:
+            return None
+        cmd = [py, os.path.join(bof.rig_dir(), "bofpf.py"), "--title", title,
+               "--slot", info.get("slot") or "0"]
+        distro = bof.rig_distro()
+        if distro:
+            cmd += ["--distro", distro]
+            art = info.get("art") or ""
+            if art.startswith("/"):
+                # the picture lives in the app's Linux; Windows reads it
+                # through the distro's share
+                cmd += ["--art", "\\\\wsl.localhost\\%s%s"
+                        % (distro, art.replace("/", "\\"))]
+        return cmd
+
+    def _open_switches(self, info=None):
+        if self._sw_proc is not None and self._sw_proc.poll() is None:
+            return True              # already open (it keeps itself on top)
+        if info is None or not info.get("title"):
+            info = self._read_status()
+        cmd = self._switch_window_cmd(info or {})
+        if not cmd:
+            self._log("BoF: could not open the switch window (no Python to "
+                      "run it with, or the game is not running).")
+            return False
+        try:
+            self._sw_proc = subprocess.Popen(
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=_rig.CREATE_FLAGS)
+            return True
+        except Exception as exc:                           # noqa: BLE001
+            self._sw_proc = None
+            self._log("BoF: could not open the switch window: %s" % exc)
+            return False
+
+    def _close_switches(self):
+        """The window also closes itself once the game stops answering;
+        this is the prompt version, for Stop and app quit."""
+        proc, self._sw_proc = self._sw_proc, None
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:                              # noqa: BLE001
+                pass
 
     # ------------------------------------------------------------------
     # start / stop
@@ -334,6 +323,8 @@ class EmulateBoFTab(RigTabMixin, TabService):
                 elif rc not in (0, None):
                     self._log("BoF: start failed (exit %d). %s"
                               % (rc, bof.EXIT_TEXT.get(rc, "")))
+                else:
+                    self._open_switches()
             except Exception as exc:                       # noqa: BLE001
                 self._log("BoF: start failed: %s" % exc)
             finally:
@@ -360,7 +351,7 @@ class EmulateBoFTab(RigTabMixin, TabService):
         self._go_busy = True
         self._started_here = False
         self._set_go("Stopping…", False)
-        self._ctl.close()
+        self._close_switches()
 
         def work():
             try:
@@ -399,37 +390,12 @@ class EmulateBoFTab(RigTabMixin, TabService):
         else:
             self._footer_now("idle")
 
-    def _panel(self, title):
-        """The switch panel for *title*: quick buttons, service buttons and
-        every switch, grouped, from the title's profile."""
-        prof = bof.load_profile(title)
-        if not prof:
-            return None
-        keys = prof.get("keys") or {}
-        quick = [{"key": k, "label": lbl, "n": keys[k],
-                  "hold": k.startswith("flipper")}
-                 for k, lbl in QUICK if k in keys]
-        service = [{"label": lbl, "n": keys[k]}
-                   for k, lbl in SERVICE if k in keys]
-        cab, pf = [], []
-        for s in prof.get("switches") or []:
-            item = {"n": s["n"], "label": s.get("label") or s.get("const", ""),
-                    "opto": bool(s.get("opto"))}
-            (cab if "cabinet" in (s.get("tags") or []) or s["n"] < 24
-             else pf).append(item)
-        return {"title": prof.get("title") or bof.title_name(title),
-                "quick": quick, "service": service,
-                "coin_door": keys.get("coin_door"),
-                "groups": [{"name": "Cabinet", "switches": cab},
-                           {"name": "Playfield", "switches": pf}]}
-
     def _apply(self, info):
         self._info = info
         was_up = self._last_up
         self._last_up = info.get("running") == "1"
         if was_up and not self._last_up:
             self._started_here = False
-            self._ctl.close()
         hw = bof.hw_state(info)
         ready = bool((hw.get("status") or {}).get("hardware_connected"))
         label, hint = bof.state_text(info)
@@ -453,12 +419,7 @@ class EmulateBoFTab(RigTabMixin, TabService):
                          for lbl, k in CELLS],
                   note="" if bof.rig_available() else self.get("note"),
                   up=self._last_up, ready=ready,
-                  game=bof.title_name(title) if title else "",
-                  active=sorted(int(k) for k, v in
-                                (hw.get("switches") or {}).items() if v))
-        if title != self._panel_title:
-            self._panel_title = title
-            kw["panel"] = self._panel(title) if title else None
+                  game=bof.title_name(title) if title else "")
         if not self._busy:
             kw["go_label"] = "Stop" if self._last_up else "Start"
             kw["go_enabled"] = bof.rig_available()
@@ -476,7 +437,7 @@ class EmulateBoFTab(RigTabMixin, TabService):
         nothing else - a run it merely saw is somebody else's."""
         self._stopped = True
         self._cancel_poll()
-        self._ctl.close()
+        self._close_switches()
         if rig_off() or not bof.rig_available() or not bof.platform_ok():
             return
         if not self._started_here or not (self._last_up or self._busy):

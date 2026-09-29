@@ -26,8 +26,17 @@ mkdir -p "$BOF_CACHE"
 
 find_bin() { find "$1" -maxdepth 2 -name '*.x86_64' -type f 2>/dev/null | head -1; }
 
+# The playfield drawing for the switch window (pfart.py), cached with the
+# build.  Best effort: a build without one still runs.
+art() {         # <build dir>
+    { [ -e "$1/pfart.webp" ] || [ -e "$1/pfart.png" ]; } && return 0
+    python3 "$BOF_TOOLS/pfart.py" "$(find_bin "$1")" "$1/pfart.webp" \
+        > /dev/null 2> "$1/pfart_error.txt" || true
+}
+
 if [ -f "$DEST/.complete" ]; then
     touch "$DEST/.complete"
+    art "$DEST"         # a build unpacked before the switch window existed
     echo "binary=$(find_bin "$DEST")"
     exit 0
 fi
@@ -74,6 +83,8 @@ if [ -z "$bin" ]; then
     exit 5
 fi
 chmod 755 "$bin"
+echo "progress 99"
+art "$TMP"
 chmod -R a+rX "$TMP"
 mv "$TMP" "$DEST"
 touch "$DEST/.complete"

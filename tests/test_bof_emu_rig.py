@@ -250,3 +250,40 @@ def test_rig_scripts_parse(script):
 def test_scripts_have_no_carriage_returns():
     for p in list(RIG.glob("*.sh")) + list(RIG.glob("*.py")):
         assert b"\r" not in p.read_bytes(), p.name
+
+
+# ------------------------------------------------------ the switch window
+def _load_bofpf():
+    import sys
+    sys.path.insert(0, str(RIG.parent / "spike2_emu"))
+    spec = importlib.util.spec_from_file_location("bofpf", RIG / "bofpf.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize("title", TITLES)
+def test_switch_window_model(title):
+    """Every switch is listed; the ones with a test-screen position are
+    placed on the drawing; the keys land on the switches the profile names."""
+    pf = _load_bofpf()
+    prof = profile(title)
+    m = pf.page_model(prof)
+    assert len(m["switches"]) == len(prof["switches"])
+    placed = [s for s in m["switches"] if s["placed"]]
+    assert len(placed) > len(m["switches"]) // 2
+    assert all(s["x"] and s["y"] for s in placed)
+    keyed = {s["key"]: s["n"] for s in m["switches"] if s["key"]}
+    assert keyed["1"] == prof["keys"]["start"]
+    flippers = [s for s in m["switches"] if s["hold"]]
+    # every flipper button holds (upper ones too); nothing else does
+    assert {s["n"] for s in flippers} == {
+        n for k, n in prof["keys"].items() if k.startswith("flipper")}
+    groups = {s["group"] for s in m["switches"]}
+    assert groups <= {"Cabinet", "Playfield", "Mechanism"}
+    assert ("Mechanism" in groups) == bool(prof.get("bics_switches"))
+
+
+def test_switch_window_page_files_ship():
+    for f in ("index.html", "bof.css", "bof.js"):
+        assert (RIG / "bofpage" / f).is_file()

@@ -39,7 +39,7 @@ def test_bof_shows_the_tab_with_its_idle_state(rig, tmp_path):
             assert not tabs[other]["visible"]
         s = w.state(NS)
         assert s["go_label"] == "Start" and s["go_enabled"]
-        assert s["note"] == "" and s["panel"] is None
+        assert s["note"] == ""
         assert [c["label"] for c in s["cells"]] == [
             "Game", "Boards", "Balls", "LEDs lit", "Drivers set up",
             "Memory", "Uptime"]
@@ -129,8 +129,7 @@ RUNNING = {"wsl": "1", "running": "1", "title": "dune", "pid": "42",
            "visible": "1", "hw": json.dumps(HW)}
 
 
-def test_apply_running_fills_the_grid_and_builds_the_panel(
-        rig, real_profiles, tmp_path):
+def test_apply_running_fills_the_grid(rig, tmp_path):
     with web_app(tmp_path, mfr="bof") as w:
         _svc(w)._apply(dict(RUNNING))
         s = w.state(NS)
@@ -141,15 +140,6 @@ def test_apply_running_fills_the_grid_and_builds_the_panel(
         assert v["Boards"] == "Neuron, 4 expansion, BICS"
         assert v["Balls"] == "5 in trough, 0 in play, 1 in shooter lane"
         assert v["Memory"] == "2.0 GB" and v["Uptime"] == "1:15"
-        assert s["active"] == [12, 72, 79]
-        p = s["panel"]
-        quick = {q["label"]: q for q in p["quick"]}
-        assert quick["Start"]["n"] == 14 and not quick["Start"]["hold"]
-        assert quick["Left flipper"]["hold"]
-        assert p["coin_door"] == 12
-        names = [g["name"] for g in p["groups"]]
-        assert names == ["Cabinet", "Playfield"]
-        assert sum(len(g["switches"]) for g in p["groups"]) == 89
 
 
 def test_starting_up_is_not_yet_running(rig, tmp_path):
@@ -165,40 +155,33 @@ def test_stopped(rig, tmp_path):
         _svc(w)._apply({"wsl": "1", "running": "0"})
         s = w.state(NS)
         assert not s["up"] and s["state_label"] == "Stopped"
-        assert s["panel"] is None and s["go_label"] == "Start"
+        assert s["go_label"] == "Start"
 
 
-# ------------------------------------------------------------ switches
-class _Ctl:
-    def __init__(self):
-        self.sent = []
-
-    def send(self, line):
-        self.sent.append(line)
-        return True
-
-    def close(self):
-        pass
-
-
-def test_presses_go_down_the_stream_only_while_running(
-        rig, monkeypatch, tmp_path):
-    from pinball_decryptor.webui import emulate_jjp_common
+# ------------------------------------------------------- the switch window
+def test_the_switch_window_command(rig, monkeypatch, tmp_path):
+    """bofpf.py on the app's Windows Python, told the title, the slot, the
+    distro, and the playfield picture through the distro's share."""
+    from pinball_decryptor.webui import emulate_bof_core as core
+    from pinball_decryptor.webui.tabs import emulate_bof as tab
+    monkeypatch.setattr(tab, "windows_python", lambda: "pythonw.exe")
+    monkeypatch.setattr(core, "rig_distro", lambda: "PAD-Runtime")
     with web_app(tmp_path, mfr="bof") as w:
-        svc = _svc(w)
-        svc._ctl = _Ctl()
-        assert not w.call(NS + ".press", 14)          # not running
-        svc._last_up = True
-        monkeypatch.setattr(
-            "pinball_decryptor.webui.tabs.emulate_bof.rig_off", lambda: False)
-        w.call(NS + ".press", 14)
-        w.call(NS + ".hold", 8, True)
-        w.call(NS + ".hold", 8, False)
-        w.call(NS + ".press", 3, 99999)               # clamped
-        w.call(NS + ".plunge")
-        w.call(NS + ".drain")
-        assert svc._ctl.sent == ["tap 14 150", "sw 8 1", "sw 8 0",
-                                 "tap 3 5000", "plunge", "drain"]
+        cmd = _svc(w)._switch_window_cmd(dict(
+            RUNNING, slot="0",
+            art="/var/tmp/pad_bof/cache/dune-1-2/pfart.webp"))
+        assert cmd[0] == "pythonw.exe"
+        assert cmd[1].endswith("bofpf.py")
+        assert cmd[cmd.index("--title") + 1] == "dune"
+        assert cmd[cmd.index("--distro") + 1] == "PAD-Runtime"
+        assert cmd[cmd.index("--art") + 1] == '\\\\wsl.localhost\\PAD-Runtime\\var\\tmp\\pad_bof\\cache\\dune-1-2\\pfart.webp'
+        # no game, no window
+        assert _svc(w)._switch_window_cmd({"running": "0"}) is None
+
+
+def test_switches_button_needs_a_running_game(rig, monkeypatch, tmp_path):
+    with web_app(tmp_path, mfr="bof") as w:
+        assert not w.call(NS + ".switches")
 
 
 def test_launch_lines_move_the_footer(rig, tmp_path):

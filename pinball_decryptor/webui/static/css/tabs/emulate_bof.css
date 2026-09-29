@@ -1,21 +1,3 @@
-/* Emulate (Barrels of Fun): the shared Emulate layout plus the switch panel.
-   Tokens and classes from app.css only. */
+/* Emulate (Barrels of Fun): the shared Emulate layout.  The switches live in
+   their own window (tools/bof_emu/bofpf.py). */
 @import url("./emulate_jjp.css");
-
-.bof-panel .bd { display: flex; flex-direction: column; gap: 10px; }
-.bof-quick { flex-wrap: wrap; gap: 6px; align-items: center; }
-.bof-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px; margin-top: 6px; }
-.bof-group > summary { cursor: pointer; font-size: 13px; padding: 2px 0; }
-
-.bof-sw {
-  display: flex; align-items: center; gap: 6px; min-width: 0;
-  padding: 5px 8px; border-radius: 6px; font-size: 12px; text-align: left;
-  border: 1px solid var(--line); background: var(--panel-2); color: var(--ink);
-  cursor: pointer; user-select: none; touch-action: none;
-}
-.bof-sw:hover { border-color: var(--accent); }
-.bof-sw:active { transform: translateY(1px); }
-.bof-sw.on { background: var(--ok-soft); border-color: var(--ok); }
-.bof-sw .bof-n { color: var(--ink-2); flex: 0 0 auto; min-width: 2ch; }
-.bof-sw .bof-l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bof-sw.opto .bof-n::after { content: "°"; }
