@@ -449,3 +449,25 @@ def test_the_scene_list_is_coloured_by_what_is_not_written_yet(tmp_path):
         assert w.call("text_scenes.tree_move", art, 1, 0)
         assert row(w)["state"] == "edited"
         w.call("text_scenes.close")
+
+
+def test_an_exact_size_in_pixels(tmp_path):
+    """DragonRR: "set the exact size I am after rather than %". W px / H px on the screen;
+    with Keep its shape one sets both, without it only that side stretches."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        art = next(h for h in _tv(w)["hits"] if h["name"] == "Art")["id"]
+        assert w.call("text_scenes.tree_select", art)
+        p = _tv(w)["props"]
+        w0, h0 = p["w"], p["h"]
+        assert w.call("text_scenes.tree_set_pixels", art, w0 * 2, None, True)
+        p = _tv(w)["props"]
+        assert abs(p["w"] - w0 * 2) <= 1 and abs(p["h"] - h0 * 2) <= 1
+        assert w.call("text_scenes.tree_set_pixels", art, None, 50, False)
+        p = _tv(w)["props"]
+        assert abs(p["h"] - 50) <= 1 and abs(p["w"] - w0 * 2) <= 1
+        assert w.call("text_scenes.tree_set_pixels", art, 0, None, True) is False
+        w.call("text_scenes.close")

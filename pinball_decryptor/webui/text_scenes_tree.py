@@ -581,6 +581,33 @@ class TreeEditMixin:
         return self.tree_scale(node, pct / float(cur))
 
     @rpc
+    def tree_set_pixels(self, node, w_px=None, h_px=None, keep_shape=True):
+        """An exact size in screen pixels (DragonRR: "set the exact size I am after rather
+        than %"): the width and/or height of what the element draws now, on the 1360x768
+        glass.  With *keep_shape* one of them sets both in proportion."""
+        node = int(node)
+        box = self._tree_box(node)
+        if box is None:
+            return False
+        cur_w, cur_h = box[2] - box[0], box[3] - box[1]
+        try:
+            w = float(w_px) if w_px not in (None, "") else None
+            h = float(h_px) if h_px not in (None, "") else None
+        except (TypeError, ValueError):
+            return False
+        if (w is not None and w < 1) or (h is not None and h < 1) or (w is None and h is None):
+            return False
+        fw = w / cur_w if w is not None and cur_w > 0 else None
+        fh = h / cur_h if h is not None and cur_h > 0 else None
+        if keep_shape:
+            f = fw if fw is not None else fh
+            if f is None:
+                return False
+            fw = fh = f
+        return self.tree_scale(node, fw if fw is not None else 1.0,
+                               fh if fh is not None else 1.0)
+
+    @rpc
     def tree_set_size(self, node, w_pct=None, h_pct=None):
         """Width % and height % on their own (a picture stretched), each against the size
         the game ships."""

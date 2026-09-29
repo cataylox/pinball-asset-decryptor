@@ -651,6 +651,7 @@ function TreeCanvas({ s }) {
 function TreeSide({ t }) {
   const p = t.props;
   const [tint, setTint] = useState(p ? p.tint : "#ffffff");
+  const [keepShape, setKeepShape] = useState(true);
   useEffect(() => { if (p) setTint(p.tint); }, [p && p.id, p && p.tint]);
   const num = (label, value, onCommit, title) => html`<label class="tree-num" ...${tip(title)}>
     <span class="lbl">${label}</span>
@@ -680,9 +681,15 @@ function TreeSide({ t }) {
         ${num("X", p.x, (v) => call("text_scenes.tree_move", p.id, Number(v) - p.x, 0), "Left edge on the glass (px)")}
         ${num("Y", p.y, (v) => call("text_scenes.tree_move", p.id, 0, Number(v) - p.y), "Top edge on the glass (px)")}
       </div>` : html`<div class="small muted">Not on the glass at this moment.</div>`}
+      ${p.w != null ? html`<div class="tree-row">
+        ${num("W px", p.w, (v) => call("text_scenes.tree_set_pixels", p.id, v, null, keepShape), "Its width on the screen, in pixels (the screen is 1360 x 768)")}
+        ${num("H px", p.h, (v) => call("text_scenes.tree_set_pixels", p.id, null, v, keepShape), "Its height on the screen, in pixels")}
+      </div>
+      <label class="tree-row small tree-keep" title="On: a new width or height resizes it both ways, so it keeps its shape. Off: it stretches one way only.">
+        <input type="checkbox" checked=${keepShape} onChange=${(e) => setKeepShape(e.target.checked)} /> Keep its shape
+      </label>` : null}
       <div class="tree-row">
         ${num("Size %", p.scale === p.scale_y ? p.scale : "", (v) => call("text_scenes.tree_set_scale", p.id, v), "Both ways at once; 100 = the size the game ships")}
-        <span class="small muted">${p.w != null ? `${p.w} x ${p.h} px` : ""}</span>
       </div>
       <div class="tree-row">
         ${num("Width %", p.scale, (v) => call("text_scenes.tree_set_size", p.id, v, null), "Stretch it sideways only")}
