@@ -49,6 +49,7 @@ class TreeEditMixin:
         self._tpeek = None           # a selected layer the game is not drawing now, drawn on top
         self._tforce = {}            # {card: node ids turned on in the preview only} (PAD-276)
         self._tstate_off = set()     # layers off only because of a switchable part's pick
+        self._teye_off = set()       # ... and not turned on in the preview by their eye
         self._tdraws = []            # the draw list of the last render
         self._tworlds = {}
         self._tparents = {}
@@ -151,6 +152,17 @@ class TreeEditMixin:
         else:
             plain = worlds
         self._tstate_off = self._state_off(man, plain)
+        # what the eyes show: a layer the eye turned on is on, even though the plain draw has
+        # it off (DragonRR, PAD-280: the eyes stayed crossed); a peek is only while selected
+        mine = self._tree_force_set(card) if peek is not None else force
+        if peek is None:
+            lit = worlds
+        elif not mine:
+            lit = plain
+        else:
+            lit = {}
+            scene_eval.draw_list(man, frame, pins=pins, worlds=lit, force=mine)
+        self._teye_off = self._tstate_off - set(lit)
         self._tdraws, self._tworlds, self._tman = draws, worlds, man
         new_scene = card != self._tshown_card
         state = {"tree": True, "animated": False, "screens": []}
@@ -489,7 +501,7 @@ class TreeEditMixin:
             kind = _kind_of(man, n)
             layers.append({"id": n["id"], "name": n["name"], "depth": depth, "kind": kind,
                            "drawn": n["id"] in drawn or n["id"] in self._tworlds,
-                           "state_off": n["id"] in self._tstate_off,
+                           "state_off": n["id"] in self._teye_off,
                            "shown": n["id"] in (self._tforce.get(card) or ()),
                            "added": bool(n.get("added")),
                            "hidden": any(op["op"] == "visible" and op.get("node") == n["id"]
