@@ -22,8 +22,10 @@
  * set_dtr/set_rts), and wjwwood THROWS on that failure, which would abort the
  * game.  Those ioctls report success on a tty.
  *
- * Every symbol used exists in glibc 2.17, so the .so loads on any distro the
- * game itself loads on.
+ * No symbol needs a glibc newer than 2.34 (dlsym's version since libdl moved
+ * into libc; build.sh proves it), and the game itself needs 2.33, so the .so
+ * loads wherever the game does.  stat/stat64 are resolved at run time so a
+ * glibc without the 2.33 stat exports still works.
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
