@@ -437,19 +437,22 @@ function TreeLayers({ t }) {
   return html`<div class="scenes-contents tree-layers" ref=${listRef} role="tree" aria-label="Layers">
     <div class="sc-head"><span class="eyebrow">Layers — last drawn on top</span></div>
     ${(t.layers || []).map((l) => html`<div key=${l.id} data-node=${l.id}
-        class=${cx("sc-item", "ly-item", t.sel === l.id && "sel", !l.drawn && "ly-off")}
+        class=${cx("sc-item", "ly-item", t.sel === l.id && "sel", !l.drawn && !l.state_off && "ly-off")}
         style=${`padding-left:${10 + l.depth * 14}px`}
-        title=${!l.drawn && !l.hidden ? "Not on the screen at this moment: click to see it on top while it is selected, and edit it" : null}
+        title=${l.state_off ? "Off in the preview: the part it sits in shows another of its looks. Click to see it on top while it is selected, or click the eye to turn it on here"
+          : !l.drawn && !l.hidden ? "Not on the screen at this moment: click to see it on top while it is selected, and edit it" : null}
         onClick=${() => call("text_scenes.tree_select", l.id)}>
       <button type="button" class="ly-eye"
-        title=${l.hidden ? "Hidden — show it again" : l.drawn ? "Hide it"
+        title=${l.hidden ? "Hidden — show it again" : l.state_off ? "Off in the preview: turn it on here (the preview only, not the card)"
+          : l.shown ? "Turned on in the preview: turn it back off (the card is not changed)" : l.drawn ? "Hide it"
           : "Not on the screen at this moment: see it on top while it is selected"}
         onClick=${(e) => {
           e.stopPropagation();
-          if (!l.hidden && !l.drawn) call("text_scenes.tree_select", l.id);
+          if (l.state_off || l.shown) call("text_scenes.tree_force", l.id, !l.shown);
+          else if (!l.hidden && !l.drawn) call("text_scenes.tree_select", l.id);
           else call("text_scenes.tree_visible", l.id, l.hidden);
         }}>
-        <${Icon} name=${l.hidden ? "eye-off" : "eye"} /></button>
+        <${Icon} name=${l.hidden || l.state_off ? "eye-off" : "eye"} /></button>
       <span class="sc-t ellip" title=${l.name}>${l.name}${l.added ? " (added)" : ""}</span>
       <span class="sc-i small muted ellip" title=${l.edits || l.kind}>${l.edits || l.kind}</span>
     </div>`)}

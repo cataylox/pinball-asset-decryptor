@@ -4,9 +4,10 @@
 
 Serves <repo> on a settings copy whose Stern project is <project> (only read: the rig selects,
 never edits), opens Scenes on Godzilla's HUD (the energy meter, one picture per level), clicks
-the greyed "Level 6" picture in the Layers list and writes:
+the "Level 6" picture's eye in the Layers list and writes:
 
-- <prefix>_layers.png   the page after the click
+- <prefix>_open.png     the scene as it opens (which meter pictures are greyed)
+- <prefix>_eye.png      the page after clicking the Level 6 picture's eye
 - <prefix>_notes.txt    which moment the scene is at and which layers are greyed
 """
 import os
@@ -58,17 +59,20 @@ def main():
                       state()["text_scenes"].get("frames"), 90)
             time.sleep(1.5)
             describe("opened")
-            row = page.locator('.tree-layers [data-node="%d"] .sc-t' % LEVEL6)
-            row.scroll_into_view_if_needed()
-            row.click()
-            rig._wait(lambda: state()["text_scenes"]["tree_view"]["sel"] == LEVEL6, 20)
+            row = page.locator('.tree-layers [data-node="%d"]' % LEVEL6)
+
+            def snap(name):
+                row.scroll_into_view_if_needed()
+                page.mouse.move(5, 995)                 # no tooltip over the list
+                time.sleep(0.8)
+                page.screenshot(path=os.path.join(out, "%s_%s.png" % (prefix, name)))
+            snap("open")
+            row.locator(".ly-eye").click()
+            time.sleep(0.5)
             rig._wait(lambda: not state()["text_scenes"].get("tree_busy"), 30)
             time.sleep(2.0)
-            row.scroll_into_view_if_needed()
-            page.mouse.move(5, 995)                     # no tooltip over the list
-            time.sleep(0.8)
-            page.screenshot(path=os.path.join(out, "%s_layers.png" % prefix))
-            describe("after the click")
+            snap("eye")
+            describe("after the eye")
             notes.append("page errors: %s" % errors)
             browser.close()
     finally:

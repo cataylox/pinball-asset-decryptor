@@ -212,7 +212,7 @@ def first_visible(node):
 
 
 def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=None,
-              worlds=None, _settled=None, play=False, show=None):
+              worlds=None, _settled=None, play=False, show=None, force=()):
     """Every picture and line of text *man* draws at root frame *frame* (default:
     :func:`default_frame`), in draw order.  *pins* ``{node id: frame}`` seeks a nested sprite
     (what the game's code does with labels); *hidden* node ids are not drawn (what code
@@ -229,7 +229,8 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
 
     *show*, a node id, is drawn even where the timeline has it off at that moment, on top of
     everything else (the editor's look at a layer the game is not drawing now, PAD-276); it
-    is only reached when the sprite it sits in is drawn."""
+    is only reached when the sprite it sits in is drawn.  *force* node ids are drawn where
+    they are even where the timeline has them off (the editor's own "on", PAD-276)."""
     if frame is None:
         frame = default_frame(man)
     # a labelled sprite's resting frame is found by drawing it (settled_frame), and nested
@@ -237,6 +238,7 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
     settled = {} if _settled is None else _settled
     pins = pins or {}
     hidden = set(hidden or ())
+    force = set(force or ())
     objects = man["objects"]
     out = []
     base = (tuple(matrix) if matrix is not None and len(matrix) == 6
@@ -244,7 +246,7 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
 
     def run(kids, f, world, tint, path):
         for n in kids:
-            forced = n["id"] == show
+            forced = n["id"] == show or n["id"] in force
             if n["id"] in hidden or not (forced or visible_at(n, f)):
                 continue
             w = compose(world, transform_at(n, f))
@@ -261,7 +263,7 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
                 if o is None or (start > f and not forced):
                     continue
                 emit(n, o, w, t, here, f)
-            if forced:
+            if n["id"] == show:
                 on_top.extend(out[at:])
                 del out[at:]
 
