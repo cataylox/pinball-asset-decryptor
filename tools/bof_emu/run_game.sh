@@ -62,8 +62,14 @@ done
 chown -R "$BOF_USER": "$BOF_RIG" "$HOMEDIR"
 
 # The boards.  They run as the game's user so it may open their ptys.
-runuser -u "$BOF_USER" -- setsid python3 "$BOF_TOOLS/bofhw.py" \
-    --dir "$BOF_RIG/hw" --profile "$PROFILE" > "$BOF_RIG/hw/daemon.out" 2>&1 &
+#
+# EVERYTHING STARTED HERE IS DETACHED WHOLE: `setsid -f` goes OUTSIDE runuser,
+# and stdin is closed.  runuser passes the launching session's hang-up on to
+# its child, so a game started as `runuser ... setsid game &` quit the moment
+# the wsl.exe that ran this returned - i.e. right after watch.sh said Ready.
+setsid -f runuser -u "$BOF_USER" -- python3 "$BOF_TOOLS/bofhw.py" \
+    --dir "$BOF_RIG/hw" --profile "$PROFILE" \
+    < /dev/null > "$BOF_RIG/hw/daemon.out" 2>&1
 for _ in $(seq 1 50); do [ -S "$BOF_RIG/hw/ctl.sock" ] && break; sleep 0.1; done
 [ -S "$BOF_RIG/hw/ctl.sock" ] || { echo "run_game.sh: board emulator did not start:" >&2; cat "$BOF_RIG/hw/daemon.out" >&2; exit 3; }
 
@@ -71,9 +77,10 @@ if [ $VISIBLE = 1 ]; then
     DISP=${DISPLAY:-:0}
 else
     DISP=$BOF_DISPLAY
-    Xvfb "$DISP" -screen 0 2560x1440x24 -nolisten tcp > "$BOF_RIG/xvfb.log" 2>&1 &
-    echo $! > "$BOF_RIG/xvfb.pid"
+    setsid -f Xvfb "$DISP" -screen 0 2560x1440x24 -nolisten tcp \
+        < /dev/null > "$BOF_RIG/xvfb.log" 2>&1
     for _ in $(seq 1 50); do [ -e "/tmp/.X11-unix/X${DISP#:}" ] && break; sleep 0.1; done
+    pgrep -xf "Xvfb $DISP .*" | head -1 > "$BOF_RIG/xvfb.pid"
 fi
 echo "$DISP" > "$BOF_RIG/display"
 
@@ -87,14 +94,14 @@ fi
 
 cd "$BOF_RIG" || exit 3
 # shellcheck disable=SC2086
-runuser -u "$BOF_USER" -- env -i \
+setsid -f runuser -u "$BOF_USER" -- env -i \
     PATH="$BOF_RIG/bin:/usr/local/bin:/usr/bin:/bin" \
     HOME="$HOMEDIR" USER="$BOF_USER" LANG=C.UTF-8 \
     DISPLAY="$DISP" XDG_RUNTIME_DIR="$BOF_RIG" $AUDIO_ENV \
     BOFEMU_LOG_DIR="$BOF_RIG" GODOT_SILENCE_ROOT_WARNING=1 \
     LD_PRELOAD="$BOF_SHIM" BOFHW_DEV="$BOF_RIG/hw/dev" BOFHW_SYS="$BOF_RIG/hw/sys" \
-    setsid "$BIN" --display-driver x11 --rendering-method gl_compatibility \
-        --audio-driver $AUDIO_ARG > "$BOF_RIG/game.log" 2>&1 &
+    "$BIN" --display-driver x11 --rendering-method gl_compatibility \
+        --audio-driver $AUDIO_ARG < /dev/null > "$BOF_RIG/game.log" 2>&1
 for _ in $(seq 1 50); do
     GP=$(pgrep -u "$BOF_USER" -xf "$BIN .*" | head -1)
     [ -n "$GP" ] && break

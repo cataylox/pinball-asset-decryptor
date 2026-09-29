@@ -24,7 +24,7 @@ function SwitchButton({ sw, active, hold }) {
   // right-click latches: the switch stays as it is until clicked again
   const latch = (e) => { e.preventDefault(); call("emulate_bof.hold", n, !active); };
   return html`<button type="button" class=${"bof-sw" + (active ? " on" : "") + (sw.opto ? " opto" : "")}
-    title=${"Switch " + n + (sw.opto ? " (opto)" : "") + " - click to press, right-click to latch"}
+    title=${sw.label + " - switch " + n + (sw.opto ? ", opto" : "") + ". Click to press, right-click to latch."}
     onPointerDown=${down} onPointerUp=${up} onPointerLeave=${up} onClick=${click} onContextMenu=${latch}>
     <span class="mono bof-n">${n}</span><span class="bof-l">${sw.label}</span></button>`;
 }
