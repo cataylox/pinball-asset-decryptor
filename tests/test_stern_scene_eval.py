@@ -271,3 +271,23 @@ def test_battle_select_wraps_its_instructions_like_the_machine():
         rows = np.split(ys, np.where(np.diff(ys) > 4)[0] + 1)
         assert len(rows) == 2, (want, [(r[0], r[-1]) for r in rows])
         assert 30 <= rows[1][0] - rows[0][0] <= 42          # one declared line (36) apart
+
+
+def test_a_straight_alpha_replacement_is_premultiplied_like_the_write_does(tmp_path):
+    """DragonRR: a replaced picture with a soft white edge drew a solid white halo in the
+    Scenes preview (and not while dragged). Card pictures are premultiplied and the renderer
+    blends them so; an editor's PNG has straight alpha, which the Write premultiplies
+    (engine._premultiply_like_stock) - the preview now does the same, and leaves card
+    pictures as they are."""
+    assets = _red_project(tmp_path)
+    glow = np.zeros((10, 10, 4), np.uint8)
+    glow[..., :3] = 255                      # white...
+    glow[..., 3] = 20                        # ...but nearly transparent
+    Image.fromarray(glow, "RGBA").save(os.path.join(assets, "images", "scene_textures", "red.png"))
+    m = man([N(1, "Glow", [9], tr=((1, (4, 0, 0, 4, 20, 20)),))], {9: BMP})
+    img = np.asarray(R.render_tree(assets, m, 1))
+    assert img[40, 40].max() < 40                               # a faint glow, not a white box
+    stock = np.zeros((10, 10, 4), np.uint8)
+    stock[..., 0] = stock[..., 3] = 200                        # premultiplied: RGB <= A
+    pic = Image.fromarray(stock, "RGBA")
+    assert R._premultiplied(pic, "k", {}) is pic               # a card picture is untouched
