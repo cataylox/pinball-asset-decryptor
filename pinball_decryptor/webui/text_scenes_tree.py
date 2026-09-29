@@ -50,6 +50,7 @@ class TreeEditMixin:
         self._trunning = False       # the render worker is up
         self._trev = 0               # bumped by every edit: the page knows when an image is new
         self._tshown_card = None     # the scene whose picture the canvas shows
+        self._tplay = None           # the playback being drawn: {"cancel": bool, ...}
         self._tlive = {}             # card -> (push result, "HH:MM:SS") handed to a running game
         self._tlive_job = None
         self._tlive_lock = threading.Lock()
@@ -117,6 +118,8 @@ class TreeEditMixin:
         drawn (``tree_loading``).  *quiet*: only the selection's layers change."""
         from ..plugins.stern import scene_eval
         card, stock = self._tree_card(scene_dir)
+        if not quiet:
+            self._play_stop()
         self._ttoken += 1
         token = self._ttoken
         man, notes = self._tree_edited(card, stock)
@@ -195,6 +198,109 @@ class TreeEditMixin:
             self._render_tree_preview(self._sel, quiet=True)
         else:
             self._render_preview(self._sel)
+
+    # ------------------------------------------------------------------
+    # playing the animation (DragonRR: "play the animation as well as step through it")
+    # ------------------------------------------------------------------
+    _PLAY_SCALE = 0.5                # frames are drawn at half size: 4x fewer pixels
+
+    def _play_stop(self):
+        if self._tplay is not None:
+            self._tplay["cancel"] = True
+            self._tplay = None
+            self.set(tree_play=None)
+
+    @rpc
+    def tree_play(self, on=True):
+        """Play the scene's timeline on the canvas: every frame drawn once in the background
+        (identical frames drawn once, at half size), handed to the page as they are ready; the
+        page plays them at the scene's own frame rate.  *on* False stops."""
+        from ..plugins.stern import scene_eval
+        self._play_stop()
+        if not on:
+            return True
+        card, stock = self._tree_card()
+        if card is None or self._tman is None:
+            return False
+        man = self._tman
+        frames = int(man["root"].get("frames") or 1)
+        if frames < 2:
+            return False
+        pins = dict(self._tpins.get(card) or {})
+        fps = float((man.get("stage") or [0, 0, 30])[2] or 30)
+        state = self._tplay = {"cancel": False}
+        job = {"man": man, "pins": pins, "frames": frames, "bg": self._bg,
+               "text_edits": self._pending_texts(card, None), "colors": self._pending_colors(card),
+               "pictures": self._tree_pictures(), "sizes": self._tree_sizes(),
+               "tmp": self._tmpdir(), "assets": self.assets_dir, "cache": self._tcache}
+        self.set(tree_play={"fps": fps, "frames": frames, "map": [], "srcs": [],
+                            "total": 0, "done": False})
+        threading.Thread(target=self._play_draw, args=(state, job), daemon=True,
+                         name="scene-play").start()
+        return True
+
+    def _play_draw(self, state, job):
+        import time
+        from ..plugins.stern import scene_eval, scene_render
+        s = self._PLAY_SCALE
+        w, h = job["man"]["stage"][0], job["man"]["stage"][1]
+        small = dict(job["man"], stage=[round(w * s), round(h * s)] + list(job["man"]["stage"][2:]))
+        shrink = (s, 0.0, 0.0, s, 0.0, 0.0)
+        tag = "p%d" % id(state)
+        srcs, last = [], 0.0
+        try:
+            # which frames differ (a held stretch is drawn once): seconds on a big scene, so
+            # here on the worker, never on the page's thread
+            uniq, index = [], []
+            for f in range(1, job["frames"] + 1):
+                if state["cancel"]:
+                    return
+                d = scene_eval.draw_list(job["man"], f, pins=job["pins"])
+                if not (uniq and scene_eval._same(d, uniq[-1])):
+                    uniq.append(d)
+                index.append(len(uniq) - 1)
+            job["draws"] = uniq
+            self.ctx.loop.post(self._play_map, state, index, len(uniq))
+            if self._fonts is None:
+                from ..plugins.stern import fontrender as fr
+                self._fonts = fr.load_fonts(job["assets"])
+            for i, draws in enumerate(job["draws"]):
+                if state["cancel"]:
+                    return
+                scaled = [dict(d, m=scene_eval.compose(shrink, d["m"])) for d in draws]
+                img = scene_render.render_tree(
+                    job["assets"], small, draws=scaled, fonts=self._fonts, background=job["bg"],
+                    colors=job["colors"], text_edits=job["text_edits"], cache=job["cache"],
+                    pictures=job["pictures"], sizes=job["sizes"])
+                path = os.path.join(job["tmp"], "%s_%d.png" % (tag, i))
+                if img is not None:
+                    img.save(path, compress_level=1)
+                srcs.append(path if img is not None else "")
+                now = time.time()
+                if now - last > 0.4 or i == len(job["draws"]) - 1:
+                    last = now
+                    self.ctx.loop.post(self._play_publish, state, list(srcs),
+                                       i == len(job["draws"]) - 1)
+        except Exception:                            # noqa: BLE001
+            log.exception("scene play")
+            self.ctx.loop.post(self._play_publish, state, list(srcs), True)
+
+    def _play_map(self, state, index, total):
+        if state is not self._tplay or state["cancel"]:
+            return
+        cur = dict(self.store.get(self.ns, "tree_play") or {})
+        if cur:
+            cur.update(map=index, total=total)
+            self.set(tree_play=cur)
+
+    def _play_publish(self, state, srcs, done):
+        if state is not self._tplay or state["cancel"]:
+            return
+        cur = dict(self.store.get(self.ns, "tree_play") or {})
+        if not cur:
+            return
+        cur.update(srcs=srcs, done=done)
+        self.set(tree_play=cur)
 
     def _tree_split(self, draws, nid):
         """The indices of *draws* node *nid* draws (itself and what is inside it): they run
