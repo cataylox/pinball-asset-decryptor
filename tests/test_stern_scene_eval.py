@@ -291,3 +291,23 @@ def test_a_straight_alpha_replacement_is_premultiplied_like_the_write_does(tmp_p
     stock[..., 0] = stock[..., 3] = 200                        # premultiplied: RGB <= A
     pic = Image.fromarray(stock, "RGBA")
     assert R._premultiplied(pic, "k", {}) is pic               # a card picture is untouched
+
+
+def test_a_sprite_that_slides_in_rests_where_it_stops_on_the_screen():
+    """DragonRR: the HUD's power meter drew half off the screen. Its sprite's first label
+    span is its entrance (sliding in from the left); the game holds it at a later label
+    (Energy Meter Onscreen). A sprite still hanging off the screen at its first span's best
+    frame rests on the first later label where it holds still, further on the screen."""
+    slide = [(f, (1, 0, 0, 1, -300 + 70 * (f - 1), 10)) for f in range(1, 5)] + [(5, (1, 0, 0, 1, 10, 10))]
+    meter = {"kind": "Sprite", "frames": 8, "labels": [["Enter Start", 1], ["Onscreen", 5], ["Exit", 7]],
+             "kids": [N(10, "Bar", [9], tr=slide)]}
+    big = dict(BMP, w=100, h=20)
+    m = man([N(1, "Meter", [2])], {2: meter, 9: big}, frames=3)
+    d, = E.draw_list(m, 1)
+    assert E.outline(d)[0][0] == 10                        # at rest where the game keeps it
+    # a sprite whose first span is already on the screen keeps the first-span rule
+    held = {"kind": "Sprite", "frames": 6, "labels": [["A", 1], ["B", 4]],
+            "kids": [N(10, "Bar", [9], tr=((1, (1, 0, 0, 1, 20, 10)), (4, (1, 0, 0, 1, 90, 10))))]}
+    m2 = man([N(1, "Meter", [2])], {2: held, 9: big}, frames=3)
+    d, = E.draw_list(m2, 1)
+    assert E.outline(d)[0][0] == 20
