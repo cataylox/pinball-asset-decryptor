@@ -92,6 +92,26 @@ else
     AUDIO_ARG=Dummy
 fi
 
+# A window you can move and size.  Every title's project says borderless and
+# not resizable (a cabinet's monitor has nothing else on it), which on a desk
+# is a 1280x1110 slab with no title bar to drag.  Godot reads override.cfg
+# from the executable's folder after the embedded project settings; the game
+# code never sets its own window, so this is the whole change.  canvas_items
+# stretch scales the picture with the window instead of cropping it (at the
+# project size it draws exactly as before).  It opens near the top left, not
+# centred: centred, a 1110-high window on a shorter screen puts its title bar
+# above the top edge, out of reach.  Only on the desktop: a hidden run stays
+# exactly the build as shipped.
+OVR="$(dirname "$BIN")/override.cfg"
+if [ $VISIBLE = 1 ]; then
+    printf '%s\n' '[display]' 'window/size/borderless=false' \
+        'window/size/resizable=true' 'window/stretch/mode="canvas_items"' \
+        'window/stretch/aspect="keep"' 'window/size/initial_position_type=0' \
+        'window/size/initial_position=Vector2i(40, 40)' > "$OVR"
+else
+    rm -f "$OVR"
+fi
+
 cd "$BOF_RIG" || exit 3
 # shellcheck disable=SC2086
 setsid -f runuser -u "$BOF_USER" -- env -i \

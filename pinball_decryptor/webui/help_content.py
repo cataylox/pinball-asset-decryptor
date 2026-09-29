@@ -1557,7 +1557,8 @@ HELP_CONTENT = {
          "closes it. With that window focused, Z and / (or the Shift keys) "
          "are the flippers, 1 is Start, 5 a coin, Space Launch, P Plunge and "
          "D Drain. Closed it? \"Switches window\" on this tab brings it "
-         "back."),
+         "back. The game's own window can be moved and resized like any "
+         "other; the picture scales to fit."),
         ("Cancel",
          "While a game is starting the Start button is Cancel. A build on a "
          "slow or busy drive can take a long time to unpack; Cancel stops "
