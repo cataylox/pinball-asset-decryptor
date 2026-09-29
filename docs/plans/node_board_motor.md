@@ -418,6 +418,29 @@ Proven: `tests/test_spike2_coil_motor.py` (the real functions compiled out of
 hwshim.c, fed jaws_le's frames), the on/off runs above, and the library sweep
 below.
 
+## Every title (library sweep, 2026-09-28)
+
+`rigbatch.sh` over the 33-build list with motorcheck.sh (40 s from Start),
+model on: **33/33 pass**. john_wick_le failed twice on the way (the run ended
+10 s in; then it stalled before the guest started), both before the game ran;
+its rerun passed with the model on and off alike. Five titles send a coil a
+stop-switch rule and run it; `runs=` (motorcheck's new count of the short
+cmd 40 on every node, boot and attract included) on vs `PAD_COIL_MOTOR=0`:
+
+| title | coil (node:index) -> stop inputs | runs on / off |
+|---|---|---|
+| jaws_le 1.02 | 9:0 -> 12 (UP-MAG), 13 (DOWN-MAG) | 1 / 8 after Start (see above) |
+| jurassic_park_le 1.16 | 9:1 -> 22 | 2 / 5 |
+| led_zeppelin_le 1.22 | 9:6 -> 11, then 10 | 1 / 1 |
+| metallica_spike 1.03 | 11:3 -> 5, then 4 | 2 / 2 |
+| rush_le 1.18 | 12:0 -> 4 | 1 / 1 |
+
+So jaws_le and jurassic_park_le were retrying a mech nobody answered; the
+other three move it and do not retry in 40 s either way, and now arrive.
+Which mechs those are was not read out of their games (rush_le's cached
+table names input 4 EXTRA BALL (FRONT LEFT) SWITCH and lists no coil on node
+12, so it is likely stale - PAD-93).
+
 ## Not done
 
 - **The game still takes 10 s to see the shark arrive.** It clears each rule
