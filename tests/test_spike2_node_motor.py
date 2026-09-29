@@ -364,22 +364,26 @@ def _says(cbin, steps, **env):
             if line.startswith("R ")]
 
 
-def test_only_an_encoder_board_says_its_frame_count(cbin):
-    """The `ff` frame count is answered on the jetpack's board alone.
-
-    Every other board keeps answering 0 - and so keeps being re-initialised at
-    each service visit - because batman's lamps and attract detection lean on
-    the cmd 70 that only a board init sends (see nb_rx_count in hwshim.c)."""
-    assert _says(cbin, ["t0:9", "r9", "f" + JB_CONFIG, "r9", "r10"]) == [0, 1, 0]
-
-
-def test_an_end_stop_board_does_not_say_its_count(cbin):
-    assert _says(cbin, ["t0:9", "f" + CONFIG, "r9"]) == [0]
+def test_every_board_says_its_frame_count(cbin):
+    """PAD-255: the `ff` frame count is answered on every board, so no board is
+    re-initialised at each service visit. batman's lamps and attract never
+    needed the re-init's cmd 70 - its show is the swelf family the wide
+    decoders read (see nb_rx_count in hwshim.c)."""
+    assert _says(cbin, ["t0:9", "r9", "f" + JB_CONFIG, "r9", "r10"]) == [1, 1, 1]
 
 
-def test_the_count_follows_the_off_switches(cbin):
+def test_enc_keeps_the_encoder_only_gate(cbin):
+    """PAD_NB_RXCOUNT=enc is PAD-249's rule, kept for the comparison run: only
+    a board with a configured encoder motor says its count."""
+    assert _says(cbin, ["t0:9", "r9", "f" + JB_CONFIG, "r9", "r10"],
+                 PAD_NB_RXCOUNT="enc") == [0, 1, 0]
+    assert _says(cbin, ["t0:9", "f" + CONFIG, "r9"], PAD_NB_RXCOUNT="enc") == [0]
+    assert _says(cbin, ["t0:9", "f" + JB_CONFIG, "r9"], PAD_NB_RXCOUNT="enc",
+                 PAD_NB_MOTOR="0") == [0]
+
+
+def test_the_count_follows_the_off_switch(cbin):
     assert _says(cbin, ["t0:9", "f" + JB_CONFIG, "r9"], PAD_NB_RXCOUNT="0") == [0]
-    assert _says(cbin, ["t0:9", "f" + JB_CONFIG, "r9"], PAD_NB_MOTOR="0") == [0]
 
 
 def test_an_end_stop_motor_ignores_cmd_55(cbin):

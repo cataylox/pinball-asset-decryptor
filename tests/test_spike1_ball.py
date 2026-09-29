@@ -272,3 +272,63 @@ def test_no_lane_exit_on_titles_without_one(tmp_path):
     _write_map(tmp_path)
     k = s1ball.Keeper(str(tmp_path))
     assert k.lane_exit is None
+
+
+# ------------------------------------ the early era's trough eject (PAD-235) --
+# On the 2012 home models TROUGH EJECT only ever means "serve a ball": their
+# ball search pulses slings, pops and the drop-target reset, never the eject,
+# and after three fruitless rounds it gives the ball up and serves a
+# replacement, retried until the shooter lane closes.
+
+def _tf_keeper(tmp_path, monkeypatch, era="early"):
+    if era:
+        monkeypatch.setenv("S1_ERA", era)
+    else:
+        monkeypatch.delenv("S1_ERA", raising=False)
+    (tmp_path / "s1switches.json").write_text(json.dumps({
+        "8,12": "SHOOTER LANE", "8,13": "TROUGH 1", "8,14": "TROUGH 2",
+        "8,15": "TROUGH 3", "8,21": "START", "8,42": "SHOOTER LANE EXIT",
+        "_trough_coils": [[8, 3]]}), encoding="utf-8")
+    k = s1ball.Keeper(str(tmp_path))
+    k.balls, k.in_shooter = 2, False          # one ball launched into play
+    k.armed_until = 0.0                       # long after the START press
+    return k
+
+
+def test_early_eject_serves_after_the_arm_window(tmp_path, monkeypatch):
+    k = _tf_keeper(tmp_path, monkeypatch)
+    monkeypatch.setattr(k, "balls_written_off", lambda: 0)   # multiball add
+    k.on_coil(8, 3, 1)
+    assert k.in_shooter and k.balls == 1      # served; the ball in play stays
+
+
+def test_early_replacement_eject_brings_the_lost_ball_home(tmp_path, monkeypatch):
+    """The game wrote one ball off: it rolls back to the trough, then the
+    replacement serves - the trough never runs dry on an unplayed game."""
+    k = _tf_keeper(tmp_path, monkeypatch)
+    monkeypatch.setattr(k, "balls_written_off", lambda: 1)
+    k.on_coil(8, 3, 1)
+    assert k.in_shooter and k.balls == 2
+    assert k.on_playfield() == 0
+    k.on_coil(8, 3, 1)                        # the game's retry: nothing more
+    assert k.in_shooter and k.balls == 2
+
+
+def test_early_rollback_never_exceeds_the_balls_in_play(tmp_path, monkeypatch):
+    k = _tf_keeper(tmp_path, monkeypatch)
+    monkeypatch.setattr(k, "balls_written_off", lambda: 2)
+    k.on_coil(8, 3, 1)
+    assert k.balls + (1 if k.in_shooter else 0) == k.nballs
+
+
+def test_unreadable_ball_count_leaves_the_balls_alone(tmp_path, monkeypatch):
+    k = _tf_keeper(tmp_path, monkeypatch)
+    assert k.balls_written_off() == 0         # no game running here
+    k.on_coil(8, 3, 1)
+    assert k.in_shooter and k.balls == 1
+
+
+def test_dmd_generation_keeps_the_disarmed_ball_search_rule(tmp_path, monkeypatch):
+    k = _tf_keeper(tmp_path, monkeypatch, era=None)
+    k.on_coil(8, 3, 1)                        # disarmed fire = a search
+    assert not k.in_shooter and k.balls == 3

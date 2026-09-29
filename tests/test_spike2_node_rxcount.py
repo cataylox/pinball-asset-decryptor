@@ -8,9 +8,8 @@ re-initialised and event 135 re-homes every encoder motor on it. The rig used
 to answer 0, which mismatched at every service visit: every board re-inited
 every ~0.7 s on every title, and james_bond_le's jetpack re-homed each time.
 
-nb_rx_count_tx() now counts what the game counts (the count is ANSWERED only
-on a board with an encoder motor - test_spike2_node_motor.py covers that
-choice). This compiles the REAL function out of hwshim.c (text extracted,
+nb_rx_count_tx() now counts what the game counts (the count is ANSWERED on
+every board since PAD-255 - test_spike2_node_motor.py covers that choice). This compiles the REAL function out of hwshim.c (text extracted,
 never copied) and feeds it frames.
 What is worth failing on:
 

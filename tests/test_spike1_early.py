@@ -144,3 +144,86 @@ def test_nodebus_hands_the_early_era_to_s1early(monkeypatch):
     monkeypatch.setattr(nodebus.sys, "argv", ["nodebus.py", "slave", "cap", "log"])
     assert nodebus.main() == 0
     assert called["argv"] == ["slave", "cap", "log"]
+
+
+# ------------------------------------------- drop targets (PAD-235) --------
+def test_drop_target_slots_are_the_targets_not_the_reset():
+    names = {16: "DROP TARGET 1", 17: "DROP TARGET 2", 18: "DROP TARGET 3",
+             19: "MEGATRON", 50: "DROP TARGET RESET"}
+    assert s1early.drop_target_slots(names) == {16, 17, 18}
+
+
+def test_a_hit_drop_target_stays_down_until_the_reset_fires():
+    bank = s1early.DropBank({16, 17, 18}, {7})
+    bank.feed({16})                  # a click closes it for a moment...
+    bank.feed(set())                 # ...and lets go
+    assert bank.down == {16}         # the target is still lying down
+    bank.feed({13})                  # other switches are not targets
+    assert bank.down == {16}
+    assert not bank.on_coil(3)       # a trough eject is not the reset
+    assert bank.on_coil(7)
+    assert bank.down == set()
+
+
+def test_a_target_held_through_the_reset_does_not_relatch():
+    bank = s1early.DropBank({16}, {7})
+    bank.feed({16})
+    bank.on_coil(7)
+    bank.feed({16})                  # still held: the hold reads it, no edge
+    assert bank.down == set()
+    bank.feed(set())
+    bank.feed({16})                  # a fresh hit latches again
+    assert bank.down == {16}
+
+
+def test_switch_masks_round_trip():
+    idx = {0, 7, 13, 16, 18, 63}
+    assert s1early.mask_indexes(s1early.indexes_mask(idx)) == idx
+
+
+# ----------------------------------------- the switch window's state -------
+def _read_block(path):
+    from pinball_decryptor.plugins.stern.spike1_emulate import StateBlock
+    with open(path, "rb") as f:
+        st, seq, _ = StateBlock.unpack(f.read())
+    return st, seq
+
+
+def test_lamp_frames_land_in_s1hw_state(tmp_path):
+    t = [0.0]
+    w = s1early.HwStateWriter(str(tmp_path / "s1hw.state"), clock=lambda: t[0])
+    w.lamp_frame(8, 0x8f, b"\xff\x58")        # channels 15, 16
+    w.lamp_frame(8, 0xbf, b"\xff\xff")        # 63, then 64 is off the node
+    assert w.flush()
+    st, seq = _read_block(tmp_path / "s1hw.state")
+    assert st.get_lamp(8, 15) == (255, 255, 255)
+    assert st.get_lamp(8, 16) == (0x58, 0x58, 0x58)
+    assert st.get_lamp(8, 63) == (255, 255, 255)
+    assert seq == 1
+
+
+def test_switches_and_fired_coils_land_in_s1hw_state(tmp_path):
+    t = [0.0]
+    path = str(tmp_path / "s1hw.state")
+    w = s1early.HwStateWriter(path, clock=lambda: t[0])
+    w.set_switches(8, {13, 14, 16})
+    w.coil_fire(8, 7)
+    w.flush()
+    st, _ = _read_block(path)
+    assert [i for i in range(64) if st.get_switch(8, i)] == [13, 14, 16]
+    assert st.get_coil(8, 7)
+    t[0] += s1early.COIL_SHOW_S + 0.01
+    w.flush()
+    st, _ = _read_block(path)
+    assert not st.get_coil(8, 7)              # a pulse, not a latch
+
+
+def test_state_writes_are_throttled_and_only_on_change(tmp_path):
+    t = [0.0]
+    w = s1early.HwStateWriter(str(tmp_path / "s1hw.state"), clock=lambda: t[0])
+    assert w.flush()                          # first frame
+    assert not w.flush()                      # nothing changed
+    w.lamp_frame(8, 0x8a, b"\xff")
+    assert not w.flush()                      # changed, but too soon
+    t[0] += w.min_interval
+    assert w.flush()
