@@ -473,6 +473,36 @@ def test_an_exact_size_in_pixels(tmp_path):
         w.call("text_scenes.close")
 
 
+def test_a_greyed_layer_is_brought_into_view_where_the_game_shows_it(tmp_path):
+    """DragonRR: the greyed eyes, "force them to show".  A layer the game is not drawing at
+    this moment: tree_show goes to a moment where it is drawn and selects it; no edit."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        assert w.call("text_scenes.tree_moment", "f:12")
+        assert _wait(w, lambda: _tv(w)["frame"] == 12)
+        off = [l for l in _tv(w)["layers"] if not l["drawn"]]
+        assert off, "the synthetic scene has a layer that is gone by frame 12"
+        assert w.call("text_scenes.tree_show", off[0]["id"])
+        tv = _tv(w)
+        assert tv["frame"] != 12 and tv["sel"] == off[0]["id"]
+        assert next(l for l in tv["layers"] if l["id"] == off[0]["id"])["drawn"]
+        assert _ops(folder) == []
+        # and it is edited there like any other layer (DragonRR: "place/move/change all of
+        # the greyed out stuff"); the edit holds whatever moment is shown
+        nid = off[0]["id"]
+        x0 = tv["props"]["x"]
+        assert w.call("text_scenes.tree_move", nid, 25, 0)
+        assert _ops(folder) == [{"op": "move", "node": nid, "dx": 25.0, "dy": 0.0}]
+        assert abs(_tv(w)["props"]["x"] - (x0 + 25)) <= 1
+        assert w.call("text_scenes.tree_moment", "f:12")
+        assert _wait(w, lambda: _tv(w)["frame"] == 12)
+        assert len(_ops(folder)) == 1
+        w.call("text_scenes.close")
+
+
 def test_play_draws_each_different_frame_once_and_stops(tmp_path):
     """DragonRR: "play the animation as well as step through it". Play draws the scene's
     frames in the background (a held stretch once) and hands them to the page with a map

@@ -15,6 +15,7 @@ The page's half is ``TreeCanvas`` / ``TreeSide`` / ``TreeLayers`` in
 import json
 import logging
 import os
+import re
 import threading
 
 from . import compat
@@ -24,6 +25,10 @@ log = logging.getLogger(__name__)
 
 _TREE_DISPLAY = (1360, 768)          # the canvas image is drawn full size: it is edited on
 _ORDER = ("up", "down", "front", "back")
+
+
+#: a sprite state that is on its way in or out (tree_show tries these last)
+_PASSING = re.compile(r"fade|intro|reveal|enter|appear|slide|out|exit|leave", re.I)
 
 
 class TreeEditMixin:
@@ -42,6 +47,7 @@ class TreeEditMixin:
         self._tworlds = {}
         self._tparents = {}
         self._tman = None
+        self._tonce = []             # notes for the next picture only (tree_show)
         self._ttoken = 0
         self._tdefault = {}          # card -> the stock scene's resting frame (costly to find)
         self._tcache = {}            # pictures read for the renders, kept while unchanged
@@ -138,7 +144,8 @@ class TreeEditMixin:
         elif not quiet:
             state.update(tree_busy=True)
         self.set(**state)
-        self._tree_publish(card, man, frame, notes)
+        once, self._tonce = self._tonce, []
+        self._tree_publish(card, man, frame, list(notes) + once)
         self.set(pic_note=self._missing_note(draws))
         sel = self._tsel
         split = self._tree_split(draws, sel) if sel is not None else set()
@@ -748,6 +755,78 @@ class TreeEditMixin:
             return True
         return self._tree_add({"op": "tint", "node": node,
                                "mul": [round(c, 4) for c in rgb] + [round(a, 4)]})
+
+    #: how many moments tree_show tries before it gives up
+    _SHOW_TRIES = 400
+
+    @rpc
+    def tree_show(self, node):
+        """Bring a layer the game is not drawing at this moment into view (DragonRR: the
+        greyed eyes, "force them to show"): the nearest moment where the game DOES draw it -
+        another state of a sprite it sits in (Gigan's tile: the kaiju picker on Gigan), then
+        another frame of the scene.  The preview goes there and selects it; nothing on the
+        card changes.  False when the game never draws it (a note says so)."""
+        from ..plugins.stern import scene_eval
+        card, _stock = self._tree_card()
+        man = self._tman
+        if card is None or man is None:
+            return False
+        node = int(node)
+        pins = dict(self._tpins.get(card) or {})
+        frame = self._tree_frame(card, man)
+        frames = int(man["root"].get("frames") or 1)
+        # the sprites it sits in (itself first), nearest first, with their states
+        chain, p, hops = [], node, 0
+        while p is not None and hops < 256:
+            chain.append(p)
+            p, hops = self._tparents.get(p), hops + 1
+        seek = {nid: labels for nid, _path, labels, _f in scene_eval.seekable(man)}
+        # a state the game HOLDS first (Gigan_Selected_Start), then its comings and goings
+        # (Gigan_FadeIn_Start draws the tile still transparent)
+        states = [(nid, f) for nid in chain if nid in seek
+                  for _n, f in sorted(seek[nid], key=lambda x: (bool(_PASSING.search(x[0] or "")),
+                                                                x[1]))]
+        root_frames = [frame] + sorted({f for _n, f in man["root"]["labels"]})
+        root_frames += list(range(1, frames + 1, max(1, frames // 60)))
+        tried = set()
+
+        def shows(f, pn):
+            key = (f, tuple(sorted(pn.items())))
+            if key in tried:
+                return False
+            tried.add(key)
+            for d in scene_eval.draw_list(man, f, pins=pn):
+                if d["mul"][3] <= 0.01:
+                    continue
+                q, hops = d["node"], 0            # it, or something inside it, shows
+                while q is not None and q != node and hops < 256:
+                    q, hops = self._tparents.get(q), hops + 1
+                if q == node:
+                    return True
+            return False
+
+        found = None
+        for f in dict.fromkeys(root_frames):
+            for extra in [None] + states:
+                if len(tried) >= self._SHOW_TRIES:
+                    break
+                pn = dict(pins)
+                if extra is not None:
+                    pn[extra[0]] = extra[1]
+                if shows(f, pn):
+                    found = (f, pn)
+                    break
+            if found or len(tried) >= self._SHOW_TRIES:
+                break
+        if found is None:
+            self._tonce = ["The game does not draw that at any moment of this scene"]
+            self._render_tree_preview(self._sel)
+            return False
+        self._tframe[card] = found[0]
+        self._tpins[card] = found[1]
+        self._tsel = node
+        self._render_tree_preview(self._sel)
+        return True
 
     @rpc
     def tree_visible(self, node, on):

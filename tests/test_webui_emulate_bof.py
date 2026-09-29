@@ -16,6 +16,15 @@ def _svc(w):
     return w.window.service(NS)
 
 
+@pytest.fixture(autouse=True)
+def _no_theme_probe(monkeypatch):
+    """On macOS the app asks ``defaults read -g AppleInterfaceStyle`` for the
+    theme through subprocess, which the tests here spy on to see what the tab
+    runs: answer the theme without running anything."""
+    from pinball_decryptor.webui import theme
+    monkeypatch.setattr(theme, "detect_system_theme", lambda: "light")
+
+
 @pytest.fixture
 def rig(monkeypatch):
     from pinball_decryptor.webui import emulate_bof_core as core
