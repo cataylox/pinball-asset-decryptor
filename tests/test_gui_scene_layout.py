@@ -219,7 +219,7 @@ def test_scene_browser_layout_needs_a_recorded_layout(tmp_path):
         assert w.call("text_scenes.align_text", "NOT IN THIS SCENE",
                       "left") is False
         shown = w.asked[n:]
-        assert len(shown) == 2 and "Rebuild previews" in shown[0]["message"]
+        assert len(shown) == 2 and "Re-read from card" in shown[0]["message"]
         assert text_layout.load(str(folder)) == {}
         w.call("text_scenes.close")
 

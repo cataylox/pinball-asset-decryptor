@@ -335,7 +335,7 @@ def _no_worker_thread(monkeypatch):
 
 
 def _run_bulk(w, sb, out):
-    """Click "Save all previews…" the way the page does and wait for the
+    """Click "Export all pictures…" the way the page does and wait for the
     batch to land.  THE CALL IS PART OF THE TEST — a command wired to nothing
     is exactly what a screenshot cannot see."""
     captured = {}

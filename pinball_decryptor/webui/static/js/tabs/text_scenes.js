@@ -26,26 +26,124 @@ const SCENE_COLS = [
   { key: "vids", label: "Video", width: "minmax(50px,50px)", sort: "vids", num: true },
 ];
 let sceneWidths = null;         // dragged column widths, kept for the session
+// The count columns the scene list has room for: a narrow list keeps the scene NAMES
+// readable and drops the counts, least useful first (Video, Fonts, then Text and Images).
+const COLS_BY_WIDTH = [[470, ["imgs", "fonts", "texts", "vids"]], [330, ["imgs", "texts"]],
+  [250, ["imgs"]], [0, []]];
+function sceneCols(width) {
+  const keep = (COLS_BY_WIDTH.find(([w]) => width >= w) || [0, []])[1];
+  const cols = SCENE_COLS.filter((c) => c.key === "label" || keep.includes(c.key));
+  // the last column is a fixed track so the Table keeps its width (see SCENE_COLS)
+  return cols.map((c, i) => (i === cols.length - 1 && c.key !== "label" && !c.width.startsWith("minmax")
+    ? { ...c, width: `minmax(${parseInt(c.width, 10)}px,${parseInt(c.width, 10)}px)` } : c));
+}
 
-// The page head's buttons (Save preview…, Save all previews…, Rebuild previews…).
+// The dividers between the scene list, the preview and the inspector (and between the
+// inspector's selection and its Layers): where the user left them, kept across sessions.
+// Unset = the layout's own proportions; a double-click on a divider puts it back.
+const SPLIT_KEY = "pad.scenes.split";
+function loadSplit() {
+  try { return JSON.parse(localStorage.getItem(SPLIT_KEY) || "{}") || {}; } catch (e) { return {}; }
+}
+const SPLIT_LIMITS = { left: [180, 720], right: [240, 760], top: [90, 2000] };
+const clampSplit = (k, v) => Math.round(Math.max(SPLIT_LIMITS[k][0], Math.min(SPLIT_LIMITS[k][1], v)));
+
+// One divider.  *measure(event)* turns the pointer into the size it sets (unzoomed px);
+// *dir* is the sign an arrow key moves it by.
+function Divider({ k, horizontal, measure, split, setSplit, save, dir = 1, label }) {
+  const drag = useRef(false);
+  const down = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    drag.current = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const move = (e) => {
+    if (!drag.current) return;
+    const v = measure(e);
+    if (v != null) setSplit((q) => ({ ...q, [k]: clampSplit(k, v) }));
+  };
+  const up = () => { if (drag.current) { drag.current = false; save(); } };
+  const key = (e) => {
+    const step = (e.shiftKey ? 64 : 16) * dir;
+    const back = horizontal ? "ArrowUp" : "ArrowLeft", fwd = horizontal ? "ArrowDown" : "ArrowRight";
+    if (e.key !== back && e.key !== fwd) return;
+    e.preventDefault();
+    const cur = split[k] != null ? split[k] : measure(null);
+    if (cur == null) return;
+    setSplit((q) => ({ ...q, [k]: clampSplit(k, cur + (e.key === fwd ? step : -step)) }));
+    setTimeout(save, 0);
+  };
+  const reset = () => { setSplit((q) => { const n = { ...q }; delete n[k]; return n; }); setTimeout(save, 0); };
+  return html`<div class=${cx("sc-split", horizontal ? "h" : "v", "sc-split-" + k)} role="separator" tabIndex="0"
+    aria-orientation=${horizontal ? "horizontal" : "vertical"} aria-label=${label}
+    title=${label + ": drag to resize, double-click to put it back"}
+    onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}
+    onDblClick=${reset} onKeyDown=${key}><span></span></div>`;
+}
+
+// The page head's buttons (Export picture…, Export all pictures…, Re-read from card…): none of
+// them is needed to keep an edit (edits are kept as they are made; Write puts them on the card).
 export function ScenesActions() {
   const s = useNs("text_scenes");
   if (!s.alive) return null;
   const tips = s.tips || {};
   return html`
     ${s.rebuild_msg ? html`<span class="small muted scenes-msg-head">${s.rebuild_msg}</span>` : null}
-    <${Button} disabled=${!s.can_save && !s.exporting} title=${tips.save}
-      onClick=${() => call("text_scenes.save_preview")}>${s.exporting ? "Cancel" : "Save preview…"}<//>
+    <${Button} kind="ghost" icon="download" disabled=${!s.can_save && !s.exporting} title=${tips.save}
+      onClick=${() => call("text_scenes.save_preview")}>${s.exporting ? "Cancel" : "Export picture…"}<//>
     <${Button} kind="ghost" title=${tips.save_all} disabled=${!(s.scenes || []).length && !s.bulk}
-      onClick=${() => call("text_scenes.save_all")}>${s.bulk ? "Cancel" : "Save all previews…"}<//>
+      onClick=${() => call("text_scenes.save_all")}>${s.bulk ? "Cancel" : "Export all pictures…"}<//>
     <${Button} kind="ghost" icon=${s.rebuilding ? "x" : "refresh"} title=${tips.rebuild}
-      onClick=${() => call("text_scenes.rebuild")}>${s.rebuilding ? "Cancel" : "Rebuild previews…"}<//>`;
+      onClick=${() => call("text_scenes.rebuild")}>${s.rebuilding ? "Cancel" : "Re-read from card…"}<//>`;
 }
 
 export function ScenesPage() {
   const s = useNs("text_scenes");
   const [color, setColor] = useState(null);     // {text, start, stock, title}
   const [wide, setWide] = useState(false);      // the scene editor without the scene list
+  const [split, setSplit] = useState(loadSplit);
+  const splitRef = useRef(split);
+  splitRef.current = split;
+  const saveSplit = () => { try { localStorage.setItem(SPLIT_KEY, JSON.stringify(splitRef.current)); } catch (e) {} };
+  const bodyRef = useRef(null);
+  const inspRef = useRef(null);
+  const listRef = useRef(null);
+  const [listW, setListW] = useState(340);
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(() => setListW(el.offsetWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const topRef = useRef(null);
+  // pointer -> unzoomed px against the element (the app can be zoomed: rect px / offset px)
+  const scaleOf = (el, r) => (r.width ? el.offsetWidth / r.width : 1) || 1;
+  const measureLeft = (e) => {
+    const el = bodyRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    if (!e) { const l = el.querySelector(".scenes-left"); return l ? l.offsetWidth : null; }
+    return (e.clientX - r.left) * scaleOf(el, r);
+  };
+  const measureRight = (e) => {
+    const el = bodyRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    if (!e) { const i = inspRef.current; return i ? i.offsetWidth : null; }
+    return (r.right - e.clientX) * scaleOf(el, r);
+  };
+  const measureTop = (e) => {
+    const el = inspRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    if (!e) return topRef.current ? topRef.current.offsetHeight : null;
+    return (e.clientY - r.top) * scaleOf(el, r);
+  };
+  const splitProps = { split, setSplit, save: saveSplit };
+  const bodyStyle = [split.left != null ? `--sc-left:${split.left}px` : "",
+    split.right != null ? `--sc-right:${split.right}px` : ""].filter(Boolean).join(";");
   useEffect(() => { if (!s.alive) setColor(null); }, [s.alive]);
   const tips = s.tips || {};
   const layout = s.layout_dialog;               // Move… / Font size…, shown in the side column
@@ -91,7 +189,7 @@ export function ScenesPage() {
   // The page is one screen tall: the scene list, the preview (as big as the room lets it be,
   // width AND height) and the inspector side by side, each scrolling on its own.
   return html`<section class="card scenes-card">
-    <div class=${cx("scenes-body", wide && "wide")}>
+    <div class=${cx("scenes-body", wide && "wide")} ref=${bodyRef} style=${bodyStyle}>
       <div class="scenes-left">
         <div class="row scenes-search">
           <${Field} sm value=${s.search} placeholder="Search" onChange=${(v) => call("text_scenes.set_search", v)}
@@ -99,14 +197,15 @@ export function ScenesPage() {
           <${InfoBadge} text=${s.hint} />
         </div>
         ${(s.scenes || []).length ? null : html`<p class="small muted" style="margin:0">${s.hint}</p>`}
-        <div class="scenes-list-wrap" ...${tip(tips.list)}>
-          <${Table} cls="scenes-list" columns=${SCENE_COLS} rows=${s.scenes || []} rowKey=${(r) => r.d}
+        <div class="scenes-list-wrap" ref=${listRef} ...${tip(tips.list)}>
+          <${Table} key=${sceneCols(listW).length} cls="scenes-list" columns=${sceneCols(listW)} rows=${s.scenes || []} rowKey=${(r) => r.d}
             selected=${s.sel} onSelect=${(r) => call("text_scenes.select", r.d)} rowHeight=${30}
             sort=${{ key: (s.sort || {}).col, desc: (s.sort || {}).rev }}
             onSort=${(k) => call("text_scenes.sort_by", k)}
             resizable widths=${sceneWidths} onResize=${(w) => { sceneWidths = w; }} />
         </div>
       </div>
+      <${Divider} k="left" measure=${measureLeft} label="Scene list width" ...${splitProps} />
       <div class="scenes-center">
         <div class="scenes-stage" style=${`--ar:${stage[0] / stage[1]}`}>
           ${s.preparing ? html`<${Preparing} p=${s.preparing} />`
@@ -117,6 +216,9 @@ export function ScenesPage() {
             title=${wide ? "Show the scene list" : "Hide the scene list: more room for the preview"} onClick=${() => setWide(!wide)} />
           ${s.preparing ? html`<span class="grow"></span>`
             : editor ? html`<${TreeActions} t=${s.tree_view} /><span class="grow"></span>
+              ${s.tree_live ? html`<span class=${cx("chip sm tree-live-chip", s.tree_live.kind === "live" ? "ok" : "warn")}
+                title=${s.tree_live.text}><span class="dot"></span>${s.tree_live.kind === "live" ? "Live in the emulator"
+                  : s.tree_live.kind === "failed" ? "Emulator not reached" : "Restart the game to see it"}</span>` : null}
               <${InfoBadge} text=${s.caption_full || s.caption} />`
             : html`<span class="small muted ellip grow">${s.caption}</span>
               ${s.caption_full ? html`<${InfoBadge} text=${s.caption_full} />` : null}`}
@@ -144,8 +246,12 @@ export function ScenesPage() {
           <span class="small muted mono scenes-detail">${s.detail}</span>
         </div>`}
       </div>
-      <div class="scenes-inspector">
-        ${editor ? html`<div class="insp-top"><${TreeSide} t=${s.tree_view} /></div>
+      <${Divider} k="right" measure=${measureRight} dir=${-1} label="Inspector width" ...${splitProps} />
+      <div class="scenes-inspector" ref=${inspRef}>
+        ${editor ? html`<div class="insp-top" ref=${topRef}
+            style=${split.top != null ? `flex:0 0 auto;height:${split.top}px;max-height:calc(100% - 120px)` : ""}>
+            <${TreeSide} t=${s.tree_view} /></div>
+          <${Divider} k="top" horizontal measure=${measureTop} label="Selection and Layers" ...${splitProps} />
           <${TreeTop} s=${s} onMenu=${itemMenu} />`
           : s.preparing ? null : html`<${Contents} s=${s} onMenu=${itemMenu} />`}
       </div>
@@ -602,9 +708,22 @@ function TreeActions({ t }) {
     <span class="tree-actions-sep"></span>
     <${Button} size="sm" kind="ghost" icon="undo" disabled=${!t.edits} title="Undo the last edit in this scene (Ctrl+Z)"
       onClick=${() => call("text_scenes.tree_undo")}>Undo<//>
-    <${Button} size="sm" kind="ghost" disabled=${!t.edits} title="Put this scene back the way the game shipped it"
-      onClick=${() => call("text_scenes.tree_clear")}>As shipped<//>
-    ${t.edits ? html`<span class="small muted nw" title="Write puts them on the card">${t.edits} edit${t.edits === 1 ? "" : "s"}, not built yet</span>` : null}
+    <${Button} size="sm" kind="ghost" iconRight="down" disabled=${!t.edits && !t.all_edits}
+      title="Put this scene (or every scene) back: as the last Write left it, or as the game shipped it"
+      onClick=${(e) => openMenu(e.currentTarget, [
+        { label: "Back to the last Write (this scene)", icon: "undo", disabled: t.built !== "changed",
+          title: t.built === "none" ? "No Write has been made from this project folder yet."
+            : t.built === "same" ? "Nothing in this scene has changed since the last Write."
+            : "Drop every edit made to this scene since the last Write put it on a card.",
+          onClick: () => call("text_scenes.tree_revert_built") },
+        { label: "As shipped (this scene)", icon: "refresh", disabled: !t.edits,
+          title: "Put this scene back the way the game shipped it.", onClick: () => call("text_scenes.tree_clear") },
+        { sep: true },
+        { label: "As shipped (every scene)…", icon: "trash", disabled: !t.all_edits,
+          title: "Put every scene in this project back the way the game shipped it.",
+          onClick: () => call("text_scenes.tree_clear_all") },
+      ])}>Reset<//>
+    ${t.edits ? html`<span class="small muted nw" title="Edits are kept as you make them; there is nothing to save. Write puts them on the card.">${t.edits} edit${t.edits === 1 ? "" : "s"} kept, Write puts ${t.edits === 1 ? "it" : "them"} on the card</span>` : null}
     ${adding ? html`<${Modal} title="Add a line of text" onClose=${() => setAdding(false)}
         footer=${html`<${Button} onClick=${() => setAdding(false)}>Cancel<//><${Button} kind="primary"
           disabled=${!words.trim()} onClick=${() => { setAdding(false); call("text_scenes.tree_add_text", words); }}>Add<//>`}>

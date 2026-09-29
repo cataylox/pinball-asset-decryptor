@@ -45,6 +45,7 @@ import os
 
 RELDIR = ("images", "scene_textures")
 FILENAME = "scene_edits.json"
+BUILT_FILENAME = "scene_edits_built.json"   # the edits as the last successful Write built them
 FIRST_ADDED_ID = 0x7F000000          # preview ids of added nodes (never a stock id)
 
 
@@ -148,6 +149,51 @@ def clear(assets_dir, card=None):
 
 def count(assets_dir):
     return sum(len(v) for v in load(assets_dir).values())
+
+
+# ---------------------------------------------------------------------------------------------
+# the last Write: edits are kept the moment they are made, so "the last saved state" a user can
+# go back to is what the last successful Write (image build or direct SD) put on a card
+# ---------------------------------------------------------------------------------------------
+def _built_path(assets_dir):
+    return os.path.join(assets_dir, *RELDIR, BUILT_FILENAME)
+
+
+def mark_built(assets_dir):
+    """Record the current edits as the ones the last Write built (called when a Write run from
+    this project folder succeeds).  A project with no scene edits at all records nothing."""
+    edits = load(assets_dir)
+    path = _built_path(assets_dir)
+    if not edits and not os.path.isfile(path):
+        return False
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"edits": edits}, f, indent=1, sort_keys=True)
+    return True
+
+
+def built_ops(assets_dir, card):
+    """*card*'s ops as the last Write built them, or ``None`` when no Write has been recorded."""
+    try:
+        with open(_built_path(assets_dir), "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    edits = data.get("edits") if isinstance(data, dict) else None
+    if not isinstance(edits, dict):
+        return None
+    return [op for op in edits.get(card) or () if isinstance(op, dict) and op.get("op")]
+
+
+def restore_built(assets_dir, card):
+    """Put *card*'s edits back to the last Write's; False when there is no recorded Write."""
+    ops = built_ops(assets_dir, card)
+    if ops is None:
+        return False
+    edits = load(assets_dir)
+    edits[card] = copy.deepcopy(ops)
+    save(assets_dir, edits)
+    return True
 
 
 def describe(op):

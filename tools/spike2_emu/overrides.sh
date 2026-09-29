@@ -165,6 +165,22 @@ if [ "${PAD_OVERRIDE_STAGE:-1}" = 0 ]; then
     exit 0
 fi
 
+# PAD-251: files a running game was handed by livescene.sh (the Scenes tab's live edits) are
+# no longer the generation this stage says it holds, so each goes back to the set's own copy
+# (or out, when the set dropped it) before anything below trusts the stage.
+LIVE=${PAD_SLOTDIR:-$PAD_HOME}/override.live
+if [ -f "$LIVE" ]; then
+    while IFS= read -r rel; do
+        [ -n "$rel" ] || continue
+        if [ -f "$SRC/$rel" ]; then
+            cp -L "$SRC/$rel" "$STAGE/$rel" 2>/dev/null || { rm -f "$STAMP" "$GENF"; }
+        else
+            rm -f "$STAGE/$rel"
+        fi
+    done < "$LIVE"
+    rm -f "$LIVE"
+fi
+
 WANT=$(signature "$SRC")
 if [ -f "$STAGE/$MANIFEST" ] && [ -f "$STAMP" ] \
         && [ "$WANT" = "$(cat "$STAMP" 2>/dev/null)" ]; then

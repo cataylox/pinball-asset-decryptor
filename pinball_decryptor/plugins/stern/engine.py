@@ -443,6 +443,11 @@ CARD_CACHE_KEEP = 2
 #: call, ``on`` by write_overrides while it computes that set (a Write may run
 #: beside a preview build in the same process)
 _KEEP_EXTRACTS = threading.local()
+# PAD-251: while write_overrides builds a set, the scene tree step records here (``.store``,
+# ``{card path: bytes}``) each edited scene as it was BEFORE its tree edits (the stock scene
+# with every other writer's patches), so the Scenes tab can rebuild that one scene for a
+# running game (:func:`scene_live_bytes`).  Unset outside write_overrides.
+_SCENE_BASES = threading.local()
 
 
 class keep_card_extracts:
@@ -4002,6 +4007,9 @@ def _scene_tree_plan(reader, assets_dir, log, cancel, dest_is_device, radium_ove
         if ov:
             for off, b in ov[1].items():
                 buf[off:off + len(b)] = b
+        bases = getattr(_SCENE_BASES, "store", None)
+        if bases is not None:
+            bases[card_path] = bytes(buf)
         new, n = _apply_tree_ops(bytes(buf), card_path, ops, names, assets_dir, log)
         if not n:
             continue
@@ -8930,6 +8938,7 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         # caller asks (keep_card_extracts), keep the card's firmware + image.bin
         # for the next one (_extract_inputs_kept)
         _KEEP_EXTRACTS.on = bool(getattr(_KEEP_EXTRACTS, "wanted", False))
+        _SCENE_BASES.store = scene_bases = {}
         try:
             writes, counts, grow_plan, audio_mode, valpatch_mode = _compute_patches(
                 disk_f, parts, assets_dir, log, progress, cancel, label=label,
@@ -8940,6 +8949,7 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                 **({} if sound_ok is None else {"sound_ok": sound_ok}))
         finally:
             _KEEP_EXTRACTS.on = False
+            _SCENE_BASES.store = None
         if writes is None:                  # cancelled mid-compute
             _rmtree_grow_plan(grow_plan)
             return None, None, None, None
@@ -9174,6 +9184,7 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
     except Exception:                                   # noqa: BLE001
         pass
     _write_override_manifest(out_dir, manifest)
+    _write_scene_bases(out_dir, scene_bases, log)
     # Item 149: the set's list of NEW files travels with the delta like a file of
     # the set (whole when this build has one, removed when the last one did), so a
     # stage brought forward by overrides.sh never keeps a stale list.
@@ -9725,6 +9736,62 @@ def read_override_manifest(out_dir):
         return {}
     return data if isinstance(data, dict) else {}
 
+
+
+# ---------------------------------------------------------------------------------------------
+# PAD-251: a scene edit reaching a RUNNING emulator ("on the fly", like the Modes tab's Try it)
+# ---------------------------------------------------------------------------------------------
+def scene_bases_dir(out_dir):
+    """Where a set keeps its scenes as they were before their tree edits: BESIDE the set
+    (like "<set>-modes"), because the rig binds every file INSIDE the set over the card."""
+    return os.path.abspath(str(out_dir)).rstrip("\\/") + "-scenes"
+
+
+def _write_scene_bases(out_dir, bases, log=None):
+    base_dir = scene_bases_dir(out_dir)
+    _rmtree(base_dir)
+    for card_path, data in (bases or {}).items():
+        path = _override_path(base_dir, card_path)
+        try:
+            os.makedirs(_lp(os.path.dirname(path)), exist_ok=True)
+            with open(_lp(path), "wb") as f:
+                f.write(data)
+        except OSError as e:
+            if log:
+                log("Scene %s: could not keep its base for live edits (%s)." % (card_path, e),
+                    "debug")
+
+
+def scene_live_bytes(out_dir, assets_dir, card_path, log=None):
+    """The scene *card_path* as a game running over the override set in *out_dir* should read
+    it NOW: the scene the set was built from (its base, or the set's own copy when the build
+    applied no tree edits to it) with the project's CURRENT Scenes-tab edits applied.
+
+    ``None`` when the set does not hold the scene: nothing is bound over the card's copy, so
+    a running game cannot be handed a new one (the next Start includes it)."""
+    from . import scene_edit as _scene_edit
+    log = log or (lambda *_a, **_k: None)
+    in_set = _override_path(out_dir, card_path)
+    if not os.path.isfile(_lp(in_set)):
+        return None
+    base_path = _override_path(scene_bases_dir(out_dir), card_path)
+    src = base_path if os.path.isfile(_lp(base_path)) else in_set
+    with open(_lp(src), "rb") as f:
+        base = f.read()
+    ops = _scene_edit.ops_for(assets_dir, card_path)
+    if not ops:
+        return base
+    trees = _load_scene_trees(assets_dir)
+    names = _scene_edit.names_of(trees[card_path]) if card_path in trees else {}
+    new, _n = _apply_tree_ops(base, card_path, ops, names, assets_dir, log)
+    return new
+
+
+def scene_loads_on_demand(card_path):
+    """True for a scene the game reads from its file each time it is shown (``demand_loaded``:
+    measured in the emulator, PAD-251), False for one it loads once when it starts
+    (``auto_loaded``: the HUD, Battle Select), which a running game never reads again."""
+    return "/demand_loaded/" in "/" + str(card_path).replace("\\", "/").strip("/") + "/"
 
 def _rmtree_grow_plan(grow_plan):
     """Remove the scratch dir a grow plan carries (the rebuilt firmware), if any.

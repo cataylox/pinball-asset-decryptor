@@ -143,6 +143,9 @@ class EmulateTab(TabService):
         self._saves_token = None
         self._launch_slot = None
         self._launch_prepare = None
+        # PAD-251: the override set the running game was started with ({"assets", "out"}), so
+        # a scene edited on the Scenes tab can be handed to it live (push_live_scene)
+        self._live_ovr = None
         self._launch_accepted = False
         self._launch_serial = 0
         self._loading = False
@@ -705,11 +708,31 @@ class EmulateTab(TabService):
             text = rig.OVR_NO_ASSETS
         else:
             text = rig.OVR_ON
+        if assets and os.path.isdir(assets):
+            text += " " + self._ovr_carries(assets)
         # The whole paragraph, as Tk showed it: the ON text names the cost
         # (Start re-encodes first) and that a Replace-tab pick is written
         # into the project folder at Start, and neither may hide behind a
         # hover (must survive #4).
         self.set(assets=assets, ovr_hint=text, ovr_refused=False)
+
+    def _ovr_carries(self, assets):
+        """PAD-251: say that scene edits (and modes, when the mode maker is on) ride along."""
+        n = scenes = 0
+        try:
+            from ...plugins.stern import scene_edit
+            edits = scene_edit.load(assets)
+            n, scenes = sum(len(v) for v in edits.values()), len(edits)
+        except Exception:                                # noqa: BLE001
+            pass
+        modes_on = False
+        fn = getattr(self.window, "modes_preview_on", None)
+        if callable(fn):
+            try:
+                modes_on = bool(fn())
+            except Exception:                            # noqa: BLE001
+                modes_on = False
+        return rig.ovr_carries(n, scenes, modes_on)
 
     def _overrides_wanted(self):
         if not self.emulate_overrides_var.get() or self._assets_var is None:
@@ -1683,8 +1706,8 @@ class EmulateTab(TabService):
         if not why:
             self._log("[emulate] your edits are unchanged since the override "
                       "set in %s was built — reusing it" % out)
-            return self._with_override_modes(
-                out, ["PAD_OVERRIDE_DIR=%s" % rig.wsl_path(out)])
+            return self._live_ready(assets, out, self._with_override_modes(
+                out, ["PAD_OVERRIDE_DIR=%s" % rig.wsl_path(out)]))
         self._log("[emulate] preparing your edits (%s)" % why)
         self._preparing = "Preparing your edits…"
         self._preparing_kind = "edits"
@@ -1718,8 +1741,52 @@ class EmulateTab(TabService):
         self._log("[emulate] %d card file(s) will be applied on top of the "
                   "card: %s" % (len(files),
                                 ", ".join(p for p, _n in files[:6])))
-        return self._with_override_modes(
-            out, ["PAD_OVERRIDE_DIR=%s" % rig.wsl_path(out)])
+        return self._live_ready(assets, out, self._with_override_modes(
+            out, ["PAD_OVERRIDE_DIR=%s" % rig.wsl_path(out)]))
+
+    # -- PAD-251: scene edits reaching the running game ("on the fly") -----
+    def _live_ready(self, assets, out, env):
+        self._live_ovr = ({"assets": os.path.normcase(os.path.abspath(assets)), "out": out}
+                          if env is not None else None)
+        return env
+
+    def live_scene_target(self, assets):
+        """The override folder of the game running NOW over *assets*' edits, or None (no game
+        up, or it runs the card as it is, or another project's edits)."""
+        o = self._live_ovr
+        if (not o or not self._last_up or self._starting or self._stopping
+                or not assets):
+            return None
+        if os.path.normcase(os.path.abspath(assets)) != o["assets"]:
+            return None
+        return o["out"]
+
+    def push_live_scene(self, card_path, data):
+        """Write *data* over the running game's copy of scene *card_path*
+        (``tools/spike2_emu/livescene.sh``).  ``"sent"``, ``"not_in_set"`` (the set the
+        game started with does not hold it) or ``"failed"``.  Blocking: call it from a
+        worker."""
+        import tempfile
+        folder = os.path.join(tempfile.gettempdir(), "spike2_live")
+        try:
+            os.makedirs(folder, exist_ok=True)
+            path = os.path.join(folder, "scene.radium")
+            with open(path, "wb") as f:
+                f.write(data)
+            arg = rig.wsl_path(path) if sys.platform == "win32" else path
+            r = self._run(self._cmd("livescene.sh", card_path, arg),
+                          capture_output=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as exc:
+            self._log("[emulate] could not hand the running game the edited scene: %s" % exc)
+            return "failed"
+        said = ((r.stdout or b"") + (r.stderr or b"")).decode("utf8", "replace").strip()
+        if r.returncode == 0:
+            return "sent"
+        if r.returncode == 3:
+            return "not_in_set"
+        self._log("[emulate] could not hand the running game the edited scene: %s"
+                  % (said[-300:] or "exit %d" % r.returncode))
+        return "failed"
 
     def _with_override_modes(self, out, env):
         from ...plugins.stern import engine as stern_engine
@@ -2062,6 +2129,7 @@ class EmulateTab(TabService):
         if self._mains_note:
             self._log("[emulate] " + self._mains_note)
         ovr_request = self._overrides_wanted()
+        self._live_ovr = None
         ovr_selector = bool(self._select_var.get())
         prepare_card = self._card()
         self._select_probe_kick()
