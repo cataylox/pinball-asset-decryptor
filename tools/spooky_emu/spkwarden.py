@@ -38,7 +38,7 @@ request, one line per reply - the same protocol as tools/bof_emu's boards,
 so the app's switch window (spkpf.py, on tools/bof_emu/bofpf.py) drives it:
     sw <n> <0|1>        hold / release a switch          -> ok
     tap <n> [ms]        press and release (150 ms)       -> ok
-    plunge              the ball in the shooter lane goes into play -> ok
+    plunge              the Launch button: the game fires the ball into play -> ok
     drain               one ball in play back to the trough          -> ok
     state               {"switches": {n: 0|1}, "balls": {...},
                          "connected": bool, "leds_lit": 0}
@@ -47,6 +47,7 @@ Everything the board does is logged to <rig>/warden.log.
 """
 import json
 import os
+import queue
 import select
 import socket
 import sys
@@ -56,6 +57,7 @@ import time
 TROUGH = [7, 6, 5, 4, 3, 1, 0]       # TROUGH 1..7 (Switches.TroughSwitches)
 BALLS = int(os.environ.get("SPK_BALLS", "6"))
 SHOOTER = 8
+LAUNCH_BUTTON = 85
 EJECT_COIL = 51
 LAUNCH_COIL = 54
 # Opcodes whose first argument is a coil number (fire / hold a coil).
@@ -81,6 +83,7 @@ class Board:
             self.slave_path = os.ttyname(slave)
             self.slave = slave      # keep one handle open: no EIO on reopen
         self.connected = False
+        self.outq = queue.Queue()
         self._set_trough()
 
     def say(self, *a):
@@ -92,10 +95,19 @@ class Board:
         self.state[2] = 0            # TROUGH JAM
 
     def send(self, data):
-        try:
-            os.write(self.master, bytes(data))
-        except OSError as e:
-            self.say("write failed", e)
+        """Queue a message for the game.  Only the writer thread writes: the
+        game reads its replies once a frame, and a write that waits for it
+        must never hold up reading the game's own stream (a late read makes
+        the game's writes time out, and ten of those reset its board link)."""
+        self.outq.put(bytes(data))
+
+    def writer(self):
+        while True:
+            data = self.outq.get()
+            try:
+                os.write(self.master, data)
+            except OSError as e:
+                self.say("write failed", e)
 
     def set_switch(self, sw, on):
         with self.lock:
@@ -118,14 +130,17 @@ class Board:
     # -- host -> board --------------------------------------------------
     def host_bytes(self, buf):
         """Scan for '>' <op> ... that need an answer or move a ball.  A
-        false match inside LED data costs at most a harmless extra reply."""
-        i = 0
+        false match inside LED data costs at most a harmless extra reply.
+
+        bytes.find does the scanning, not a Python loop over every byte: the
+        game streams LED frames flat out (a pty has no baud rate), gives each
+        write only 20 ms, and after ten late ones resets its board link and
+        stops reacting to switches (PAD-266)."""
         n = len(buf)
-        while i < n - 2:
-            if buf[i] != 0x3E:
-                i += 1
-                continue
+        i = buf.find(b">")
+        while 0 <= i < n - 2:
             op, arg = buf[i + 1], buf[i + 2]
+            i = buf.find(b">", i + 1)
             if op == OP_SWITCH_STATE:
                 with self.lock:
                     self.send([0x3C, OP_SWITCH_STATE, arg, self.state.get(arg, 0)])
@@ -140,7 +155,6 @@ class Board:
             elif op in COIL_OPS and arg == LAUNCH_COIL:
                 self.say("launch coil")
                 self.later(0.1, self.set_switch, SHOOTER, 0)
-            i += 1
         # The last two bytes may start a message split across reads.
         tail = buf[max(0, n - 2):]
         return tail if 0x3E in tail else b""
@@ -153,6 +167,17 @@ class Board:
         self.say("eject: ball to the shooter lane,", self.balls, "left")
         self.trough_changed()
         self.later(0.5, self.set_switch, SHOOTER, 1)
+
+    def plunge(self):
+        """Beetlejuice has no manual plunger: the Launch button makes the
+        game fire its auto-launch coil, which (host_bytes) moves the ball
+        into play.  A ball that only LEAVES the lane, without that coil, is
+        one the game never saw launched - it sits in the skill shot and
+        ignores the playfield.  So press Launch; if the game does not fire
+        the coil (a tilt, a mode holding the ball), let the ball go anyway."""
+        self.set_switch(LAUNCH_BUTTON, 1)
+        self.later(0.2, self.set_switch, LAUNCH_BUTTON, 0)
+        self.later(1.5, self.set_switch, SHOOTER, 0)
 
     def drain(self):
         if self.balls >= len(TROUGH):
@@ -185,7 +210,7 @@ class Board:
         if p[0] == "plunge":
             if not self.state.get(SHOOTER):
                 return "err no ball in the shooter lane"
-            self.set_switch(SHOOTER, 0)
+            self.plunge()
             return "ok"
         if p[0] in ("sw", "tap") and len(p) >= 2 and p[1].isdigit():
             n = int(p[1])
@@ -241,7 +266,7 @@ class Board:
             if not r:
                 continue
             try:
-                data = os.read(self.master, 4096)
+                data = os.read(self.master, 1 << 16)
             except OSError:
                 # EIO: nobody holds the slave but us - the game closed it
                 # (or has not opened it yet).  Keep serving: it reopens.
@@ -260,6 +285,7 @@ def main():
         f.write(b.slave_path + "\n")
     os.rename(os.path.join(rig, "warden.tty.tmp"), os.path.join(rig, "warden.tty"))
     b.say("board up on", b.slave_path, "balls", b.balls)
+    threading.Thread(target=b.writer, daemon=True).start()
     threading.Thread(target=b.ctl_loop, args=(os.path.join(rig, "ctl.sock"),),
                      daemon=True).start()
     b.serve()

@@ -61,7 +61,14 @@ chown -R "$SPK_USER": "$SPK_RIG"
 
 # The board first: the game opens /dev/WARDEN once at start, then retries
 # every half second until it answers.
-setsid -f env SPK_MARK="$SPK_RIG" runuser -u "$SPK_USER" -- \
+# At real-time priority: the game gives each serial write 20 ms, and while it
+# loads (or draws on llvmpipe) it has every core busy; an ordinary-priority
+# board that misses its turn makes the game reset its board link and stop
+# reacting to switches (PAD-266).  The board sleeps in select(), so this
+# costs nothing when idle.  Plain nice where chrt is refused.
+PRIO="nice -n -10"
+chrt -r 10 true 2>/dev/null && PRIO="chrt -r 10"
+setsid -f env SPK_MARK="$SPK_RIG" $PRIO runuser -u "$SPK_USER" -- \
     python3 -u "$SPK_TOOLS/spkwarden.py" "$SPK_RIG" < /dev/null > "$SPK_RIG/warden.out" 2>&1
 for _ in $(seq 1 50); do [ -s "$SPK_RIG/warden.tty" ] && break; sleep 0.1; done
 TTY=$(cat "$SPK_RIG/warden.tty" 2>/dev/null)
