@@ -1,102 +1,163 @@
 # Dutch Pinball PC emulator rig
 
 Runs a Dutch Pinball game on this PC, the way `tools/bof_emu` runs a Barrels
-of Fun game. Development title: **The Big Lebowski**, versions 1.13 (off a
-machine's disk image) and 1.15 (the 1.15 update zip laid over that image's
-installed 1.13, as the machine's updater does).
+of Fun game, and backs the app's **Emulate DP** tab (Dutch Pinball -> Play ->
+Emulate). Two titles, two quite different programs:
 
-Status as of **2026-09-29** (PAD-263): the game **boots to attract mode and
-takes switch input** - proven by capturing its window: the attract clips play
-on the colour DMD, and a pressed Start (`sw.py startButton`) starts a game
-("BALL 1/3 PLAYER 1", the rug skill-shot prompt). Wiring it into the app's
-Emulate tab is a follow-up ticket.
+| | The Big Lebowski | Alice's Adventures in Wonderland |
+|---|---|---|
+| program | x86-64 PyInstaller (Python 2.7) build of Dutch Pinball's pyprocgame-derived `dp` framework | `/opt/pinterface`, a stripped native C++ program (Buildroot 2023.08, glibc 2.37, SDL2), libpinproc compiled in |
+| on the PC | runs on PAD-Runtime's own libraries (it bundles everything) | runs in a chroot of its own root |
+| the board | **its own simulator**: `./start fakepinproc dev` | none - `aaiw/aaiwshim.c` answers it as a P-ROC |
+| switches in | pygame keys, through keyboard.yaml | P-ROC switch events from the fake board |
+| screens | one colour-DMD window, 1366x512 | the LCD (1366x768) and the round one (480x480) |
+| comes as | a disk image (+ update zips) | a Clonezilla `full_image` installer |
 
-## Why this is the smallest rig of all
-
-The game ships its own simulator. `start` is an x86-64 PyInstaller (Python
-2.7) build of Dutch Pinball's pyprocgame-derived framework (packages `dp` and
-`game`), with every library it needs in its own folder (SDL 1.2, pygame,
-numpy, libpinproc). Given `fakepinproc` on its command line it talks to a
-**FakePinPROC** instead of the P3-ROC, serves balls from a fake trough
-(`TroughFake`), and reads switches from the keyboard through the build's own
-`config/keyboard.yaml`. There is no licence or hardware-ID check. Nothing is
-emulated here; the rig only gives the game what the machine's disk gave it.
-
-| the machine | the rig |
-|---|---|
-| `/home/dp/game/{assets,<version>,version,serial,temp}` | `$DP_RIG/game/`, hard-linked from the prepared build |
-| `run.sh`: `./start fullscreen os_version ...` | `./start fakepinproc dev` |
-| P3-ROC over USB (libftdi) | the game's own FakePinPROC |
-| a keyboard on the service port (never) | `dpinput.so` + `sw.py` |
-| X on the cabinet LCD | a hidden Xvfb per slot (`:120 + slot`), or WSLg |
-
-## What the rig has to supply
-
-* **A disk image.** The update zips (`TBL-v1.00.zip` ...) are not whole
-  builds. ~1,400 base assets - the DMD dot sheet
-  `display/dot_shapes.png`, most fonts, most sounds - live only in the
-  machine's `/home/dp/game/assets` (without them the game dies at
-  `dp/display.py`: `'NoneType' object has no attribute 'get_width'`). And
-  the machine's updater copies the installed version folder and lays the zip
-  over it, so each installed version folder holds files no zip has (1.10 on
-  the image: 173). A zip laid over the wrong folder dies in the preloader
-  (`dp/font.py`: `'NoneType' object has no attribute 'readlines'` - that
-  was 1.10 + 1.15 without the image's 1.10 folder). So a build is prepared
-  from a **disk image** first, and `prepare.py zip` lays updates over its
-  installed version, refusing a zip whose `delta` list does not name it.
-* **`serial` and `temp/`** beside the version folder (it opens `../serial`
-  at boot).
-* **An audio device.** With none, pygame's mixer is never opened and the
-  first `pygame.mixer.Sound(file)` fails (`Unrecognized argument (type
-  file)`). A hidden run uses SDL's disk writer into `/dev/null`.
-* **Switch input with no one at the keyboard.** PAD-Runtime has no xdotool
-  or XTest library, and a hidden window has no focus. `dpinput.so`
-  (LD_PRELOAD) pushes key events straight onto SDL's queue from a FIFO. Two
-  traps it handles: the PyInstaller bootloader re-executes itself (so the
-  shim must stay in the environment and only start its reader in the process
-  that opens a window), and pygame loads SDL `RTLD_LOCAL` (so SDL's symbols
-  are fetched from the loaded library by name, not `RTLD_NEXT`).
-
-Two image-specific traps, both handled in the rig's copy only (the cache and
-the image are never changed): macOS `._*` AppleDouble files (skipped when
-preparing), and a **zero-byte WAV** in the fan-modded image
-`TBL_justin_113_v10.img` (`remake_hotelcalifornia_loop.wav`), which stops
-the boot the same way a missing mixer does; the rig stands a second of
-silence in for it and logs that in `rig.log`.
+Status as of **2026-09-29** (PAD-263): both **boot to attract, take every
+switch, start a game and score** - hidden, visible, with and without sound.
+See *What is proven* and *What is open*.
 
 ## Use
 
-All in PAD-Runtime, as root; `PAD_SLOT=N` picks a slot (default 0).
+The app runs `watch.sh` (as root) and polls `status.sh`; that is the whole
+contract. By hand, in PAD-Runtime, as root; `PAD_SLOT=N` picks a slot:
 
 ```
 T=/mnt/c/.../tools/dp_emu
-python3 $T/prepare.py image /mnt/d/Pinball/TBL/justin_img/TBL_justin_113_v10.img --name TBL-justin
-python3 $T/prepare.py zip "/mnt/d/Pinball/images/Dutch Pinball/TBL-v1.10.zip" \
-        "/mnt/d/Pinball/images/Dutch Pinball/TBL-v1.15.zip" --base TBL-justin      # -> zip-1.15
-bash $T/run_game.sh TBL-justin            # Ready: ... display :120 (1366x512)
-python3 $T/sw.py startButton              # or: sw.py flipperLwL down / up; sw.py --list
-bash $T/shot.sh /mnt/c/tmp/tbl.png
-bash $T/status.sh
-bash $T/killgame.sh
+PAD_VISIBLE=0 bash $T/watch.sh /mnt/d/Pinball/TBL/justin_img/TBL_justin_113_v10.img \
+    "/mnt/d/Pinball/images/Dutch Pinball/TBL-v1.15.zip"          # TBL 1.15, hidden
+PAD_VISIBLE=0 bash $T/watch.sh "/mnt/d/Pinball/images/Dutch Pinball/AAIW_1.05_full_image.img"
+python3 $T/sw.py --list                    # every switch of the running game
+python3 $T/sw.py startButton               # tap; or: sw.py flipperLwL down / up
+bash $T/shot.sh /mnt/c/tmp/game.png        # every window the game opened
+bash $T/status.sh; bash $T/stop.sh
 ```
 
-`run_game.sh --visible` draws on the WSLg desktop instead, `--audio` plays
-sound through WSLg's PulseAudio, `--version V` runs another version folder
-of the build (`prepare.py image --all` keeps every version on the image).
+`PAD_VISIBLE=1` (the app's default) draws on the WSLg desktop in ordinary
+framed windows titled `<PAD_LABEL> - <the game's title>`; `PAD_AUDIO=1` plays
+the sound through WSLg's PulseAudio. `dppf.py` is the switch window (the tab
+opens it): TBL's own machine drawing with every switch on it plus a grouped
+list, or Alice's switches as a list; hold with the mouse, right-click to
+latch, the game's own keys work while it is focused.
 
-## What is proven
+| script | what |
+|---|---|
+| `watch.sh <img> [zip...]` | prepare (cached) + start + wait; `== Prepare/Game/Ready ==` and `progress N` for the footer |
+| `prepare.py` | a build from a disk image (cached by its size and time, the two newest kept), updates laid over it |
+| `run_game.sh` / `run_aaiw.sh` | start one build on this slot (TBL / Alice) |
+| `status.sh`, `stop.sh`, `cancel.sh`, `killgame.sh` | key=value status; stop; cancel a start (drops the half-made build); stop and prove it |
+| `dpctl.py` (`ctl.sh`) | press/hold/tap switch n; `--stream` for the switch window |
+| `sw.py` | the same by name, for people |
+| `dpinput.c` | TBL's shim: key events from a FIFO, window frame and title |
+| `dpswitches.py` | TBL: a key for EVERY machine.yaml switch in the rig's keyboard.yaml, and switches.json |
+| `aaiw/aaiwshim.c`, `aaiw/switches.json` | Alice's fake P-ROC and input shim; its 65 switches |
+| `ftd2xx_stub.py` | Bride of Pinbot 2.0's missing driver DLL (see *What is open*) |
 
-* 1.13 off the image (slot 1) and 1.15 (the zip over the image's 1.13,
-  slot 0) both boot to attract, hidden, and start a game on
-  `sw.py startButton`: "BALL 1/3 PLAYER 1" (2026-09-29).
+## The Big Lebowski: what the rig has to supply
+
+The game ships its own simulator, so the rig only gives it what the
+machine's disk gave it:
+
+* **A disk image.** The update zips are not whole builds. ~1,400 base assets
+  (the DMD dot sheet `display/dot_shapes.png`, most fonts and sounds) live
+  only in the machine's `/home/dp/game/assets`, and the machine's updater
+  copies the INSTALLED version folder and lays the zip over it, so each
+  installed folder holds files no zip has (1.10 on the image: 173). A zip
+  laid over the wrong folder dies in the preloader (`dp/font.py`), with no
+  assets in `dp/display.py`. So `prepare.py` starts from the image, and lays
+  updates over its installed version, refusing a zip whose `delta` list
+  does not name it.
+* **`serial` and `temp/`** beside the version folder (it opens `../serial`).
+* **An audio device.** With none, pygame's mixer never opens and the first
+  `Sound(file)` fails (`Unrecognized argument (type file)`). A muted run uses
+  SDL's disk writer into `/dev/null`.
+* **Every switch.** FakePinPROC reads switches only as keys through
+  keyboard.yaml, which maps a dozen. `dpswitches.py` adds one key per
+  machine.yaml switch (1000+n) to the rig's copy - unlinked first, never
+  written through the cache's hard link - so targets, ramps and the trough
+  can be pressed too.
+* **Input with no one at the keyboard.** `dpinput.so` (LD_PRELOAD) pushes key
+  events onto SDL's queue from a FIFO: no focus, no X tools. It starts its
+  reader only in the process that opens a window (the PyInstaller bootloader
+  re-executes itself) and finds SDL by handle (pygame loads it RTLD_LOCAL).
+
+Two image-specific traps, handled in the rig's copy only: macOS `._*` files
+(skipped), and a **zero-byte WAV** in the fan-modded `TBL_justin_113_v10.img`
+(`remake_hotelcalifornia_loop.wav`), replaced by a second of silence.
+
+## Alice's Adventures in Wonderland
+
+The game SSD's root is a partclone + zstd image inside the Clonezilla
+installer (`pinball-image/sda2.ext4-ptcl-img.zst`); `prepare.py` restores it
+to `root.ext4` (~2.5 min, 8.5 GB). `run_aaiw.sh` loop-mounts it read-only
+once (`$DP_ROOT/lower/<build>`, shared by every slot) and gives each slot an
+overlay over it, then chroots into that as the ordinary user.
+
+* **Mounts.** `/proc` is mounted fresh; `/sys`, `/dev` and the X socket are
+  bound in and made `rslave` AT ONCE. PAD-Runtime's mounts are shared, and a
+  recursive unmount of a shared bind propagates back to the host's own
+  `/dev/pts`. And `dp_clear_rig` refuses to delete a rig folder with anything
+  still mounted under it (a recursive delete through a bound `/dev`...).
+* **The board.** `aaiwshim.so`, through the root's `/etc/ld.so.preload` (its
+  busybox `env`/`sh` drop LD_PRELOAD), replaces the libftdi1 calls libpinproc
+  makes and answers like a P-ROC FPGA: chip id, version, switch state words,
+  and a switch event word for every press. It holds every switch at the
+  machine's rest level (`AAIW_CLOSED`: the closed-at-rest switches plus 5
+  balls in the trough). Most of Alice's switches rest CLOSED, so a press
+  moves a switch AWAY from rest (`dpctl.py`). Coil/lamp writes are dropped.
+* **The switches** (`aaiw/switches.json`): the game's own numbers and names
+  ("46 Pop Bumper Top" is in the program), its cabinet switches at 64-79,
+  and each one's rest level read from the running game's memory.
+* **glibc.** The shim must not need a glibc newer than the root's 2.37;
+  `run_aaiw.sh` refuses a build that asks for GLIBC_2.38+ (`sscanf` and
+  `strtoul` would, so the shim parses numbers by hand).
+* **Sound.** The root's SDL2 has no PulseAudio driver (ALSA, OSS, disk,
+  dummy). With sound on, SDL's disk driver writes into a FIFO and a relay
+  (`ffmpeg ... -f pulse`) plays it; the shim logs the format the game opens
+  (48 kHz s16 stereo) so the relay reads it right.
+* `pinterface` ignores SIGTERM: `killgame.sh` KILLs everything whose root is
+  the slot's chroot, then unmounts it.
+
+## Two rig-wide lessons
+
+* **Xvfb must run with `-noreset`.** By default it regenerates when its last
+  client disconnects, and a connection that arrives meanwhile is reset: TBL
+  failed to start 3 times in 5 ("Couldn't open X11 display" -> pygame's
+  "video system not initialized"); 8 of 8 with it. `dp_wait_display` waits
+  until the display actually opens - PAD-Runtime's `/tmp/.X11-unix` is WSLg's
+  read-only mount, so a rig's Xvfb has only its abstract socket, and waiting
+  for the socket file never ends.
+* **A press is held at least 100 ms** (`dpctl.py`): both games debounce, and
+  a 0 ms click (Playwright's) started nothing on Alice.
+
+## What is proven (2026-09-29)
+
+* TBL 1.13 (off the image) and 1.15 (the zip over it) boot to attract, hidden
+  and visible; Start begins a game; the window's Left Slingshot scores
+  (00 -> 10 -> 20 -> 30). 8 of 8 cold starts.
+* Alice 1.05 boots to attract on both screens; Start (from the switch
+  window) begins Ball 1/3; three Pop Bumper Top hits score 15,000.
+* Visible: framed, movable windows titled `PAD-263 - The Big Lebowski TM
+  Pinball`, and Alice's two windows side by side.
+* Sound: TBL opens its mixer on WSLg's PulseAudio (no disk-writer fallback -
+  and it cannot load a sound without an open device); Alice's relay reads
+  its stream at 196 KB/s (48 kHz s16 stereo) into PulseAudio, no errors.
+* Stop leaves nothing: games, displays, relays, chroot mounts (PAD-Runtime's
+  own `/dev`, `/proc`, `/sys` untouched).
 
 ## What is open
 
-* Only the switches `keyboard.yaml` names have a key (Start, launch, coins,
-  menu1-4, flippers, tilt, slam tilt, coin door). Playfield switches
-  (targets, ramps, the bowling alley) need FakePinPROC's `add_switch_event`
-  reached some other way - the `dev` machine view, or a keyboard.yaml of our
-  own in the rig's copy.
-* `--audio` and `--visible` are wired but were not exercised on 2026-09-29.
-* Other Dutch Pinball titles (Alice's Adventures in Wonderland, Bride of
-  Pinbot 2) were not tried.
+* **Bride of Pinbot 2.0** (`BOP2-v1.21.zip`) is a WINDOWS build of the same
+  `dp` framework, driving the original machine's ROM through PinMAME
+  (`pinmame/pinmamep.exe`, ROMs `bop_l6`/`bop_l7`, an AutoHotkey script to
+  place its window). It runs on Windows itself: `ftd2xx_stub.py` gets it past
+  the FTDI driver DLL its pinproc.pyd needs, and it then stops where TBL's
+  zips do - a base asset (a font) no update zip carries. There is no BOP2
+  disk image on this machine. With one, its `game/assets` beside the zip's
+  version folder and `start.exe fakepinproc dev` is the next step; PinMAME
+  and its AutoHotkey placement are untested.
+* The machine's own ball physics are not modelled: a drained ball is a press
+  of the outhole/trough switches, by hand.
+* Alice's resting switch levels are the game's own idle values; the four
+  optos that rest closed (30, 33, 49, 51) and the coin slots' mixed levels
+  are as the game has them, unverified on a machine.

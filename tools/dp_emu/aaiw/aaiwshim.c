@@ -397,6 +397,20 @@ int SDL_PollEvent(void *ev)
     return real ? real(ev) : 0;
 }
 
+/* ------------------------------------------------------------- sound */
+/* The root's SDL2 was built with ALSA only - no PulseAudio driver, and no
+ * ALSA pulse plugin - so on a PC its sound goes out through SDL's "disk"
+ * driver into a FIFO that run_aaiw.sh's relay plays to WSLg's PulseAudio.
+ * The relay has to know the stream's format: log what the game opens. */
+int Mix_OpenAudio(int frequency, uint16_t format, int channels, int chunksize)
+{
+    static int (*real)(int, uint16_t, int, int);
+    if (!real)
+        real = (int (*)(int, uint16_t, int, int))dlsym(RTLD_NEXT, "Mix_OpenAudio");
+    logf_("audio: %d 0x%x %d\n", frequency, format, channels);
+    return real ? real(frequency, format, channels, chunksize) : -1;
+}
+
 /* ----------------------------------------------------------- windows */
 #define SDL_WINDOW_FULLSCREEN 0x00000001u
 #define SDL_WINDOW_BORDERLESS 0x00000010u

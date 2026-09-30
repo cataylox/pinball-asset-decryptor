@@ -33,6 +33,14 @@ slot_pids() {
 for p in $(slot_pids); do kill -TERM "$p" 2>/dev/null; done
 for p in $(slot_pids); do stop_pid "$p"; done
 stop_pid "$(cat "$DP_RIG/xvfb.pid" 2>/dev/null)"
+# Alice's sound relay (run_aaiw.sh): its ffmpeg ends with the game's FIFO,
+# but a relay still waiting for the game's first sound would not.
+AP=$(cat "$DP_RIG/audio.pid" 2>/dev/null)
+if [ -n "$AP" ]; then
+    pkill -TERM -P "$AP" 2>/dev/null
+    stop_pid "$AP"
+    rm -f "$DP_RIG/audio.pid"
+fi
 
 # An AAIW root: every mount under it was made rslave when it was made
 # (run_aaiw.sh), so this recursive unmount cannot reach PAD-Runtime's own.

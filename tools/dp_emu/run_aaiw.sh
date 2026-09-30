@@ -114,9 +114,30 @@ echo "$DISP" > "$DP_RIG/display"
 mount --bind "$(readlink -f /tmp/.X11-unix)" "$R/tmp/.X11-unix" && mount --make-rslave "$R/tmp/.X11-unix"
 
 if [ $AUDIO = 1 ] && [ -S /mnt/wslg/PulseServer ]; then
-    mkdir -p "$R/mnt/wslg"
-    mount --bind /mnt/wslg "$R/mnt/wslg" && mount --make-rslave "$R/mnt/wslg"
-    AUDIO_ENV="SDL_AUDIODRIVER=pulseaudio PULSE_SERVER=unix:/mnt/wslg/PulseServer"
+    # The root's SDL2 has no PulseAudio driver (ALSA, OSS, disk, dummy
+    # only), so the game's sound goes out through SDL's disk driver into a
+    # FIFO, and a relay on this side plays it to WSLg's PulseAudio.  The
+    # stream's format is whatever the game opens - aaiwshim.c logs it
+    # ("audio: <rate> <SDL format> <channels>"), so the relay waits for that
+    # line.  The game's open of the FIFO waits for a reader, so a format the
+    # relay cannot name is still read (and dropped) rather than left to hang.
+    mkfifo -m 666 "$R/tmp/pad_audio"
+    AUDIO_ENV="SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE=/tmp/pad_audio"
+    setsid -f bash -c '
+        log=$1 fifo=$2 user=$3 pidf=$4
+        echo $$ > "$pidf"
+        for _ in $(seq 1 600); do grep -q "^audio:" "$log" 2>/dev/null && break; sleep 0.1; done
+        set -- $(grep -m1 "^audio:" "$log")
+        case "$3" in
+            0x8010) f=s16le ;; 0x10) f=u16le ;; 0x8008) f=s8 ;; 0x8) f=u8 ;;
+            0x8020) f=s32le ;; 0x8120) f=f32le ;;
+            *) echo "unknown audio format $3: dropping the sound" >&2; exec cat "$fifo" > /dev/null ;;
+        esac
+        exec runuser -u "$user" -- env PULSE_SERVER=unix:/mnt/wslg/PulseServer \
+            ffmpeg -nostdin -loglevel error -f "$f" -ar "$2" -ac "$4" -i "$fifo" \
+            -f pulse -name "PAD Dutch Pinball" "Alice"
+    ' relay "$R/tmp/rig.log" "$R/tmp/pad_audio" "$DP_USER" "$DP_RIG/audio.pid" \
+        < /dev/null > "$DP_RIG/audio.log" 2>&1
 else
     AUDIO_ENV="SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE=/dev/null"
 fi
