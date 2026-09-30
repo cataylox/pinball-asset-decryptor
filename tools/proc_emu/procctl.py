@@ -2,7 +2,8 @@
 """procctl.py [--slot N] <command...> | --stream - talk to a running rig's board.
 
 Commands are prochw.py's control protocol: sw <sw> <0|1>, closed <sw> <0|1>,
-tap <sw> [ms], state, switches, drivers, log [n], leds.  Prints the reply;
+tap <sw> [ms], state, switches, drivers, log [n], leds, balls ..., drain,
+plunge.  Prints the reply;
 exit 1 when the rig is not running or the command was refused.
 
 --stream keeps ONE connection and forwards stdin line by line, printing each
