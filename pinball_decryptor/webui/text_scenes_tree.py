@@ -48,6 +48,8 @@ class TreeEditMixin:
         self._tanchor = None         # where a Shift-click range in Layers starts
         self._tpeek = None           # a selected layer the game is not drawing now, drawn on top
         self._tforce = {}            # {card: node ids turned on in the preview only} (PAD-276)
+        self._tview = {}             # (project, card) -> node ids hidden in the preview only
+        self._tsolo = {}             # (project, card) -> (node shown alone, eyes, ons) before
         self._tstate_off = set()     # layers off only because of a switchable part's pick
         self._teye_off = set()       # ... and not turned on in the preview by their eye
         self._thead = set()          # ... the looks themselves, not what sits inside them
@@ -174,11 +176,20 @@ class TreeEditMixin:
         # the sprites a peek sits in are only its way in: drawing them whole showed every
         # other layer in them (DragonRR, PAD-284)
         through = self._tree_ancestors(peek) - self._tree_force_set(card) if peek else set()
-        # a picked sprite shows every layer in it, those hidden with their eye too; the eyes
-        # are not changed (DragonRR, PAD-289)
-        unveil = self._tree_inside(peek, self._tree_hidden(card)) if peek else set()
+        # the game's eye (red) never changes the preview: a layer hidden in the game is drawn
+        # as the game would without it; the preview's own eye (blue) hides it here (DragonRR,
+        # PAD-293).  A picked sprite shows every layer in it, those hidden with the preview's
+        # eye too, and a picked layer is seen through the sprites it sits in; the eyes are not
+        # changed (DragonRR, PAD-286, PAD-289)
+        unveil = self._tree_hidden(card)
+        view = self._tree_view_hidden(card)
+        if peek is not None:
+            gone = view - {peek} - self._tree_inside(peek, view) - self._tree_ancestors(peek)
+        else:
+            gone = view
         draws = scene_eval.draw_list(man, frame, pins=pins, worlds=worlds, show=peek,
-                                     force=force, through=through, unveil=unveil)
+                                     force=force, through=through, unveil=unveil,
+                                     hidden=gone)
         self._fit_kept(draws, worlds)
         # what the eyes show: a layer the eye turned on is on, even though the plain draw has
         # it off (DragonRR, PAD-280: the eyes stayed crossed); a peek is only while selected
@@ -187,7 +198,8 @@ class TreeEditMixin:
             lit = worlds
         else:
             lit = {}
-            scene_eval.draw_list(man, frame, pins=pins, worlds=lit, force=mine)
+            scene_eval.draw_list(man, frame, pins=pins, worlds=lit, force=mine,
+                                 unveil=unveil, hidden=view)
         # only a look itself has the eye that turns it on; what sits inside it keeps its own
         # eye (DragonRR, PAD-285: "as Fusion would")
         self._tstate_off, self._thead = self._state_off(man, lit)
@@ -231,16 +243,35 @@ class TreeEditMixin:
         return out
 
     def _tree_hidden(self, card):
-        """The nodes hidden with their eye."""
+        """The nodes hidden in the game (Write leaves them out; their row's card mark)."""
         return {op.get("node") for op in self._tree_ops(card) if op["op"] == "visible"}
+
+    def _tree_view_hidden(self, card):
+        """The nodes hidden in the preview with their eye (the card is not changed).  As in
+        Photoshop or Fusion the eye is the view only; hiding in the game is its own mark (a
+        struck-through row, like Fusion's Suppress).  A scene opened for the first time starts
+        with its eyes shut on what the game hides; after that the two are apart until the
+        scene is reset (DragonRR, PAD-293)."""
+        key = (self.assets_dir, card)
+        if key not in self._tview:
+            self._tview[key] = set(self._tree_hidden(card))
+        return self._tview[key]
+
+    def _tree_view_reset(self, card=None):
+        """The preview's eyes back to the game's: for *card*, or every scene."""
+        for store in (self._tview, self._tsolo):
+            for key in [k for k in store
+                        if k[0] == self.assets_dir and (card is None or k[1] == card)]:
+                del store[key]
+        for c in [c for c in self._tforce if card is None or c == card]:
+            del self._tforce[c]
 
     def _tree_inside(self, nid, nodes):
         """Those of *nodes* that sit inside *nid*, however deep."""
         return {n for n in nodes if nid in self._tree_ancestors(n)}
 
-    def _tree_hidden_in(self, man, nid, ops):
-        """The name of the nearest sprite *nid* sits in that is hidden with its eye, or ""."""
-        hidden = {op.get("node") for op in ops if op["op"] == "visible"}
+    def _tree_hidden_in(self, man, nid, hidden):
+        """The name of the nearest sprite *nid* sits in that is one of *hidden*, or ""."""
         p, hops = self._tparents.get(nid), 0
         while p is not None and hops < 256:
             if p in hidden:
@@ -257,8 +288,8 @@ class TreeEditMixin:
         should override and show"; it said the game never draws it).  A layer turned on by its
         eye does not turn on the part it sits in: it shows when that part is on, as in an
         editor's layers (DragonRR, PAD-285: "only if the head of that tree is made
-        visible")."""
-        hidden = {op.get("node") for op in self._tree_ops(card) if op["op"] == "visible"}
+        visible").  What counts as hidden here is the preview's eye (PAD-293)."""
+        hidden = self._tree_view_hidden(card)
         out = set(self._tforce.get(card) or ())
         veiled = self._tree_ancestors(peek) & hidden if peek is not None else set()
         if peek is not None and (peek in self._tstate_off or veiled):
@@ -296,11 +327,73 @@ class TreeEditMixin:
         if card is None:
             return False
         node = int(node)
+        self._tsolo.pop((self.assets_dir, card), None)     # an eye click ends a solo
         got = self._tforce.setdefault(card, set())
         if on:
             got.add(node)
         else:
             got.discard(node)
+        self._render_tree_preview(self._sel)
+        return True
+
+    @rpc
+    def tree_view(self, node, on):
+        """A layer's eye (DragonRR, PAD-293): hide it in the preview, or show it again,
+        without changing the card.  A layer off only because of a switchable part's pick is
+        turned on (or back off) with :meth:`tree_force`."""
+        return self.tree_view_many([node], on)
+
+    @rpc
+    def tree_view_solo(self, node):
+        """Alt+click on an eye, as in Photoshop: the preview shows that layer alone (with
+        the sprites it sits in and what is inside it); Alt+click it again and every eye is
+        as it was.  Alt+click on another layer's eye moves the solo there.  The card is not
+        changed."""
+        card, man = self._tree_card()
+        if card is None or self._tman is None:
+            return False
+        node = int(node)
+        key = (self.assets_dir, card)
+        got = self._tsolo.get(key)
+        if got is not None and got[0] == node:
+            del self._tsolo[key]
+            self._tview[key] = set(got[1])
+            self._tforce[card] = set(got[2])
+        else:
+            if got is None:
+                got = (None, set(self._tree_view_hidden(card)),
+                       set(self._tforce.get(card) or ()))
+            self._tsolo[key] = (node, got[1], got[2])
+            chain = {node} | self._tree_ancestors(node)
+            everything = {n["id"] for n, _p, _d in _walk_man(self._tman)}
+            keep = chain | self._tree_inside(node, everything)
+            self._tview[key] = everything - keep
+            self._tforce[card] = set(got[2]) | (chain & self._tstate_off)
+        self._render_tree_preview(self._sel)
+        return True
+
+    @rpc
+    def tree_view_many(self, nodes, on):
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        view = self._tree_view_hidden(card)
+        self._tsolo.pop((self.assets_dir, card), None)     # an eye click ends a solo
+        for node in self._tree_nodes(nodes):
+            if on:
+                view.discard(node)
+            else:
+                view.add(node)
+        self._render_tree_preview(self._sel)
+        return True
+
+    @rpc
+    def tree_view_reset(self):
+        """The preview's eyes back to the game's for this scene (the card is not changed)."""
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        self._tree_view_reset(card)
         self._render_tree_preview(self._sel)
         return True
 
@@ -342,6 +435,7 @@ class TreeEditMixin:
             return
         self._fonts = None
         self._tsizes = None
+        self._tree_unselect()                    # it comes back with nothing selected (PAD-294)
         self._restate_list()                     # a Write since: its scenes are written now
         if self._tree_available(self._sel):
             self._render_tree_preview(self._sel, quiet=True)
@@ -379,6 +473,8 @@ class TreeEditMixin:
         fps = float((man.get("stage") or [0, 0, 30])[2] or 30)
         state = self._tplay = {"cancel": False}
         job = {"man": man, "pins": pins, "frames": frames, "bg": self._bg,
+               "unveil": set(self._tree_hidden(card)),
+               "hidden": set(self._tree_view_hidden(card)),
                "text_edits": self._pending_texts(card, None), "colors": self._pending_colors(card),
                "pictures": self._tree_pictures(), "sizes": self._tree_sizes(),
                "tmp": self._tmpdir(), "assets": self.assets_dir, "cache": self._tcache}
@@ -408,7 +504,8 @@ class TreeEditMixin:
             for f in range(1, job["frames"] + 1):
                 if state["cancel"]:
                     return
-                draws = scene_eval.draw_list(job["man"], f, pins=job["pins"], play=True)
+                draws = scene_eval.draw_list(job["man"], f, pins=job["pins"], play=True,
+                                             unveil=job["unveil"], hidden=job["hidden"])
                 if prev is None or not scene_eval._same(draws, prev):
                     prev = draws
                     scaled = [dict(d, m=scene_eval.compose(shrink, d["m"])) for d in draws]
@@ -558,6 +655,7 @@ class TreeEditMixin:
             key = op.get("node", op.get("id"))
             edited_nodes.setdefault(key, []).append(scene_edit.describe(op))
         drawn = {d["node"] for d in self._tdraws}
+        view = self._tree_view_hidden(card)
         layers = []
         index = scene_edit._man_index(man)
         have, memo = {}, {}
@@ -579,6 +677,7 @@ class TreeEditMixin:
                            "added": bool(n.get("added")),
                            "hidden": any(op["op"] == "visible" and op.get("node") == n["id"]
                                          for op in ops),
+                           "view_off": n["id"] in view,
                            "edits": "; ".join(edited_nodes.get(n["id"], []))})
         sel = self._tsel if self._tsel in index else None
         self._tsel = sel
@@ -596,6 +695,9 @@ class TreeEditMixin:
             "edits": len(ops), "notes": list(notes), "rev": self._trev,
             # PAD-290: an eye hide is a card edit; the status line names every one
             "hidden_names": [l["name"] for l in layers if l["hidden"]],
+            # PAD-293: the preview's eyes differ from the game's (Reset puts them back)
+            "view_apart": view != self._tree_hidden(card) or bool(self._tforce.get(card)),
+            "solo": (self._tsolo.get((self.assets_dir, card)) or (None,))[0],
             "can_undo": bool(ops or (self._tree_hist(card) or {}).get("undo")),
             "can_redo": bool((self._tree_hist(card) or {}).get("redo")),
             "all_edits": scene_edit.count(self.assets_dir),
@@ -632,7 +734,9 @@ class TreeEditMixin:
                 "layer": sibs.index(n) + 1, "layers": len(sibs),
                 "drawn": nid in self._tworlds,
                 "peek": nid == self._tpeek and nid in self._tworlds and nid not in self._tlit,
-                "hid_in": self._tree_hidden_in(man, nid, ops),
+                "view_off": nid in self._tree_view_hidden(card),
+                "hid_in": self._tree_hidden_in(man, nid, self._tree_hidden(card)),
+                "view_in": self._tree_hidden_in(man, nid, self._tree_view_hidden(card)),
                 "pic": self._tree_pic_props(nid)}
 
     def _tree_picture(self, nid):
@@ -678,6 +782,14 @@ class TreeEditMixin:
             size = _kept_size(picks.get(d["image"]) or {})
             if size is not None:
                 d["w"], d["h"] = size
+
+    def _tree_unselect(self):
+        """Nothing selected: a scene opens, and the Scenes tab comes forward, with no layer
+        picked, since a selected one is drawn on top (DragonRR, PAD-294)."""
+        self._tsel = None
+        self._tsels = []
+        self._tanchor = None
+        self._tpeek = None
 
     def _tree_sels(self):
         """Every selected node, the last one picked (``_tsel``) last.  Whatever selects a
@@ -984,7 +1096,7 @@ class TreeEditMixin:
                 scene_edit.reset_node(self.assets_dir, card, node)
         own = [n for n in nodes if n not in added]
         if own:
-            return self.tree_visible_many(own, False)
+            return self._tree_delete(own)
         self._tree_refresh()
         return True
 
@@ -1319,6 +1431,9 @@ class TreeEditMixin:
         if card is None:
             return False
         scene_edit.reset_node(self.assets_dir, card, int(node))
+        # its preview eye goes back to the game's too (PAD-293)
+        self._tree_view_hidden(card).discard(int(node))
+        (self._tforce.get(card) or set()).discard(int(node))
         self._tree_refresh()
         return True
 
@@ -1329,7 +1444,19 @@ class TreeEditMixin:
         got = [n for n, _p, _d in _walk_man(self._tman) if n["id"] == node]
         if got and got[0].get("added"):
             return self.tree_reset(node)
-        return self.tree_visible(node, False)
+        return self._tree_delete([node])
+
+    def _tree_delete(self, nodes):
+        """Delete on the game's own layers: hidden in the game, and in the preview too, since
+        a deleted layer that stayed on the screen would look like Delete did nothing (the
+        eyes alone keep the two apart, PAD-293)."""
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        self._tree_view_hidden(card).update(nodes)
+        if not self.tree_visible_many(nodes, False):     # hidden in the game already
+            self._render_tree_preview(self._sel)
+        return True
 
     @rpc
     def tree_undo(self):
@@ -1390,6 +1517,7 @@ class TreeEditMixin:
                 "Every edit made to it since then is dropped."):
             return False
         scene_edit.restore_built(self.assets_dir, card)
+        self._tree_view_reset(card)
         self._tsel = None
         self._tree_refresh()
         return True
@@ -1408,6 +1536,7 @@ class TreeEditMixin:
                 "pictures and text." % (n, len(edits))):
             return False
         scene_edit.clear(self.assets_dir)
+        self._tree_view_reset()
         self._tsel = None
         self._tree_refresh()
         return True
@@ -1508,6 +1637,7 @@ class TreeEditMixin:
                 "resize, tint, layer change and added picture or text in it is dropped."):
             return False
         scene_edit.clear(self.assets_dir, card)
+        self._tree_view_reset(card)
         self._tsel = None
         self._tree_refresh()
         return True

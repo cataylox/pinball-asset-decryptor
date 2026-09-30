@@ -46,6 +46,7 @@ PHASE_ROW_BY_KEY = {
     "Emulate": "emulate", "Emulate JJP": "emulate",
     "Emulate Spike1": "emulate", "Emulate BoF": "emulate",
     "Emulate DP": "emulate",
+    "Emulate AP": "emulate",
     "Emulate Spooky": "emulate",
     "Multi-boot": "multiboot",
     "Replace Audio": None, "Replace Video": None,
@@ -184,7 +185,7 @@ class WebWindow:
         self.stop_all_preview_playback()
         if not self._running:
             emu = ("Emulate", "Emulate JJP", "Emulate Spike1",
-                   "Emulate BoF", "Emulate DP",
+                   "Emulate BoF", "Emulate DP", "Emulate AP",
                    "Emulate Spooky")
             if ((prev_key in emu and svc.key not in emu)
                     or (prev_key == "Multi-boot" and svc.key != "Multi-boot")):
@@ -393,6 +394,7 @@ class WebWindow:
             "Emulate": g("emulate"),
             "Emulate JJP": g("emulate_jjp"),
             "Emulate Spike1": g("emulate_spike1"),
+            "Emulate AP": g("emulate_ap"),
             "Emulate BoF": g("emulate_bof"),
             "Emulate DP": g("emulate_dp"),
             "Emulate Spooky": g("emulate_spooky"),
@@ -689,7 +691,7 @@ class WebWindow:
             return
         key = self.current_tab_key()
         if key not in ("Emulate", "Emulate JJP", "Emulate Spike1",
-                       "Emulate BoF", "Emulate DP",
+                       "Emulate BoF", "Emulate DP", "Emulate AP",
                        "Emulate Spooky"):
             return
         if tab is not None and key != tab:

@@ -439,16 +439,24 @@ HELP_CONTENT = {
          "whichever button or key made it, and Redo (Ctrl+Y or Ctrl+Shift+Z) puts it back. A greyed layer is one the game is not "
          "drawing at this moment: click its name and it is shown on top, "
          "where it sits, at this same moment while it stays selected, ready to edit "
-         "(an edit belongs to the layer, so it holds at every moment); its eye hides it. "
-         "Picking any layer shows it on top, even one you hid with its eye, and picking "
-         "a sprite shows everything in it; the eye itself never changes by picking. A dark layer "
+         "(an edit belongs to the layer, so it holds at every moment). A layer's eye works as in "
+         "Photoshop or Fusion: it hides the layer in the preview only, to place things or reach "
+         "what is under it, and never changes the card. H hides or shows the selected layers, "
+         "and Alt+click on an eye shows that layer alone (Alt+click again brings the others "
+         "back). Hiding a layer in the game is its own mark, like Fusion's Suppress: the card "
+         "at the end of its row (or right-click, Hide in the game). The Write leaves it out of "
+         "the card, the row is struck through and reads 'hidden in game', the status line names "
+         "every such layer, and the preview is not changed. A scene opened for the first time "
+         "starts with its eyes shut on the layers hidden in the game; after that the eyes stay "
+         "as you set them until Reset puts them back ('Preview eyes as in the game', or As "
+         "shipped). Delete hides a layer in both. Picking any layer shows it on top, even one "
+         "hidden with its eye, and picking "
+         "a sprite shows everything in it; no eye changes by picking. A dark layer "
          "with a crossed-out eye is off only because its switchable part shows another "
-         "look: its eye turns it on in the preview (the eye turns it back off). The "
+         "look: its eye turns it on in the preview (and back off). The "
          "layers inside that look keep their own eyes, like an editor's layers: one "
          "shows only while the look it sits in is on, and turning the look on leaves "
-         "a layer you hid inside it hidden. A layer hidden in the game (the Write "
-         "leaves it out of the card) has an orange eye and reads 'hidden in game', "
-         "and the status line names every such layer. Select "
+         "a layer you hid inside it hidden. Select "
          "something else and the scene goes back to what the game draws. A layer that draws a picture "
          "(itself or through what it holds) has a picture button at the end of its row: it opens "
          "that picture on the Images tab (a layer with several lists them to pick from). "
@@ -1643,6 +1651,60 @@ HELP_CONTENT = {
          "Each game keeps its own settings, audits and high scores between "
          "runs, as a machine does. Sound follows Mute; the game's own volume "
          "is in its service menu."),
+    ],
+    "Emulate AP": [
+        ("What it does",
+         "Runs the real American Pinball game on this PC - Houdini, "
+         "Oktoberfest, Hot Wheels, Legends of Valhalla or Galactic Tank Force "
+         "- in its own window, with its sound. The game carries its own "
+         "stand-in for the machine's controller board; the emulator gives it "
+         "what the machine's computer did (the Python it runs on, a full "
+         "trough, the coin door shut) and a way to press every switch, and "
+         "it boots into attract mode."),
+        ("Which file to pick",
+         "The game-code file (.pkg) - the one the machine installs from a "
+         "USB stick. That can be American Pinball's own, or one the Write "
+         "tab built from your edits: emulating it first is the quick way to "
+         "check a mod before it goes on a stick. The file is only read."),
+        ("Playing",
+         "When the game is up its virtual playfield opens beside it - the "
+         "same window as the Stern Emulate tab's. Where the game has a "
+         "playfield picture (Legends of Valhalla, Houdini, Galactic Tank "
+         "Force) its switches and lights are drawn on it, the lights lit in "
+         "the game's colours; otherwise its lights show as a grid and its "
+         "switches as a list. A green dot is a switch the game sees made. "
+         "Hold a switch with the mouse; hold the right button on one to rip "
+         "it (a spinner spinning), as on Stern. There is no ball physics: Start "
+         "serves a ball to the shooter lane, Plunge puts it into play, you "
+         "press the switches it would hit, and Drain sends it back to the "
+         "trough, ending the ball - unless the game's ball save is still "
+         "running (the first seconds after the ball reaches the playfield, "
+         "12 on Legends of Valhalla), when it serves the ball again, as the "
+         "machine would. With that window or one of the game's own windows "
+         "focused, the arrow keys are the "
+         "flippers, 1 is Start, 5 a coin (two or four make a credit), Space "
+         "the Action button, T tilt, the letters beside the playfield "
+         "switches press them, F plunges, D drains, C opens and shuts the coin "
+         "door, Backspace, -, = and Enter are the service buttons, and Pause "
+         "or F9 (in the playfield window) freezes the game. Closed it? "
+         "\"Switches window\" on this tab "
+         "brings it back."),
+        ("First start is slower",
+         "The very first Start sets the emulator up inside the app's Linux: "
+         "it downloads the Python the games run on (about 1 GB, a few "
+         "minutes, once). Each new .pkg is then unpacked once (under a "
+         "minute) and kept, so starting it again is quick; a rebuilt mod is "
+         "unpacked fresh. While a game is starting the Start button is "
+         "Cancel."),
+        ("One at a time",
+         "Hot Wheels and Galactic Tank Force play their pictures and sound "
+         "through American Pinball's own player, which only one game at a "
+         "time can use. Barry-O's BBQ Challenge does not run here yet. "
+         "Volume and Mute change the game's sound while it plays; the game's "
+         "own volume is in its service menu."),
+        ("Stopping",
+         "Stop ends the game and closes its switch window. So does closing "
+         "any of the game's own windows with its X."),
     ],
     "Emulate Spooky": [
         ("What it does",

@@ -120,6 +120,13 @@ Source: "{#ProjectDir}\tools\bof_emu\*"; DestDir: "{app}\tools\bof_emu"; \
 Source: "{#ProjectDir}\tools\dp_emu\*"; DestDir: "{app}\tools\dp_emu"; \
     Flags: recursesubdirs ignoreversion; \
     Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.so,*.img,*.zip"
+; The American Pinball rig (tools/ap_emu, PAD-264/PAD-292): the Emulate AP
+; tab.  Sources only: the Python the games run on is downloaded inside WSL on
+; the first Start (setup.sh), and the unpacked game lives under /var/tmp
+; there, never here.
+Source: "{#ProjectDir}\tools\ap_emu\*"; DestDir: "{app}\tools\ap_emu"; \
+    Flags: recursesubdirs ignoreversion; \
+    Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.pkg,*.zip"
 ; The Spooky rig (tools/spooky_emu, PAD-266): the Emulate Spooky tab.  Like
 ; the BoF rig it carries one BUILT file, spkshim.so, so .so must never join
 ; the excludes; its switch window reuses tools/bof_emu's page.  The unpacked

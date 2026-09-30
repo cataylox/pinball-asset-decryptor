@@ -26,6 +26,7 @@ export const WHAT = {
   compare: "Compare it with another card and see what changed.",
   emulate: "Run the game on this computer.",
   emulate_jjp: "Run the game on this computer.",
+  emulate_ap: "Run the game on this computer.",
   emulate_bof: "Run the game on this computer.",
   emulate_dp: "Run the game on this computer.",
   emulate_spooky: "Run the game on this computer from its update file (Beetlejuice so far).",

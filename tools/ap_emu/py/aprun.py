@@ -19,7 +19,22 @@ machine has that FakePinPROC lacks are added here, before the launcher runs:
   `<switch> close|open|tap [ms]` from the FIFO $AP_FIFO (sw.py writes them)
   and the game loop delivers them through FakePinPROC.add_switch_event, the
   hook its own switch simulator uses - so every switch in the machine yaml
-  can be pressed, not only the keyboard_switch_map ones.
+  can be pressed, not only the keyboard_switch_map ones.  `!drain` puts a
+  ball back in the trough (the playfield has no physics to drain it).
+* What the game sees, for the switch window: the numbers of the switches
+  the game has active, in `active` beside $AP_LOG, rewritten when they change
+  (checked five times a second from the game loop); every light's colour in
+  `lights.json` ({name: [r, g, b]}: an LED's current_color, a lamp driver's
+  on/off from the fake P-ROC); and once, `pfpos.json` - the positions the
+  machine yaml gives switches and LEDs (x, y: Galactic Tank Force 2026 has
+  them, for AP's own playfield simulator).  `!reset` refills the trough.
+  `!rip <n> 1|0` RIPS a switch (a spinner): while on, the game loop flips it
+  every RIP_S, as the Stern rigs' right-hold does.
+* The keyboard in the game's own windows (PAD-292): the same keys as the
+  virtual playfield (apswitches.py's `keymap`, read from switches.json beside
+  $AP_LOG).  A key in the game's SDL window is taken here, before procgame's
+  desktop sees it (its Esc would quit the game; here Esc is the service
+  Back button); apiav's windows forward theirs (apquit.c) as `!key <sym> 1|0`.
 
 Everything the rig injects is logged to $AP_LOG.
 """
@@ -117,12 +132,51 @@ except ImportError:                             # Tank: no SDL on the Python sid
 if sdl2 is not None:
     _orig_create_window = sdl2.video.SDL_CreateWindow
 
+    # A visible run's windows say whose they are (the line in
+    # $AP_TITLE_FILE, "PAD - Legends of Valhalla"), not "PyProcGameHD.
+    # [CTRL-C to exit]".
+    try:
+        with open(os.environ["AP_TITLE_FILE"], "rb") as f:
+            _title = f.read().strip()
+    except (KeyError, IOError, OSError):
+        _title = b""
+
     def _create_window(title, x, y, w, h, flags):
+        title = _title or title
         win = _orig_create_window(title, x, y, w, h, flags)
         log("window: %dx%d+%d+%d %s" % (w, h, x, y, title))
         return win
 
     sdl2.video.SDL_CreateWindow = sdl2.SDL_CreateWindow = _create_window
+
+    # Closing a game window (its X) ends the game.  procgame's desktop quits
+    # only on Esc / Ctrl-C and drops SDL's close events, so the X did nothing
+    # (PAD-292: David wants the X to close every emulator window - the rig
+    # and the app take down the rest once the game is gone).  The desktop
+    # reads events through sdl2.ext.get_events at call time, so this sees
+    # every one of them.
+    import sdl2.ext
+    _orig_ext_get_events = sdl2.ext.get_events
+
+    def _ext_get_events():
+        evs = _orig_ext_get_events()
+        out = []
+        for e in evs:
+            if e.type == sdl2.SDL_QUIT or (
+                    e.type == sdl2.SDL_WINDOWEVENT
+                    and e.window.event == sdl2.SDL_WINDOWEVENT_CLOSE):
+                log("window closed: the game quits")
+                os._exit(0)
+            if e.type in (sdl2.SDL_KEYDOWN, sdl2.SDL_KEYUP):
+                code = _SDLK.get(e.key.keysym.sym)
+                if code and code in _keys():
+                    if not e.key.repeat:
+                        _handle_key(code, e.type == sdl2.SDL_KEYDOWN)
+                    continue                    # ours, not the desktop's
+            out.append(e)
+        return out
+
+    sdl2.ext.get_events = _ext_get_events
 from procgame import fakepinproc
 from procgame.game import game as pgame
 
@@ -293,6 +347,18 @@ def _inject(self):
         if num == "state":
             _log_state(_game[0])
             continue
+        if num == "drain":
+            _trough_drain(_game[0])
+            continue
+        if num == "reset":
+            _trough_reset(_game[0])
+            continue
+        if num == "key":
+            _handle_key(*closed)
+            continue
+        if num == "rip":
+            _rip(*closed)
+            continue
         sw = _game[0].switches[num]
         et = (pinproc.EventTypeSwitchClosedDebounced if closed else pinproc.EventTypeSwitchOpenDebounced) \
             if sw.debounce else \
@@ -314,8 +380,39 @@ def _set_active(sw, active, delay=0.0):
 _later = []
 
 
+#: A ripped switch flips this often (s): 20 turns a second, well above
+#: procgame's debounce.
+RIP_S = 0.025
+_rips = {}                                      # number -> [next flip, active]
+
+
+def _rip(num, on):
+    g = _game[0]
+    if g is None:
+        return
+    try:
+        sw = g.switches[num]
+    except (KeyError, IndexError):
+        return
+    if on:
+        _rips[sw.number] = [0.0, False]
+    elif _rips.pop(sw.number, None) is not None:
+        _set_active(sw, False)
+
+
+def _flip_rips(now):
+    g = _game[0]
+    for num, st in list(_rips.items()):
+        if now >= st[0]:
+            st[1] = not st[1]
+            st[0] = now + RIP_S
+            _set_active(g.switches[num], st[1])
+
+
 def _release_later():
     now = time.time()
+    if _rips:
+        _flip_rips(now)
     for item in [i for i in _later if i[0] <= now]:
         _later.remove(item)
         _queue.put(item[1:])
@@ -332,11 +429,23 @@ def _name(x):
     return x if isinstance(x, basestring) else getattr(x, "name", None)
 
 
+def _num(sw):
+    digits = "".join(c for c in sw.name if c.isdigit())
+    return int(digits) if digits else 0
+
+
 def _trough_parts(g):
-    """(eject coil name, position switches from the eject end, shooter switch)
+    """(eject coil name, position switches in the order balls sit - from
+    the eject end to the ENTRY, where a drained ball lands - shooter switch)
     of the game's trough - SkeletonGame's Trough / Houdini's TroughHoudini
     (names) or ApiLib's TroughController (Hot Wheels on: objects, positions
-    listed from the eject end)."""
+    listed from the eject end).
+
+    The entry matters: SkeletonGame only checks for a drain once a ball has
+    come in there (its sw_trough6_active - trough7 on Houdini - sets
+    ball_entered_trough); a count going up anywhere else is ignored.  It is
+    the position the trough class has its own `sw_<name>_active` for (else
+    the highest-numbered); the rest sit by their numbers, eject end first."""
     t = getattr(g, "trough", None)
     if t is None:
         return None, [], None
@@ -344,17 +453,24 @@ def _trough_parts(g):
         coil = _name(getattr(t, "release_coil", None) or getattr(t.trough_device, "release_coil", None))
         pos = [g.switches[_name(s)] for s in (t.trough_device.position_switches or [])
                if _name(s) in g.switches]
+        entry = _name(getattr(t.trough_device, "entry_switch", None))
         shooter = _name(getattr(t, "shooter_switch", None))
     else:
         coil = getattr(t, "eject_coilname", None)
         pos = [g.switches[n] for n in (getattr(t, "position_switchnames", None) or [])
                if n in g.switches]
         eject = getattr(t, "eject_switchname", None)
+        pos.sort(key=_num)
         if eject in g.switches and g.switches[eject] in pos:
             pos.remove(g.switches[eject])
             pos.insert(0, g.switches[eject])        # balls sit from the eject end
+        entry = next((s.name for s in pos if hasattr(type(t), "sw_%s_active" % s.name)), None)
+        if entry is None and pos:
+            entry = max(pos[1:] or pos, key=_num).name
         shooter = getattr(t, "shooter_lane_switchname", None)
     pos = [s for s in pos if "jam" not in (getattr(s, "label", "") or s.name).lower()]
+    if entry in [s.name for s in pos]:
+        pos = [s for s in pos if s.name != entry] + [g.switches[entry]]
     return coil, pos, (g.switches[shooter] if shooter in g.switches else None)
 
 
@@ -370,6 +486,49 @@ def _trough_eject(g, pos, shooter):
     if shooter is not None:
         _set_active(shooter, True, 0.5)
     log("trough: ejected a ball, %d left%s" % (balls - 1, ", into " + shooter.name if shooter else ""))
+
+
+def _trough_drain(g):
+    """A ball drains the way a real one does: it lands on the trough's entry
+    switch (the far end) and rolls down to the next free position (they fill
+    from the eject end) - the entry is what makes the game look for a drain
+    (_trough_parts)."""
+    if g is None:
+        return
+    coil, pos, shooter = _trough_parts(g)
+    balls = sum(1 for s in pos if s.is_active())
+    if balls >= len(pos):
+        log("trough: drain with the trough full")
+        return
+    entry = pos[-1]
+    if not entry.is_active():
+        _set_active(entry, True)
+    for i, s in enumerate(pos):
+        want = i <= balls
+        if s is entry:
+            if not want:
+                _set_active(entry, False, 0.3)          # rolled on down
+        elif s.is_active() != want:
+            _set_active(s, want, 0.3)
+    log("trough: drained a ball in at %s, %d in the trough" % (entry.name, balls + 1))
+
+
+def _trough_reset(g):
+    """Every ball home: the trough full (PRGame.numBalls, from the eject
+    end), the shooter lane empty - the window's Reset balls."""
+    if g is None:
+        return
+    coil, pos, shooter = _trough_parts(g)
+    try:
+        balls = int(g.config["PRGame"]["numBalls"])
+    except Exception:
+        balls = len(pos)
+    for i, s in enumerate(pos):
+        if s.is_active() != (i < balls):
+            _set_active(s, i < balls)
+    if shooter is not None and shooter.is_active():
+        _set_active(shooter, False)
+    log("trough: reset, %d in the trough" % min(balls, len(pos)))
 
 
 def _coil_fired(driver):
@@ -399,15 +558,167 @@ for _m in ("pulse", "future_pulse", "patter", "pulsed_patter"):
             _hook(_cls, _m)
 
 
+_ACTIVE = os.path.join(os.path.dirname(LOG), "active") if LOG else None
+_active_seen = [0.0, None]
+
+
+def _publish_active():
+    """Rewrite `active` (the switch numbers the game has active) when they
+    changed - at most five times a second."""
+    now = time.time()
+    g = _game[0]
+    if not _ACTIVE or g is None or now - _active_seen[0] < 0.2:
+        return
+    _active_seen[0] = now
+    try:
+        line = " ".join(str(n) for n in sorted(sw.number for sw in g.switches if sw.is_active()))
+    except Exception:                           # the game still setting up
+        return
+    if line != _active_seen[1]:
+        _active_seen[1] = line
+        with open(_ACTIVE + ".tmp", "w") as f:
+            f.write(line + "\n")
+        os.rename(_ACTIVE + ".tmp", _ACTIVE)
+
+
+# SDL2 keycodes -> the browser's KeyboardEvent.code names the keymap uses.
+# Numeric, so the Python 3 titles (no pysdl2) and apquit.c share them.
+_SDLK = dict([(ord(c), "Key" + c.upper()) for c in "abcdefghijklmnopqrstuvwxyz"]
+             + [(ord(d), "Digit" + d) for d in "0123456789"]
+             + [(0x40000059 + i, "Numpad%d" % (i + 1)) for i in range(9)])
+_SDLK.update({32: "Space", 13: "Enter", 8: "Backspace", 27: "Escape", 45: "Minus",
+              61: "Equal", 0x40000062: "Numpad0", 0x40000058: "NumpadEnter",
+              0x40000056: "NumpadSubtract", 0x40000057: "NumpadAdd",
+              0x40000050: "ArrowLeft", 0x4000004F: "ArrowRight",
+              0x40000052: "ArrowUp", 0x40000051: "ArrowDown",
+              0x40000042: "F9", 0x40000048: "Pause"})
+_KEYS = os.path.join(os.path.dirname(LOG), "switches.json") if LOG else None
+_keymap = [None, {}]                            # [mtime, {code: entry}]
+
+
+def _keys():
+    """{code: keymap entry} from switches.json, re-read when it changes (it
+    is written after the game is up)."""
+    try:
+        mtime = os.stat(_KEYS).st_mtime
+    except (OSError, TypeError):
+        return {}
+    if mtime != _keymap[0]:
+        import json
+        try:
+            with open(_KEYS) as f:
+                km = json.load(f).get("keymap") or []
+        except (IOError, OSError, ValueError):
+            km = []
+        _keymap[0] = mtime
+        _keymap[1] = dict((c, k) for k in km for c in k.get("codes") or [])
+    return _keymap[1]
+
+
+def _handle_key(code, down):
+    """A key pressed in a game window: the switches it holds, or its action.
+    True if the key is the keymap's (and so not the game's)."""
+    k = _keys().get(code)
+    g = _game[0]
+    if k is None or g is None:
+        return False
+    act = k.get("action")
+    if act:
+        if down:
+            if act == "plunge":
+                coil, pos, shooter = _trough_parts(g)
+                if shooter is not None and shooter.is_active():
+                    _set_active(shooter, False)
+            elif act == "drain":
+                _trough_drain(g)
+            elif act == "door" and "coinDoor" in g.switches:
+                sw = g.switches["coinDoor"]
+                _set_active(sw, not sw.is_active())
+            # pause: only the virtual playfield can (a frozen game cannot
+            # read the key that would resume it)
+            log("key: %s %s" % (code, act))
+        return True
+    for n in k.get("ns") or []:
+        try:
+            _set_active(g.switches[n], down)
+        except (KeyError, IndexError):
+            pass
+    return True
+
+
+_LIGHTS = os.path.join(os.path.dirname(LOG), "lights.json") if LOG else None
+_POS = os.path.join(os.path.dirname(LOG), "pfpos.json") if LOG else None
+_lights_seen = [0.0, None, False]
+
+
+def _rgb(c):
+    c = list(c or [])[:3]
+    if len(c) == 1:                             # a single-colour LED
+        c = c * 3
+    return [max(0, min(255, int(v))) for v in c] + [0] * (3 - len(c))
+
+
+def _publish_lights():
+    """lights.json: every LED's colour and every lamp driver's on/off (a lit
+    lamp is warm white), rewritten when anything changed, at most ten times
+    a second.  pfpos.json once: switch / LED positions from the machine yaml."""
+    import json
+    now = time.time()
+    g = _game[0]
+    if not _LIGHTS or g is None or now - _lights_seen[0] < 0.1:
+        return
+    _lights_seen[0] = now
+    out = {}
+    try:
+        for led in getattr(g, "leds", None) or []:
+            cur = getattr(led, "current_color", None)
+            if cur is not None:
+                out[led.name] = _rgb(cur)
+        for lamp in getattr(g, "lamps", None) or []:
+            try:
+                st = lamp.state() or {}
+                on = bool(st.get("state"))
+            except Exception:
+                on = False
+            out[lamp.name] = [255, 214, 140] if on else [0, 0, 0]
+    except Exception:
+        return
+    if not _lights_seen[2]:
+        _lights_seen[2] = True
+        pos = {"switches": {}, "leds": {}}
+        try:
+            pos["balls"] = int(g.config["PRGame"]["numBalls"])
+        except Exception:
+            pass
+        for kind, items in (("switches", g.switches), ("leds", getattr(g, "leds", None) or [])):
+            for it in items:
+                x, y = getattr(it, "x", None), getattr(it, "y", None)
+                if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+                    pos[kind][it.name] = [x, y]
+        with open(_POS + ".tmp", "w") as f:
+            json.dump(pos, f)
+        os.rename(_POS + ".tmp", _POS)
+    text = json.dumps(out, sort_keys=True)
+    if text != _lights_seen[1]:
+        _lights_seen[1] = text
+        with open(_LIGHTS + ".tmp", "w") as f:
+            f.write(text)
+        os.rename(_LIGHTS + ".tmp", _LIGHTS)
+
+
 def get_events(self):
     _release_later()
     _inject(self)
+    _publish_active()
+    _publish_lights()
     return _orig_get_events(self)
 
 
 def get_events_noDMD(self):
     _release_later()
     _inject(self)
+    _publish_active()
+    _publish_lights()
     return _orig_get_events_nodmd(self)
 
 
@@ -426,6 +737,28 @@ def _reader(path):
                 parts = line.split()
                 if parts == ["!state"]:
                     _queue.put(("state", None))     # answered from the game loop
+                    continue
+                if parts == ["!drain"]:
+                    log("sw: drain")
+                    _queue.put(("drain", None))
+                    continue
+                if parts == ["!reset"]:
+                    log("sw: reset balls")
+                    _queue.put(("reset", None))
+                    continue
+                if len(parts) == 3 and parts[0] == "!rip":
+                    try:
+                        _queue.put(("rip", (int(parts[1]), parts[2] == "1")))
+                    except ValueError:
+                        pass
+                    continue
+                if len(parts) == 3 and parts[0] == "!key":
+                    try:
+                        code = _SDLK.get(int(parts[1]))
+                    except ValueError:
+                        code = None
+                    if code:
+                        _queue.put(("key", (code, parts[2] == "1")))
                     continue
                 if len(parts) < 2 or _game[0] is None:
                     continue

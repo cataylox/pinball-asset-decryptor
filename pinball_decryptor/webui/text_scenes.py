@@ -626,7 +626,7 @@ class TextScenesService(TreeEditMixin):
         if d != self._sel:
             self._focus_want = None
             self._drop_live_edit()
-            self._tsel = None
+        self._tree_unselect()
         self._sel = d
         self._on_select()
         return True

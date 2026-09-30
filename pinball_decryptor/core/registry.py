@@ -94,6 +94,12 @@ class Capabilities:
     # it is era-gated within the Stern plugin (Spike 2 sets ``emulate``, the
     # Spike 1 era sets this).  See gui/spike1_emulate_tab.py and tools/spike1_emu.
     emulate_spike1: bool = False
+    # Emulate tab for American Pinball.  Its own rig (tools/ap_emu): the
+    # games are SkeletonGame Python programs with the framework's own
+    # simulator (FakePinPROC), so the rig supplies only what the machine's OS
+    # did - the Python, a machine at rest, a window, switches.  No key beyond
+    # the .pkg's, no CPU emulation.  See webui/tabs/emulate_ap.py.
+    emulate_ap: bool = False
     # Emulate tab for Barrels of Fun.  Its own flag for the same reason as
     # the two above: a fourth rig (tools/bof_emu) - a native x86-64 Godot game
     # whose only missing piece is the USB serial hardware (FAST Neuron,
