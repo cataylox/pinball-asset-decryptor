@@ -330,7 +330,7 @@ export function ScenesPage() {
         </div>
       </div>
       <${Divider} k="left" measure=${measureLeft} label="Scene list width" ...${splitProps} />
-      <div class="scenes-center">
+      <div class="scenes-center" onPointerDown=${editor ? (e) => deselectOnBlank(s.tree_view, e) : null}>
         ${[s.card_note, editor && s.pic_note].filter(Boolean).map((t, i) => html`<div key=${"w" + i}
           class="note warn scenes-warn" role="status"><${Icon} name="warn" /><div class="body-text small">${t}</div></div>`)}
         <div class=${cx("scenes-stage", zoom.zoom > 1 && "zoomed")} ref=${zoom.ref}
@@ -543,6 +543,21 @@ function TreeTop({ s, onMenu }) {
 // them in the Layers list (PAD-279).
 const pickHow = (e, range) => (range && e.shiftKey ? "range" : e.ctrlKey || e.metaKey || e.shiftKey ? "add" : "");
 
+// PAD-294 (DragonRR): a plain click on the empty room around the picture, or below the rows
+// in Layers, drops the selection (a selected layer is drawn on top until then).  A click on
+// a control, the picture itself or a scrollbar is left alone.
+const BLANK_SKIP = ".tree-canvas, .sc-item, button, input, select, textarea, a, label, [role=button], [role=listbox], .field, .scenes-edit";
+function deselectOnBlank(t, e) {
+  if (!t || e.button !== 0 || pickHow(e, false) || (t.sel == null && !(t.sels || []).length)) return;
+  const el = e.target;
+  if (!el || !el.closest || el.closest(BLANK_SKIP)) return;
+  const r = el.getBoundingClientRect();
+  const k = (r.width ? el.offsetWidth / r.width : 1) || 1;       // the app can be zoomed
+  if ((e.clientX - r.left) * k > el.clientLeft + el.clientWidth
+      || (e.clientY - r.top) * k > el.clientTop + el.clientHeight) return;
+  call("text_scenes.tree_select", null);
+}
+
 // PAD-293 (DragonRR): as in Photoshop or Fusion, a layer's eye is the preview only - it never
 // changes the card - and Alt+click on it shows that layer alone.  Hiding a layer in the game
 // is its own mark (the card at the row's end, like Fusion's Suppress): the row is struck
@@ -639,7 +654,8 @@ function TreeLayers({ t }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  return html`<div class="scenes-contents tree-layers" ref=${listRef} role="tree" aria-label="Layers">
+  return html`<div class="scenes-contents tree-layers" ref=${listRef} role="tree" aria-label="Layers"
+      onPointerDown=${(e) => deselectOnBlank(t, e)}>
     <div class="sc-head"><span class="eyebrow">Layers — last drawn on top</span>
       ${t.solo != null ? html`<button type="button" class="ly-solo small"
         ...${tip({ head: "One layer is shown alone", lines: [["Click", "bring the other layers back"], ["Alt+click", "its eye does the same"]] })}
