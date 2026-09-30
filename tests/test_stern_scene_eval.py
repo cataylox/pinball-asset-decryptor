@@ -357,6 +357,19 @@ def test_a_peeked_layer_in_a_hidden_sprite_is_drawn_alone():
                              through={1, 11})) == ["Art", "Glow", "Textbox"]
 
 
+def test_a_peeked_sprite_unveils_the_layers_hidden_with_their_eye():
+    """DragonRR (PAD-289): picking a sprite shows every layer in it, those hidden with their
+    eye too.  The eye keeps the layer's own timeline in ``_kf``; *unveil* draws by that."""
+    art = N(20, "Art", [9], kf=((1, 0),))
+    art["_kf"] = [[1, 1]]                               # hidden with its eye
+    body = {"kind": "Sprite", "frames": 1, "labels": [], "kids": [art, N(21, "Textbox", [9])]}
+    m = man([N(1, "Body", [3]), N(2, "Over", [9])], {3: body, 9: BMP})
+    names = lambda ds: [d["path"][-1] for d in ds]                       # noqa: E731
+    assert names(E.draw_list(m, 1)) == ["Textbox", "Over"]
+    assert names(E.draw_list(m, 1, show=1)) == ["Over", "Textbox"]
+    assert names(E.draw_list(m, 1, show=1, unveil={20})) == ["Over", "Art", "Textbox"]
+
+
 def test_battle_select_peeks_the_gigan_text_box_alone():
     m = _manifest("cac32730")
     by = {}
