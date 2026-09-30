@@ -20,6 +20,7 @@ import threading
 import time
 
 from pinball_decryptor.webui import rig as _rig
+from ...core import rigslot
 from .. import emulate_jjp_core as jjp
 from .. import compat
 from ..emulate_jjp_common import RigTabMixin, rig_off
@@ -233,7 +234,8 @@ class EmulateJJPTab(RigTabMixin, TabService):
                         "watch.sh", *args,
                         # PAD_AUDIO=1: a rig is silent unless asked (PAD-253)
                         env=["PAD_AUDIO=1",
-                             "PAD_AUDIO_CTL=" + self._audio_ctl_file()]),
+                             "PAD_AUDIO_CTL=" + self._audio_ctl_file()]
+                        + rigslot.board_env()),
                     timeout=1800)
                 if saw_wrong_key or rc == 7:
                     self._mark_wrong_key()

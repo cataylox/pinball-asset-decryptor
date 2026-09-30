@@ -1,14 +1,24 @@
-"""Emulate Spooky tab: run a Spooky Pinball game on this PC - Beetlejuice
-only, so far, and the page says so first.
+"""Emulate Spooky tab: run a Spooky Pinball game on this PC from its update
+file - Beetlejuice only, so far, and the page says so.
 
-THIN, like the BoF tab: every step of the launch (unpack, board, game)
-lives in ``tools/spooky_emu/watch.sh``.  This service starts it (and cancels
-it), stops it, and polls ``status.sh``.
+Built on the American Pinball tab (webui/tabs/emulate_ap.py), the template
+every maker's Emulate tab follows (David, PAD-266: "We want the volume and the
+ball feed and everything to look consistent between the manufacturers"):
 
-The machine's switches are a WINDOW of their own, as the other rigs' are:
-``tools/spooky_emu/spkpf.py`` (the BoF switch window pointed at this rig's
-board), run on the app's Windows Python.  This tab opens it once the game is
-in attract mode, reopens it on request, and closes it on Stop.
+* THIN: every step of the launch (unpack, board, game) lives in
+  ``tools/spooky_emu/watch.sh``.  This service starts it (and cancels it),
+  stops it, and polls ``status.sh`` - the same keys as AP's.
+* The machine is a WINDOW of its own - AP's virtual playfield
+  (``tools/ap_emu/appf.py``, the Stern window's page) pointed at this rig's
+  board by ``tools/spooky_emu/spkpf.py``: the keys, the service buttons,
+  BALLS (Plunge, Drain, Reset balls), Pause and the Volume bar.  It opens
+  once the game is in attract, reopens on request, and closes on Stop (its
+  stdin is the tab's pipe) or when the game ends.
+* Sound is always on; Volume / Mute follow live through the control file
+  every Emulate tab shares (``tools/spooky_emu/spkvol.py`` holds the game's
+  stream at that level).
+* A Cache window (AP's) shows and deletes the builds unpacked in the app's
+  Linux.
 
 Exports ``spooky_emulate_file_var`` (the run logic persists it per project)
 and answers ``emulate_shutdown`` (the app-quit fan-out).
@@ -18,38 +28,43 @@ import os
 import subprocess
 import sys
 import threading
+import time
 
 from pinball_decryptor.webui import rig as _rig
 from .. import compat
+from ...core import rigslot
 from .. import emulate_spooky_core as spk
-from ..emulate_jjp_common import (RigTabMixin, rig_off, load_audio_ctl,
+from ..emulate_jjp_common import (RigTabMixin, rig_off, audio_ctl_file,
                                   windows_python)
 from .base import TabService, rpc
 
 INTRO = ("Run a Spooky Pinball game on this PC. Supported so far: %s - "
-         "the other Spooky games can't be emulated yet. The game is a native "
-         "Linux program, so it runs directly; the emulator stands in for the "
-         "machine's controller board.\n"
+         "the other Spooky games can't be emulated yet. The emulator stands "
+         "in for the machine's controller board and gives the game a window, "
+         "sound and every switch.\n"
          "Pick the machine's update file, or one the Write tab built, to play "
          "a mod before it goes on a USB stick."
          % ", ".join(spk.supported_names()))
 
 FILE_TIP = ("A Beetlejuice update file (.beetlejuice). It is only read: the "
-            "emulator unpacks a copy inside the app's Linux, and keeps the "
-            "last two so the next start is quicker.")
+            "emulator unpacks it once (a few minutes) and keeps it, so the "
+            "next start is quicker.")
 
-SOUND_TIP = ("Play the game's sound on this PC. Applies when the game starts; "
-             "the game's own volume is in its service menu.")
+VOLUME_TIP = ("The game's sound on this PC - Volume and Mute follow at once, "
+              "while the game plays (the same knob every Emulate tab shares). "
+              "The game's own volume is in its service menu.")
 
-SWITCHES_TIP = ("The machine's switches, every one by name. Hold a switch with "
-                "the mouse, right-click to latch it.")
+SWITCHES_TIP = ("The virtual playfield, as on the American Pinball and Stern "
+                "Emulate tabs: every switch, the keyboard, the service "
+                "buttons and the balls (Plunge, Drain, Reset balls), Pause "
+                "and the volume.")
 
-#: The status grid (label, key into the values _apply computes).
+#: The status grid (label, key into the values _apply computes) - AP's.
 CELLS = (
     ("Game", "title"),
     ("Version", "version"),
-    ("Board", "board"),
-    ("Balls", "balls"),
+    ("Switches", "switches"),
+    ("Window", "window"),
     ("Memory", "rss"),
     ("Uptime", "uptime"),
 )
@@ -73,11 +88,14 @@ class EmulateSpookyTab(RigTabMixin, TabService):
         super().__init__(window)
         self.spooky_emulate_file_var = self.var("file")
         self._init_rig_state()
-        #: a Start is in flight (the button is Cancel) / its cancel is
         self._starting = False
         self._cancelling = False
-        #: the switch window (spkpf.py), when this app opened one
+        #: the virtual playfield (spkpf.py), when this app opened one
         self._sw_proc = None
+        #: the Cache window: open?, its entries by name, the selection
+        self._cache_open = False
+        self._cache_entries = {}
+        self._cache_sel = []
         ok = spk.rig_available()
         if not ok:
             note = ("The Spooky emulator is missing from tools/spooky_emu - "
@@ -88,16 +106,15 @@ class EmulateSpookyTab(RigTabMixin, TabService):
                     "on Windows only.")
         else:
             note = ""
-        self.set(intro=INTRO, file_tip=FILE_TIP, sound_tip=SOUND_TIP,
-                 switches_tip=SWITCHES_TIP,
-                 supported=spk.supported_names(),
+        self.set(intro=INTRO, file_tip=FILE_TIP, volume_tip=VOLUME_TIP,
+                 switches_tip=SWITCHES_TIP, supported=spk.supported_names(),
                  platform=sys.platform, rig_ok=ok,
                  go_label="Start", go_enabled=ok, busy=False, go_busy=False,
                  starting=False,
                  state_label="Checking…", state_hint="", tone="",
                  cells=[{"label": lbl, "key": k, "value": "—"}
                         for lbl, k in CELLS],
-                 note=note, up=False, ready=False, game="")
+                 note=note, up=False, ready=False, game="", cache=None)
         self._start_polling()
 
     # ------------------------------------------------------------------
@@ -193,7 +210,7 @@ class EmulateSpookyTab(RigTabMixin, TabService):
 
     @rpc
     def switches(self):
-        """Open (or bring back) the switch window for the running game."""
+        """Open (or bring back) the virtual playfield for the running game."""
         if rig_off() or not self._last_up:
             return False
         info = dict(self._info)
@@ -214,47 +231,202 @@ class EmulateSpookyTab(RigTabMixin, TabService):
         return True
 
     # ------------------------------------------------------------------
-    # the switch window
+    # the Cache window (AP's): the builds unpacked in the app's Linux, and
+    # deleting them (tools/spooky_emu/cache.sh)
+    # ------------------------------------------------------------------
+    CACHE_HINT = ("Deleting frees the space now: a build is unpacked again on "
+                  "its next Start - nothing is lost (settings and high scores "
+                  "are kept apart).")
+
+    @rpc
+    def open_cache(self):
+        if not spk.rig_available() or not spk.platform_ok():
+            return False
+        if self._cache_open:
+            return True
+        self._cache_open = True
+        self._cache_sel = []
+        self.set(cache={"head": "Reading the cache…", "rows": [], "sel": [],
+                        "busy": True, "hint": self.CACHE_HINT})
+        self.cache_refresh()
+        return True
+
+    def _cache_patch(self, **kw):
+        cur = self.get("cache")
+        if not cur or not self._cache_open:
+            return
+        cur = dict(cur)
+        cur.update(kw)
+        self.set(cache=cur)
+
+    @rpc
+    def cache_close(self):
+        self._cache_open = False
+        self.set(cache=None)
+        return True
+
+    @rpc
+    def cache_refresh(self):
+        if not self._cache_open:
+            return False
+        self._cache_sel = []
+        self._cache_patch(head="Reading the cache…", busy=True, sel=[])
+        if rig_off():
+            self._post(self._cache_show, ([], None))
+            return True
+
+        def work():
+            try:
+                out = subprocess.run(
+                    spk.rig_cmd_root("cache.sh", "--list"),
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    timeout=120, creationflags=_rig.CREATE_FLAGS)
+                text = out.stdout.decode("utf-8", "replace")
+            except Exception:                              # noqa: BLE001
+                text = ""
+            self._post(self._cache_show, spk.parse_cache(text))
+
+        threading.Thread(target=work, daemon=True,
+                         name="pad-spooky-cache").start()
+        return True
+
+    def _cache_show(self, result):
+        if not self._cache_open:
+            return
+        from ..emulate_core import human_size
+        entries, disk = result
+        self._cache_entries = {e["name"]: e for e in entries}
+        running = (self._info.get("build") or "") if self._last_up else ""
+        rows = [{"name": e["name"], "label": spk.cache_label(e),
+                 "size": human_size(e["kb"]),
+                 "used": time.strftime("%Y-%m-%d %H:%M",
+                                       time.localtime(e["used"]))
+                 if e["used"] else "—",
+                 "src": ("running now" if e["name"] == running else e["src"])}
+                for e in entries]
+        total = sum(e["kb"] for e in entries)
+        if not entries:
+            head = "Nothing is cached - the next Start unpacks the game."
+        else:
+            head = "%d item%s — %s" % (len(entries),
+                                       "" if len(entries) == 1 else "s",
+                                       human_size(total))
+            if disk:
+                head += " · %s free of %s (the app's Linux)" % (
+                    human_size(disk[0]), human_size(disk[1]))
+        self._cache_patch(head=head, rows=rows, busy=False, sel=[],
+                          hint=self.CACHE_HINT)
+
+    @rpc
+    def cache_select(self, names):
+        self._cache_sel = [n for n in (names or []) if n in self._cache_entries]
+        self._cache_patch(sel=list(self._cache_sel))
+        return len(self._cache_sel)
+
+    @rpc
+    def cache_delete(self):
+        names = list(self._cache_sel)
+        if not self._cache_open or not names or rig_off():
+            return False
+        from ..emulate_core import human_size
+        freed = sum(self._cache_entries.get(n, {}).get("kb", 0) for n in names)
+        if not compat.messagebox.askyesno(
+                "Delete cached items",
+                "Delete %d item%s, freeing about %s?\n\nA running game's "
+                "build is kept." % (len(names), "" if len(names) == 1 else "s",
+                                    human_size(freed))):
+            return False
+        self._cache_patch(busy=True, hint="Deleting…")
+
+        def work():
+            try:
+                out = subprocess.run(
+                    spk.rig_cmd_root("cache.sh", "--drop", *names),
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    timeout=600, creationflags=_rig.CREATE_FLAGS)
+                for line in out.stdout.decode("utf-8", "replace").splitlines():
+                    if line.startswith("refused="):
+                        self._log("Spooky: cache: kept %s" % line[8:])
+                    elif line.startswith("dropped "):
+                        self._log("Spooky: cache: deleted %s" % line[8:])
+            except Exception as exc:                       # noqa: BLE001
+                self._log("Spooky: cache delete failed: %s" % exc)
+            self._post(self.cache_refresh)
+
+        threading.Thread(target=work, daemon=True,
+                         name="pad-spooky-cache-drop").start()
+        return True
+
+    # ------------------------------------------------------------------
+    # the virtual playfield
     # ------------------------------------------------------------------
     def _switch_window_cmd(self, info):
         """spkpf.py's command line for the running game, or None."""
+        table = (info or {}).get("switches_json")
         py = windows_python()
-        if not py:
+        if not table or not py:
             return None
-        cmd = [py, os.path.join(spk.rig_dir(), "spkpf.py"),
-               "--slot", (info or {}).get("slot") or "0"]
+        # --parent-pipe: the window closes itself when this app closes its
+        # stdin (_close_switches)
+        cmd = [py, os.path.join(spk.rig_dir(), "spkpf.py"), "--parent-pipe",
+               "--slot", info.get("slot") or "0",
+               # the status bar's VOL / Mute: the same control file as this tab's
+               "--audio-ctl", audio_ctl_file()]
         distro = spk.rig_distro()
         if distro:
-            cmd += ["--distro", distro]
+            # the table lives in the app's Linux; Windows reads it through
+            # the distro's share
+            cmd += ["--distro", distro, "--table",
+                    "\\\\wsl.localhost\\%s%s" % (distro, table.replace("/", "\\"))]
+        else:
+            cmd += ["--table", table]
         return cmd
 
     def _open_switches(self, info=None):
         if self._sw_proc is not None and self._sw_proc.poll() is None:
-            return True              # already open (it keeps itself on top)
-        cmd = self._switch_window_cmd(info)
+            return True
+        if info is None or not info.get("switches_json"):
+            info = self._read_status()
+        cmd = self._switch_window_cmd(info or {})
         if not cmd:
-            self._log("Spooky: could not open the switch window (no Python "
-                      "to run it with).")
+            self._log("Spooky: could not open the virtual playfield (no Python "
+                      "to run it with, or the game is not running).")
             return False
         try:
             self._sw_proc = subprocess.Popen(
-                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                creationflags=_rig.CREATE_FLAGS)
+                cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, creationflags=_rig.CREATE_FLAGS)
             return True
         except Exception as exc:                           # noqa: BLE001
             self._sw_proc = None
-            self._log("Spooky: could not open the switch window: %s" % exc)
+            self._log("Spooky: could not open the virtual playfield: %s" % exc)
             return False
 
-    def _close_switches(self):
-        """The window also closes itself once the game stops answering;
-        this is the prompt version, for Stop and app quit."""
+    #: how long the window gets to close itself before it is killed
+    SW_CLOSE_S = 4.0
+
+    def _close_switches(self, wait=False):
+        """Close the virtual playfield, as the AP tab does: closing its stdin
+        asks it to close its window and quit; if it has not within
+        SW_CLOSE_S, its whole process tree goes."""
         proc, self._sw_proc = self._sw_proc, None
-        if proc is not None and proc.poll() is None:
+        if proc is None or proc.poll() is not None:
+            return
+
+        def work():
             try:
-                proc.terminate()
+                if proc.stdin is not None:
+                    proc.stdin.close()
+                proc.wait(timeout=self.SW_CLOSE_S)
+                return
             except Exception:                              # noqa: BLE001
                 pass
+            _kill_tree(proc)
+        if wait:
+            work()
+        else:
+            threading.Thread(target=work, daemon=True,
+                             name="pad-spooky-switches-close").start()
 
     # ------------------------------------------------------------------
     # start / stop
@@ -293,7 +465,6 @@ class EmulateSpookyTab(RigTabMixin, TabService):
         self._cancelling = False
         self._started_here = True
         self._set_go("Cancel", True)
-        _vol, muted = load_audio_ctl()
 
         def work():
             try:
@@ -303,8 +474,17 @@ class EmulateSpookyTab(RigTabMixin, TabService):
                 rc = self._run_streaming(
                     spk.rig_cmd_root(
                         "watch.sh", _rig.wsl_path(path),
-                        env=["PAD_VISIBLE=1",
-                             "PAD_AUDIO=%d" % (0 if muted else 1)]),
+                        # sound always on: Volume / Mute follow live through
+                        # the control file (spkvol.py), so unmuting a game
+                        # started muted works
+                        # the rig board names the run by its title
+                        # (PAD-296); the file's extension says which
+                        env=["PAD_VISIBLE=1", "PAD_AUDIO=1",
+                             "PAD_AUDIO_CTL=%s" % _rig.wsl_path(audio_ctl_file()),
+                             "PAD_TITLE=%s" % next(
+                                 (t for t, ext in spk.SUPPORTED
+                                  if path.lower().endswith(ext)), "")]
+                        + rigslot.board_env()),
                     timeout=1800, on_line=self._footer_line)
                 if self._cancelling:
                     self._started_here = False
@@ -386,31 +566,33 @@ class EmulateSpookyTab(RigTabMixin, TabService):
         was_up = self._last_up
         self._last_up = info.get("running") == "1"
         if was_up and not self._last_up:
+            # the game ended (its window's X, or it quit): so does its window
             self._started_here = False
-        hw = spk.hw_state(info)
-        ready = self._last_up and info.get("attract") == "1"
+            self._close_switches()
+        up = self._last_up
+        ready = up and info.get("attract") == "1"
         label, hint = spk.state_text(info)
         tone = "ok" if ready else (
             "warn" if label == "WSL not answering" else "")
         rss = int(info.get("rss_kb") or 0)
-        up = int(info.get("uptime_s") or 0)
+        secs = int(info.get("uptime_s") or 0)
         values = {
-            "title": "Beetlejuice" if self._last_up else "—",
-            "version": (info.get("version") or "—") if self._last_up else "—",
-            "board": ("connected" if hw.get("connected") else "waiting")
-            if self._last_up else "—",
-            "balls": spk.balls_text(hw) if self._last_up else "—",
-            "rss": ("%.1f GB" % (rss / 1048576.0)) if rss else "—",
-            "uptime": ("%d:%02d" % (up // 60, up % 60)) if up else "—",
+            "title": "Beetlejuice" if up else "—",
+            "version": (info.get("version") or "—") if up else "—",
+            "switches": (info.get("switches") or "—") if up else "—",
+            "window": (info.get("window") or "—").replace("x", " × ")
+            if up else "—",
+            "rss": ("%.1f GB" % (rss / 1048576.0)) if up and rss else "—",
+            "uptime": ("%d:%02d" % (secs // 60, secs % 60)) if up and secs
+            else "—",
         }
         kw = dict(state_label=label, state_hint=hint, tone=tone,
                   cells=[{"label": lbl, "key": k, "value": values.get(k, "—")}
                          for lbl, k in CELLS],
                   note="" if spk.rig_available() else self.get("note"),
-                  up=self._last_up, ready=ready,
-                  game="Beetlejuice" if self._last_up else "")
+                  up=up, ready=ready, game="Beetlejuice" if up else "")
         if not self._busy:
-            kw["go_label"] = "Stop" if self._last_up else "Start"
+            kw["go_label"] = "Stop" if up else "Start"
             kw["go_enabled"] = spk.rig_available()
             self._footer_from_info()
         kw["busy"] = self._busy
@@ -426,7 +608,7 @@ class EmulateSpookyTab(RigTabMixin, TabService):
         nothing else - a run it merely saw is somebody else's."""
         self._stopped = True
         self._cancel_poll()
-        self._close_switches()
+        self._close_switches(wait=True)
         if rig_off() or not spk.rig_available() or not spk.platform_ok():
             return
         if not self._started_here or not (self._last_up or self._busy):
@@ -439,6 +621,19 @@ class EmulateSpookyTab(RigTabMixin, TabService):
             pass
 
     shutdown_sync = emulate_shutdown
+
+
+def _kill_tree(proc):
+    """Kill *proc* and everything it started (the window's Edge)."""
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=15, creationflags=_rig.CREATE_FLAGS)
+        else:
+            proc.kill()
+    except Exception:                                      # noqa: BLE001
+        pass
 
 
 TAB = EmulateSpookyTab

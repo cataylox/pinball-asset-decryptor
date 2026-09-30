@@ -11,7 +11,9 @@
 #                display (the default: windows popping up are disruptive;
 #                shot.sh shows a hidden run)
 #   --audio      play sound through WSLg's PulseAudio (default: no audio
-#                device - the game runs silent)
+#                device - the game runs silent).  PAD_AUDIO_CTL (the app's
+#                audio_ctl.json, a WSL path) makes its level follow the
+#                app's Volume / Mute, live (spkvol.py)
 #
 # The game sees the machine's /game in a private mount namespace.  /game
 # itself is $NV/game, kept between runs, because that is where the games
@@ -44,6 +46,7 @@ case "$BUILD" in /*) ;; "") ;; *) BUILD=$SPK_CACHE/$BUILD ;; esac
 [ -n "$BUILD" ] && { [ -x "$BUILD/main.x86_64" ] || [ -x "$BUILD/uptest/main.x86_64" ]; } ||
     { echo "run_game.sh: not a prepared build: ${BUILD:-<none>} (prepare.sh)" >&2; exit 2; }
 [ -f "$SPK_SHIM" ] || { echo "run_game.sh: no $SPK_SHIM (build.sh)" >&2; exit 2; }
+AUDIO=$(rigboard_audio "$VISIBLE" "$AUDIO")
 [ "$(id -u)" = 0 ] || { echo "run_game.sh: run as root (it drops to $SPK_USER itself)" >&2; exit 2; }
 [ -n "$SPK_USER" ] || { echo "run_game.sh: no ordinary user account to run the game as" >&2; exit 2; }
 
@@ -89,15 +92,25 @@ UNAME=$(tget uname)
 chmod 755 "$SPK_RIG"/bin/*
 echo "$BUILD" > "$SPK_RIG/build"
 echo "$TITLE" > "$SPK_RIG/title"
+touch "$(realpath "$BUILD")/used"            # the Cache window's "Last played"
 echo "$VISIBLE" > "$SPK_RIG/visible"
 chown -R "$SPK_USER": "$SPK_RIG"
 
 # The board first: the games open /dev/WARDEN once at start, then retry.
-setsid -f env SPK_MARK="$SPK_RIG" SPK_TITLE="$TITLE" runuser -u "$SPK_USER" -- \
+# At real-time priority: Beetlejuice gives each serial write 20 ms, and while
+# it loads (or draws on llvmpipe) it has every core busy; an ordinary-priority
+# board that misses its turn makes the game reset its board link and stop
+# reacting to switches (PAD-266).  The board sleeps in select(), so this
+# costs nothing when idle.  Plain nice where chrt is refused.
+PRIO="nice -n -10"
+chrt -r 10 true 2>/dev/null && PRIO="chrt -r 10"
+setsid -f env SPK_MARK="$SPK_RIG" SPK_TITLE="$TITLE" $PRIO runuser -u "$SPK_USER" -- \
     python3 -u "$SPK_TOOLS/spkwarden.py" "$SPK_RIG" < /dev/null > "$SPK_RIG/warden.out" 2>&1
 for _ in $(seq 1 50); do [ -s "$SPK_RIG/warden.tty" ] && break; sleep 0.1; done
 TTY=$(cat "$SPK_RIG/warden.tty" 2>/dev/null)
 [ -n "$TTY" ] || { echo "run_game.sh: the board did not come up:" >&2; cat "$SPK_RIG/warden.out" >&2; exit 1; }
+# The virtual playfield's table (the AP window's format; spkswitches.py).
+SPK_TITLE=$TITLE python3 "$SPK_TOOLS/spkswitches.py" "$SPK_RIG" || echo "run_game.sh: no switches.json - the virtual playfield will not open" >&2
 
 # The cabinet's screen is 1920x1080; on the desktop a window that size
 # would cover it, so a visible run draws at 1280x720 (the games scale).
@@ -113,6 +126,7 @@ else
     pgrep -xf "Xvfb $DISP .*" | head -1 > "$SPK_RIG/xvfb.pid"
 fi
 echo "$DISP" > "$SPK_RIG/display"
+echo "${W}x${H}" > "$SPK_RIG/window"
 
 if [ $AUDIO = 1 ] && [ -S /mnt/wslg/PulseServer ]; then
     AUDIO_ENV="PULSE_SERVER=unix:/mnt/wslg/PulseServer"; GODOT_AUDIO=PulseAudio
@@ -154,6 +168,13 @@ EOF
 # wsl.exe that started this (tools/bof_emu learned it).
 setsid -f unshare -m -u --propagation private bash "$SPK_RIG/ns.sh" \
     < /dev/null > "$SPK_RIG/game.out" 2>&1
+# The app's Volume / Mute, live, as on the AP rig: spkvol.py holds this
+# slot's stream at the level in the control file every Emulate tab writes.
+# It waits for the game, and ends with it.
+if [ $AUDIO = 1 ] && [ -n "${PAD_AUDIO_CTL:-}" ] && [ -S /mnt/wslg/PulseServer ]; then
+    setsid -f python3 "$SPK_TOOLS/spkvol.py" --ctl "$PAD_AUDIO_CTL" --rig "$SPK_RIG" \
+        < /dev/null >> "$SPK_RIG/spkvol.log" 2>&1
+fi
 for _ in $(seq 1 50); do
     p=$(spk_slot_pids | while read -r q; do grep -q main.x86_64 /proc/$q/cmdline 2>/dev/null && echo $q; done | head -1)
     [ -n "$p" ] && { echo "$p" > "$SPK_RIG/game.pid"; break; }
@@ -170,6 +191,7 @@ for i in $(seq 1 3000); do
 done
 if spk_game_alive && spk_attract; then
     echo "Ready: $(basename "$BUILD"), slot $SPK_SLOT, display $DISP"
+    rigboard_post spooky "$SPK_SLOT" "$(spk_game_pid)" "$(basename "$BUILD")" "${PAD_TITLE:-$(tget name)}" "$VISIBLE" "$AUDIO"
 else
     echo "run_game.sh: the game did not reach attract:" >&2
     tail -20 "$SPK_RIG/player.log" "$SPK_RIG/warden.log" "$SPK_RIG/game.out" >&2 2>/dev/null

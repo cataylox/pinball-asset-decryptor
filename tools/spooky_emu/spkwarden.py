@@ -54,21 +54,31 @@ Behaviour, just enough to play:
   * a stepper move or home finishes after a moment and reports idle.
 
 Switch input comes over the control socket <rig>/ctl.sock, one line per
-request, one line per reply - the same protocol as tools/bof_emu's boards,
-so the app's switch window (spkpf.py, on tools/bof_emu/bofpf.py) drives it:
-    sw <n> <0|1>        hold / release a switch          -> ok
-    tap <n> [ms]        press and release (150 ms)       -> ok
-    plunge              the ball in the shooter lane goes into play -> ok
-    drain               one ball in play back to the trough          -> ok
-    state               {"switches": {n: 0|1}, "balls": {...},
-                         "connected": bool, "leds_lit": n, "coils": ...}
+request, one JSON line per reply - the requests tools/ap_emu's game answers,
+so the virtual playfield (spkpf.py, on tools/ap_emu/appf.py and the Stern
+window's page) drives this board exactly as it drives an AP game:
+    state               {"up": true, "switches": {n: 1 for each one made},
+                         "balls": {"trough", "shooter", "in_play"},
+                         "lights": {}, "paused": bool, "connected": bool,
+                         and what the board keeps: "title", "key",
+                         "leds_lit", "coils", "power", "lamps", "servos",
+                         "stepper", "unknown_opcodes"...}
+    sw <n> <0|1>        hold / release a switch
+    tap <n> [ms]        press and release (150 ms)
+    rip <n> <0|1>       flip a switch while held (a spinner spinning)
+    plunge              the Launch button: the game fires the ball into play
+    drain               a ball in play (or in the shooter lane) to the trough
+    reset               every ball back in the trough
+    pause <0|1>         freeze / thaw the game (SIGSTOP / SIGCONT)
     leds                {"<n>": "rrggbb", ...} every lit LED
 ctl.sh / spkctl.py and sw.py are its clients.
 Everything the board does is logged to <rig>/warden.log.
 """
 import json
 import os
+import queue
 import select
+import signal
 import socket
 import sys
 import threading
@@ -106,6 +116,24 @@ PALETTE = {0: (0, 0, 0), 1: (0, 0, 255), 2: (0, 255, 0), 3: (255, 128, 0),
 STEPPER_IDLE, STEPPER_MOVING, STEPPER_DISABLED, STEPPER_HOMING = 3, 2, 4, 5
 SHOOTER_DELAY = 0.5
 EOS_DELAY = 0.015
+#: Every Warden game's Launch button - its plunger.
+LAUNCH_BUTTON = 85
+#: The shortest press the board passes on (see set_switch).
+MIN_PRESS_S = 0.12
+# Linux's numbers (the tests import this on Windows, which has neither)
+SIGSTOP = getattr(signal, "SIGSTOP", 19)
+SIGCONT = getattr(signal, "SIGCONT", 18)
+# LED messages (led_message): the layer, the mode, how the colour is sent.
+LED_OVERLAY = {172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 185,
+               193, 195, 197, 199, 219}
+LED_MODE = {157: "blink", 175: "blink", 194: "blink", 195: "blink",
+            160: "blink", 177: "blink", 218: "blink", 219: "blink",
+            159: "breathe", 176: "breathe", 182: "breathe", 183: "breathe",
+            196: "breathe", 197: "breathe", 163: "chirp", 164: "chirp",
+            178: "chirp", 179: "chirp", 170: "rainbow", 172: "rainbow",
+            184: "crossfade", 185: "crossfade"}
+LED_OPS = {128, 155, 157, 159, 160, 163, 164, 167, 170, 171, 184, 192, 194,
+           196, 198, 218} | LED_OVERLAY
 
 
 def _keyed(d):
@@ -173,6 +201,10 @@ class Board:
         self.stepper = {"state": STEPPER_IDLE, "mm": 0, "target": 0,
                         "speed": 0, "accel": 0}
         self.now_serving = None
+        self.paused = False
+        self.ripping = set()
+        self.on_at = {}             # switch -> when it was made
+        self.outq = queue.Queue()
         self._set_trough()
 
     def say(self, *a):
@@ -190,17 +222,42 @@ class Board:
             self.state[sw] = 1
 
     def send(self, data):
-        try:
-            os.write(self.master, bytes(data))
-        except OSError as e:
-            self.say("write failed", e)
+        """Queue a message for the game.  Only the writer thread writes: the
+        game reads its replies once a frame, and a write that waits for it
+        must never hold up reading the game's own stream (a late read makes
+        the game's writes time out, and ten of those reset its board link)."""
+        self.outq.put(bytes(data))
 
-    def set_switch(self, sw, on, why=""):
+    def writer(self):
+        while True:
+            data = self.outq.get()
+            try:
+                os.write(self.master, data)
+            except OSError as e:
+                self.say("write failed", e)
+
+    def set_switch(self, sw, on, why="", now=False):
+        """A press is held at least MIN_PRESS_S unless *now*: the games
+        believe a Start / menu / tilt edge only after asking the board for
+        that switch again, so a click or key tap shorter than that (a
+        browser's key press is 0 ms) would be dropped - a real button is
+        closed for tens of milliseconds at the least."""
+        wait = 0.0
         with self.lock:
             on = 1 if on else 0
             if self.state.get(sw, 0) == on:
                 return
+            if not on and not now:
+                wait = MIN_PRESS_S - (time.monotonic() - self.on_at.get(sw, 0.0))
+        if wait > 0:
+            self.later(wait, self.set_switch, sw, 0, why, True)
+            return
+        with self.lock:
+            if self.state.get(sw, 0) == on:
+                return
             self.state[sw] = on
+            if on:
+                self.on_at[sw] = time.monotonic()
             self.send([RX, on, sw])
         self.say("switch", sw, self.name(sw), "on" if on else "off", why)
         if on and sw in self.autoactions:
@@ -257,7 +314,9 @@ class Board:
         return self.pend
 
     def message(self, op, a):
-        if op == 152:                                    # get_switch_state
+        if op in LED_OPS:                     # most of the stream: first
+            self.led_message(op, a)
+        elif op == 152:                                  # get_switch_state
             with self.lock:
                 self.send([RX, 152, a[0], self.state.get(a[0], 0)])
         elif op == 151:
@@ -321,19 +380,11 @@ class Board:
             self.now_serving = None
         elif 205 <= op <= 217:
             self.stepper_message(op, a)
-        else:
-            self.led_message(op, a)
+        # else: status LEDs (136, 156), switch config, flip timeout, ...
 
     def led_message(self, op, a):
-        over = op in (172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182,
-                      185, 193, 195, 197, 199, 219)
-        layer = self.overlay if over else self.leds
-        mode = {157: "blink", 175: "blink", 194: "blink", 195: "blink",
-                160: "blink", 177: "blink", 218: "blink", 219: "blink",
-                159: "breathe", 176: "breathe", 182: "breathe", 183: "breathe",
-                196: "breathe", 197: "breathe", 163: "chirp", 164: "chirp",
-                178: "chirp", 179: "chirp", 170: "rainbow", 172: "rainbow",
-                184: "crossfade", 185: "crossfade"}.get(op, "solid")
+        layer = self.overlay if op in LED_OVERLAY else self.leds
+        mode = LED_MODE.get(op, "solid")
         if op in (155, 174):                             # every LED
             first, count, col = 0, max(sum(self.chain), len(layer)), rgb8(a[0])
         elif op in (128, 181, 157, 175, 159, 176, 163, 179, 184, 185):
@@ -351,7 +402,7 @@ class Board:
             first, count, col = a[0], a[1], rgb8(a[2])
         elif op in (198, 199):
             first, count, col = a[0], a[1], (a[2], a[3], a[4])
-        else:                   # status LEDs (136, 156), switch config, ...
+        else:
             return
         for n in range(first, first + count):
             if any(col):
@@ -434,6 +485,19 @@ class Board:
         self.trough_changed()
         self.later(SHOOTER_DELAY, self.set_switch, lane, 1, "ball served")
 
+    def plunge(self):
+        """The Warden games have no manual plunger: the Launch button makes
+        the game fire its launch coil, which (fire) moves the ball into
+        play.  A ball that only LEAVES the lane, without that coil, is one
+        the game never saw launched - it sits in the skill shot and ignores
+        the playfield.  So press Launch; if the game does not fire the coil
+        (a tilt, a mode holding the ball), let the ball go anyway."""
+        full = [n for n in self.lanes if self.state.get(n)]
+        self.set_switch(LAUNCH_BUTTON, 1, "plunge")
+        self.later(0.2, self.set_switch, LAUNCH_BUTTON, 0, "plunge")
+        if full:
+            self.later(1.5, self.set_switch, full[0], 0, "plunged")
+
     def drain(self):
         if self.balls >= len(self.trough):
             return
@@ -453,17 +517,18 @@ class Board:
         return both
 
     def command(self, line):
-        """One control request -> its one-line reply."""
+        """One control request -> its one-line JSON reply."""
         p = line.split()
         if not p:
-            return "err empty"
+            return json.dumps({"err": "empty"})
         if p[0] == "state":
             with self.lock:
-                sw = {str(k): v for k, v in sorted(self.state.items())}
+                sw = {str(k): 1 for k, v in sorted(self.state.items()) if v}
             return json.dumps({
+                "up": True, "switches": sw, "balls": self.balls_state(),
+                "lights": {}, "paused": self.paused,
+                "connected": self.connected,
                 "title": self.title["name"], "key": self.title_key,
-                "switches": sw,
-                "balls": self.balls_state(), "connected": self.connected,
                 "leds_lit": len(self.lit()),
                 "coils": {"fired": _keyed(self.coil_fired),
                           "held": sorted(self.coil_held),
@@ -480,26 +545,69 @@ class Board:
             return json.dumps({str(k): "%02x%02x%02x" % v
                                for k, v in sorted(self.lit().items())})
         if p[0] == "drain":
-            if self.balls_state()["in_play"] <= 0:
-                return "err no ball in play"
+            b = self.balls_state()
+            if b["in_play"] <= 0 and not b["shooter"]:
+                return json.dumps({"err": "no ball in play"})
+            if b["in_play"] <= 0:
+                full = [n for n in self.lanes if self.state.get(n)]
+                self.set_switch(full[0], 0, "drained", True)
             self.drain()
-            return "ok"
-        if p[0] == "plunge":
-            full = [n for n in self.lanes if self.state.get(n)]
-            if not full:
-                return "err no ball in the shooter lane"
-            self.set_switch(full[0], 0, "plunged")
-            return "ok"
-        if p[0] in ("sw", "tap") and len(p) >= 2 and p[1].isdigit():
+        elif p[0] == "plunge":
+            if not any(self.state.get(n) for n in self.lanes):
+                return json.dumps({"err": "no ball in the shooter lane"})
+            self.plunge()
+        elif p[0] == "reset":
+            for n in self.lanes:
+                self.set_switch(n, 0, "reset", True)
+            self.balls = self.total
+            self.trough_changed()
+        elif p[0] == "pause":
+            self.set_pause(len(p) > 1 and p[1] == "1")
+            return json.dumps({"paused": self.paused})
+        elif p[0] in ("sw", "tap", "rip") and len(p) >= 2 and p[1].isdigit():
             n = int(p[1])
+            on = len(p) < 3 or p[2] not in ("0", "off")
             if p[0] == "sw":
-                self.set_switch(n, len(p) < 3 or p[2] not in ("0", "off"), "ctl")
+                self.set_switch(n, on, "ctl")
+            elif p[0] == "rip":
+                self.rip(n, on)
             else:
                 ms = int(p[2]) if len(p) > 2 and p[2].isdigit() else 150
                 self.set_switch(n, 1, "ctl")
                 self.later(ms / 1000.0, self.set_switch, n, 0, "ctl")
-            return "ok"
-        return "err unknown request: " + line.strip()
+        else:
+            return json.dumps({"err": "unknown request: " + line.strip()})
+        return json.dumps({"ok": True})
+
+    def rip(self, n, on):
+        """Right-held on the playfield: the switch flips every 60 ms until
+        released, as a spinning spinner does."""
+        if not on:
+            self.ripping.discard(n)
+            return
+        if n in self.ripping:
+            return
+        self.ripping.add(n)
+
+        def spin():
+            state = 0
+            while n in self.ripping:
+                state ^= 1
+                self.set_switch(n, state, "rip", True)
+                time.sleep(0.06)
+            self.set_switch(n, 0, "rip", True)
+        threading.Thread(target=spin, daemon=True).start()
+
+    def set_pause(self, on):
+        """Freeze the game itself: its pid is the rig's game.pid."""
+        try:
+            with open(os.path.join(self.rig, "game.pid")) as f:
+                pid = int(f.read().strip())
+            os.kill(pid, SIGSTOP if on else SIGCONT)
+            self.paused = on
+            self.say("paused" if on else "resumed")
+        except (OSError, ValueError) as e:
+            self.say("pause failed", e)
 
     def client(self, conn):
         buf = b""
@@ -517,7 +625,7 @@ class Board:
                     try:
                         reply = self.command(line.decode("utf-8", "replace"))
                     except Exception as e:      # never let a typo stop the board
-                        reply = "err %s" % e
+                        reply = json.dumps({"err": str(e)})
                     try:
                         conn.sendall((reply + "\n").encode())
                     except OSError:
@@ -542,7 +650,7 @@ class Board:
             if not r:
                 continue
             try:
-                data = os.read(self.master, 4096)
+                data = os.read(self.master, 1 << 16)
             except OSError:
                 # EIO: nobody holds the slave but us - the game closed it
                 # (or has not opened it yet).  Keep serving: it reopens.
@@ -561,6 +669,7 @@ def main():
         f.write(b.slave_path + "\n")
     os.rename(os.path.join(rig, "warden.tty.tmp"), os.path.join(rig, "warden.tty"))
     b.say("board up on", b.slave_path, "for", b.title["name"], "balls", b.balls)
+    threading.Thread(target=b.writer, daemon=True).start()
     threading.Thread(target=b.ctl_loop, args=(os.path.join(rig, "ctl.sock"),),
                      daemon=True).start()
     b.serve()

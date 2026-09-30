@@ -26,10 +26,23 @@ Halloween (`code_H78.pkg`) and Ultraman (`code_UM.pkg`) talk to Spooky's
 and Total Nuclear Annihilation are P-ROC games (PAD-269).
 
 **In the app** (PAD-266): Spooky Pinball has an **Emulate** tab
-(`webui/tabs/emulate_spooky.py`) that drives `watch.sh` / `status.sh` /
-`stop.sh` / `cancel.sh` and opens the switch window (`spkpf.py`). It still
-takes `.beetlejuice` files only; offering the other four there is a
-follow-up. The rig itself runs all five by hand (below).
+(`webui/tabs/emulate_spooky.py`) built on the American Pinball tab, the
+template every maker's Emulate tab follows: the update file with
+**Cache...**, Start / Cancel / Stop, **Switches window**, the live **Volume**
+/ Mute, AP's status grid, a **Supported games** card. When the game reaches
+attract, the **virtual playfield** opens: AP's window (`tools/ap_emu/appf.py`,
+the Stern page) pointed at this rig by `spkpf.py`, fed `switches.json`
+(`spkswitches.py`, apswitches.py's format, from the running title's
+profile) - the same keys, service buttons, BALLS (Plunge, Drain, Reset
+balls), Pause and VOL bar. The tab still takes `.beetlejuice` files only;
+offering the other four there is a follow-up. The rig itself runs all five
+by hand (below).
+
+**The board keeps up** (PAD-266, second pass): Beetlejuice gives each serial
+write 20 ms and after ten late ones resets its board link and ignores
+switches. The board reads 64 KB at a time, replies from a writer thread,
+runs at real-time priority, and `spkshim.so` makes a write that would get
+EAGAIN wait for room instead of failing.
 
 ## Why this is small
 
@@ -131,25 +144,31 @@ Behaviour, from the title's profile:
   held (Texas Chainsaw's diverter); a coil in `resets` makes its drop bank's
   switches again (Evil Dead).
 
-Everything is logged to `$SPK_RIG/warden.log`; `state` (and `status.sh`'s
-`hw=`) reports it, `leds` lists every lit LED.
+Everything is logged to `$SPK_RIG/warden.log`; `state` reports it, `leds`
+lists every lit LED.
 
 ## Use
 
 The app runs `watch.sh <update>` as root (`PAD_VISIBLE=1` draws on the
-desktop at 1280x720, `PAD_AUDIO=1` plays sound), polls `status.sh` (key=value)
-and stops with `stop.sh`; the switch window (`spkpf.py`, which asks the
-board which game it is) talks to the board through `ctl.sh --stream`
-(requests `sw <n> <0|1>`, `tap <n> [ms]`, `plunge`, `drain`, `state`,
-`leds` - the BoF boards' protocol). By hand, all in PAD-Runtime as root;
-`PAD_SLOT=N` picks a slot (default 0):
+desktop at 1280x720, `PAD_AUDIO=1` plays sound, `PAD_AUDIO_CTL=<the app's
+audio_ctl.json>` makes the level follow its Volume / Mute live through
+`spkvol.py` - AP's apvol.py, on the game's own libpulse since PAD-Runtime has
+no pactl), polls `status.sh` (key=value, AP's keys) and stops with `stop.sh`;
+`cache.sh --list | --drop` is the Cache window. The virtual playfield talks
+to the board through `ctl.sh --stream`, one JSON reply per request - the
+requests AP's game answers: `state`, `sw <n> <0|1>`, `tap <n> [ms]`,
+`rip <n> <0|1>`, `plunge` (presses Launch: the game fires the ball in),
+`drain`, `reset`, `pause <0|1>` (SIGSTOP/SIGCONT the game), plus `leds`. A
+press is held at least 120 ms: the games believe a Start / menu edge only
+after asking the board again. By hand, all in PAD-Runtime as root;
+`PAD_SLOT=N` picks a slot (default 0) - take a riglock slot first:
 
 ```
 T=/mnt/c/.../tools/spooky_emu
 bash $T/build.sh                                  # once, if spkshim.so is missing
 PAD_VISIBLE=0 bash $T/watch.sh /mnt/d/Pinball/images/Spooky/v2025.12.01.09.scooby
 python3 $T/sw.py coin; python3 $T/sw.py start     # sw.py --list, sw.py --state
-python3 $T/sw.py launch                           # or: sw.py plunge
+python3 $T/sw.py plunge                           # the Launch button
 python3 $T/sw.py "left sling"; python3 $T/sw.py drain
 bash $T/shot.sh /mnt/c/tmp/scooby.png
 bash $T/status.sh
@@ -161,7 +180,7 @@ bash $T/bootcheck.sh scooby_v2025.12.01.09        # VERDICT <build> pass|fail ..
 named `<title>_<version.txt>` (`bj_`, `scooby_`, `tcm_`, `ed_`, `looney_`).
 The game's log is `$SPK_RIG/player.log` (Unity's log, or Godot's stdout),
 the board's `$SPK_RIG/warden.log`, the no-op'd shell calls
-`$SPK_RIG/shell.log`.
+`$SPK_RIG/shell.log`, the volume keeper's `$SPK_RIG/spkvol.log`.
 
 ## What is open
 
@@ -180,3 +199,8 @@ the board's `$SPK_RIG/warden.log`, the no-op'd shell calls
   Beetlejuice's v2026.06.11.13 were not.
 * Sound (`PAD_AUDIO=1`) was run for Beetlejuice only, and the visible
   (desktop) window for none of them: every run here was hidden.
+* No lights in the virtual playfield: the board decodes every LED write
+  (`leds`), but the Spooky games ship no map from LED numbers to insert
+  positions, so the window's light grid stays empty.
+* The game's own window keeps its built-in keys (Beetlejuice: Enter, Space,
+  arrows); the playfield window's keys are AP's and work there only.

@@ -19,6 +19,14 @@ PROC_CTL=$PROC_RIG/ctl.sock
 PROC_STUB=$PROC_TOOLS/pystub
 PROC_FTDI=$PROC_LIB/libftdi1.so.2
 
+# The rig board (PAD-296): tools/rigboard.sh, shared by every emulator, posts
+# this rig's runs where the triage dashboard and the app can see them.
+if [ -f "$PROC_TOOLS/../rigboard.sh" ]; then
+    . "$PROC_TOOLS/../rigboard.sh"
+else
+    rigboard_post() { :; }; rigboard_clear() { :; }; rigboard_audio() { echo "${2:-0}"; }
+fi
+
 proc_hw_pid() { cat "$PROC_RIG/prochw.pid" 2>/dev/null; }
 proc_hw_alive() {
     local p; p=$(proc_hw_pid)

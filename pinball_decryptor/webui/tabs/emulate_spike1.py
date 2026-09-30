@@ -25,7 +25,7 @@ import sys
 import threading
 import time
 
-from ...core import payloads, rigdata, runtime
+from ...core import payloads, rigdata, rigslot, runtime
 from pinball_decryptor.webui import rig as _rig
 from pinball_decryptor.webui import runtime_prompt as _runtime_ui
 from .. import emulate_spike1_core as s1
@@ -269,7 +269,7 @@ class EmulateSpike1Tab(RigTabMixin, TabService):
                               "below.")
                 args = [card] if card else []
                 env = ["PAD_AUDIO=1", "PAD_AUDIO_CTL=" + audio_ctl_file(),
-                       "PAD_AUDIO_SINK=relay", "S1_PIVOT=1"]
+                       "PAD_AUDIO_SINK=relay", "S1_PIVOT=1"] + rigslot.board_env()
                 rc = self._run_streaming(
                     s1.rig_cmd_root("start.sh", *args, env=env),
                     timeout=1800, on_line=on_line)

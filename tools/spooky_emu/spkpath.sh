@@ -21,6 +21,14 @@ SPK_RIG=$SPK_ROOT/rig$SPK_SLOT
 SPK_DISPLAY=${SPK_DISPLAY:-:$((160 + SPK_SLOT))}
 SPK_SHIM=$SPK_TOOLS/spkshim.so
 
+# The rig board (PAD-296): tools/rigboard.sh, shared by every emulator, posts
+# this rig's runs where the triage dashboard and the app can see them.
+if [ -f "$SPK_TOOLS/../rigboard.sh" ]; then
+    . "$SPK_TOOLS/../rigboard.sh"
+else
+    rigboard_post() { :; }; rigboard_clear() { :; }; rigboard_audio() { echo "${2:-0}"; }
+fi
+
 # The first ordinary account (uid 1000..59999): "pad" in PAD-Runtime.
 if [ -z "${SPK_USER:-}" ]; then
     SPK_USER=$(getent passwd | awk -F: '$3>=1000 && $3<60000 {print $1; exit}')

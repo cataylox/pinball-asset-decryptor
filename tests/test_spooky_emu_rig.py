@@ -1,8 +1,8 @@
 """tools/spooky_emu (PAD-266, PAD-267): the parts of the Spooky Warden rig
 that can be checked without WSL - the emulated Warden board's framing,
 answers and state, its ball moves and per-title mechanics, the title
-profiles and detection, sw.py's switch names and the switch window's
-model."""
+profiles and detection, sw.py's switch names and the virtual playfield's
+table (spkswitches.py) and window (spkpf.py, on tools/ap_emu/appf.py)."""
 
 import importlib.util
 import json
@@ -135,31 +135,74 @@ def test_an_unknown_opcode_is_skipped_to_the_next_message(board):
     assert board.sent == [bytes([RX, 152, 7, 1])]
 
 
+def _ask(board, line):
+    return json.loads(board.command(line))
+
+
 def test_control_requests(board):
-    assert board.command("sw 87 1") == "ok"
+    """The requests tools/ap_emu's game answers (appf.py's), in JSON."""
+    assert _ask(board, "sw 87 1") == {"ok": True}
     assert board.sent == [bytes([RX, 1, 87])]
     board.command("sw 87 1")                                # no change, no report
     board.command("sw 87 0")
     assert board.sent[-1] == bytes([RX, 0, 87])
-    assert board.command("tap 25 50") == "ok"
+    assert _ask(board, "tap 25 50") == {"ok": True}
     assert board.sent[-2:] == [bytes([RX, 1, 25]), bytes([RX, 0, 25])]
-    assert board.command("nonsense").startswith("err")
+    assert "err" in _ask(board, "nonsense")
 
 
-def test_state_plunge_and_drain(board):
-    st = json.loads(board.command("state"))
-    assert st["balls"] == {"trough": 6, "shooter": 0, "in_play": 0}
-    assert st["switches"]["7"] == 1 and not st["connected"]
+def test_state_plunge_drain_and_reset(board):
+    st = _ask(board, "state")
+    assert st["up"] and st["lights"] == {} and not st["paused"]
     assert st["title"] == "Beetlejuice" and st["key"] == "bj"
-    assert board.command("drain").startswith("err")          # nothing in play
-    assert board.command("plunge").startswith("err")         # lane empty
+    assert not st["connected"]
+    # only the switches that are made (appf.py reads the keys)
+    assert st["switches"] == {"1": 1, "3": 1, "4": 1, "5": 1, "6": 1, "7": 1}
+    assert st["balls"] == {"trough": 6, "shooter": 0, "in_play": 0}
+    assert "err" in _ask(board, "drain")                     # nothing in play
+    assert "err" in _ask(board, "plunge")                    # lane empty
     board.host_bytes(bytes([TX, 133, 51]))                   # serve
-    assert json.loads(board.command("state"))["balls"]["shooter"] == 1
-    assert board.command("plunge") == "ok"
-    assert json.loads(board.command("state"))["balls"] == {
-        "trough": 5, "shooter": 0, "in_play": 1}
-    assert board.command("drain") == "ok"
-    assert json.loads(board.command("state"))["balls"]["trough"] == 6
+    assert _ask(board, "state")["balls"]["shooter"] == 1
+    # Plunge presses the Launch button (no Warden game has a manual
+    # plunger); the lane empties either way
+    assert _ask(board, "plunge") == {"ok": True}
+    assert bytes([RX, 1, 85]) in board.sent
+    assert _ask(board, "state")["balls"] == {"trough": 5, "shooter": 0, "in_play": 1}
+    assert _ask(board, "drain") == {"ok": True}
+    assert _ask(board, "state")["balls"]["trough"] == 6
+    board.host_bytes(bytes([TX, 133, 51]))                   # serve again
+    assert _ask(board, "reset") == {"ok": True}
+    assert _ask(board, "state")["balls"] == {"trough": 6, "shooter": 0, "in_play": 0}
+
+
+def test_a_ball_left_in_the_lane_can_be_drained(board):
+    board.host_bytes(bytes([TX, 133, 51]))
+    assert _ask(board, "drain") == {"ok": True}
+    assert _ask(board, "state")["balls"] == {"trough": 6, "shooter": 0, "in_play": 0}
+
+
+def test_pause_freezes_the_game_by_its_pid(board, monkeypatch, tmp_path):
+    (tmp_path / "game.pid").write_text("4242\n")
+    sent = []
+    monkeypatch.setattr(warden.os, "kill", lambda pid, sig: sent.append((pid, sig)))
+    assert _ask(board, "pause 1") == {"paused": True}
+    assert _ask(board, "pause 0") == {"paused": False}
+    assert sent == [(4242, warden.SIGSTOP), (4242, warden.SIGCONT)]
+
+
+def test_a_zero_length_press_is_held_long_enough_to_count(board, monkeypatch):
+    """A browser key press is 0 ms; the games re-ask the board about Start
+    before they believe it, so the release waits out MIN_PRESS_S."""
+    waits = []
+    monkeypatch.setattr(board, "later", lambda secs, fn, *a: waits.append((secs, fn, a)))
+    board.command("sw 87 1")
+    board.command("sw 87 0")
+    assert board.state[87] == 1                    # still held
+    secs, fn, a = waits[-1]
+    assert 0 < secs <= warden.MIN_PRESS_S
+    fn(*a)                                          # the timer fires
+    assert board.state[87] == 0
+    assert board.sent[-1] == bytes([RX, 0, 87])
 
 
 # --- what the board keeps: LEDs, coils, power, lamps, servos, stepper ------
@@ -291,7 +334,7 @@ def test_evil_dead_serves_to_the_lane_its_diverter_points_at(make):
     assert b.balls_state()["shooter"] == 2
     b.host_bytes(bytes([TX, 133, 14]))                     # RIGHT AUTO LAUNCHER
     assert b.state[15] == 0 and b.state[14] == 1
-    assert b.command("plunge") == "ok" and b.state[14] == 0
+    assert _ask(b, "plunge") == {"ok": True} and b.state[14] == 0
 
 
 def test_evil_dead_drop_banks_stand_back_up(make):
@@ -405,43 +448,99 @@ def test_sw_and_board_agree_on_the_trough():
     assert sw.SWITCHES[t["shooter"]] == "SHOOTER LANE"
 
 
-def _spkpf():
-    paths = [str(RIG), str(RIG.parent / "bof_emu"), str(RIG.parent / "spike2_emu")]
-    for p in paths:
-        sys.path.insert(0, p)
-    try:
-        return _load("pf", RIG / "spkpf.py"), sys.modules["bofpf"]
-    finally:
-        for p in paths:
-            sys.path.remove(p)
+def _import_rig(name):
+    import importlib
+    for p in (RIG, RIG.parent / "ap_emu", RIG.parent / "jjp_emu", RIG.parent / "spike2_emu"):
+        if str(p) not in sys.path:
+            sys.path.insert(0, str(p))
+    return importlib.import_module(name)
 
 
-def test_switch_window_model_groups_beetlejuice_switches():
-    """spkpf.py hands bofpf's page a profile built from the title's table."""
-    spkpf, bofpf = _spkpf()
-    model = bofpf.page_model(spkpf.profile())
-    assert len(model["switches"]) == len(sw.SWITCHES)
-    keys = {r["n"]: r["key"] for r in model["switches"] if r["key"]}
-    assert keys == {87: "1", 90: "5", 86: "Z", 80: "/", 85: "Space", 81: "A"}
-    assert not any(r["placed"] for r in model["switches"])   # list only
-    assert spkpf.group(7) == "Trough" and spkpf.group(87) == "Cabinet"
-    assert spkpf.group(25) == "Playfield"
+def test_the_table_is_in_the_ap_windows_format(monkeypatch):
+    monkeypatch.delenv("SPK_TITLE", raising=False)
+    t = _import_rig("spkswitches").table()
+    assert t["title"] == "Beetlejuice"
+    assert t["balls"] == 6 and t["shooter"] == 8 and t["art"] == "" and t["size"] is None
+    assert len(t["switches"]) == len(sw.SWITCHES)
+    names = [s["name"] for s in t["switches"]]
+    assert len(set(names)) == len(names)
+    # the AP window finds the service buttons, the trough and the shooter by name
+    for n in ("exit", "down", "up", "enter", "shooter", "trough1", "trough7"):
+        assert n in names
+    keys = {r["keys"]: r["ns"] for r in t["rows"] if r["keys"]}
+    assert keys["1"] == [87] and keys["5"] == [90] and keys["Space"] == [85]
+    assert keys["Left"] == [86, 83] and keys["Right"] == [80, 82]
+    assert keys["T"] == [84] and keys["Down"] == [81]
+    actions = {k["action"]: k["codes"] for k in t["keymap"] if k["action"]}
+    assert actions["plunge"] == ["KeyF"] and actions["drain"] == ["KeyD"]
+    # every switch can be pressed: a key row, a service button, or the list
+    in_rows = {n for r in t["rows"] for n in r["ns"]}
+    for s in t["switches"]:
+        assert (s["n"] in in_rows or s["name"] in ("exit", "down", "up", "enter")
+                or s["group"] == "Trough"), s
 
 
-def test_switch_window_follows_the_running_title():
-    spkpf, bofpf = _spkpf()
-    p = spkpf.profile("ed")
-    assert p["title"] == "Evil Dead"
-    assert len(p["switches"]) == len(titles.TITLES["ed"]["switches"])
-    assert spkpf.group(14, "ed") == "Trough" and spkpf.group(15, "ed") == "Trough"
-    assert spkpf.group(66, "ed") == "Trough" and spkpf.group(45, "ed") == "Playfield"
+@pytest.mark.parametrize("key", sorted(titles.TITLES))
+def test_every_title_gets_its_own_table(key, tmp_path, monkeypatch):
+    """run_game.sh writes the rig's title; the table is that game's."""
+    monkeypatch.delenv("SPK_TITLE", raising=False)
+    spk = _import_rig("spkswitches")
+    (tmp_path / "title").write_text(key + "\n")
+    assert spk.main([str(tmp_path)]) == 0
+    t = json.loads((tmp_path / "switches.json").read_text())
+    p = titles.TITLES[key]
+    assert t["title"] == p["name"] and t["balls"] == p["balls"]
+    assert t["shooter"] == p["shooter"]
+    assert len(t["switches"]) == len(p["switches"])
+    names = [s["name"] for s in t["switches"]]
+    assert len(set(names)) == len(names)
+    for n in ("exit", "down", "up", "enter", "shooter", "troughJam") + tuple(
+            "trough%d" % i for i in range(1, 8)):
+        assert n in names, (key, n)
+    keys = {r["keys"]: r["ns"] for r in t["rows"] if r["keys"]}
+    assert keys["1"] == [87] and keys["5"] == [90] and keys["Space"] == [85]
+    groups = {s["n"]: s["group"] for s in t["switches"]}
+    for lane in p["launch"].values():
+        assert groups[lane] == "Trough"
+    # no end-of-stroke switch takes a letter
+    keyed = {n for r in t["rows"] if r["keys"] for n in r["ns"]}
+    assert not any("EOS" in p["switches"][n].upper() for n in keyed)
 
-    class Asks(spkpf.Rig):
-        def __init__(self, reply):
-            self.reply = reply
 
+def test_the_ap_window_serves_beetlejuice(monkeypatch):
+    """spkpf.py hands tools/ap_emu/appf.py the table and this rig's pipe."""
+    monkeypatch.delenv("SPK_TITLE", raising=False)
+    appf = _import_rig("appf")
+    t = _import_rig("spkswitches").table()
+
+    class Pipe:
         def ask(self, line):
-            return self.reply
-    assert Asks(json.dumps({"key": "looney"})).title_key() == "looney"
-    assert Asks(json.dumps({"key": "nope"})).title_key() is None
-    assert Asks(None).title_key() is None
+            return {"up": True, "switches": {"1": 1, "3": 1, "8": 1}, "lights": {},
+                    "paused": False}
+    app = appf.App(t, Pipe(), "", "Beetlejuice")
+    st = app.state("main")
+    assert st["kind"] == "schematic"
+    assert [b["label"] for b in st["panel"]["spec"]["svc"]] == [
+        "Service Back", "Service Minus", "Service Plus", "Service Select"]
+    assert st["panel"]["spec"]["balls"] == {"pos": ["1", "2", "3", "4", "5", "6"]}
+    assert len(st["view"]["entries"]) == len(sw.SWITCHES)
+    rig = _import_rig("spkpf").Rig("PAD-Runtime", "1")
+    assert rig.cmd[-2].endswith("tools/spooky_emu/ctl.sh")
+
+
+def test_the_window_says_its_keys_are_its_own(monkeypatch):
+    monkeypatch.delenv("SPK_TITLE", raising=False)
+    appf = _import_rig("appf")
+    spkpf = _import_rig("spkpf")
+    t = _import_rig("spkswitches").table()
+
+    class Pipe:
+        def ask(self, line):
+            return None
+    spec = spkpf.App(t, Pipe(), "", "Beetlejuice").state("main")["panel"]["spec"]
+    assert spec["where"] == "works in this window"
+    # the AP window itself keeps the page's default
+    assert "where" not in appf.App(t, Pipe(), "", "x").state("main")["panel"]["spec"]
+    # the flippers' end-of-stroke switches take no letter
+    keyed = {n for r in t["rows"] if r["keys"] for n in r["ns"]}
+    assert not keyed & {13, 21, 35}

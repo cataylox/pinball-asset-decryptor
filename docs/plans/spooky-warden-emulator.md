@@ -56,7 +56,7 @@ full-protocol board with per-title mechanics, `spkshim.c` (+ `glob`),
 `prepare.sh` (every format; refuses Pinotaur and P-ROC updates by name),
 `run_game.sh` (layouts, persistent `/game`, no-op commands, `uname`, the
 Godot launch line), `spk_attract` (attract per title, from the game's log or
-the board's), a title-aware `sw.py` and switch window (`spkpf.py`).
+the board's), a title-aware `sw.py` and virtual-playfield table (`spkswitches.py`, for the AP window PAD-266 moved to).
 `tests/test_spooky_emu_rig.py` covers the board, the profiles and detection.
 
 ## Proof

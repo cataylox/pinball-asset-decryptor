@@ -75,7 +75,8 @@ def rig_available():
     d = rig_dir()
     return all(os.path.isfile(os.path.join(d, s))
                for s in ("watch.sh", "stop.sh", "status.sh", "cancel.sh",
-                         "ctl.sh", "spkshim.so", "spkwarden.py",
+                         "cache.sh", "ctl.sh", "spkshim.so", "spkwarden.py",
+                         "spkswitches.py", "spkpf.py", "spkvol.py",
                          "spktitles.py"))
 
 
@@ -103,14 +104,6 @@ def rig_cmd_root(*args, **kw):
     return _rig.rig_cmd_root(rig_dir(), *args, **kw)
 
 
-def hw_state(info):
-    """The board's JSON from status.sh's ``hw=`` line, or {}."""
-    try:
-        return json.loads(info.get("hw") or "{}")
-    except ValueError:
-        return {}
-
-
 def state_text(info):
     """(label, hint) for the headline, first problem first."""
     if not info:
@@ -134,10 +127,17 @@ def state_text(info):
     return "Stopped", ""
 
 
-def balls_text(hw):
-    b = hw.get("balls") or {}
-    if not b:
-        return "—"
-    return "%d in trough, %d in play%s" % (
-        b.get("trough", 0), b.get("in_play", 0),
-        ", 1 in shooter lane" if b.get("shooter") else "")
+def parse_cache(text):
+    """``cache.sh --list`` -> ``(entries, disk)``: the AP rig's protocol, so
+    its parser (and the AP tab's Cache window) serve this tab too."""
+    from .emulate_ap_core import parse_cache as _parse
+    return _parse(text)
+
+
+def cache_label(entry):
+    """What the Cache window calls an entry: bj_v2026.09.15.11 ->
+    Beetlejuice v2026.09.15.11."""
+    name = entry["name"]
+    if name.startswith("bj_"):
+        return "Beetlejuice " + name[3:]
+    return name

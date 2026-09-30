@@ -231,6 +231,9 @@ if [ "$DETACH" = "1" ]; then
         exit 8
     fi
     echo "launched detached; pid=$(cat "$JJP_PID_FILE") procs=$(jjp_game_count) selector=$(jjp_select_count)"
+    # JJP's game is always on a window (Xephyr, or WSLg's :0); audio.sh set
+    # the sound from PAD_AUDIO.
+    rigboard_post jjp 0 "$(cat "$JJP_PID_FILE")" "$(jjp_title)" "${PAD_TITLE:-}" 1 "${PAD_AUDIO:-0}"
     echo "log: $JJP_GAME_LOG"
 else
     if [ -n "$CAP" ]; then

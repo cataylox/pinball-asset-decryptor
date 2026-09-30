@@ -2,7 +2,6 @@
 without ever touching a rig: the harness sets PAD_UI_NO_RIG, conftest points
 the rig dir at an empty directory, and the tests that need more stub it."""
 
-import json
 import time
 
 import pytest
@@ -50,7 +49,7 @@ def test_spooky_shows_the_tab_and_says_what_it_runs(rig, tmp_path):
         assert "can't be emulated yet" in s["intro"]
         assert s["go_label"] == "Start" and s["go_enabled"]
         assert [c["label"] for c in s["cells"]] == [
-            "Game", "Version", "Board", "Balls", "Memory", "Uptime"]
+            "Game", "Version", "Switches", "Window", "Memory", "Uptime"]
 
 
 @pytest.mark.parametrize("mfr", ["stern", "jjp", "bof"])
@@ -126,13 +125,12 @@ def test_start_without_a_file_asks_and_runs_nothing(rig, monkeypatch, tmp_path):
 
 
 # ------------------------------------------------------------ the poll
-HW = {"switches": {"1": 1, "3": 1, "4": 1, "5": 1, "6": 1, "8": 1},
-      "balls": {"trough": 5, "shooter": 1, "in_play": 0},
-      "connected": True, "leds_lit": 0}
 RUNNING = {"wsl": "1", "running": "1", "title": "beetlejuice",
-           "version": "v2026.09.15.11", "pid": "42",
+           "build": "bj_v2026.09.15.11", "version": "v2026.09.15.11", "pid": "42",
            "rss_kb": str(3 * 1048576), "uptime_s": "95", "display": ":0",
-           "visible": "1", "slot": "0", "attract": "1", "hw": json.dumps(HW)}
+           "visible": "1", "window": "1280x720", "switches": "60", "slot": "0",
+           "attract": "1",
+           "switches_json": "/var/tmp/pad_spooky/rig0/switches.json"}
 
 
 def test_apply_running_fills_the_grid(rig, tmp_path):
@@ -144,8 +142,7 @@ def test_apply_running_fills_the_grid(rig, tmp_path):
         assert s["state_label"] == "Running" and s["tone"] == "ok"
         v = {c["label"]: c["value"] for c in s["cells"]}
         assert v["Game"] == "Beetlejuice" and v["Version"] == "v2026.09.15.11"
-        assert v["Board"] == "connected"
-        assert v["Balls"] == "5 in trough, 0 in play, 1 in shooter lane"
+        assert v["Switches"] == "60" and v["Window"] == "1280 × 720"
         assert v["Memory"] == "3.0 GB" and v["Uptime"] == "1:35"
 
 
@@ -181,6 +178,12 @@ def test_the_switch_window_command(rig, monkeypatch, tmp_path):
         assert cmd[0] == "pythonw.exe" and cmd[1].endswith("spkpf.py")
         assert cmd[cmd.index("--slot") + 1] == "0"
         assert cmd[cmd.index("--distro") + 1] == "PAD-Runtime"
+        assert "--parent-pipe" in cmd                  # Stop closes it
+        assert cmd[cmd.index("--table") + 1] == (
+            r"\\wsl.localhost\PAD-Runtime\var\tmp\pad_spooky\rig0\switches.json")
+        assert cmd[cmd.index("--audio-ctl") + 1].endswith("audio_ctl.json")
+        # no table yet (the game is still loading): no window
+        assert _svc(w)._switch_window_cmd({"running": "1"}) is None
 
 
 def test_quit_stops_only_a_run_this_app_started(rig, monkeypatch, tmp_path):
@@ -233,3 +236,49 @@ def test_supported_file_is_by_suffix():
     assert core.supported_file("/mnt/d/X.BEETLEJUICE")
     assert not core.supported_file("v2025.12.01.09.scooby")
     assert not core.supported_file("")
+
+
+def test_start_passes_sound_and_the_volume_control(rig, monkeypatch, tmp_path):
+    """As the AP tab: sound always on, the level from the shared control file."""
+    from pinball_decryptor.webui import emulate_spooky_core as core
+    seen = []
+    monkeypatch.setattr(core, "rig_cmd_root",
+                        lambda *a, **k: seen.append((a, k)) or ["true"])
+    with web_app(tmp_path, mfr="spooky") as w:
+        _spooky(w)
+        svc = _svc(w)
+        f = tmp_path / "v2026.09.15.11.beetlejuice"
+        f.write_bytes(b"x")
+        w.window.spooky_emulate_file_var.set(str(f))
+        monkeypatch.setattr(svc, "_refuse_off", lambda: False)
+        monkeypatch.setattr(svc, "_run_streaming", lambda *a, **k: 1)
+        svc._start_async()
+        end = time.time() + 5
+        while not seen and time.time() < end:
+            time.sleep(0.02)
+        args, kw = seen[0]
+        assert args[0] == "watch.sh"
+        env = kw["env"]
+        assert "PAD_AUDIO=1" in env and "PAD_VISIBLE=1" in env
+        assert any(e.startswith("PAD_AUDIO_CTL=") and e.endswith("audio_ctl.json")
+                   for e in env)
+
+
+def test_the_cache_window_lists_and_names_builds(rig, tmp_path):
+    from pinball_decryptor.webui import emulate_spooky_core as core
+    entries, disk = core.parse_cache(
+        "entry=bj_v2026.09.15.11 kind=build kb=5242880 used=1759200000 "
+        "src=/mnt/d/Pinball/images/Spooky/v2026.09.15.11.beetlejuice\n"
+        "disk=31457280 102400000\n")
+    assert disk == (31457280, 102400000)
+    assert core.cache_label(entries[0]) == "Beetlejuice v2026.09.15.11"
+    with web_app(tmp_path, mfr="spooky") as w:
+        _spooky(w)
+        svc = _svc(w)
+        svc._cache_open = True
+        svc.set(cache={"head": "", "rows": [], "sel": [], "busy": True, "hint": ""})
+        svc._cache_show((entries, disk))
+        c = w.state(NS)["cache"]
+        assert c["rows"][0]["label"] == "Beetlejuice v2026.09.15.11"
+        assert c["rows"][0]["src"].endswith(".beetlejuice")
+        assert c["head"].startswith("1 item")
