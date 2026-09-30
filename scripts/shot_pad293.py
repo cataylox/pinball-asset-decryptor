@@ -9,6 +9,7 @@ the monster picker on Gigan, hides Gigan's body in the game (DragonRR's PAD-290 
 writes:
 
 - <prefix>_eyes.png     the preview and the Layers list with Gigan hidden in the game
+- <prefix>_menu.png     the same, right-clicking Gigan's row
 - <prefix>_notes.txt    the row's eyes' tooltips and the status line's words
 """
 import os
@@ -68,17 +69,33 @@ def main():
             idle()
             layers = state()["text_scenes"]["tree_view"]["layers"]
             gig = [l for l in layers if l["name"] == SPRITE][0]
-            assert api("text_scenes.tree_visible", gig["id"], False)
+            row = page.locator('.tree-layers [data-node="%d"]' % gig["id"])
+            row.scroll_into_view_if_needed()
+            mark = row.locator(".ly-game")
+            if mark.count():                            # the card mark (PAD-293 build)
+                row.hover()
+                mark.click()
+            else:
+                assert api("text_scenes.tree_visible", gig["id"], False)
             time.sleep(0.5)
             idle()
             time.sleep(2.0)
-            row = page.locator('.tree-layers [data-node="%d"]' % gig["id"])
             row.scroll_into_view_if_needed()
             page.mouse.move(5, 995)
             time.sleep(0.5)
             page.screenshot(path=os.path.join(out, "%s_eyes.png" % prefix))
-            for i, eye in enumerate(row.locator(".ly-eye").all()):
-                notes.append("eye %d tooltip: %s" % (i, eye.get_attribute("title")))
+            for i, eye in enumerate(row.locator(".ly-eye, .ly-game").all()):
+                notes.append("control %d tip: %s" % (
+                    i, eye.get_attribute("data-tip") or eye.get_attribute("title")))
+            notes.append("row tip: %s" % row.get_attribute("title"))
+            # right-click on the row: the layer's menu
+            row.click(button="right")
+            time.sleep(0.8)
+            page.screenshot(path=os.path.join(out, "%s_menu.png" % prefix))
+            notes.append("menu: %s" % page.locator(".menu button, [role=menu] button")
+                         .all_inner_texts())
+            page.keyboard.press("Escape")
+            time.sleep(0.3)
             notes.append("row: %s" % row.inner_text().replace("\n", " | "))
             notes.append("status: %s" % page.locator(".warn-ink").all_inner_texts())
             hits = [h["name"] for h in state()["text_scenes"]["tree_view"]["hits"]]

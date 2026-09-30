@@ -925,6 +925,36 @@ def test_the_game_eye_and_the_preview_eye_are_apart(tmp_path):
         w.call("text_scenes.close")
 
 
+def test_alt_click_on_an_eye_shows_that_layer_alone(tmp_path):
+    """PAD-293, as in Photoshop: Alt+click on a layer's eye shows it alone in the preview,
+    Alt+click on another moves the solo there, and Alt+click again puts every eye back as it
+    was; a plain eye click ends it where it is.  The card is never changed."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder, _body_scene())
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        ly = {l["name"]: l for l in _tv(w)["layers"]}
+        assert w.call("text_scenes.tree_state", ly["Select"]["id"], 2)     # the picker on B
+        art, box = ly["Body_Art"]["id"], ly["Body_Textbox"]["id"]
+        hits = lambda: [h["id"] for h in _tv(w)["hits"]]                  # noqa: E731
+        before = hits()
+        assert art in before and box in before
+        assert w.call("text_scenes.tree_view", box, False)                 # an eye shut first
+        assert w.call("text_scenes.tree_view_solo", art)
+        assert hits() == [art] and _tv(w)["solo"] == art
+        assert w.call("text_scenes.tree_view_solo", box)
+        assert hits() == [box] and _tv(w)["solo"] == box
+        assert w.call("text_scenes.tree_view_solo", box)
+        assert _tv(w)["solo"] is None
+        assert hits() == [h for h in before if h != box]                  # its eye still shut
+        assert w.call("text_scenes.tree_view_solo", art)
+        assert w.call("text_scenes.tree_view", box, True)                  # a plain click
+        assert _tv(w)["solo"] is None and box in hits() and art in hits()
+        assert _ops(folder) == []
+        w.call("text_scenes.close")
+
+
 def test_a_hidden_layer_the_game_draws_elsewhere_is_found_when_picked(tmp_path):
     """DragonRR (PAD-289): a layer hidden with its eye in a sprite the game is not drawing at
     this moment goes, picked, to where the game shows that sprite, and is drawn there."""

@@ -543,6 +543,51 @@ function TreeTop({ s, onMenu }) {
 // them in the Layers list (PAD-279).
 const pickHow = (e, range) => (range && e.shiftKey ? "range" : e.ctrlKey || e.metaKey || e.shiftKey ? "add" : "");
 
+// PAD-293 (DragonRR): as in Photoshop or Fusion, a layer's eye is the preview only - it never
+// changes the card - and Alt+click on it shows that layer alone.  Hiding a layer in the game
+// is its own mark (the card at the row's end, like Fusion's Suppress): the row is struck
+// through and reads "hidden in game", and the preview is not changed.
+const EYE_KEYS = "H hides or shows the selected layers here. Alt+click shows this layer alone; Alt+click again brings the others back.";
+const eyeTip = (l, solo) => solo === l.id ? `Shown alone. Alt+click to bring the other layers back. ${EYE_KEYS}`
+  : l.view_off ? `Hidden in the preview only. Click to show it here again; the game is not changed. ${EYE_KEYS}`
+  : l.state_off ? `Off in the preview: the part it sits in shows another of its looks. Click to turn it on here; the game is not changed. ${EYE_KEYS}`
+  : l.shown ? `Turned on in the preview. Click to turn it back off; the game is not changed. ${EYE_KEYS}`
+  : `Shown in the preview. Click to hide it here, to see or reach what is under it; the game is not changed. ${EYE_KEYS}`;
+const gameTip = (l) => l.hidden
+  ? "Hidden in the game: Write leaves it out of the card, so the machine never draws it. The preview still shows it. Click to put it back in the game."
+  : `In the game. Click to hide it in the game: Write leaves it out of the card${l.part_off ? " (it shows only when the look it sits in is on)" : ""}. The preview is not changed; use the eye to hide it here. Delete in the preview hides it in both.`;
+
+function eyeClick(l, e) {
+  e.stopPropagation();
+  if (e.altKey) call("text_scenes.tree_view_solo", l.id);
+  else if (l.view_off) call("text_scenes.tree_view", l.id, true);
+  else if (l.state_off || l.shown) call("text_scenes.tree_force", l.id, !l.shown);
+  else call("text_scenes.tree_view", l.id, false);
+}
+
+function layerMenu(t, l, e) {
+  e.preventDefault();
+  const sels = t.sels || [];
+  const ids = sels.includes(l.id) && sels.length > 1 ? sels : [l.id];
+  const many = ids.length > 1;
+  const byId = Object.fromEntries((t.layers || []).map((x) => [x.id, x]));
+  const allOff = ids.every((id) => (byId[id] || {}).view_off);
+  const allGone = ids.every((id) => (byId[id] || {}).hidden);
+  const what = many ? `the ${ids.length} selected layers` : "it";
+  openMenu({ x: e.clientX, y: e.clientY }, [
+    { label: allOff ? "Show in the preview" : "Hide in the preview", icon: allOff ? "eye" : "eye-off", kbd: "H",
+      title: `${allOff ? "Show" : "Hide"} ${what} here only; the game is not changed (H with them selected)`,
+      onClick: () => call("text_scenes.tree_view_many", ids, allOff) },
+    many ? null : { label: t.solo === l.id ? "Show every layer again" : "Show only this layer", icon: "eye", kbd: "Alt+click eye",
+      title: "The preview shows this layer alone, and back again (Alt+click its eye)",
+      onClick: () => call("text_scenes.tree_view_solo", l.id) },
+    { sep: true },
+    { label: allGone ? "Put back in the game" : "Hide in the game", icon: "sd",
+      title: allGone ? `Write puts ${what} on the card again` : `Write leaves ${what} out of the card; the preview is not changed`,
+      onClick: () => call("text_scenes.tree_visible_many", ids, allGone) },
+  ].filter(Boolean));
+}
+
 function TreeLayers({ t }) {
   const listRef = useRef(null);
   const sels = t.sels || [];
@@ -551,37 +596,48 @@ function TreeLayers({ t }) {
     const el = listRef.current.querySelector(`[data-node="${t.sel}"]`);
     if (el) el.scrollIntoView({ block: "nearest" });
   }, [t.sel]);
+  // H hides or shows the selected layers in the preview, wherever the focus is on the tab
+  const tRef = useRef(t);
+  tRef.current = t;
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key.toLowerCase() !== "h" || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+      const el = e.target;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      const cur = tRef.current;
+      const ids = (cur.sels || []).length ? cur.sels : cur.sel != null ? [cur.sel] : [];
+      if (!ids.length || !listRef.current || !listRef.current.getClientRects().length
+          || document.querySelector(".scrim")) return;
+      e.preventDefault();
+      const off = ids.every((id) => ((cur.layers || []).find((x) => x.id === id) || {}).view_off);
+      call("text_scenes.tree_view_many", ids, off);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   return html`<div class="scenes-contents tree-layers" ref=${listRef} role="tree" aria-label="Layers">
-    <div class="sc-head"><span class="eyebrow">Layers — last drawn on top</span></div>
+    <div class="sc-head"><span class="eyebrow">Layers — last drawn on top</span>
+      ${t.solo != null ? html`<button type="button" class="ly-solo small" ...${tip("One layer is shown alone. Click (or Alt+click its eye) to bring the other layers back.")}
+        onClick=${() => call("text_scenes.tree_view_solo", t.solo)}>Showing one layer · show all</button>` : null}</div>
     ${(t.layers || []).map((l) => html`<div key=${l.id} data-node=${l.id}
-        class=${cx("sc-item", "ly-item", (t.sel === l.id || sels.includes(l.id)) && "sel", !l.drawn && !l.state_off && "ly-off")}
+        class=${cx("sc-item", "ly-item", (t.sel === l.id || sels.includes(l.id)) && "sel", !l.drawn && !l.state_off && "ly-off", l.hidden && "not-in-game")}
         style=${`padding-left:${10 + l.depth * 14}px`}
-        title=${l.state_off ? "Off in the preview: the part it sits in shows another of its looks. Click to see it on top while it is selected, or click its blue eye to turn it on here"
-          : l.part_off && !l.view_off ? "The look it sits in is off in the preview: it shows when that look is on. Click to see it on top while it is selected"
-          : !l.drawn && !l.view_off ? "Not on the screen at this moment: click to see it on top while it is selected, and edit it" : null}
+        title=${(l.state_off ? "Off in the preview: the part it sits in shows another of its looks. Click to see it on top while it is selected, or click its eye to turn it on here. "
+          : l.part_off && !l.view_off ? "The look it sits in is off in the preview: it shows when that look is on. Click to see it on top while it is selected. "
+          : !l.drawn && !l.view_off ? "Not on the screen at this moment: click to see it on top while it is selected, and edit it. " : "")
+          + "Ctrl+click adds it to the selection or takes it out, Shift+click selects a run. Right-click for more."}
         onMouseDown=${(e) => { if (e.shiftKey) e.preventDefault(); }}
+        onContextMenu=${(e) => layerMenu(t, l, e)}
         onClick=${(e) => call("text_scenes.tree_select", l.id, pickHow(e, true))}>
-      <button type="button" class=${cx("ly-eye", "view", (l.view_off || l.state_off) && "shut")}
-        aria-label="In the preview"
-        title=${l.view_off ? "Blue eye, the preview only: hidden here. Click to show it here again (the game is not changed)"
-          : l.state_off ? "Blue eye, the preview only: off here because the part it sits in shows another of its looks. Click to turn it on here (the game is not changed)"
-          : l.shown ? "Blue eye, the preview only: turned on here. Click to turn it back off (the game is not changed)"
-          : "Blue eye, the preview only: click to hide it here, to see or reach what is under it (the game is not changed)"}
-        onClick=${(e) => {
-          e.stopPropagation();
-          if (l.view_off) call("text_scenes.tree_view", l.id, true);
-          else if (l.state_off || l.shown) call("text_scenes.tree_force", l.id, !l.shown);
-          else call("text_scenes.tree_view", l.id, false);
-        }}>
+      <button type="button" class=${cx("ly-eye", (l.view_off || l.state_off) && "shut", t.solo === l.id && "solo")}
+        aria-label="Shown in the preview" ...${tip(eyeTip(l, t.solo))} onClick=${(e) => eyeClick(l, e)}>
         <${Icon} name=${l.view_off || l.state_off ? "eye-off" : "eye"} /></button>
-      <button type="button" class=${cx("ly-eye", "game", l.hidden && "shut")}
-        aria-label="In the game"
-        title=${l.hidden ? "Red eye, the game: hidden in the game. Write leaves it out of the card, so the machine never draws it. Click to show it in the game again (the preview is not changed)"
-          : `Red eye, the game: click to hide it in the game. Write leaves it out of the card, so the machine never draws it${l.part_off ? " (it shows only when the look it sits in is on)" : ""}. The preview is not changed: its blue eye hides it here`}
-        onClick=${(e) => { e.stopPropagation(); call("text_scenes.tree_visible", l.id, l.hidden); }}>
-        <${Icon} name=${l.hidden ? "eye-off" : "eye"} /></button>
       <span class="sc-t ellip" title=${l.name}>${l.name}${l.added ? " (added)" : ""}</span>
       <span class=${cx("sc-i small ellip", l.hidden ? "in-game" : "muted")} title=${l.edits || l.kind}>${l.edits || l.kind}</span>
+      <button type="button" class=${cx("ly-game", l.hidden && "on")} aria-label="Hidden in the game"
+        aria-pressed=${l.hidden ? "true" : "false"} ...${tip(gameTip(l))}
+        onClick=${(e) => { e.stopPropagation(); call("text_scenes.tree_visible", l.id, l.hidden); }}>
+        <${Icon} name="sd" /></button>
       ${(l.pics || []).length ? html`<button type="button" class="ly-img"
         aria-label="Show on the Images tab" ...${tip(l.pics.length === 1 ? "Show this picture on the Images tab"
           : `Show one of the ${l.pics.length} pictures it draws on the Images tab`)}
@@ -948,22 +1004,22 @@ function TreeSide({ t, play, playFrame }) {
       <div class="small muted">Drag any of them on the preview, or use the arrow keys, to move them together. Ctrl-click one to take it out; click one on its own to pick just that.</div>
       <div class="tree-row">
         <span class="lbl">Preview</span>
-        <${Button} size="xs" title="Hide every selected layer in the preview only (their blue eyes; the game is not changed)" onClick=${() => call("text_scenes.tree_view_many", t.sels, false)}>Hide<//>
-        <${Button} size="xs" title="Show every selected layer in the preview again (their blue eyes)" onClick=${() => call("text_scenes.tree_view_many", t.sels, true)}>Show<//>
+        <${Button} size="xs" title="Hide every selected layer in the preview only; the game is not changed (H)" onClick=${() => call("text_scenes.tree_view_many", t.sels, false)}>Hide<//>
+        <${Button} size="xs" title="Show every selected layer in the preview again (H)" onClick=${() => call("text_scenes.tree_view_many", t.sels, true)}>Show<//>
       </div>
       <div class="tree-row">
         <span class="lbl">Game</span>
-        <${Button} size="xs" title="Hide every selected layer in the game: Write leaves them out of the card (their red eyes; the preview is not changed)" onClick=${() => call("text_scenes.tree_visible_many", t.sels, false)}>Hide<//>
-        <${Button} size="xs" title="Show every selected layer in the game again (their red eyes)" onClick=${() => call("text_scenes.tree_visible_many", t.sels, true)}>Show<//>
+        <${Button} size="xs" title="Hide every selected layer in the game: Write leaves them out of the card; the preview is not changed" onClick=${() => call("text_scenes.tree_visible_many", t.sels, false)}>Hide<//>
+        <${Button} size="xs" title="Put every selected layer back in the game" onClick=${() => call("text_scenes.tree_visible_many", t.sels, true)}>Show<//>
       </div>
     </div>`
     : p ? html`<div class="tree-props">
       <div class="small ellip" title=${p.name}><b>${p.name}</b> <span class="muted">${p.kind}${p.added ? ", added" : ""}</span></div>
-      ${p.peek && p.view_off ? html`<div class="small muted">Hidden in the preview with its blue eye. It is shown on top while it is selected.</div>`
-      : p.peek && p.view_in ? html`<div class="small muted">It sits in ${p.view_in}, hidden in the preview with its blue eye. It is shown on top while it is selected.</div>`
+      ${p.peek && p.view_off ? html`<div class="small muted">Hidden in the preview with its eye. It is shown on top while it is selected.</div>`
+      : p.peek && p.view_in ? html`<div class="small muted">It sits in ${p.view_in}, hidden in the preview with its eye. It is shown on top while it is selected.</div>`
       : p.peek ? html`<div class="small muted">The game does not draw this at this moment. It is shown on top while it is selected; an edit holds wherever the game shows it.</div>` : null}
-      ${p.hidden ? html`<div class="small in-game">Hidden in the game with its red eye: Write leaves it out of the card.</div>`
-      : p.hid_in ? html`<div class="small in-game">It sits in ${p.hid_in}, hidden in the game with its red eye: Write leaves it out of the card.</div>` : null}
+      ${p.hidden ? html`<div class="small in-game">Hidden in the game: Write leaves it out of the card. The preview still shows it.</div>`
+      : p.hid_in ? html`<div class="small in-game">It sits in ${p.hid_in}, hidden in the game: Write leaves it out of the card.</div>` : null}
       ${p.pic ? html`<div class="tree-row">
         <span class="small muted" ...${tip("The picture's own size, and how much the game scales it to draw it here. Anything but 100% is resized by the game as it draws, which can leave jagged edges: make the picture at the size it shows, replace it on the Images tab with \"Keep this picture's own size\" ticked, then press Draw 1:1.")}>
           Picture ${p.pic.w} x ${p.pic.h} px, drawn at ${p.pic.sx === p.pic.sy ? p.pic.sx : `${p.pic.sx} x ${p.pic.sy}`}%</span>
@@ -1001,7 +1057,7 @@ function TreeSide({ t, play, playFrame }) {
         ${num("Opacity %", p.alpha, (v) => call("text_scenes.tree_tint", p.id, tint, v), "100 = as shipped")}
       </div>
       <div class="tree-row">
-        <${Button} size="xs" title=${p.hidden ? "Show it in the game again (its red eye)" : "Hide it in the game: Write leaves it out of the card (its red eye; the preview is not changed)"}
+        <${Button} size="xs" title=${p.hidden ? "Put it back in the game" : "Hide it in the game: Write leaves it out of the card; the preview is not changed"}
           onClick=${() => call("text_scenes.tree_visible", p.id, p.hidden)}>${p.hidden ? "Show in game" : "Hide in game"}<//>
         <${Button} size="xs" title="Draw it above the next layer" onClick=${() => call("text_scenes.tree_order", p.id, "up")}>Forward<//>
         <${Button} size="xs" title="Draw it below the layer before it" onClick=${() => call("text_scenes.tree_order", p.id, "down")}>Back<//>
@@ -1045,7 +1101,7 @@ function TreeActions({ t }) {
             : "Drop every edit made to this scene since the last Write put it on a card.",
           onClick: () => call("text_scenes.tree_revert_built") },
         { label: "Preview eyes as in the game (this scene)", icon: "eye", disabled: !t.view_apart,
-          title: "Every blue eye back to what its red eye says, as when the scene was first opened. The card is not changed.",
+          title: "Every eye back to what the game shows, as when the scene was first opened: shut on the layers hidden in the game, open on the rest. The card is not changed.",
           onClick: () => call("text_scenes.tree_view_reset") },
         { label: "As shipped (this scene)", icon: "refresh", disabled: !t.edits,
           title: "Put this scene back the way the game shipped it.", onClick: () => call("text_scenes.tree_clear") },
@@ -1058,7 +1114,7 @@ function TreeActions({ t }) {
       : t.edits || t.built === "changed" ? html`<span class="small nw warn-ink" title="Edits are kept as you make them; there is nothing to save. The next Write puts them on the card.">
           <span class="sc-dot edited"></span> ${t.edits ? `${t.edits} edit${t.edits === 1 ? "" : "s"}` : "Back as shipped"}, not written yet</span>` : null}
     ${(t.hidden_names || []).length ? html`<span class="small nw warn-ink"
-        title=${`Hidden in the game with its red eye, so the machine never draws it: ${t.hidden_names.join(", ")}. Click its red eye in Layers to show it again.`}>
+        title=${`Hidden in the game, so the machine never draws it: ${t.hidden_names.join(", ")}. Click the card at the end of its row in Layers to put it back.`}>
         <${Icon} name="eye-off" /> ${t.hidden_names.length} hidden in game</span>` : null}
     ${adding ? html`<${Modal} title="Add a line of text" onClose=${() => setAdding(false)}
         footer=${html`<${Button} onClick=${() => setAdding(false)}>Cancel<//><${Button} kind="primary"
