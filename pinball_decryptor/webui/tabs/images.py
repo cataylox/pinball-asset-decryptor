@@ -242,6 +242,7 @@ class ImagesTab(TabService):
         self.image_status_var = self.var("status")
         self._sort = ("#0", False)
         self._slots = []
+        self._reveal_after_scan = None
         self._by_rel = {}
         self._idx = {}
         self._assignments = {}
@@ -523,7 +524,11 @@ class ImagesTab(TabService):
             self._open_groups = set()
         self.set(dir=scan_dir)
         self._refresh_image_list()
-        self._select_first_row()
+        rel, self._reveal_after_scan = self._reveal_after_scan, None
+        if rel in self._by_rel:
+            self._reveal(rel)
+        else:
+            self._select_first_row()
         self._start_change_scan()
         self._probe_image_metadata_async(scan_id)
 
@@ -1957,7 +1962,12 @@ class ImagesTab(TabService):
         would hide it)."""
         self.window.select_tab(self.ns)
         if rel not in self._by_rel:
+            # a first visit starts the scan: land on it once the list is in (PAD-287)
+            self._reveal_after_scan = rel if self._scan_t0 is not None else None
             return
+        self._reveal(rel)
+
+    def _reveal(self, rel):
         if rel not in self._shown_rels():
             self._quiet += 1
             try:

@@ -902,3 +902,29 @@ def test_several_picked_at_once_move_and_hide_together(tmp_path):
         assert w.call("text_scenes.tree_visible_many", [art, title], True)
         assert _ops(folder) == []
         w.call("text_scenes.close")
+
+
+def test_a_layers_picture_button_lands_on_it_on_the_images_tab(tmp_path):
+    """PAD-287: every layer that draws a picture - itself or through what it holds - names
+    it, and the button lands on it on the Images tab, even on the tab's first visit (the
+    jump used to arrive before the scan and the scan then picked the first row)."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        layers = _tv(w)["layers"]
+        art = next(l for l in layers if l["name"] == "Art")
+        title = next(l for l in layers if l["name"] == "Title")
+        assert len(art["pics"]) == 1
+        assert art["pics"][0].startswith("images/scene_textures/pic_")
+        assert os.path.isfile(os.path.join(str(folder), *art["pics"][0].split("/")))
+        assert title["pics"] == []
+        at = layers.index(art)
+        holders = [l for l in layers[:at] if l["depth"] < art["depth"]]
+        assert all(art["pics"][0] in l["pics"] for l in holders)
+
+        assert w.call("text_scenes.activate", "img::" + art["pics"][0])
+        assert _wait(w, lambda: ((w.state("images").get("focus") or {}).get("id")
+                                 == art["pics"][0]), 20)
+        assert w.state("shell")["tab"] == "images"

@@ -549,9 +549,18 @@ class TreeEditMixin:
         drawn = {d["node"] for d in self._tdraws}
         layers = []
         index = scene_edit._man_index(man)
+        have, memo = {}, {}
         for n, _parent, depth in _walk_man(man):
             kind = _kind_of(man, n)
+            pics = []
+            for rel in _pics_of(man, n, memo):
+                if rel not in have:
+                    have[rel] = os.path.isfile(
+                        os.path.join(self.assets_dir, "images", *rel.split("/")))
+                if have[rel]:
+                    pics.append(rel)
             layers.append({"id": n["id"], "name": n["name"], "depth": depth, "kind": kind,
+                           "pics": ["images/" + rel for rel in pics],
                            "drawn": n["id"] in drawn or n["id"] in self._tworlds,
                            "state_off": n["id"] in self._teye_off,
                            "shown": n["id"] in (self._tforce.get(card) or ()),
@@ -1620,6 +1629,32 @@ def _walk_man(man):
 
     run(man["root"]["kids"], None, 0)
     return out
+
+
+def _pics_of(man, n, memo):
+    """The pictures (rels under images/) node *n* draws, itself or through what it holds, in
+    drawing order, each once: the Layers list's button to them on the Images tab (PAD-287).
+    *memo* keeps each object's list for the next node that shows it."""
+    objects = man["objects"]
+    out = []
+    for _s, oid in n["comps"]:
+        if oid not in memo:
+            memo[oid] = []                          # a group that holds itself stops here
+            o = objects.get(str(oid)) or {}
+            k = o.get("kind")
+            if k == "Bitmap":
+                rels = [o.get("image")]
+            elif k == "Shape" and o.get("fill") is not None:
+                rels = [(objects.get(str(o["fill"])) or {}).get("image")]
+            elif k == "StreamingFlipbook":
+                rels = [fr.get("image") for fr in o.get("seq") or () if fr]
+            else:
+                rels = []
+            for kid in o.get("kids") or ():
+                rels += _pics_of(man, kid, memo)
+            memo[oid] = rels
+        out += memo[oid]
+    return list(dict.fromkeys(rel for rel in out if rel))
 
 
 def _kind_of(man, n):
