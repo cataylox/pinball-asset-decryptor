@@ -847,6 +847,26 @@ def test_a_picked_layer_is_drawn_on_top_whatever_its_eye_says(tmp_path):
         w.call("text_scenes.close")
 
 
+def test_an_eye_hide_is_named_as_hidden_in_the_game(tmp_path):
+    """DragonRR (PAD-290): with the picker on a monster, its body's eye hides it on the card,
+    not just the preview - the row and the status line say so, until its eye shows it again."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder, _body_scene())
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        ly = {l["name"]: l for l in _tv(w)["layers"]}
+        assert w.call("text_scenes.tree_state", ly["Select"]["id"], 2)     # the picker on B
+        assert _tv(w)["hidden_names"] == []
+        assert w.call("text_scenes.tree_visible", ly["BodyB"]["id"], False)
+        tv = _tv(w)
+        assert tv["hidden_names"] == ["BodyB"]
+        assert next(l for l in tv["layers"] if l["name"] == "BodyB")["edits"] == "hidden in game"
+        assert w.call("text_scenes.tree_visible", ly["BodyB"]["id"], True)
+        assert _tv(w)["hidden_names"] == []
+        w.call("text_scenes.close")
+
+
 def test_a_hidden_layer_the_game_draws_elsewhere_is_found_when_picked(tmp_path):
     """DragonRR (PAD-289): a layer hidden with its eye in a sprite the game is not drawing at
     this moment goes, picked, to where the game shows that sprite, and is drawn there."""
