@@ -1,8 +1,9 @@
 """tools/spooky_emu (PAD-266): the parts of the Beetlejuice rig that can be
-checked without WSL - the emulated Warden board's answers and ball moves,
-and sw.py's switch names."""
+checked without WSL - the emulated Warden board's answers, ball moves and
+control requests, sw.py's switch names and the switch window's model."""
 
 import importlib.util
+import json
 import pathlib
 
 import pytest
@@ -53,7 +54,7 @@ def test_eject_serves_a_ball_and_launch_clears_the_lane(board):
     assert board.balls == 5
     board.host_bytes(bytes([0x3E, 132, 54, 50]))           # auto-launch
     assert board.state[8] == 0
-    board.command("drain")
+    board.drain()
     assert board.balls == 6 and board.state[1] == 1
 
 
@@ -65,14 +66,30 @@ def test_a_message_split_across_reads_is_kept(board):
     assert board.sent == [bytes([0x3C, 152, 87, 0])]
 
 
-def test_switch_commands(board):
-    board.command("87 on")
+def test_control_requests(board):
+    assert board.command("sw 87 1") == "ok"
     assert board.sent == [bytes([0x3C, 1, 87])]
-    board.command("87 on")                                  # no change, no report
-    board.command("87 off")
+    board.command("sw 87 1")                                # no change, no report
+    board.command("sw 87 0")
     assert board.sent[-1] == bytes([0x3C, 0, 87])
-    board.command("25 pulse 50")
+    assert board.command("tap 25 50") == "ok"
     assert board.sent[-2:] == [bytes([0x3C, 1, 25]), bytes([0x3C, 0, 25])]
+    assert board.command("nonsense").startswith("err")
+
+
+def test_state_plunge_and_drain(board):
+    st = json.loads(board.command("state"))
+    assert st["balls"] == {"trough": 6, "shooter": 0, "in_play": 0}
+    assert st["switches"]["7"] == 1 and not st["connected"]
+    assert board.command("drain").startswith("err")          # nothing in play
+    assert board.command("plunge").startswith("err")         # lane empty
+    board.host_bytes(bytes([0x3E, 133, 51]))                 # serve
+    assert json.loads(board.command("state"))["balls"]["shooter"] == 1
+    assert board.command("plunge") == "ok"
+    assert json.loads(board.command("state"))["balls"] == {
+        "trough": 5, "shooter": 0, "in_play": 1}
+    assert board.command("drain") == "ok"
+    assert json.loads(board.command("state"))["balls"]["trough"] == 6
 
 
 def test_sw_names_the_switches():
@@ -90,3 +107,24 @@ def test_sw_and_board_agree_on_the_trough():
     for i, n in enumerate(warden.TROUGH):
         assert sw.SWITCHES[n] == "TROUGH %d" % (i + 1)
     assert sw.SWITCHES[warden.SHOOTER] == "SHOOTER LANE"
+
+
+def test_switch_window_model_groups_beetlejuice_switches():
+    """spkpf.py hands bofpf's page a profile built from sw.py's table."""
+    import sys
+    sys.path.insert(0, str(RIG))
+    sys.path.insert(0, str(RIG.parent / "bof_emu"))
+    sys.path.insert(0, str(RIG.parent / "spike2_emu"))
+    try:
+        spkpf = _load("pf", RIG / "spkpf.py")
+        bofpf = sys.modules["bofpf"]
+    finally:
+        for p in (str(RIG), str(RIG.parent / "bof_emu"), str(RIG.parent / "spike2_emu")):
+            sys.path.remove(p)
+    model = bofpf.page_model(spkpf.profile())
+    assert len(model["switches"]) == len(sw.SWITCHES)
+    keys = {r["n"]: r["key"] for r in model["switches"] if r["key"]}
+    assert keys == {87: "1", 90: "5", 86: "Z", 80: "/", 85: "Space", 81: "A"}
+    assert not any(r["placed"] for r in model["switches"])   # list only
+    assert spkpf.group(7) == "Trough" and spkpf.group(87) == "Cabinet"
+    assert spkpf.group(25) == "Playfield"

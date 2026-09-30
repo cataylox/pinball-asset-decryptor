@@ -9,8 +9,15 @@ Status as of **2026-09-29** (PAD-266): it **boots to attract mode and takes
 switch input**, hidden (`bootcheck.sh`: VERDICT pass, about 1 min 50 s from a
 warm cache). It was also played: two coins, Start, Ball 1 served to the
 shooter lane, auto-launched, pop bumpers/spinner/ramp/sling scoring
-(500,000), a drain to the outlane and the next ball served. Wiring it into
-the app's Emulate tab is a follow-up ticket.
+(500,000), a drain to the outlane and the next ball served.
+
+**In the app** (2026-09-30): Spooky Pinball has an **Emulate** tab
+(`webui/tabs/emulate_spooky.py`) that leads with the games it runs -
+Beetlejuice only - takes the `.beetlejuice` update (Spooky's, or one Write
+built), and drives `watch.sh` / `status.sh` / `stop.sh` / `cancel.sh`. When
+the game reaches attract, the switch window (`spkpf.py`) opens: tools/bof_emu's
+switch page pointed at this rig's board, every switch by name. A file that is
+not a Beetlejuice update is refused with that answer (`prepare.sh` exit 4).
 
 ## Why this is small
 
@@ -33,7 +40,7 @@ just as happy on X, so the rig uses Xvfb and Mesa's llvmpipe (OpenGL core,
 | the machine | the rig |
 |---|---|
 | `/game/code/uptest/` (the game) | the cached build, hard-linked into `$SPK_RIG/game`, bound there in a private mount namespace |
-| `/game/code/config/` (settings, audits, scores) | `$SPK_RIG/config`, with factory defaults "saved" (below) |
+| `/game/code/config/` (settings, audits, scores) | `$SPK_ROOT/nv<slot>`, kept between runs (`SPK_FRESH=1` starts over), with factory defaults "saved" (below) |
 | `/game/logs`, `/game/tmp`, `/game/media` (USB), `/game/backup`, `/game/update` | `$SPK_RIG/<name>` |
 | hostname `haunted-mansion...` | `pad-rig-<slot>` in its own UTS namespace (virtual mode) |
 | the Warden board on USB (`/dev/WARDEN`, 115200) | `spkwarden.py` on a pty; `spkshim.so` maps `/dev/WARDEN` onto it |
@@ -75,25 +82,29 @@ default found" per setting - harmless).
 
 ## Use
 
-All in PAD-Runtime, as root; `PAD_SLOT=N` picks a slot (default 0).
+The app runs `watch.sh <update>` as root (`PAD_VISIBLE=1` draws on the
+desktop at 1280x720, `PAD_AUDIO=1` plays sound), polls `status.sh` (key=value)
+and stops with `stop.sh`; the switch window talks to the board through
+`ctl.sh --stream` (requests `sw <n> <0|1>`, `tap <n> [ms]`, `plunge`, `drain`,
+`state` - the BoF boards' protocol). By hand, all in PAD-Runtime as root;
+`PAD_SLOT=N` picks a slot (default 0):
 
 ```
 T=/mnt/c/.../tools/spooky_emu
 bash $T/build.sh                                  # once, if spkshim.so is missing
-bash $T/prepare.sh /mnt/d/Pinball/images/Spooky/v2026.09.15.11.beetlejuice   # -> build=bj_v2026.09.15.11
-bash $T/run_game.sh bj_v2026.09.15.11             # Ready: ... (hidden)
+PAD_VISIBLE=0 bash $T/watch.sh /mnt/d/Pinball/images/Spooky/v2026.09.15.11.beetlejuice
 python3 $T/sw.py coin; python3 $T/sw.py start     # sw.py --list, sw.py --state
-python3 $T/sw.py launch                           # the launch button
-python3 $T/sw.py "top pop"; python3 $T/sw.py "left outlane"; python3 $T/sw.py drain
+python3 $T/sw.py plunge                           # or: sw.py launch (auto-launch)
+python3 $T/sw.py "top pop"; python3 $T/sw.py drain
 bash $T/shot.sh /mnt/c/tmp/bj.png
 bash $T/status.sh
-bash $T/killgame.sh
+bash $T/stop.sh
 bash $T/bootcheck.sh bj_v2026.09.15.11            # VERDICT <build> pass|fail ...
 ```
 
-`run_game.sh --visible` draws on the WSLg desktop, `--audio` plays through
-WSLg's PulseAudio. The game's Unity log is `$SPK_RIG/player.log`, its own
-log `$SPK_RIG/logs/*.log`, the board's `$SPK_RIG/warden.log`.
+`prepare.sh` and `run_game.sh` are the two halves of `watch.sh`. The game's
+Unity log is `$SPK_RIG/player.log`, its own log `$SPK_RIG/logs/*.log`, the
+board's `$SPK_RIG/warden.log`.
 
 ## What is open
 
@@ -107,4 +118,5 @@ log `$SPK_RIG/logs/*.log`, the board's `$SPK_RIG/warden.log`.
 * Only the one title and build were run. Spooky's other Unity titles
   (Halloween's UnityPlayer is the same 2022.3) ship as encrypted `.pkg`
   updates and are not covered.
-* `--audio` and `--visible` are wired but not exercised.
+* Sound (`PAD_AUDIO=1`) was run - the game starts and plays on - but not
+  listened to; the visible (desktop) window has not been run on this machine.

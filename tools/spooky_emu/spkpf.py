@@ -69,14 +69,11 @@ class Rig(bofpf.Rig):
                      for c in self.cmd])
 
 
-def main(argv=None):
-    ap = argparse.ArgumentParser(description="Beetlejuice switch window")
-    ap.add_argument("--distro", default="")
-    ap.add_argument("--slot", default=os.environ.get("PAD_SLOT", "0"))
-    args = ap.parse_args(argv)
-    prof = profile()
-    rig = Rig(args.distro, args.slot)
-    app = bofpf.App(prof, rig, "")
+def serve(distro, slot):
+    """The window's page, served and polling: (app, rig, host).  main()
+    shows it; a capture script shows it to a headless browser instead."""
+    rig = Rig(distro, slot)
+    app = bofpf.App(profile(), rig, "")
     for row in app.model["switches"]:
         row["group"] = group(row["n"])
     app.model["switches"].sort(key=lambda r: (GROUPS.index(r["group"]), r["n"]))
@@ -85,7 +82,16 @@ def main(argv=None):
     app.host = host
     host.start()
     bofpf.threading.Thread(target=app.poll, daemon=True, name="spk-poll").start()
-    main_spec = {"page": "main", "width": 420, "height": 860,
+    return app, rig, host
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Beetlejuice switch window")
+    ap.add_argument("--distro", default="")
+    ap.add_argument("--slot", default=os.environ.get("PAD_SLOT", "0"))
+    args = ap.parse_args(argv)
+    app, rig, host = serve(args.distro, args.slot)
+    main_spec = {"page": "main", "width": 560, "height": 860,
                  "title": "Beetlejuice - switches", "min_size": (340, 480)}
 
     def on_close():
