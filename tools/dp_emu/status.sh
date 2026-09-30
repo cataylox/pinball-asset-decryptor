@@ -26,8 +26,10 @@ if dp_game_alive; then
     echo "uptime_s=$(ps -o etimes= -p "$P" 2>/dev/null | tr -d ' ')"
     echo "display=$(cat "$DP_RIG/display" 2>/dev/null)"
     echo "visible=$(cat "$DP_RIG/visible" 2>/dev/null)"
-    echo "window=$(grep '^video:' "$DP_RIG/rig.log" 2>/dev/null | tail -1 | cut -d' ' -f2)"
-    echo "switches=$(grep -c '"sym"' "$DP_RIG/switches.json" 2>/dev/null)"
+    # every window the game opened (AAIW has two: its LCD and the round one)
+    echo "window=$(grep '^video:' "$DP_RIG/rig.log" 2>/dev/null | cut -d' ' -f2 | cut -d@ -f1 | sort -u | paste -sd' ')"
+    echo "switches=$(grep -c '"n":' "$DP_RIG/switches.json" 2>/dev/null)"
+    echo "kind=$(cat "$DP_RIG/kind" 2>/dev/null || echo tbl)"
     echo "switches_json=$DP_RIG/switches.json"
     echo "slot=$DP_SLOT"
 else

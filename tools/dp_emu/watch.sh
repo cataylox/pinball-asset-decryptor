@@ -37,6 +37,10 @@ python3 "$HERE/prepare.py" image "$IMG" --name "$NAME" --keep 2 | tee "$DP_ROOT/
 rc=${PIPESTATUS[0]}
 [ "$rc" = 0 ] || exit "$rc"
 BUILD=$DP_CACHE/$NAME
+if [ $# -gt 0 ] && [ "$(cat "$BUILD/kind" 2>/dev/null)" = aaiw ]; then
+    echo "watch.sh: Alice's Adventures in Wonderland installs its updates from a USB stick; play the disk image as it is" >&2
+    exit 5
+fi
 if [ $# -gt 0 ]; then
     ZNAME=$NAME
     for z in "$@"; do b=$(basename "$z"); ZNAME="$ZNAME+${b%.*}"; done

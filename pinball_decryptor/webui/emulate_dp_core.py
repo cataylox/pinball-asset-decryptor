@@ -1,16 +1,18 @@
 """Emulate tab for Dutch Pinball - the Tk-free facts of the rig in
 ``tools/dp_emu`` (the tab itself is ``webui/tabs/emulate_dp.py``).
 
-A Dutch Pinball game (The Big Lebowski) is an x86-64 Linux program built on
+Two games, two programs.  The Big Lebowski is an x86-64 Linux program on
 Dutch Pinball's own P-ROC framework, and it ships its own simulator: started
-with ``fakepinproc`` it drives no hardware at all.  So the rig emulates
-nothing - it gives the game what the machine's disk gave it (the base
-assets, the installed version folder), a window, a sound device, and a way
-to press any switch.  See ``tools/dp_emu/README.md``.
+with ``fakepinproc`` it drives no hardware, so the rig gives it only what the
+machine's disk gave it (base assets, the installed version), a window, sound
+and a key for every switch.  Alice's Adventures in Wonderland is a native
+C++ program with no simulator; the rig runs it in a chroot of its own root
+and answers it as its P-ROC (tools/dp_emu/aaiw).  See tools/dp_emu/README.md.
 
 The tab takes the machine's DISK IMAGE (the base assets exist nowhere else)
-and, optionally, an update .zip laid over it - the factory's, or one the
-Write tab built - so a mod can be played before it goes on a USB stick.
+and, for The Big Lebowski, optionally an update .zip laid over it - the
+factory's, or one the Write tab built - so a mod can be played before it
+goes on a USB stick.
 
 Everything that knows the rig's layout lives here, as the BoF tab's does in
 ``emulate_bof_core``; how a script is invoked and how status is parsed is
@@ -45,7 +47,8 @@ EXIT_TEXT = {
     2: "The disk image or update file could not be read.",
     3: "Not enough free space in the app's Linux to unpack this game.",
     4: "This disk image holds no Dutch Pinball game (/home/dp/game).",
-    5: "The update does not install onto the version on this disk image.",
+    5: "The update does not install onto the version on this disk image "
+       "(Alice's Adventures in Wonderland takes no update here).",
     6: "The game did not start.",
     8: "The game started, then exited during start-up.",
 }

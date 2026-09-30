@@ -1,4 +1,5 @@
-"""Emulate DP tab: run a Dutch Pinball game (The Big Lebowski) on this PC.
+"""Emulate DP tab: run a Dutch Pinball game (The Big Lebowski, Alice's
+Adventures in Wonderland) on this PC.
 
 THIN, like the BoF tab: every step of the launch (prepare the build off the
 disk image, lay an update over it, start the game) lives in
@@ -6,9 +7,9 @@ disk image, lay an update over it, start the game) lives in
 it, and polls ``status.sh``.
 
 The machine's switches are a WINDOW of their own, as the other rigs' are:
-``tools/dp_emu/dppf.py``, the game's own machine view (machine.png, with
-every switch where machine.yaml puts it) plus a labelled list, run on the
-app's Windows Python.  This tab opens it once the game is up, reopens it on
+``tools/dp_emu/dppf.py`` - The Big Lebowski's own machine view (machine.png,
+with every switch where machine.yaml puts it) plus a labelled list; Alice's
+switches as a list - run on the app's Windows Python.  This tab opens it once the game is up, reopens it on
 request, and closes it on Stop.
 
 Exports ``dp_emulate_img_var`` / ``dp_emulate_zip_var`` (the run logic
@@ -29,22 +30,24 @@ from ..emulate_jjp_common import (RigTabMixin, rig_off, load_audio_ctl,
                                   windows_python)
 from .base import TabService, rpc
 
-INTRO = ("Run a Dutch Pinball game on this PC - The Big Lebowski. The game "
-         "ships its own machine simulator, so it runs as it is; the emulator "
-         "gives it a window, sound and every switch.\n"
-         "Pick the machine's disk image, and optionally an update to lay over "
-         "it - the factory's, or one the Write tab built, to play a mod "
-         "before it goes on a USB stick.")
+INTRO = ("Run a Dutch Pinball game on this PC - The Big Lebowski or Alice's "
+         "Adventures in Wonderland. The emulator stands in for the machine's "
+         "controller board and gives the game a window, sound and every "
+         "switch.\n"
+         "Pick the machine's disk image. For The Big Lebowski you can also lay "
+         "an update over it - the factory's, or one the Write tab built, to "
+         "play a mod before it goes on a USB stick.")
 
-IMG_TIP = ("The machine's disk image (.img). It is only read: the emulator "
-           "copies the game out of it once (a few minutes, several GB) and "
-           "keeps the last two, so the next start is quick. The update zips "
-           "alone cannot run - most of the game's pictures and sounds exist "
-           "only on the machine's disk.")
+IMG_TIP = ("The machine's disk image (.img) - for Alice's Adventures in "
+           "Wonderland, its full_image installer. It is only read: the "
+           "emulator copies the game out of it once (a few minutes, several "
+           "GB) and keeps the last two, so the next start is quick. The update "
+           "zips alone cannot run - most of the game's pictures and sounds "
+           "exist only on the machine's disk.")
 
-ZIP_TIP = ("Optional: a Dutch Pinball update (.zip), laid over the version "
-           "on the disk image the way the machine installs it. Leave empty "
-           "to play the image as it is.")
+ZIP_TIP = ("Optional, The Big Lebowski only: an update (.zip), laid over the "
+           "version on the disk image the way the machine installs it. Leave "
+           "empty to play the image as it is.")
 
 SOUND_TIP = ("Play the game's sound on this PC. Applies when the game starts; "
              "the game's own volume is in its service menu.")
@@ -434,7 +437,9 @@ class EmulateDPTab(RigTabMixin, TabService):
             "title": dp.title_name(info) if up else "—",
             "version": (info.get("version") or "—") if up else "—",
             "switches": (info.get("switches") or "—") if up else "—",
-            "window": (info.get("window") or "—").replace("x", " × ")
+            # "1366x768 480x480" -> "1366 × 768 + 480 × 480" (Alice has two)
+            "window": " + ".join(w.replace("x", " × ") for w in
+                                 (info.get("window") or "").split()) or "—"
             if up else "—",
             "rss": ("%.1f GB" % (rss / 1048576.0)) if up and rss else "—",
             "uptime": ("%d:%02d" % (secs // 60, secs % 60)) if up and secs

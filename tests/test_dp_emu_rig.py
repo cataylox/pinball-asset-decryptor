@@ -233,20 +233,18 @@ def test_every_switch_gets_a_key_and_the_cache_is_not_written(tmp_path):
         sw.RIG = old
 
 
-class _Fifo:
-    def __init__(self):
-        self.lines = []
+def _ctl(tmp_path, monkeypatch, switches):
+    import json
+    rig = tmp_path / "rig0"
+    rig.mkdir(exist_ok=True)
+    (rig / "switches.json").write_text(json.dumps({"switches": switches}))
+    monkeypatch.setattr(dpctl, "ROOT", str(tmp_path))
+    return dpctl.Ctl("0")
 
 
 def test_dpctl_holds_taps_and_reports(tmp_path, monkeypatch):
-    rig = tmp_path / "rig0"
-    rig.mkdir()
-    (rig / "switches.json").write_text(
-        '{"switches": [{"n": 0, "sym": 1000}, {"n": 1, "sym": 1001}]}')
-    ctl = dpctl.Ctl.__new__(dpctl.Ctl)
-    ctl.rig = str(rig)
-    ctl.held = set()
-    ctl.syms = {0: 1000, 1: 1001}
+    """The Big Lebowski: a switch is its own key."""
+    ctl = _ctl(tmp_path, monkeypatch, [{"n": 0, "sym": 1000}, {"n": 1, "sym": 1001}])
     sent = []
     monkeypatch.setattr(ctl, "send", lambda line: sent.append(line) or True)
     monkeypatch.setattr(ctl, "up", lambda: True)
@@ -259,14 +257,62 @@ def test_dpctl_holds_taps_and_reports(tmp_path, monkeypatch):
     assert ctl.run(["bogus"])["ok"] is False
 
 
-def test_dpctl_with_no_game_reading_says_so(tmp_path):
-    rig = tmp_path / "rig0"
-    rig.mkdir()
-    ctl = dpctl.Ctl.__new__(dpctl.Ctl)
-    ctl.rig, ctl.held, ctl.syms = str(rig), set(), {0: 1000}
+def test_dpctl_presses_an_aaiw_switch_away_from_rest(tmp_path, monkeypatch):
+    """Alice: most switches rest CLOSED, so pressing a pop bumper opens it;
+    a trough opto rests open, so pressing it closes it; a tap is a pulse."""
+    ctl = _ctl(tmp_path, monkeypatch, [
+        {"n": 0, "proc": 46, "rest": "closed"},
+        {"n": 1, "proc": 2, "rest": "open"}])
+    sent = []
+    monkeypatch.setattr(ctl, "send", lambda line: sent.append(line) or True)
+    ctl.run(["sw", "0", "1"])
+    ctl.run(["sw", "0", "0"])
+    ctl.run(["sw", "1", "1"])
+    ctl.run(["tap", "0", "150"])
+    assert sent == ["sw 46 o", "sw 46 c", "sw 2 c", "pulse 46 150"]
+
+
+def test_dpctl_with_no_game_reading_says_so(tmp_path, monkeypatch):
+    ctl = _ctl(tmp_path, monkeypatch, [{"n": 0, "sym": 1000}])
     # no FIFO at all: nothing to write to, never a hang
     assert ctl.run(["tap", "0"]) == {"ok": False}
     assert ctl.run(["state"])["up"] is False
+
+
+def test_aaiw_switch_table_is_whole():
+    """aaiw/switches.json: the game's 50 playfield and 15 cabinet switches,
+    unique names, a rest level each, and the trough optos open at rest."""
+    import json
+    d = json.loads((RIG / "aaiw" / "switches.json").read_text())
+    sw = d["switches"]
+    procs = [s["proc"] for s in sw]
+    assert len(sw) == 65
+    assert sorted(procs) == [*range(0, 40), 42, 43, *range(45, 53),
+                             *range(64, 75), *range(76, 80)]
+    assert len({s["name"] for s in sw}) == len(sw)
+    assert [s["n"] for s in sw] == list(range(len(sw)))
+    assert all(s["rest"] in ("open", "closed") for s in sw)
+    by = {s["proc"]: s for s in sw}
+    assert all(by[n]["rest"] == "open" for n in range(1, 8))
+    assert by[68]["title"] == "Start Button" and by[68]["key"] == "1"
+    assert by[70]["title"] == "Coin Door Interlock" and by[70]["rest"] == "closed"
+
+
+def test_aaiw_version_from_the_image_name():
+    assert prepare.aaiw_version("/mnt/d/AAIW_1.05_full_image.img") == "1.05"
+    assert prepare.aaiw_version("/x/alice.img") == ""
+
+
+def test_find_clonezilla_root(tmp_path):
+    d = tmp_path / "pinball-image"
+    d.mkdir()
+    (d / "sda1.vfat-ptcl-img.zst").write_bytes(b"x" * 10)
+    (d / "sda2.ext4-ptcl-img.zst").write_bytes(b"x" * 100)
+    assert prepare.find_clonezilla_root(str(tmp_path)) == str(d / "sda2.ext4-ptcl-img.zst")
+    assert prepare.find_clonezilla_root(str(d.parent / "pinball-image")) is not None
+    empty = tmp_path / "e"
+    empty.mkdir()
+    assert prepare.find_clonezilla_root(str(empty)) is None
 
 
 def test_ftd2xx_stub_is_a_loadable_32bit_dll_exporting_the_ordinals(tmp_path):

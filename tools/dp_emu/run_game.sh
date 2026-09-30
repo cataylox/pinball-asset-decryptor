@@ -33,6 +33,13 @@ while [ $# -gt 0 ]; do
     shift
 done
 case "$BUILD" in /*) ;; "") ;; *) BUILD=$DP_CACHE/$BUILD ;; esac
+# Alice's Adventures in Wonderland is a native program on a root of its own.
+if [ "$(cat "$BUILD/kind" 2>/dev/null)" = aaiw ]; then
+    ARGS=()
+    [ $VISIBLE = 1 ] && ARGS+=(--visible)
+    [ $AUDIO = 1 ] && ARGS+=(--audio)
+    exec bash "$DP_TOOLS/run_aaiw.sh" "$BUILD" "${ARGS[@]}"
+fi
 [ -n "$BUILD" ] && [ -d "$BUILD/assets" ] || { echo "run_game.sh: not a prepared build: ${BUILD:-<none>} (prepare.py)" >&2; exit 2; }
 [ -n "$VER" ] || VER=$(cat "$BUILD/version")
 [ -x "$BUILD/$VER/start" ] || { echo "run_game.sh: $BUILD has no version $VER" >&2; exit 2; }
@@ -48,7 +55,7 @@ fi
 
 bash "$DP_TOOLS/killgame.sh" >/dev/null 2>&1
 
-rm -rf "$DP_RIG"
+dp_clear_rig || exit 3
 G=$DP_RIG/game
 mkdir -p "$G/temp"
 cp -al "$(realpath "$BUILD/assets")" "$G/assets"
@@ -81,9 +88,9 @@ if [ $VISIBLE = 1 ]; then
 else
     WIN_ENV=""
     DISP=$DP_DISPLAY
-    setsid -f Xvfb "$DISP" -screen 0 1920x1080x24 -nolisten tcp \
+    setsid -f Xvfb "$DISP" -screen 0 1920x1080x24 -nolisten tcp -noreset \
         < /dev/null > "$DP_RIG/xvfb.log" 2>&1
-    for _ in $(seq 1 50); do [ -e "/tmp/.X11-unix/X${DISP#:}" ] && break; sleep 0.1; done
+    dp_wait_display "$DISP" || { echo "run: the hidden display $DISP did not come up" >&2; cat "$DP_RIG/xvfb.log" >&2; exit 3; }
     pgrep -xf "Xvfb $DISP .*" | head -1 > "$DP_RIG/xvfb.pid"
 fi
 echo "$DISP" > "$DP_RIG/display"

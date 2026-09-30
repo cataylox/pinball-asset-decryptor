@@ -7,9 +7,13 @@
     dpctl.py [--slot N] --stream          the same commands, one per line on
                                           stdin, one reply line each
 
-n is the switch's index in the rig's switches.json (dpswitches.py), whose
-keysym the rig's keyboard.yaml maps to it; the press goes down the game's
-input FIFO to dpinput.so.  The switch window keeps one --stream pipe open,
+n is the switch's index in the rig's switches.json.  The Big Lebowski's
+entries carry a keysym the rig's keyboard.yaml maps to the switch
+(dpswitches.py), and the press is that key; Alice's Adventures in
+Wonderland's carry the P-ROC switch number and its rest level
+(aaiw/switches.json), and a press moves the switch AWAY from rest - most of
+its switches rest closed - through aaiwshim.so's fake P-ROC.  Either way it
+goes down the game's input FIFO.  The switch window keeps one --stream pipe open,
 so a click is a line down an open pipe, not a wsl.exe start.
 
 state: {"up": bool, "held": [n...], "switches": {n: 1}} - what this pipe is
@@ -21,6 +25,12 @@ import json
 import os
 import sys
 import threading
+import time
+
+#: A press shorter than this is stretched to it: the games debounce their
+#: switches, and a mouse click can be ~0 ms (Playwright's is) - Alice
+#: ignored a 0 ms Start.
+MIN_HOLD_S = 0.1
 
 ROOT = os.environ.get("DP_ROOT", "/var/tmp/pad_dp")
 
@@ -28,11 +38,17 @@ ROOT = os.environ.get("DP_ROOT", "/var/tmp/pad_dp")
 class Ctl:
     def __init__(self, slot):
         self.rig = os.path.join(ROOT, "rig%s" % slot)
-        self.syms = {}
+        self.syms = {}                  # n -> keysym (TBL)
+        self.procs = {}                 # n -> (P-ROC number, rests closed) (AAIW)
         self.held = set()
+        self.pressed_at = {}
         try:
             with open(os.path.join(self.rig, "switches.json"), encoding="utf-8") as f:
-                self.syms = {s["n"]: s["sym"] for s in json.load(f)["switches"]}
+                for s in json.load(f)["switches"]:
+                    if "sym" in s:
+                        self.syms[s["n"]] = s["sym"]
+                    elif "proc" in s:
+                        self.procs[s["n"]] = (s["proc"], s.get("rest") == "closed")
         except (OSError, ValueError, KeyError):
             pass
 
@@ -59,6 +75,19 @@ class Ctl:
             return False
         return self.send("")            # an empty line: is anyone reading?
 
+    def _release_after_min_hold(self, n):
+        t = self.pressed_at.pop(n, None)
+        if t is not None:
+            wait = MIN_HOLD_S - (time.monotonic() - t)
+            if wait > 0:
+                time.sleep(wait)
+
+    def _mark(self, n, on):
+        if on:
+            self.pressed_at[n] = time.monotonic()
+        else:
+            self._release_after_min_hold(n)
+
     def run(self, words):
         if not words:
             return {"ok": False, "error": "no command"}
@@ -71,11 +100,24 @@ class Ctl:
                 n = int(words[1])
             except (IndexError, ValueError):
                 return {"ok": False, "error": "switch number?"}
+            if n in self.procs:
+                num, rests_closed = self.procs[n]
+                if cmd == "sw":
+                    on = len(words) > 2 and words[2] == "1"
+                    self._mark(n, on)
+                    closed = on != rests_closed          # pressed = away from rest
+                    ok = self.send("sw %d %s" % (num, "c" if closed else "o"))
+                    if ok:
+                        (self.held.add if on else self.held.discard)(n)
+                    return {"ok": ok}
+                ms = int(words[2]) if len(words) > 2 and words[2].isdigit() else 150
+                return {"ok": self.send("pulse %d %d" % (num, ms))}
             sym = self.syms.get(n)
             if sym is None:
                 return {"ok": False, "error": "no switch %d" % n}
             if cmd == "sw":
                 on = len(words) > 2 and words[2] == "1"
+                self._mark(n, on)
                 ok = self.send("%s %d" % ("down" if on else "up", sym))
                 if ok:
                     (self.held.add if on else self.held.discard)(n)

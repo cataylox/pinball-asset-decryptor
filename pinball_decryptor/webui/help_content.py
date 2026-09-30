@@ -1552,28 +1552,33 @@ HELP_CONTENT = {
     ],
     "Emulate DP": [
         ("What it does",
-         "Runs the real Dutch Pinball game on this PC - The Big Lebowski - "
-         "in its own window. The game carries its own simulator of the "
-         "machine's controller board, so nothing is emulated: the emulator "
-         "gives it what the machine's disk gave it, a window, sound, and a "
-         "way to press every switch, and it boots into attract mode."),
+         "Runs the real Dutch Pinball game on this PC - The Big Lebowski or "
+         "Alice's Adventures in Wonderland - in its own window (Alice opens "
+         "two: the main screen and the round one). The emulator stands in "
+         "for the machine's controller board and gives the game what the "
+         "machine's disk gave it, a window, sound, and a way to press every "
+         "switch, and it boots into attract mode."),
         ("Which files to pick",
-         "The machine's disk image (.img) - it is the only place most of the "
+         "The machine's disk image (.img; for Alice, the full_image "
+         "installer) - it is the only place most of the "
          "game's pictures and sounds exist; the update zips carry only what "
          "changed. The first Start copies the game out of the image (several "
          "GB, a few minutes); the next is quick. Optionally add an update "
-         "(.zip): the official one, or one the Write tab built from your "
+         "(.zip, The Big Lebowski only): the official one, or one the Write "
+         "tab built from your "
          "edits. It is laid over the version on the image the way the "
          "machine installs it, so you can play a mod before it goes on a USB "
          "stick. Both files are only read."),
         ("Playing",
          "When the game is up its switch window opens beside it: the game's "
-         "own drawing of the machine with every switch on it, and a list of "
-         "them all by name. Hold a switch with the mouse (a flipper, a ball "
-         "resting in the scoop); right-click to latch it until you "
-         "right-click again. With that window focused, N and M are the "
-         "flippers, 1 is Start and 3 a coin, and 7, 8, 9 and 0 are the "
-         "service buttons (Escape, minus, plus, Enter). Closed it? "
+         "own drawing of the machine with every switch on it (for Alice, a "
+         "list), and a list of them all by name. Hold a switch with the "
+         "mouse (a flipper, a ball resting in the scoop); right-click to "
+         "latch it until you right-click again. With that window focused "
+         "the game's own keys work: for The Big Lebowski N and M are the "
+         "flippers, 1 is Start, 3 a coin and 7, 8, 9, 0 the service buttons; "
+         "for Alice the Shift keys are the flippers, 1 is Start and 7, 0, 8, "
+         "9 are Escape, Enter and the volume. Closed it? "
          "\"Switches window\" on this tab brings it back."),
         ("Cancel",
          "While a game is starting the Start button is Cancel: it stops the "

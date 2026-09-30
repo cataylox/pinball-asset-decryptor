@@ -22,6 +22,12 @@ at all.  So a build always starts from a machine's disk image:
         Cached: an image already prepared (same size and time) is reused.
         --keep K prunes older image builds (and their zip builds) to K.
 
+        Alice's Adventures in Wonderland ships as a Clonezilla installer
+        instead: the game SSD's root is a partclone + zstd image inside it
+        (pinball-image/sda2.ext4-ptcl-img.zst).  That is restored whole to
+        <name>/root.ext4 (kind "aaiw"; run_aaiw.sh runs it) - the game is
+        a native program that wants its own root, not a folder.
+
     prepare.py zip <update.zip> [...] --base <prepared image build> [--name N]
         the base build's current version folder with the updates laid over
         it in version order, as the machine installs them; each must list
@@ -138,6 +144,20 @@ def running_builds():
     return out
 
 
+def unmount_lower(build):
+    """An AAIW build's root.ext4 stays loop-mounted (read-only) as every
+    rig's overlay lower layer; let it go before the build is deleted.
+    False when it is still in use."""
+    lower = os.path.join(ROOT, "lower", os.path.basename(build))
+    if os.path.ismount(lower):
+        if subprocess.run(["umount", lower], stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL).returncode != 0:
+            return False
+    if os.path.isdir(lower):
+        os.rmdir(lower)
+    return True
+
+
 def prune(keep, spare):
     """Keep the `keep` newest image builds (and the zip builds laid over
     them); never `spare`, the one just made, or one a rig is running."""
@@ -149,7 +169,7 @@ def prune(keep, spare):
             images.append((os.path.getmtime(os.path.join(path, "source")), path))
     images.sort(reverse=True)
     for _t, path in images[keep:]:
-        if path == spare or path in running:
+        if path == spare or path in running or not unmount_lower(path):
             continue
         for n in os.listdir(CACHE):          # its zip builds point into it
             z = os.path.join(CACHE, n)
@@ -185,7 +205,19 @@ def from_image(img, name, every, keep=0):
         try:
             game = find_game(mnt)
             if not game:
-                continue
+                zst = find_clonezilla_root(mnt)
+                if not zst:
+                    continue
+                shutil.rmtree(part, ignore_errors=True)
+                from_clonezilla(img, zst, part, stamp)
+                if os.path.exists(out):
+                    unmount_lower(out)
+                    shutil.rmtree(out)
+                os.rename(part, out)
+                print("%s %s" % (AAIW_TITLE, aaiw_version(img)), file=sys.stderr)
+                if keep:
+                    prune(keep, out)
+                return out
             vers = version_dirs(game)
             if not vers:
                 continue
@@ -223,6 +255,89 @@ def from_image(img, name, every, keep=0):
             subprocess.run(["umount", mnt])
             os.rmdir(mnt)
     die("no Dutch Pinball game (/home/dp/game) on any partition of " + img, 4)
+
+
+AAIW_TITLE = "Alice's Adventures in Wonderland"
+
+
+def find_clonezilla_root(mnt):
+    """The partclone image of a Clonezilla backup's ext4 root partition
+    (the larger one if there are several), or None."""
+    best = None
+    for d in (mnt, *(os.path.join(mnt, n) for n in sorted(os.listdir(mnt)))):
+        if not os.path.isdir(d):
+            continue
+        for n in sorted(os.listdir(d)):
+            if n.endswith(".ext4-ptcl-img.zst"):
+                f = os.path.join(d, n)
+                if best is None or os.path.getsize(f) > os.path.getsize(best):
+                    best = f
+    return best
+
+
+def restore_partclone(zst, raw):
+    """zstd -dc <zst> | partclone.restore -W: a raw ext4 file.  Progress is
+    the share of the compressed stream fed so far."""
+    size = os.path.getsize(zst)
+    prog = Progress(size)
+    z = subprocess.Popen(["zstd", "-dc"], stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    pc = subprocess.Popen(["partclone.restore", "-C", "-W", "-s", "-", "-O", raw],
+                          stdin=z.stdout, stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL)
+    z.stdout.close()
+    try:
+        with open(zst, "rb") as f:
+            while True:
+                chunk = f.read(4 << 20)
+                if not chunk:
+                    break
+                z.stdin.write(chunk)
+                prog.add(len(chunk))
+        z.stdin.close()
+    except BrokenPipeError:
+        pass
+    rz, rp = z.wait(), pc.wait()
+    return rz == 0 and rp == 0
+
+
+def aaiw_version(img):
+    """"1.05" from AAIW_1.05_full_image.img; "" when the name says none."""
+    import re
+    m = re.search(r"(\d+\.\d+)", os.path.basename(img))
+    return m.group(1) if m else ""
+
+
+def from_clonezilla(img, zst, part, stamp):
+    """Restore an AAIW installer's game root into part/root.ext4 and check
+    it is AAIW (its program and assets are where the game looks)."""
+    need = int(os.path.getsize(zst) * 2.5)          # ~7 GB used of 8.5
+    free = shutil.disk_usage(CACHE).free
+    if free < need + (1 << 30):
+        die("the game needs about %.1f GB; %.1f GB free in the app's Linux"
+            % (need / 1e9, free / 1e9), 3)
+    os.makedirs(part)
+    raw = os.path.join(part, "root.ext4")
+    if not restore_partclone(zst, raw):
+        die("could not restore the game's disk from " + os.path.basename(zst), 4)
+    look = tempfile.mkdtemp(prefix="mnt-", dir=ROOT)
+    try:
+        ok = subprocess.run(["mount", "-o", "ro,loop,noload", raw, look],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL).returncode == 0
+        is_aaiw = ok and os.path.isfile(os.path.join(look, "opt", "pinterface")) \
+            and os.path.isdir(os.path.join(look, "opt", "assets", "alice"))
+    finally:
+        subprocess.run(["umount", look], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)
+        os.rmdir(look)
+    if not is_aaiw:
+        die("the disk inside %s is not a Dutch Pinball game this emulator "
+            "knows" % os.path.basename(img), 4)
+    for n, v in (("kind", "aaiw"), ("title", AAIW_TITLE),
+                 ("version", aaiw_version(img)), ("source", stamp)):
+        with open(os.path.join(part, n), "w") as f:
+            f.write(v)
 
 
 def machine_title(vdir):

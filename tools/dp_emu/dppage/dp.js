@@ -134,7 +134,7 @@ function build() {
     if (s.placed) { mk = el("div", "m"); box.append(mk); bindPress(mk, s); }
     if (s.group !== group) { group = s.group; list.append(el("div", "grp", group)); }
     const row = el("div", "row");
-    row.append(el("span", "n", String(s.n)), el("span", "dot"), el("span", "l", s.label), el("span", "k", s.key || ""));
+    row.append(el("span", "n", s.num || String(s.n)), el("span", "dot"), el("span", "l", s.label), el("span", "k", s.key || ""));
     bindPress(row, s);
     list.append(row);
     views[s.n] = [mk, row];
@@ -151,7 +151,9 @@ function build() {
     const h = Math.max(...placed.map((s) => s.y), 600) + 12;
     place(w, h);
   }
-  body.append(pf, list);
+  // no drawing and nothing placed (Alice): the list is the window
+  if (!M.art && !placed.length) { body.classList.add("listonly"); body.append(list); }
+  else body.append(pf, list);
   app.append(bar, body);
   paint();
 }

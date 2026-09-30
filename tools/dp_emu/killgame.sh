@@ -1,6 +1,7 @@
 #!/bin/bash
-# killgame.sh - stop this slot's game and hidden display, and PROVE they
-# stopped.  Exit 0 when nothing of the slot is left running, 1 otherwise.
+# killgame.sh - stop this slot's game and hidden display, take down an AAIW
+# run's root, and PROVE they stopped.  Exit 0 when nothing of the slot is
+# left running, 1 otherwise.
 . "$(dirname "$0")/dppath.sh"
 
 stop_pid() {        # <pid>: TERM, wait up to 3 s, then KILL
@@ -11,8 +12,10 @@ stop_pid() {        # <pid>: TERM, wait up to 3 s, then KILL
     kill -KILL "$p" 2>/dev/null
 }
 
-# Every process of the game: the PyInstaller bootloader, the game it
-# re-executes, and the workers it forks all run in the rig's game folder.
+# Every process of the game.  The Big Lebowski: the PyInstaller bootloader,
+# the game it re-executes and its workers all run in the rig's game folder.
+# Alice: everything whose root is the rig's chroot (pinterface ignores TERM,
+# so stop_pid's KILL is what ends it).
 slot_pids() {
     local p
     for p in $(pgrep -f '^\./start fakepinproc'); do
@@ -20,15 +23,27 @@ slot_pids() {
             "$DP_RIG"/game/*) echo "$p" ;;
         esac
     done
+    if mountpoint -q "$DP_RIG/root" 2>/dev/null; then
+        for p in $(ls /proc | grep -E '^[0-9]+$'); do
+            [ "$(readlink "/proc/$p/root" 2>/dev/null)" = "$DP_RIG/root" ] && echo "$p"
+        done
+    fi
 }
 
 for p in $(slot_pids); do kill -TERM "$p" 2>/dev/null; done
 for p in $(slot_pids); do stop_pid "$p"; done
 stop_pid "$(cat "$DP_RIG/xvfb.pid" 2>/dev/null)"
 
+# An AAIW root: every mount under it was made rslave when it was made
+# (run_aaiw.sh), so this recursive unmount cannot reach PAD-Runtime's own.
+if mountpoint -q "$DP_RIG/root" 2>/dev/null; then
+    umount -R "$DP_RIG/root" 2>/dev/null || umount -R -l "$DP_RIG/root" 2>/dev/null
+fi
+
 left=$(slot_pids)
 xp=$(cat "$DP_RIG/xvfb.pid" 2>/dev/null)
 if [ -n "$xp" ] && kill -0 "$xp" 2>/dev/null; then left="$left xvfb:$xp"; fi
+mountpoint -q "$DP_RIG/root" 2>/dev/null && left="$left root-mounted"
 if [ -n "$left" ]; then
     echo "killgame.sh: still running:" $left >&2
     exit 1

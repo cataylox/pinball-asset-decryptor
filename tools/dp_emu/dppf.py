@@ -71,7 +71,8 @@ def key_codes(key):
     if len(key) == 1 and key.isdigit():
         return ["Digit" + key, "Numpad" + key]
     return {"Up": ["ArrowUp"], "Down": ["ArrowDown"], "Left": ["ArrowLeft"],
-            "Right": ["ArrowRight"]}.get(key, [])
+            "Right": ["ArrowRight"], "LShift": ["ShiftLeft"],
+            "RShift": ["ShiftRight"]}.get(key, [])
 
 
 def group_of(name):
@@ -90,14 +91,18 @@ def page_model(table, title):
         placed = s.get("x") is not None and s.get("y") is not None
         rows.append({
             "n": s["n"], "label": s.get("title") or s["name"],
+            # the game's own number for it (AAIW: its P-ROC switch; TBL:
+            # machine.yaml's wiring, SD1 / 0/1 ...)
+            "num": str(s["proc"]) if "proc" in s else s.get("number", ""),
             "name": s["name"], "wire": s.get("label", ""),
-            "opto": bool(s.get("nc")), "group": group_of(s["name"]),
+            "opto": bool(s.get("nc")),
+            "group": s.get("group") or group_of(s["name"]),
             "x": s.get("x") or 0, "y": s.get("y") or 0, "placed": placed,
             "key": s.get("key") or "", "codes": key_codes(s.get("key") or ""),
-            "hold": s["name"].startswith(HOLD),
+            "hold": bool(s.get("hold", s["name"].startswith(HOLD))),
         })
     rows.sort(key=lambda r: (order[r["group"]], r["n"]))
-    door = [r["n"] for r in rows if r["name"] == "coinDoor"]
+    door = [r["n"] for r in rows if r["name"] in ("coinDoor", "coinDoorInterlock")]
     return {"title": title, "switches": rows,
             "coin_door": door[0] if door else None}
 

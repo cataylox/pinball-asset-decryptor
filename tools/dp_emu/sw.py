@@ -27,10 +27,14 @@ def keymap():
     """{switch name: keysym} from the running build's keyboard.yaml.  The
     file is flat `key: name[,name]` lines under keyboard_switch_map, so no
     YAML library is needed (PAD-Runtime's python has none)."""
-    ver = open(os.path.join(RIG, "ver")).read().strip()
-    path = os.path.join(RIG, "game", ver, "config", "keyboard.yaml")
     out, section = {}, None
-    for raw in open(path, encoding="utf-8-sig"):
+    try:
+        ver = open(os.path.join(RIG, "ver")).read().strip()
+        lines = open(os.path.join(RIG, "game", ver, "config", "keyboard.yaml"),
+                     encoding="utf-8-sig").readlines()
+    except OSError:
+        return out               # Alice: no keyboard.yaml (table() has all)
+    for raw in lines:
         line = raw.split("#")[0].rstrip()
         if not line.strip():
             continue
@@ -49,10 +53,10 @@ def keymap():
 
 
 def table():
-    """{switch name: (keysym, title)} from the rig's switches.json, or {}."""
+    """{switch name: (n, title)} from the rig's switches.json, or {}."""
     try:
         with open(os.path.join(RIG, "switches.json"), encoding="utf-8") as f:
-            return {s["name"]: (s["sym"], s["title"]) for s in json.load(f)["switches"]}
+            return {s["name"]: (s["n"], s["title"]) for s in json.load(f)["switches"]}
     except (OSError, ValueError, KeyError):
         return {}
 
@@ -67,22 +71,33 @@ def main(argv):
     if argv[0] == "--list":
         for name in sorted(set(km) | set(tb)):
             key = km.get(name)
-            print("%-22s %-28s %s" % (name, tb.get(name, ("", ""))[1],
+            print("%-26s %-30s %s" % (name, tb.get(name, ("", ""))[1],
                                      ("key " + (chr(key) if key < 128 else str(key))) if key else ""))
         return
     name, action = argv[0], (argv[1] if len(argv) > 1 else "tap")
+    if action not in ("tap", "down", "up"):
+        sys.exit("sw.py: action is tap, down or up")
+    if name in tb and name not in km:
+        # the rig's own table: dpctl.py knows how this game takes a press
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import dpctl
+        ctl = dpctl.Ctl(os.environ.get("PAD_SLOT", "0"))
+        n = str(tb[name][0])
+        words = ({"tap": ["tap", n] + argv[2:3], "down": ["sw", n, "1"],
+                  "up": ["sw", n, "0"]})[action]
+        r = ctl.run(words)
+        if not r.get("ok"):
+            sys.exit("sw.py: %s" % (r.get("error") or "the game is not reading its input"))
+        print(" ".join(words))
+        return
     if name in km:
         sym = km[name]
-    elif name in tb:
-        sym = tb[name][0]
     elif len(name) == 1:
         sym = ord(name)
     elif name.isdigit():
         sym = int(name)
     else:
-        sys.exit("sw.py: %s has no key in keyboard.yaml (--list)" % name)
-    if action not in ("tap", "down", "up"):
-        sys.exit("sw.py: action is tap, down or up")
+        sys.exit("sw.py: no switch or key %s (--list)" % name)
     line = "%s %d" % (action, sym)
     if action == "tap" and len(argv) > 2:
         line += " %d" % int(argv[2])
