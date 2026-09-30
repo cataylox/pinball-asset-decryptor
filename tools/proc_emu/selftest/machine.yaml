@@ -1,0 +1,49 @@
+# A small PDB machine in the shape American Pinball / Spooky / Dutch Pinball
+# yamls take: dedicated switches SDn, NC optos in the trough, PDB coils
+# Ax-By-z.  The self-test's probe and demo game both use it.
+PRGame:
+    machineType: pdb
+    numBalls: 3
+PRFlippers:
+    - flipperLwL
+PRSwitches:
+    flipperLwL:
+        number: SD0
+    startButton:
+        number: SD8
+    tilt:
+        number: SD7
+    coinDoor:
+        number: SD9
+        type: NC
+    trough1:
+        number: SD72
+        type: NC
+    trough2:
+        number: SD73
+        type: NC
+    trough3:
+        number: SD74
+        type: NC
+    trough4:
+        number: SD75
+        type: NC
+    shooter:
+        number: SD79
+    leftSling:
+        number: SD66
+PRCoils:
+    flipperLwLMain:
+        number: A0-B0-0
+        pulseTime: 30
+    trough:
+        number: A0-B0-1
+        pulseTime: 20
+    leftSling:
+        number: A0-B0-2
+        pulseTime: 15
+    flasher:
+        number: A0-B0-3
+PRBumpers:
+    - leftSling
+PRLamps: {}
