@@ -161,6 +161,7 @@ PAD_BOARD=/x/y rigboard_dir
 POSTS = {
     ("ap_emu", "run_game.sh"): "rigboard_post ap ",
     ("bof_emu", "run_game.sh"): "rigboard_post bof ",
+    ("cgc_emu", "run_game.sh"): "rigboard_post cgc ",
     ("dp_emu", "run_game.sh"): "rigboard_post dp ",
     ("dp_emu", "run_aaiw.sh"): "rigboard_post dp ",
     ("jjp_emu", "run_game.sh"): "rigboard_post jjp ",
@@ -172,6 +173,7 @@ POSTS = {
 CLEARS = {
     ("ap_emu", "killgame.sh"): "rigboard_clear ap ",
     ("bof_emu", "killgame.sh"): "rigboard_clear bof ",
+    ("cgc_emu", "killgame.sh"): "rigboard_clear cgc ",
     ("dp_emu", "killgame.sh"): "rigboard_clear dp ",
     ("jjp_emu", "killgame.sh"): "rigboard_clear jjp ",
     ("pb_emu", "killgame.sh"): "rigboard_clear pb ",
@@ -198,7 +200,7 @@ def test_the_hidden_mute_runs_before_the_launch(emu):
     assert s.index("rigboard_audio") < s.index("rigboard_post")
 
 
-@pytest.mark.parametrize("path", ["ap_emu/appath.sh", "bof_emu/bofpath.sh",
+@pytest.mark.parametrize("path", ["ap_emu/appath.sh", "bof_emu/bofpath.sh", "cgc_emu/cgcpath.sh",
                                   "dp_emu/dppath.sh", "proc_emu/procpath.sh",
                                   "jjp_emu/padpath.sh", "pb_emu/pbpath.sh",
                                   "spooky_emu/spkpath.sh"])
