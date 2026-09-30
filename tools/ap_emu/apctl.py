@@ -6,6 +6,7 @@
     apctl.py [--slot N] plunge            the shooter lane lets its ball go
     apctl.py [--slot N] drain             a ball drains into the trough
     apctl.py [--slot N] reset             every ball back in the trough
+    apctl.py [--slot N] rip <n> 1|0       rip switch n (a spinner) / stop
     apctl.py [--slot N] pause 1|0         freeze / resume the game (and apiav)
     apctl.py [--slot N] state             one line of JSON (below)
     apctl.py [--slot N] --stream          the same commands, one per line on
@@ -46,6 +47,7 @@ class Ctl:
         self.held = set()
         self.pressed_at = {}
         self.paused = False
+        self.ripping = set()
         try:
             with open(os.path.join(self.rig, "switches.json"), encoding="utf-8") as f:
                 t = json.load(f)
@@ -147,6 +149,17 @@ class Ctl:
             return {"ok": self.send("!drain")}
         if cmd == "reset":
             return {"ok": self.send("!reset")}
+        if cmd == "rip":
+            try:
+                n, on = int(words[1]), len(words) > 2 and words[2] == "1"
+            except (IndexError, ValueError):
+                return {"ok": False, "error": "switch number?"}
+            if self.known and n not in self.known:
+                return {"ok": False, "error": "no switch %d" % n}
+            ok = self.send("!rip %d %d" % (n, 1 if on else 0))
+            if ok:
+                (self.ripping.add if on else self.ripping.discard)(n)
+            return {"ok": ok}
         if cmd == "pause":
             return {"ok": self.pause(len(words) > 1 and words[1] == "1"),
                     "paused": self.paused}
@@ -185,6 +198,8 @@ def main(argv):
         # anything it was holding.
         if ctl.paused:
             ctl.pause(False)
+        for n in list(ctl.ripping):
+            ctl.run(["rip", str(n), "0"])
         for n in list(ctl.held):
             ctl.run(["sw", str(n), "0"])
         return 0

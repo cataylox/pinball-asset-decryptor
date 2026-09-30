@@ -194,6 +194,7 @@ class App:
         self.lights = {}
         self.paused = False
         self.held_ids = set()          # switches this window holds (mouse)
+        self.ripping = set()           # switches right-held (ripping)
         self.key_held = {}             # key code -> [switch numbers]
         self.row_hit = set()           # row indexes pressed right now
         self.note = []
@@ -288,7 +289,7 @@ class App:
         return "  ·  ".join(bits)
 
     def _switch_tip(self, s):
-        return "%s  (%s, %d%s)\nclick and hold to make it; right-click too" % (
+        return "%s  (%s, %d%s)\nhold to make it; hold the right button to rip it" % (
             s["label"] or s["name"], s["name"], s["n"], ", an opto" if s.get("nc") else "")
 
     def _view(self):
@@ -339,9 +340,12 @@ class App:
             self._press(ids, False)
             return True
         if m == "rip":
+            # right-hold, as on the Stern window: the switch flips as long as
+            # it is held (a spinner spinning) - the game loop does the
+            # flipping (aprun.py), so it keeps time
             n, on = int(args[0]), bool(args[1])
-            (self.held_ids.add if on else self.held_ids.discard)(n)
-            self._press([n], on)
+            (self.ripping.add if on else self.ripping.discard)(n)
+            self.rig.ask("rip %d %d" % (n, 1 if on else 0))
             return True
         if m == "row":
             i, down = int(args[0]), bool(args[1])
@@ -368,6 +372,8 @@ class App:
         if m == "blur":
             for code in list(self.key_held):
                 self.key(code, False)
+            for n in list(self.ripping):
+                self.api("rip", [n, False])
             return True
         if m == "pause":
             self.set_pause(not self.paused)

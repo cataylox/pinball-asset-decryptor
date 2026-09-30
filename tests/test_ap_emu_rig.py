@@ -341,9 +341,13 @@ def test_apctl_turns_presses_into_fifo_lines(tmp_path, monkeypatch):
     assert ctl.run(["plunge"]) == {"ok": True}
     assert ctl.run(["drain"]) == {"ok": True}
     assert ctl.run(["reset"]) == {"ok": True}
+    assert ctl.run(["rip", "8", "1"]) == {"ok": True} and ctl.ripping == {8}
+    assert ctl.run(["rip", "8", "0"]) == {"ok": True} and ctl.ripping == set()
     assert ctl.run(["sw", "99", "1"])["ok"] is False          # not this machine's
+    assert ctl.run(["rip", "99", "1"])["ok"] is False
     assert (rig / "input").read_text().splitlines() == [
-        "0 close", "0 open", "8 tap 150", "55 open", "!drain", "!reset"]
+        "0 close", "0 open", "8 tap 150", "55 open", "!drain", "!reset",
+        "!rip 8 1", "!rip 8 0"]
 
 
 def test_apctl_state_is_what_the_game_has_active_plus_what_it_holds(tmp_path, monkeypatch):
@@ -473,6 +477,11 @@ def test_appf_calls_press_switches_and_move_balls(tmp_path):
     app.api("hold", [32])
     app.api("unhold", [])
     assert rig.lines[-2:] == ["sw 32 1", "sw 32 0"]
+    # right-hold rips (a spinner), as on the Stern window; losing focus stops it
+    app.api("rip", [47, True])
+    assert rig.lines[-1] == "rip 47 1" and app.ripping == {47}
+    app.api("blur", [])
+    assert rig.lines[-1] == "rip 47 0" and app.ripping == set()
     i = next(i for i, r in enumerate(app.rows) if r["keys"] == "Left")
     app.api("row", [i, True])
     assert rig.lines[-2:] == ["sw 0 1", "sw 15 1"]

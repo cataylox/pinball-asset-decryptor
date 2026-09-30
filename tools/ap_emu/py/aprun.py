@@ -28,6 +28,8 @@ machine has that FakePinPROC lacks are added here, before the launcher runs:
   on/off from the fake P-ROC); and once, `pfpos.json` - the positions the
   machine yaml gives switches and LEDs (x, y: Galactic Tank Force 2026 has
   them, for AP's own playfield simulator).  `!reset` refills the trough.
+  `!rip <n> 1|0` RIPS a switch (a spinner): while on, the game loop flips it
+  every RIP_S, as the Stern rigs' right-hold does.
 * The keyboard in the game's own windows (PAD-292): the same keys as the
   virtual playfield (apswitches.py's `keymap`, read from switches.json beside
   $AP_LOG).  A key in the game's SDL window is taken here, before procgame's
@@ -354,6 +356,9 @@ def _inject(self):
         if num == "key":
             _handle_key(*closed)
             continue
+        if num == "rip":
+            _rip(*closed)
+            continue
         sw = _game[0].switches[num]
         et = (pinproc.EventTypeSwitchClosedDebounced if closed else pinproc.EventTypeSwitchOpenDebounced) \
             if sw.debounce else \
@@ -375,8 +380,39 @@ def _set_active(sw, active, delay=0.0):
 _later = []
 
 
+#: A ripped switch flips this often (s): 20 turns a second, well above
+#: procgame's debounce.
+RIP_S = 0.025
+_rips = {}                                      # number -> [next flip, active]
+
+
+def _rip(num, on):
+    g = _game[0]
+    if g is None:
+        return
+    try:
+        sw = g.switches[num]
+    except (KeyError, IndexError):
+        return
+    if on:
+        _rips[sw.number] = [0.0, False]
+    elif _rips.pop(sw.number, None) is not None:
+        _set_active(sw, False)
+
+
+def _flip_rips(now):
+    g = _game[0]
+    for num, st in list(_rips.items()):
+        if now >= st[0]:
+            st[1] = not st[1]
+            st[0] = now + RIP_S
+            _set_active(g.switches[num], st[1])
+
+
 def _release_later():
     now = time.time()
+    if _rips:
+        _flip_rips(now)
     for item in [i for i in _later if i[0] <= now]:
         _later.remove(item)
         _queue.put(item[1:])
@@ -709,6 +745,12 @@ def _reader(path):
                 if parts == ["!reset"]:
                     log("sw: reset balls")
                     _queue.put(("reset", None))
+                    continue
+                if len(parts) == 3 and parts[0] == "!rip":
+                    try:
+                        _queue.put(("rip", (int(parts[1]), parts[2] == "1")))
+                    except ValueError:
+                        pass
                     continue
                 if len(parts) == 3 and parts[0] == "!key":
                     try:
