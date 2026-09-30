@@ -423,7 +423,7 @@ def describe(op):
             return "%d x %d %%" % (round(op["s"] * 100), round(op["sy"] * 100))
         return "%d %%" % round(op["s"] * 100)
     if k == "visible":
-        return "shown" if op["on"] else "hidden"
+        return "shown" if op["on"] else "hidden in game"
     if k == "tint":
         return "tinted #%02x%02x%02x" % tuple(int(round(c * 255)) for c in op["mul"][:3])
     if k == "order":

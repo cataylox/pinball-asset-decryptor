@@ -560,9 +560,11 @@ function TreeLayers({ t }) {
           : !l.drawn && !l.hidden ? "Not on the screen at this moment: click to see it on top while it is selected, and edit it" : null}
         onMouseDown=${(e) => { if (e.shiftKey) e.preventDefault(); }}
         onClick=${(e) => call("text_scenes.tree_select", l.id, pickHow(e, true))}>
-      <button type="button" class="ly-eye"
-        title=${l.hidden ? "Hidden — show it again" : l.state_off ? "Off in the preview: turn it on here (the preview only, not the card)"
-          : l.shown ? "Turned on in the preview: turn it back off (the card is not changed)" : "Hide it"}
+      <button type="button" class=${cx("ly-eye", l.hidden && "in-game")}
+        title=${l.hidden ? "Hidden in the game: Write leaves it out of the card, so the machine never draws it. Click to show it again"
+          : l.state_off ? "Off in the preview: turn it on here (the preview only, not the card)"
+          : l.shown ? "Turned on in the preview: turn it back off (the card is not changed)"
+          : "Hide it in the game: Write leaves it out of the card, so the machine never draws it (not just the preview)"}
         onClick=${(e) => {
           e.stopPropagation();
           if (l.state_off || l.shown) call("text_scenes.tree_force", l.id, !l.shown);
@@ -570,7 +572,7 @@ function TreeLayers({ t }) {
         }}>
         <${Icon} name=${l.hidden || l.state_off ? "eye-off" : "eye"} /></button>
       <span class="sc-t ellip" title=${l.name}>${l.name}${l.added ? " (added)" : ""}</span>
-      <span class="sc-i small muted ellip" title=${l.edits || l.kind}>${l.edits || l.kind}</span>
+      <span class=${cx("sc-i small ellip", l.hidden ? "in-game" : "muted")} title=${l.edits || l.kind}>${l.edits || l.kind}</span>
       ${(l.pics || []).length ? html`<button type="button" class="ly-img"
         aria-label="Show on the Images tab" ...${tip(l.pics.length === 1 ? "Show this picture on the Images tab"
           : `Show one of the ${l.pics.length} pictures it draws on the Images tab`)}
@@ -1034,6 +1036,9 @@ function TreeActions({ t }) {
     ${t.built === "same" && t.edits ? html`<span class="small nw ok-ink" title=${STATE_TIP.written}><span class="sc-dot written"></span> Written to a card</span>`
       : t.edits || t.built === "changed" ? html`<span class="small nw warn-ink" title="Edits are kept as you make them; there is nothing to save. The next Write puts them on the card.">
           <span class="sc-dot edited"></span> ${t.edits ? `${t.edits} edit${t.edits === 1 ? "" : "s"}` : "Back as shipped"}, not written yet</span>` : null}
+    ${(t.hidden_names || []).length ? html`<span class="small nw warn-ink"
+        title=${`Hidden with its eye, so the machine never draws it: ${t.hidden_names.join(", ")}. Click its eye in Layers to show it again.`}>
+        <${Icon} name="eye-off" /> ${t.hidden_names.length} hidden in game</span>` : null}
     ${adding ? html`<${Modal} title="Add a line of text" onClose=${() => setAdding(false)}
         footer=${html`<${Button} onClick=${() => setAdding(false)}>Cancel<//><${Button} kind="primary"
           disabled=${!words.trim()} onClick=${() => { setAdding(false); call("text_scenes.tree_add_text", words); }}>Add<//>`}>

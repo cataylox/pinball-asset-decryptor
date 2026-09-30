@@ -593,6 +593,8 @@ class TreeEditMixin:
                           for b in map(self._tree_box, sels) if b] if multi else [],
             "props": self._tree_props(card, man, sel, ops) if sel is not None else None,
             "edits": len(ops), "notes": list(notes), "rev": self._trev,
+            # PAD-290: an eye hide is a card edit; the status line names every one
+            "hidden_names": [l["name"] for l in layers if l["hidden"]],
             "can_undo": bool(ops or (self._tree_hist(card) or {}).get("undo")),
             "can_redo": bool((self._tree_hist(card) or {}).get("redo")),
             "all_edits": scene_edit.count(self.assets_dir),
