@@ -103,6 +103,20 @@ export function ScenesActions() {
       onClick=${() => call("text_scenes.save_preview")}>${s.exporting ? "Cancel" : "Export picture…"}<//>
     <${Button} kind="ghost" title=${tips.save_all} disabled=${!(s.scenes || []).length && !s.bulk}
       onClick=${() => call("text_scenes.save_all")}>${s.bulk ? "Cancel" : "Export all pictures…"}<//>
+    <${Button} kind="ghost" iconRight="down" disabled=${!(s.scenes || []).length}
+      title="Save your scene edits to a file, to keep as a backup or send to someone, and load a file of scene edits into this project"
+      onClick=${(e) => openMenu(e.currentTarget, [
+        { label: "Save this scene's edits to a file…", icon: "download", disabled: !(s.tree_view || {}).edits,
+          title: "The moves, resizes, tints, hidden layers and added pictures and text of this scene, in one .zip file",
+          onClick: () => call("text_scenes.edits_save", "this") },
+        { label: "Save every scene's edits to a file…", icon: "download", disabled: !(s.tree_view || {}).all_edits,
+          title: "The edits of every scene you changed in this project, in one .zip file",
+          onClick: () => call("text_scenes.edits_save", "all") },
+        { sep: true },
+        { label: "Load scene edits from a file…", icon: "upload",
+          title: "Put the edits in a file saved here or by someone else onto the same scenes of this card. A scene this card does not have is left out.",
+          onClick: () => call("text_scenes.edits_load") },
+      ])}>Save / load edits<//>
     <${Button} kind="ghost" icon=${s.rebuilding ? "x" : "refresh"} title=${tips.rebuild}
       onClick=${() => call("text_scenes.rebuild")}>${s.rebuilding ? "Cancel" : "Re-read from card…"}<//>`;
 }

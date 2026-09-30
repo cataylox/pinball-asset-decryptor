@@ -1299,6 +1299,91 @@ class TreeEditMixin:
         return True
 
     @rpc
+    def edits_save(self, which="this"):
+        """Save edits to a file... (PAD-281): this scene's edits (``which`` "this") or every
+        edited scene's ("all"), with the pictures they add, in a zip to keep or to share.
+        Returns the zip's path, or None."""
+        from ..plugins.stern import scene_edit
+        if not self.assets_dir:
+            return None
+        cards = None
+        stem = os.path.basename(os.path.normpath(self.assets_dir)) + " scene edits"
+        if which == "this":
+            card, _man = self._tree_card()
+            if card is None or not self._tree_ops(card):
+                return None
+            cards = [card]
+            stem = (self._scenes.get(self._sel, {}).get("label") or "scene") + " edits"
+        elif not scene_edit.count(self.assets_dir):
+            return None
+        stem = re.sub(r'[\\/:*?"<>|·]+', "_", stem).strip() or "scene edits"
+        path = self.window.ask_save(
+            "scene_edits_file", "Save %s to a file" % (
+                "this scene's edits" if which == "this" else "every scene's edits"),
+            initialfile=stem + ".zip", filetypes=[("PAD scene edits", "*.zip")],
+            defaultextension=".zip")
+        if not path:
+            return None
+        try:
+            n = scene_edit.export_edits(self.assets_dir, path, cards)
+        except (scene_edit.SceneEditError, OSError) as e:
+            compat.messagebox.showerror("Save scene edits", str(e))
+            return None
+        self._set_caption("Saved the edits of %d scene%s to %s"
+                          % (n, "" if n == 1 else "s", os.path.basename(path)))
+        return path
+
+    @rpc
+    def edits_load(self, path=None):
+        """Load edits from a file... (PAD-281): each scene in a file Save edits to a file...
+        wrote takes the file's edits in place of its own, when this card has that scene.
+        Returns the scene paths loaded, or None."""
+        from ..plugins.stern import scene_edit
+        if not self.assets_dir:
+            return None
+        if not path:
+            path = self.window.ask_open(
+                "scene_edits_file", "Load scene edits from a file",
+                filetypes=[("PAD scene edits", "*.zip"), ("All files", "*.*")])
+        if not path:
+            return None
+        try:
+            scenes = scene_edit.read_share(path)
+            got, missing = scene_edit.match_cards(scenes, self._load_trees().keys())
+            mine = scene_edit.load(self.assets_dir)
+            over = [c for c in got if mine.get(c)]
+            if not got:
+                compat.messagebox.showinfo(
+                    "Load scene edits", "None of the %d scene%s in %s %s on this card, so "
+                    "nothing was loaded." % (len(scenes), "" if len(scenes) == 1 else "s",
+                                             os.path.basename(path),
+                                             "is" if len(scenes) == 1 else "are"))
+                return None
+            if over and not compat.messagebox.askyesno(
+                    "Load scene edits", "%d of the scenes in this file %s edits here already. "
+                    "Loading puts the file's edits in their place. Go ahead?"
+                    % (len(over), "has" if len(over) == 1 else "have")):
+                return None
+            got, missing = scene_edit.import_edits(self.assets_dir, path,
+                                                   self._load_trees().keys())
+        except (scene_edit.SceneEditError, OSError) as e:
+            compat.messagebox.showerror("Load scene edits", str(e))
+            return None
+        self._tsel = None
+        self._tree_refresh()
+        words = "Loaded the edits of %d scene%s from %s." % (
+            len(got), "" if len(got) == 1 else "s", os.path.basename(path))
+        if missing:
+            words += (" %d scene%s in the file %s not on this card and %s left out."
+                      % (len(missing), "" if len(missing) == 1 else "s",
+                         "is" if len(missing) == 1 else "are",
+                         "was" if len(missing) == 1 else "were"))
+        self._set_caption(words)
+        if missing:
+            compat.messagebox.showinfo("Load scene edits", words)
+        return sorted(got)
+
+    @rpc
     def tree_clear(self):
         from ..plugins.stern import scene_edit
         card, _man = self._tree_card()

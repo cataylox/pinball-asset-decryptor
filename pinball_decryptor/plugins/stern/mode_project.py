@@ -2075,6 +2075,77 @@ def copy_modes(src, dest, slugs=None):
     return report
 
 
+# ---- a file of modes to share or keep (PAD-281) --------------------------------------
+SHARE_MANIFEST = "pad_modes.json"
+SHARE_KIND = "pad-modes"
+
+
+def export_modes(project, zip_path, slugs=None):
+    """Write modes of ``project`` (``slugs``; None: every form and code mode) to a zip: each
+    mode's whole folder (picture, clip and sounds too) under ``modes/<slug>/``. Anyone loads
+    it with :func:`import_modes`. Returns the slugs written."""
+    import zipfile
+    from . import code_modes as CM
+    have = [s for s, _ in list_modes(project)[0]] + CM.code_slugs(project)
+    want = [s for s in (have if slugs is None else slugs) if s in have]
+    if not want:
+        raise ModeProjectError("there are no modes to save")
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(SHARE_MANIFEST, json.dumps(
+            {"format": FORMAT, "kind": SHARE_KIND, "modes": want}, indent=1))
+        for slug in want:
+            top = mode_folder(project, slug)
+            for root, _dirs, files in os.walk(top):
+                for name in files:
+                    if name.endswith(".tmp"):
+                        continue
+                    path = os.path.join(root, name)
+                    rel = os.path.relpath(path, top).replace(os.sep, "/")
+                    z.write(path, "%s/%s/%s" % (MODES_DIRNAME, slug, rel))
+    return want
+
+
+def import_modes(zip_path, project):
+    """Load a file :func:`export_modes` wrote into ``project``: each mode is added beside the
+    ones there (a clash of names gets ``_2``) and matched to the project's card the way
+    :func:`copy_modes` matches a copy. Returns its :class:`CopyReport`."""
+    import tempfile
+    import zipfile
+    bad = ModeProjectError("%s is not a file of modes saved by PAD" % os.path.basename(zip_path))
+    try:
+        z = zipfile.ZipFile(zip_path)
+    except (OSError, zipfile.BadZipFile):
+        raise bad from None
+    with z, tempfile.TemporaryDirectory(prefix="pad-modes-") as tmp:
+        try:
+            data = json.loads(z.read(SHARE_MANIFEST).decode("utf-8"))
+        except (KeyError, ValueError):
+            raise bad from None
+        if not isinstance(data, dict) or data.get("kind") != SHARE_KIND:
+            raise bad
+        if data.get("format", FORMAT) > FORMAT:
+            raise ModeProjectError("%s was saved by a newer PAD: update to load it"
+                                   % os.path.basename(zip_path))
+        slugs = [s for s in data.get("modes") or () if isinstance(s, str)
+                 and re.match(r"^[A-Za-z0-9_-]+$", s)]
+        root = os.path.realpath(modes_dir(tmp))
+        for info in z.infolist():
+            parts = info.filename.replace("\\", "/").split("/")
+            if (info.is_dir() or len(parts) < 3 or parts[0] != MODES_DIRNAME
+                    or parts[1] not in slugs or any(p in ("", ".", "..") for p in parts)
+                    or ":" in info.filename):
+                continue
+            dest = os.path.realpath(os.path.join(tmp, *parts))
+            if not dest.startswith(root + os.sep):
+                continue
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with z.open(info) as src, open(dest, "wb") as out:
+                shutil.copyfileobj(src, out)
+        if not slugs:
+            raise bad
+        return copy_modes(tmp, project, slugs)
+
+
 def duplicate_mode(project, slug):
     """Copy a mode's whole folder (its art, clip and sound too) under a new name."""
     specs = dict(list_modes(project)[0])

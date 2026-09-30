@@ -287,6 +287,20 @@ function ModeList({ s, onNewCode, onNewBlocks, onAllNumbers }) {
         <${Button} size="sm" disabled=${!s.dup_ok} onClick=${() => call("modes.duplicate")}>Duplicate<//>
         <${Button} size="sm" disabled=${!s.copy_ok} onClick=${() => call("modes.copy_to")}
           title="Copy every mode here into another card's project: pick that project's folder. Each is matched to that card's shots by name, and the app says which need a look there.">Copy to…<//>
+        <${Button} size="sm" iconRight="down" disabled=${!s.project}
+          title="Save modes to a file, to keep as a backup or send to someone, and load a file of modes into this project"
+          onClick=${(e) => openMenu(e.currentTarget, [
+            { label: "Save this mode to a file…", icon: "download", disabled: !s.del_ok,
+              title: "The open mode, with its picture, clip and sounds, in one .zip file",
+              onClick: () => call("modes.save_file", "this") },
+            { label: "Save every mode to a file…", icon: "download", disabled: !s.copy_ok,
+              title: "Every mode of your own in this project, in one .zip file",
+              onClick: () => call("modes.save_file", "all") },
+            { sep: true },
+            { label: "Load modes from a file…", icon: "upload",
+              title: "Add the modes in a file saved here or by someone else. Each is matched to this card's shots by name, and the app says which need a look.",
+              onClick: () => call("modes.load_file") },
+          ])}>Save / load<//>
         <${Button} size="sm" kind="ghost" icon="trash" disabled=${!s.del_ok} onClick=${() => call("modes.delete")}>Delete<//>
       </div>
     </div>
