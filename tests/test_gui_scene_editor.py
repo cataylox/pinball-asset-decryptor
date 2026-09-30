@@ -803,6 +803,71 @@ def test_a_layer_in_a_sprite_hidden_with_its_eye_is_shown_when_picked(tmp_path):
         w.call("text_scenes.close")
 
 
+def test_a_picked_layer_is_drawn_on_top_whatever_its_eye_says(tmp_path):
+    """DragonRR (PAD-289): picking any layer shows it on top while it is picked - one hidden
+    with its eye too - and picking a sprite shows every layer in it, those hidden with their
+    eye included; no eye changes, and picking nothing puts the scene back."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder, _body_scene())
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        ly = {l["name"]: l for l in _tv(w)["layers"]}
+        body, box, art = ly["BodyB"]["id"], ly["Body_Textbox"]["id"], ly["Body_Art"]["id"]
+        assert w.call("text_scenes.tree_state", ly["Select"]["id"], 2)     # the picker on B
+        hits = [h["id"] for h in _tv(w)["hits"]]
+        assert hits.index(art) < hits.index(box), "the text box is drawn over the art"
+        # a layer on the screen comes to the front while picked
+        assert w.call("text_scenes.tree_select", art)
+        tv = _tv(w)
+        assert tv["hits"][-1]["id"] == art and not tv["props"]["peek"]
+        assert w.call("text_scenes.tree_select", None)
+        assert [h["id"] for h in _tv(w)["hits"]] == hits
+        # hidden with its eye: picked, it is shown on top, and its eye stays shut
+        assert w.call("text_scenes.tree_visible", art, False)
+        assert art not in [h["id"] for h in _tv(w)["hits"]]
+        assert w.call("text_scenes.tree_select", art)
+        tv = _tv(w)
+        assert tv["hits"][-1]["id"] == art and tv["props"]["peek"] and tv["props"]["hidden"]
+        assert tv["props"]["x"] is not None
+        assert next(l for l in tv["layers"] if l["id"] == art)["hidden"]
+        # the sprite it sits in, picked: every layer in it, the hidden one too, on top
+        assert w.call("text_scenes.tree_select", body)
+        tv = _tv(w)
+        assert [h["id"] for h in tv["hits"]][-2:] == [art, box]
+        assert w.call("text_scenes.tree_select", None)
+        assert art not in [h["id"] for h in _tv(w)["hits"]]
+        assert _ops(folder) == [{"op": "visible", "node": art, "on": False}]
+        # the sprite hidden too: its eye opened again, the art stays hidden (its own eye)
+        assert w.call("text_scenes.tree_visible", body, False)
+        assert box not in [h["id"] for h in _tv(w)["hits"]]
+        assert w.call("text_scenes.tree_visible", body, True)
+        hits = [h["id"] for h in _tv(w)["hits"]]
+        assert box in hits and art not in hits
+        w.call("text_scenes.close")
+
+
+def test_a_hidden_layer_the_game_draws_elsewhere_is_found_when_picked(tmp_path):
+    """DragonRR (PAD-289): a layer hidden with its eye in a sprite the game is not drawing at
+    this moment goes, picked, to where the game shows that sprite, and is drawn there."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder, _body_scene())
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        assert w.call("text_scenes.tree_moment", "f:1")
+        assert _wait(w, lambda: _tv(w)["frame"] == 1)
+        ly = {l["name"]: l for l in _tv(w)["layers"]}
+        art = ly["Body_Art"]["id"]
+        assert w.call("text_scenes.tree_visible", art, False)
+        assert w.call("text_scenes.tree_select", art)
+        tv = _tv(w)
+        assert "The game does not draw that" not in " ".join(tv.get("notes") or [])
+        assert tv["sel"] == art and tv["hits"][-1]["id"] == art
+        assert _ops(folder) == [{"op": "visible", "node": art, "on": False}]
+        w.call("text_scenes.close")
+
+
 def test_a_layer_inside_a_look_that_is_off_keeps_its_own_eye(tmp_path):
     """DragonRR (PAD-285): with Gigan's name box selected (shown with the Gigan look it sits
     in), clicking the Gigan picture beside it showed nothing - the picture counted as drawn
@@ -969,3 +1034,29 @@ def test_several_picked_at_once_move_and_hide_together(tmp_path):
         assert w.call("text_scenes.tree_visible_many", [art, title], True)
         assert _ops(folder) == []
         w.call("text_scenes.close")
+
+
+def test_a_layers_picture_button_lands_on_it_on_the_images_tab(tmp_path):
+    """PAD-287: every layer that draws a picture - itself or through what it holds - names
+    it, and the button lands on it on the Images tab, even on the tab's first visit (the
+    jump used to arrive before the scan and the scan then picked the first row)."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        layers = _tv(w)["layers"]
+        art = next(l for l in layers if l["name"] == "Art")
+        title = next(l for l in layers if l["name"] == "Title")
+        assert len(art["pics"]) == 1
+        assert art["pics"][0].startswith("images/scene_textures/pic_")
+        assert os.path.isfile(os.path.join(str(folder), *art["pics"][0].split("/")))
+        assert title["pics"] == []
+        at = layers.index(art)
+        holders = [l for l in layers[:at] if l["depth"] < art["depth"]]
+        assert all(art["pics"][0] in l["pics"] for l in holders)
+
+        assert w.call("text_scenes.activate", "img::" + art["pics"][0])
+        assert _wait(w, lambda: ((w.state("images").get("focus") or {}).get("id")
+                                 == art["pics"][0]), 20)
+        assert w.state("shell")["tab"] == "images"

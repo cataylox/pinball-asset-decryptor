@@ -174,8 +174,11 @@ class TreeEditMixin:
         # the sprites a peek sits in are only its way in: drawing them whole showed every
         # other layer in them (DragonRR, PAD-284)
         through = self._tree_ancestors(peek) - self._tree_force_set(card) if peek else set()
+        # a picked sprite shows every layer in it, those hidden with their eye too; the eyes
+        # are not changed (DragonRR, PAD-289)
+        unveil = self._tree_inside(peek, self._tree_hidden(card)) if peek else set()
         draws = scene_eval.draw_list(man, frame, pins=pins, worlds=worlds, show=peek,
-                                     force=force, through=through)
+                                     force=force, through=through, unveil=unveil)
         self._fit_kept(draws, worlds)
         # what the eyes show: a layer the eye turned on is on, even though the plain draw has
         # it off (DragonRR, PAD-280: the eyes stayed crossed); a peek is only while selected
@@ -226,6 +229,14 @@ class TreeEditMixin:
             out.add(p)
             p, hops = self._tparents.get(p), hops + 1
         return out
+
+    def _tree_hidden(self, card):
+        """The nodes hidden with their eye."""
+        return {op.get("node") for op in self._tree_ops(card) if op["op"] == "visible"}
+
+    def _tree_inside(self, nid, nodes):
+        """Those of *nodes* that sit inside *nid*, however deep."""
+        return {n for n in nodes if nid in self._tree_ancestors(n)}
 
     def _tree_hidden_in(self, man, nid, ops):
         """The name of the nearest sprite *nid* sits in that is hidden with its eye, or ""."""
@@ -549,9 +560,18 @@ class TreeEditMixin:
         drawn = {d["node"] for d in self._tdraws}
         layers = []
         index = scene_edit._man_index(man)
+        have, memo = {}, {}
         for n, _parent, depth in _walk_man(man):
             kind = _kind_of(man, n)
+            pics = []
+            for rel in _pics_of(man, n, memo):
+                if rel not in have:
+                    have[rel] = os.path.isfile(
+                        os.path.join(self.assets_dir, "images", *rel.split("/")))
+                if have[rel]:
+                    pics.append(rel)
             layers.append({"id": n["id"], "name": n["name"], "depth": depth, "kind": kind,
+                           "pics": ["images/" + rel for rel in pics],
                            "drawn": n["id"] in drawn or n["id"] in self._tworlds,
                            "state_off": n["id"] in self._teye_off,
                            "part_off": n["id"] in self._tpart_off,
@@ -609,7 +629,7 @@ class TreeEditMixin:
                 "hidden": any(op["op"] == "visible" and op.get("node") == nid for op in ops),
                 "layer": sibs.index(n) + 1, "layers": len(sibs),
                 "drawn": nid in self._tworlds,
-                "peek": nid == self._tpeek and nid in self._tworlds,
+                "peek": nid == self._tpeek and nid in self._tworlds and nid not in self._tlit,
                 "hid_in": self._tree_hidden_in(man, nid, ops),
                 "pic": self._tree_pic_props(nid)}
 
@@ -849,11 +869,12 @@ class TreeEditMixin:
             self._tpeek = node
             self._render_tree_preview(self._sel, quiet=True)
             return True
-        if node is not None and node not in self._tlit and not any(
-                op["op"] == "visible" and op.get("node") == node
-                for op in self._tree_ops(card)):
+        if node is not None:
+            # whatever it is - on the screen, hidden with its eye, not drawn now - it is drawn
+            # on top while it is picked, and a sprite with every layer in it; no eye changes
+            # (DragonRR, PAD-289)
             self._tpeek = node
-            self._render_tree_preview(self._sel)
+            self._render_tree_preview(self._sel, quiet=node in self._tlit)
             if node in self._tworlds:
                 return True
             self._tpeek = None
@@ -1216,13 +1237,15 @@ class TreeEditMixin:
         root_frames = [frame] + sorted({f for _n, f in man["root"]["labels"]})
         root_frames += list(range(1, frames + 1, max(1, frames // 60)))
         tried = set()
+        # what the user hid with an eye is looked for too: picking it shows it (PAD-289)
+        veiled = self._tree_hidden(card)
 
         def shows(f, pn):
             key = (f, tuple(sorted(pn.items())))
             if key in tried:
                 return False
             tried.add(key)
-            for d in scene_eval.draw_list(man, f, pins=pn):
+            for d in scene_eval.draw_list(man, f, pins=pn, unveil=veiled):
                 if d["mul"][3] <= 0.01:
                     continue
                 q, hops = d["node"], 0            # it, or something inside it, shows
@@ -1252,6 +1275,8 @@ class TreeEditMixin:
         self._tframe[card] = found[0]
         self._tpins[card] = found[1]
         self._tsel = node
+        self._tsels = [node]
+        self._tpeek = node
         self._render_tree_preview(self._sel)
         return True
 
@@ -1621,6 +1646,32 @@ def _walk_man(man):
 
     run(man["root"]["kids"], None, 0)
     return out
+
+
+def _pics_of(man, n, memo):
+    """The pictures (rels under images/) node *n* draws, itself or through what it holds, in
+    drawing order, each once: the Layers list's button to them on the Images tab (PAD-287).
+    *memo* keeps each object's list for the next node that shows it."""
+    objects = man["objects"]
+    out = []
+    for _s, oid in n["comps"]:
+        if oid not in memo:
+            memo[oid] = []                          # a group that holds itself stops here
+            o = objects.get(str(oid)) or {}
+            k = o.get("kind")
+            if k == "Bitmap":
+                rels = [o.get("image")]
+            elif k == "Shape" and o.get("fill") is not None:
+                rels = [(objects.get(str(o["fill"])) or {}).get("image")]
+            elif k == "StreamingFlipbook":
+                rels = [fr.get("image") for fr in o.get("seq") or () if fr]
+            else:
+                rels = []
+            for kid in o.get("kids") or ():
+                rels += _pics_of(man, kid, memo)
+            memo[oid] = rels
+        out += memo[oid]
+    return list(dict.fromkeys(rel for rel in out if rel))
 
 
 def _kind_of(man, n):

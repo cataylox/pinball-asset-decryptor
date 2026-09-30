@@ -212,7 +212,8 @@ def first_visible(node):
 
 
 def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=None,
-              worlds=None, _settled=None, play=False, show=None, force=(), through=()):
+              worlds=None, _settled=None, play=False, show=None, force=(), through=(),
+              unveil=()):
     """Every picture and line of text *man* draws at root frame *frame* (default:
     :func:`default_frame`), in draw order.  *pins* ``{node id: frame}`` seeks a nested sprite
     (what the game's code does with labels); *hidden* node ids are not drawn (what code
@@ -234,7 +235,12 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
 
     *through* node ids (sprites *show* sits in, in *force* too) are, where the timeline has
     them off, drawn only as the way to *show*: none of their own pictures and none of their
-    other layers (DragonRR, PAD-284: picking a hidden text box showed its whole sprite)."""
+    other layers (DragonRR, PAD-284: picking a hidden text box showed its whole sprite).
+
+    *unveil* node ids hidden with the editor's eye (:mod:`scene_edit` keeps their own
+    timeline in ``_kf``) are drawn where that timeline has them on: the layers inside a
+    picked sprite are all shown while it is picked, whatever their eyes say (DragonRR,
+    PAD-289)."""
     if frame is None:
         frame = default_frame(man)
     # a labelled sprite's resting frame is found by drawing it (settled_frame), and nested
@@ -244,6 +250,7 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
     hidden = set(hidden or ())
     force = set(force or ())
     through = set(through or ())
+    unveil = set(unveil or ())
     path_only = through | {show}
     objects = man["objects"]
     out = []
@@ -255,9 +262,10 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
             if only is not None and n["id"] not in only:
                 continue
             forced = n["id"] == show or n["id"] in force
-            if n["id"] in hidden or not (forced or visible_at(n, f)):
+            on = visible_at({"kf": n["_kf"]} if n["id"] in unveil and "_kf" in n else n, f)
+            if n["id"] in hidden or not (forced or on):
                 continue
-            narrow = n["id"] in through and (only is not None or not visible_at(n, f))
+            narrow = n["id"] in through and (only is not None or not on)
             w = compose(world, transform_at(n, f))
             t = compose_tint(tint, tint_at(n, f))
             if worlds is not None:
