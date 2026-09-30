@@ -67,6 +67,7 @@ class TreeEditMixin:
         self._tlive = {}             # card -> (push result, "HH:MM:SS") handed to a running game
         self._tlive_job = None
         self._tlive_lock = threading.Lock()
+        self._thist = {}             # (project, card) -> undo / redo lists of whole op lists
 
     def _tree_reset(self):
         self._trees = None
@@ -92,8 +93,32 @@ class TreeEditMixin:
             return None, None
         for card, man in self._load_trees().items():
             if card.replace("\\", "/").rsplit("/", 1)[0] == want:
+                if scene_dir is None and self._tree_hist(card) is None:
+                    self._tree_track(card)
                 return card, man
         return None, None
+
+    # -- undo / redo (PAD-283) ---------------------------------------------
+    # Every change to a scene's op list is one step, whatever made it (a drag, Draw 1:1, Show,
+    # As shipped, a new tint), so Undo puts back the list as it was and Redo the one it undid.
+    def _tree_hist(self, card):
+        return self._thist.get((self.assets_dir, card))
+
+    def _tree_track(self, card):
+        """Note *card*'s op list; a change since it was last noted becomes an undo step."""
+        ops = self._tree_ops(card)
+        h = self._tree_hist(card)
+        if h is None:
+            self._thist[(self.assets_dir, card)] = {"now": ops, "undo": [], "redo": []}
+        elif ops != h["now"]:
+            h["undo"].append(h["now"])
+            del h["undo"][:-self._UNDO_STEPS]
+            h["redo"] = []
+            h["now"] = ops
+        return self._tree_hist(card)
+
+    #: undo steps kept per scene
+    _UNDO_STEPS = 200
 
     def _tree_ops(self, card):
         from ..plugins.stern import scene_edit
@@ -521,6 +546,8 @@ class TreeEditMixin:
                           for b in map(self._tree_box, sels) if b] if multi else [],
             "props": self._tree_props(card, man, sel, ops) if sel is not None else None,
             "edits": len(ops), "notes": list(notes), "rev": self._trev,
+            "can_undo": bool(ops or (self._tree_hist(card) or {}).get("undo")),
+            "can_redo": bool((self._tree_hist(card) or {}).get("redo")),
             "all_edits": scene_edit.count(self.assets_dir),
             "built": _built_state(scene_edit.built_ops(self.assets_dir, card), ops)})
 
@@ -642,6 +669,9 @@ class TreeEditMixin:
         return min(xs), min(ys), max(xs), max(ys)
 
     def _tree_refresh(self):
+        card, _man = self._tree_card()
+        if card is not None:
+            self._tree_track(card)                   # the edit just made is one undo step
         self._trev += 1
         self._folder_state_written()
         self._restate_list()
@@ -1247,11 +1277,39 @@ class TreeEditMixin:
 
     @rpc
     def tree_undo(self):
+        """Back one step.  Edits made before the app was started (no steps noted for them)
+        come off the end of the list one at a time."""
         from ..plugins.stern import scene_edit
         card, _man = self._tree_card()
         if card is None:
             return False
-        scene_edit.undo(self.assets_dir, card)
+        h = self._tree_hist(card)
+        was = h["undo"].pop() if h["undo"] else scene_edit.undone(h["now"])
+        if was == h["now"]:
+            return False
+        h["redo"].append(h["now"])
+        return self._tree_put(card, h, was)
+
+    @rpc
+    def tree_redo(self):
+        """Forward again over the last undo (Ctrl+Y, Ctrl+Shift+Z); any new edit ends it."""
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        h = self._tree_hist(card)
+        if not h["redo"]:
+            return False
+        h["undo"].append(h["now"])
+        return self._tree_put(card, h, h["redo"].pop())
+
+    def _tree_put(self, card, h, ops):
+        from ..plugins.stern import scene_edit
+        try:
+            scene_edit.set_ops(self.assets_dir, card, ops)
+        except OSError as e:
+            compat.messagebox.showerror("Scene edit", str(e))
+            return False
+        h["now"] = self._tree_ops(card)
         self._tree_refresh()
         return True
 
