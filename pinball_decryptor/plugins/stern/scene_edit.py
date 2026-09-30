@@ -174,14 +174,28 @@ def drop(assets_dir, card, node, kind):
     save(assets_dir, edits)
 
 
-def undo(assets_dir, card):
-    edits = load(assets_dir)
-    ops = edits.get(card)
+def undone(ops):
+    """*ops* without its last edit (a group's ops go together)."""
+    ops = list(ops or ())
     if ops:
         gid = ops.pop().get("group")
         while gid is not None and ops and ops[-1].get("group") == gid:
             ops.pop()
+    return ops
+
+
+def undo(assets_dir, card):
+    edits = load(assets_dir)
+    if edits.get(card):
+        edits[card] = undone(edits[card])
         save(assets_dir, edits)
+
+
+def set_ops(assets_dir, card, ops):
+    """*card*'s whole list, as an undo or redo puts it back."""
+    edits = load(assets_dir)
+    edits[card] = [dict(op) for op in ops or ()]
+    save(assets_dir, edits)
 
 
 def clear(assets_dir, card=None):

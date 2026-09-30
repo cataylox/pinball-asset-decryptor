@@ -78,6 +78,73 @@ def _ops(folder):
     return scene_edit.ops_for(str(folder), CARD)
 
 
+def test_undo_and_redo_take_back_every_kind_of_edit(tmp_path):
+    """PAD-283 (DragonRR): Undo steps back over ANY edit - Draw 1:1, Show, As shipped and a
+    new tint too, which change the list in place rather than adding to its end - and Redo
+    (Ctrl+Y, Ctrl+Shift+Z) steps forward again until a new edit is made."""
+    from pinball_decryptor.plugins.stern import scene_edit
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    # an edit left by an earlier session: Undo still takes it off, one op at a time
+    scene_edit.add(str(folder), CARD, {"op": "order", "node": 1, "index": 0})
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        tv = _tv(w)
+        assert tv["can_undo"] and not tv["can_redo"]
+        art = next(h for h in tv["hits"] if h["name"] == "Art")["id"]
+        title = next(h for h in tv["hits"] if h["name"] == "Title")["id"]
+        start = _ops(folder)
+
+        assert w.call("text_scenes.tree_select", art)
+        assert w.call("text_scenes.tree_set_scale", art, 40)
+        s40 = _ops(folder)
+        assert w.call("text_scenes.tree_one_to_one", art)
+        one = _ops(folder)
+        assert one[-1]["op"] == "scale" and one[-1]["node"] == art
+        assert w.call("text_scenes.tree_visible", title, False)
+        hid = _ops(folder)
+        assert w.call("text_scenes.tree_visible", title, True)       # Show drops the hide
+        assert _ops(folder) == one
+        assert w.call("text_scenes.tree_tint", art, "#ff0000", 100)
+        assert w.call("text_scenes.tree_tint", art, "#00ff00", 100)  # replaces the tint
+        green = _ops(folder)
+        assert w.call("text_scenes.tree_reset", art)                  # As shipped
+        assert _ops(folder) == [op for op in green if op.get("node") != art]
+
+        assert w.call("text_scenes.tree_undo")
+        assert _ops(folder) == green
+        assert _tv(w)["can_redo"]
+        assert w.call("text_scenes.tree_undo")
+        assert [op["mul"][:3] for op in _ops(folder) if op["op"] == "tint"] == [[1.0, 0.0, 0.0]]
+        assert w.call("text_scenes.tree_undo")
+        assert _ops(folder) == one
+        assert w.call("text_scenes.tree_undo")
+        assert _ops(folder) == hid                                    # back before the Show
+        assert w.call("text_scenes.tree_undo")
+        assert _ops(folder) == one
+        assert w.call("text_scenes.tree_undo")                        # Draw 1:1 taken back
+        assert _ops(folder) == s40
+        assert w.call("text_scenes.tree_undo")
+        assert _ops(folder) == start
+
+        # forward again, step by step, to where it was
+        for want in (s40, one, hid, one):
+            assert w.call("text_scenes.tree_redo")
+            assert _ops(folder) == want
+
+        # a new edit ends the redo; the earlier session's edit still comes off at the end
+        assert w.call("text_scenes.tree_move", title, 5, 0)
+        assert not _tv(w)["can_redo"] and not w.call("text_scenes.tree_redo")
+        for _ in range(5):
+            assert w.call("text_scenes.tree_undo")
+        assert _ops(folder) == start
+        assert w.call("text_scenes.tree_undo")
+        assert _ops(folder) == [] and not _tv(w)["can_undo"]
+        assert not w.call("text_scenes.tree_undo")
+        assert w.call("text_scenes.tree_redo") and _ops(folder) == start
+
+
 def test_the_editor_draws_the_tree_and_edits_it(tmp_path):
     from pinball_decryptor.webui import write_scan
     folder = tmp_path / "proj"
@@ -631,6 +698,27 @@ def test_a_part_the_game_picks_is_turned_on_in_the_preview_not_greyed(tmp_path):
         w.call("text_scenes.close")
 
 
+def _body_scene():
+    """Godzilla's battle select in small (PAD-284): the picker shows one body per state; the
+    body it does not show is a sprite with a picture and a text box in it."""
+    from tests.test_stern_scene_tree import (FLAG, bitmap, cls, mat, node, sprite, texture,
+                                             u8, u32, u64, fs)
+    lib = [
+        u32(3) + cls(1, "Bitmap") + u32(FLAG | 10) + bitmap(3, 8, 4, texture(20)),
+        u32(5) + cls(2, "Sprite") + u32(FLAG | 12) + sprite(5, "", 1, [
+            node(60, "Body_Art", [u32(1) + cls(1) + u32(10)]),
+            node(61, "Body_Textbox", [u32(1) + cls(1) + u32(10)], tracks=((1, mat(1, 30, 0)),))]),
+        u32(4) + cls(2) + u32(FLAG | 11) + sprite(4, "", 2, [
+            node(40, "BodyA", [u32(1) + cls(1) + u32(10)], kf=((1, 1), (2, 0))),
+            node(41, "BodyB", [u32(1) + cls(2) + u32(12)], kf=((1, 0), (2, 1)))],
+            labels=[("A", 1), ("B", 2)]),
+    ]
+    root = sprite(2, "", 20, [node(50, "Select", [u32(1) + cls(2) + u32(11)])],
+                  labels=[("Start", 1)])
+    return (u8(1) + u64(len(lib)) + b"".join(lib) + u64(0)
+            + u32(1360) + u32(768) + fs(30.0) + fs(0.2, 0.2, 0.2, 1.0) + root)
+
+
 def _battle_select_scene():
     """Godzilla's Kaiju Battle Select in small: a sprite the game picks a look of (Level 0,
     Level 1), each look a sprite of its own with a picture and a name box in it."""
@@ -655,6 +743,66 @@ def _battle_select_scene():
             + u32(1360) + u32(768) + fs(30.0) + fs(0.2, 0.2, 0.2, 1.0) + root)
 
 
+def test_a_hidden_layer_in_a_sprite_is_shown_alone_and_the_sprite_whole(tmp_path):
+    """DragonRR (PAD-284): picking the text box of a body the game is not showing drew the
+    whole body; picking the body after it then did nothing.  The text box is drawn alone; the
+    body, picked next, is drawn with everything in it."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder, _body_scene())
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        assert w.call("text_scenes.tree_moment", "f:1")
+        assert _wait(w, lambda: _tv(w)["frame"] == 1)
+        ly = {l["name"]: l for l in _tv(w)["layers"]}
+        body = ly["BodyA"] if not ly["BodyA"]["drawn"] else ly["BodyB"]
+        assert body["name"] == "BodyB", "the picker rests on A"
+        assert w.call("text_scenes.tree_select", ly["Body_Textbox"]["id"])
+        tv = _tv(w)
+        assert tv["props"]["peek"]
+        hits = [h["id"] for h in tv["hits"]]
+        assert ly["Body_Textbox"]["id"] in hits and ly["Body_Art"]["id"] not in hits
+        assert w.call("text_scenes.tree_select", body["id"])
+        tv = _tv(w)
+        assert tv["props"]["peek"] and tv["sel"] == body["id"]
+        hits = [h["id"] for h in tv["hits"]]
+        assert ly["Body_Textbox"]["id"] in hits and ly["Body_Art"]["id"] in hits
+        assert w.call("text_scenes.tree_select", None)
+        hits = [h["id"] for h in _tv(w)["hits"]]
+        assert ly["Body_Textbox"]["id"] not in hits and ly["Body_Art"]["id"] not in hits
+        w.call("text_scenes.close")
+
+
+def test_a_layer_in_a_sprite_hidden_with_its_eye_is_shown_when_picked(tmp_path):
+    """DragonRR (PAD-286): with a body hidden with its eye, picking a picture in it said "The
+    game does not draw that at any moment of this scene".  It is drawn alone on top, at any
+    moment, and the Selected panel names the hidden sprite; no edit is made."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder, _body_scene())
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        ly = {l["name"]: l for l in _tv(w)["layers"]}
+        body, box, art = ly["BodyB"]["id"], ly["Body_Textbox"]["id"], ly["Body_Art"]["id"]
+        assert w.call("text_scenes.tree_visible", body, False)
+        for f in (1, 2):                        # the picker on A (B off anyway), then on B
+            assert w.call("text_scenes.tree_moment", "f:%d" % f)
+            assert _wait(w, lambda: _tv(w)["frame"] == f)
+            assert w.call("text_scenes.tree_select", box)
+            tv = _tv(w)
+            assert tv["frame"] == f and tv["sel"] == box
+            assert "The game does not draw that" not in " ".join(tv.get("notes") or [])
+            assert tv["props"]["peek"] and tv["props"]["hid_in"] == "BodyB"
+            assert tv["props"]["x"] is not None
+            hits = [h["id"] for h in tv["hits"]]
+            assert box in hits and art not in hits
+            assert w.call("text_scenes.tree_select", None)
+            hits = [h["id"] for h in _tv(w)["hits"]]
+            assert box not in hits and art not in hits
+        assert _ops(folder) == [{"op": "visible", "node": body, "on": False}]
+        w.call("text_scenes.close")
+
+
 def test_a_layer_inside_a_look_that_is_off_keeps_its_own_eye(tmp_path):
     """DragonRR (PAD-285): with Gigan's name box selected (shown with the Gigan look it sits
     in), clicking the Gigan picture beside it showed nothing - the picture counted as drawn
@@ -677,7 +825,7 @@ def test_a_layer_inside_a_look_that_is_off_keeps_its_own_eye(tmp_path):
 
         # the name box, then the picture beside it: each is shown while selected
         assert w.call("text_scenes.tree_select", box)
-        assert _tv(w)["props"]["peek"] and lay()["Gigan_Art"]["drawn"]
+        assert _tv(w)["props"]["peek"] and not lay()["Gigan_Art"]["drawn"]  # alone (PAD-284)
         assert w.call("text_scenes.tree_select", art)
         p = _tv(w)["props"]
         assert p["peek"] and p["x"] is not None
@@ -794,6 +942,9 @@ def test_several_picked_at_once_move_and_hide_together(tmp_path):
         assert w.call("text_scenes.tree_select", art)
         assert _tv(w)["sels"] == [art]
         assert (_tv(w)["props"]["x"], _tv(w)["props"]["y"]) == (a0["x"] + 25, a0["y"] + 5)
+        # each drag is still its own undo step (PAD-283)
+        assert w.call("text_scenes.tree_undo")
+        assert sorted((op["dx"], op["dy"]) for op in _ops(folder)) == [(20.0, 5.0)] * 2
         assert w.call("text_scenes.tree_undo")
         assert _ops(folder) == []
 
