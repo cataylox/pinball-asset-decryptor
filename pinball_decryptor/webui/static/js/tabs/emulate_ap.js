@@ -11,6 +11,8 @@ export const css = true;
 
 // The Cache window, as the Stern tab's: what the rig keeps in the app's
 // Linux (each unpacked .pkg, and the one-time setup), and deleting it.
+// Exported with its tab's ns: the Spooky tab (emulate_spooky.js) shows the
+// same window for its own rig.
 const CACHE_COLS = [
   { key: "label", label: "Item", width: "minmax(160px,1.1fr)", cls: "mono", titleOf: (r) => r.label },
   { key: "size", label: "On disk", width: "90px", num: true },
@@ -18,7 +20,7 @@ const CACHE_COLS = [
   { key: "src", label: "From", width: "minmax(0,1.6fr)", cls: "mono dim", titleOf: (r) => r.src || undefined },
 ];
 
-function CacheModal({ c }) {
+export function CacheModal({ c, ns = "emulate_ap", title = "Cache — American Pinball emulator" }) {
   const rows = c.rows || [];
   const sel = new Set(c.sel || []);
   // a click picks one row; Ctrl/Cmd-click adds or removes one
@@ -29,13 +31,13 @@ function CacheModal({ c }) {
       next = new Set(sel);
       if (next.has(r.name)) next.delete(r.name); else next.add(r.name);
     } else next = new Set([r.name]);
-    call("emulate_ap.cache_select", [...next]);
+    call(ns + ".cache_select", [...next]);
   };
-  const close = () => call("emulate_ap.cache_close");
-  return html`<${Modal} title="Cache — American Pinball emulator" icon="disk" xwide onClose=${close} cls="emu-cache"
+  const close = () => call(ns + ".cache_close");
+  return html`<${Modal} title=${title} icon="disk" xwide onClose=${close} cls="emu-cache"
     footer=${html`<span class="small muted grow emu-cache-hint">${c.hint}</span>
-      <${Button} kind="danger" disabled=${c.busy || !sel.size} onClick=${() => call("emulate_ap.cache_delete")}>Delete selected<//>
-      <${Button} disabled=${c.busy} onClick=${() => call("emulate_ap.cache_refresh")}>Refresh<//>
+      <${Button} kind="danger" disabled=${c.busy || !sel.size} onClick=${() => call(ns + ".cache_delete")}>Delete selected<//>
+      <${Button} disabled=${c.busy} onClick=${() => call(ns + ".cache_refresh")}>Refresh<//>
       <${Button} onClick=${close}>Close<//>`}>
     <div class="row">${c.busy ? html`<span class="spin"></span>` : null}<span>${c.head}</span></div>
     <div class="emu-cache-tbl">
