@@ -3,3 +3,4 @@
 *.py text eol=lf
 *.c text eol=lf
 *.so binary
+*.so.1 binary

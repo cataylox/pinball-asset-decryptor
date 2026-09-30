@@ -1,37 +1,57 @@
 #!/usr/bin/env python3
 """spkwarden.py - the rig's Warden: Spooky's playfield controller board, on
-a pty, for Beetlejuice (Unity).
+a pty, for every Warden-era title (spktitles.py; $SPK_TITLE picks one).
 
     spkwarden.py <rig dir>
 
 Makes a pty, writes its slave path to <rig>/warden.tty (run_game.sh hands it
 to the game as SPK_WARDEN; spkshim.so maps /dev/WARDEN onto it), then serves
-the board until the game closes the port for good or it is killed.
+the board until it is killed.
 
-The wire protocol (Warden.cs, decompiled):
-  host -> board   0x3E ('>') <opcode> <args...>   ~60 opcodes: coils, LEDs,
-                  switch config, steppers...  The board here parses none of
-                  them fully - it scans the stream for the few it must
-                  answer or act on (a '>' followed by one of those opcodes),
-                  and swallows the rest.
-  board -> host   0x3C ('<') 0x01 <sw>            switch went active
-                  0x3C 0x00 <sw>                  switch went inactive
-                  0x3C 0x98 <sw> <0|1>            reply to get_switch_state
-                  0x3C 0xA8 <coil> x x x <255>    reply to get_coil_config
-                                                  (the game's watchdog asks
-                                                  for coil 6; 255 = still
-                                                  configured, no re-send)
-                  0x3C 0x96|0x97 <text> 0x00      firmware / hardware info
-The board reports LOGICAL states: the host tells it which switches are
-inverted (opto troughs) and the firmware applies that.
+The wire protocol (Beetlejuice's and Scooby-Doo's Warden.cs, Texas
+Chainsaw's and Evil Dead's warden.cs, Looney Tunes' warden.gd - the same
+firmware; every argument count below is what those hosts send):
 
-The machine at rest: the trough full (Game.expectedBallCount = 6: TROUGH
-1..6 active, TROUGH 7 and the jam opto clear), every other switch inactive.
+  host -> board   0x3E ('>') <opcode> <args>   a fixed count per opcode
+  board -> host   0x3C ('<') 0x01 <sw>         switch went active
+                  0x3C 0x00 <sw>               switch went inactive
+                  0x3C 0x98 <sw> <0|1>         reply to get_switch_state
+                  0x3C 0xA8 <coil> <pulse ms> <pulse pwm> <hold ms>
+                       <hold pwm>              reply to get_coil_config (the
+                                               Unity games' watchdog asks for
+                                               coil 6: a hold pwm other than
+                                               the one it configured means
+                                               "the board reset", and it
+                                               sends the whole config again)
+                  0x3C 0x97 "WARDEN" 0x00      hardware info - the board's
+                                               ping: Evil Dead and Texas
+                                               Chainsaw read exactly 7 bytes
+                                               and want "WARDEN", Looney
+                                               Tunes asks every 2 s
+                  0x3C 0x96 <text> 0x00        firmware info
+                  0x3C 0xD4 <state>            stepper state (3 = idle)
 
-Physics, just enough to play: the trough eject coil (51) takes a ball out
-and makes the shooter lane (8) active half a second later; the auto-launch
-coil (54) clears the shooter lane.  `drain` puts a ball back in the
-trough.
+The board parses every message and keeps what it says: coils (fired, held,
+their configuration), LEDs (every colour form - 8-bit RRGGGBBB, 12-bit,
+24-bit, palette - solid, blinking, breathing, the overlay layer), servos,
+the stepper, the start/launch button lamps, 48 V and PWM, flipper and
+auto-action (slingshot / pop) rules.  It reports LOGICAL switch states: the
+host tells the firmware which switches are inverted (opto troughs) and the
+firmware applies that.
+
+Behaviour, just enough to play:
+  * the trough starts full ("balls" of the profile); the eject coil takes a
+    ball out and the shooter lane closes half a second later (Evil Dead:
+    the lane its diverter servo points at); a launch coil opens its lane.
+    `drain` puts a ball back.
+  * a flipper button the host configured (144) fires its coil and closes its
+    end-of-stroke switch while held, as the real flipper does.
+  * switches that are made at rest ("rest": Texas Chainsaw's closed orbit
+    diverter, Evil Dead's standing drop targets) are; a coil that lifts one
+    ("holds") opens it while held, and a drop bank's reset coil ("resets")
+    makes its targets' switches again.
+  * a switch the host tied to a coil (146: slings, pops) fires that coil.
+  * a stepper move or home finishes after a moment and reports idle.
 
 Switch input comes over the control socket <rig>/ctl.sock, one line per
 request, one line per reply - the same protocol as tools/bof_emu's boards,
@@ -41,7 +61,8 @@ so the app's switch window (spkpf.py, on tools/bof_emu/bofpf.py) drives it:
     plunge              the ball in the shooter lane goes into play -> ok
     drain               one ball in play back to the trough          -> ok
     state               {"switches": {n: 0|1}, "balls": {...},
-                         "connected": bool, "leds_lit": 0}
+                         "connected": bool, "leds_lit": n, "coils": ...}
+    leds                {"<n>": "rrggbb", ...} every lit LED
 ctl.sh / spkctl.py and sw.py are its clients.
 Everything the board does is logged to <rig>/warden.log.
 """
@@ -53,25 +74,73 @@ import sys
 import threading
 import time
 
-TROUGH = [7, 6, 5, 4, 3, 1, 0]       # TROUGH 1..7 (Switches.TroughSwitches)
-BALLS = int(os.environ.get("SPK_BALLS", "6"))
-SHOOTER = 8
-EJECT_COIL = 51
-LAUNCH_COIL = 54
-# Opcodes whose first argument is a coil number (fire / hold a coil).
-COIL_OPS = {129, 132, 133, 148, 149, 166, 186, 187, 191}
-OP_SWITCH_STATE = 152
-OP_COIL_CONFIG = 168
-OP_FIRMWARE = 150
-OP_HARDWARE = 151
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import spktitles  # noqa: E402
+
+TX, RX = 0x3E, 0x3C
+
+# Argument bytes after <opcode>, per opcode.  An opcode not here is logged
+# and skipped to the next '>'.
+ARGS = {
+    128: 2, 129: 1, 130: 1, 131: 2, 132: 2, 133: 1, 136: 1, 137: 0, 138: 0,
+    139: 0, 140: 0, 142: 0, 143: 5, 144: 4, 145: 0, 146: 3, 147: 0, 148: 2,
+    149: 3, 150: 0, 151: 0, 152: 1, 153: 2, 154: 2, 155: 1, 156: 1, 157: 3,
+    159: 2, 160: 3, 161: 2, 163: 2, 164: 2, 165: 2, 166: 3, 167: 3, 168: 1,
+    169: 1, 170: 1, 171: 4, 172: 1, 173: 4, 174: 1, 175: 3, 176: 2, 177: 3,
+    178: 2, 179: 2, 180: 3, 181: 2, 182: 4, 183: 4, 184: 3, 185: 3, 186: 1,
+    187: 1, 188: 1, 189: 2, 190: 1, 191: 3, 192: 3, 193: 3, 194: 4, 195: 4,
+    196: 3, 197: 3, 198: 5, 199: 5, 200: 1, 201: 0, 205: 1, 206: 1, 207: 1,
+    208: 4, 209: 4, 210: 4, 211: 0, 212: 0, 213: 0, 214: 0, 215: 0, 216: 0,
+    217: 0, 218: 5, 219: 5, 224: 6,
+}
+# Coil messages: opcode -> how it drives the coil.
+PULSE_OPS = {132, 133, 148, 149, 166}          # a pulse
+HOLD_OPS = {129, 186, 187}                     # on until turned off
+HARDWARE_INFO = b"WARDEN"
+FIRMWARE_INFO = b"PAD rig Warden"
+# Warden.cs palette_* (the high nibble of a palette byte is the colour).
+PALETTE = {0: (0, 0, 0), 1: (0, 0, 255), 2: (0, 255, 0), 3: (255, 128, 0),
+           4: (255, 0, 0), 5: (128, 0, 255), 6: (255, 255, 0),
+           7: (255, 255, 255), 8: (0, 160, 255), 9: (96, 255, 0),
+           11: (0, 255, 255)}
+STEPPER_IDLE, STEPPER_MOVING, STEPPER_DISABLED, STEPPER_HOMING = 3, 2, 4, 5
+SHOOTER_DELAY = 0.5
+EOS_DELAY = 0.015
+
+
+def _keyed(d):
+    """A dict with int keys, as JSON wants it."""
+    return {str(k): v for k, v in sorted(d.items())}
+
+
+def rgb8(v):
+    """RRGGGBBB (Warden.cs set_led) -> (r, g, b)."""
+    return ((v >> 6) * 85, ((v >> 3) & 7) * 255 // 7, (v & 7) * 255 // 7)
+
+
+def u32(b):
+    return int.from_bytes(bytes(b), "big")
 
 
 class Board:
-    def __init__(self, rig, pty=True):
+    def __init__(self, rig, pty=True, title=None):
         self.rig = rig
+        self.title_key = title or os.environ.get("SPK_TITLE") or "bj"
+        self.title = t = spktitles.get(self.title_key)
+        self.trough = list(t["trough"])
+        self.jam = t["jam"]
+        self.shooter = t["shooter"]
+        self.eject_coils = set(t["eject"])
+        self.launch = dict(t["launch"])     # coil -> the lane it empties
+        self.divert = t.get("divert")
+        self.lanes = sorted(set(self.launch.values()) | {self.shooter})
+        self.rest = list(t.get("rest", []))
+        self.holds = dict(t.get("holds", {}))  # coil -> switch it opens
+        self.resets = dict(t.get("resets", {}))  # coil -> switches it makes
+        self.total = t["balls"]
         self.lock = threading.Lock()
         self.state = {}
-        self.balls = BALLS
+        self.balls = self.total
         self.log = open(os.path.join(rig, "warden.log"), "a", buffering=1)
         self.master = self.slave = self.slave_path = None
         if pty:
@@ -81,15 +150,44 @@ class Board:
             self.slave_path = os.ttyname(slave)
             self.slave = slave      # keep one handle open: no EIO on reopen
         self.connected = False
+        self.pend = b""
+        self.unknown = {}           # opcode -> times seen
+        self.coil_config = {}       # coil -> [pulse ms, pulse pwm,
+        #                                     hold ms, hold pwm]
+        self.coil_fired = {}        # coil -> pulses
+        self.coil_held = set()
+        self.hold_gen = {}          # coil -> hold count (a timed release
+        #                             must not end a later hold)
+        self.coil_last = []         # the last 20 (time, coil, how)
+        self.leds = {}              # n -> (r, g, b), the base layer
+        self.overlay = {}           # n -> (r, g, b), drawn over the base
+        self.led_mode = {}          # n -> "blink" / "breathe" / ...
+        self.chain = [0, 0]         # LEDs on bank 0 and bank 1
+        self.flippers = {}          # button -> (high coil, low coil, eos)
+        self.autoactions = {}       # switch -> (coil, delay)
+        self.inverted = set()
+        self.servos = {}
+        self.outputs = {}           # switch output (189) -> 0|1
+        self.lamps = {"start": 0, "launch": 0}
+        self.power = {"48v": 0, "pwm": 0}
+        self.stepper = {"state": STEPPER_IDLE, "mm": 0, "target": 0,
+                        "speed": 0, "accel": 0}
+        self.now_serving = None
         self._set_trough()
 
     def say(self, *a):
-        self.log.write("%s %s\n" % (time.strftime("%H:%M:%S"), " ".join(str(x) for x in a)))
+        self.log.write("%s %s\n" % (time.strftime("%H:%M:%S"),
+                                    " ".join(str(x) for x in a)))
+
+    def name(self, sw):
+        return self.title["switches"].get(sw, "switch %d" % sw)
 
     def _set_trough(self):
-        for i, sw in enumerate(TROUGH):
+        for i, sw in enumerate(self.trough):
             self.state[sw] = 1 if i < self.balls else 0
-        self.state[2] = 0            # TROUGH JAM
+        self.state[self.jam] = 0
+        for sw in self.rest:
+            self.state[sw] = 1
 
     def send(self, data):
         try:
@@ -97,14 +195,23 @@ class Board:
         except OSError as e:
             self.say("write failed", e)
 
-    def set_switch(self, sw, on):
+    def set_switch(self, sw, on, why=""):
         with self.lock:
             on = 1 if on else 0
             if self.state.get(sw, 0) == on:
                 return
             self.state[sw] = on
-            self.send([0x3C, on, sw])
-        self.say("switch", sw, "on" if on else "off")
+            self.send([RX, on, sw])
+        self.say("switch", sw, self.name(sw), "on" if on else "off", why)
+        if on and sw in self.autoactions:
+            coil, delay = self.autoactions[sw]
+            self.later(delay / 1000.0, self.fire, coil, "autoaction")
+        if sw in self.flippers:
+            high, low, eos = self.flippers[sw]
+            if on:
+                self.fire(high, "flipper")
+            if eos != sw and eos < 96:
+                self.later(EOS_DELAY, self.set_switch, eos, on, "flipper stroke")
 
     def later(self, secs, fn, *a):
         t = threading.Timer(secs, fn, a)
@@ -112,50 +219,223 @@ class Board:
         t.start()
 
     def trough_changed(self):
-        for i, sw in enumerate(TROUGH):
-            self.set_switch(sw, i < self.balls)
+        for i, sw in enumerate(self.trough):
+            self.set_switch(sw, i < self.balls, "trough")
 
     # -- host -> board --------------------------------------------------
     def host_bytes(self, buf):
-        """Scan for '>' <op> ... that need an answer or move a ball.  A
-        false match inside LED data costs at most a harmless extra reply."""
-        i = 0
-        n = len(buf)
-        while i < n - 2:
-            if buf[i] != 0x3E:
-                i += 1
+        """Take whole messages off the front of pend + buf; keep a partial
+        one for the next read.  Returns what is kept."""
+        buf = self.pend + bytes(buf)
+        i, n = 0, len(buf)
+        while i < n:
+            if buf[i] != TX:
+                j = buf.find(bytes([TX]), i)
+                j = j if j >= 0 else n
+                self.say("skipped %d byte(s) outside a message" % (j - i))
+                i = j
                 continue
-            op, arg = buf[i + 1], buf[i + 2]
-            if op == OP_SWITCH_STATE:
-                with self.lock:
-                    self.send([0x3C, OP_SWITCH_STATE, arg, self.state.get(arg, 0)])
-            elif op == OP_COIL_CONFIG:
-                self.send([0x3C, OP_COIL_CONFIG, arg, 0, 0, 0, 255])
-            elif op == OP_FIRMWARE:
-                self.send([0x3C, OP_FIRMWARE] + list(b"PAD rig Warden") + [0])
-            elif op == OP_HARDWARE:
-                self.send([0x3C, OP_HARDWARE] + list(b"WARDEN (PAD rig)") + [0])
-            elif op in COIL_OPS and arg == EJECT_COIL:
-                self.eject()
-            elif op in COIL_OPS and arg == LAUNCH_COIL:
-                self.say("launch coil")
-                self.later(0.1, self.set_switch, SHOOTER, 0)
-            i += 1
-        # The last two bytes may start a message split across reads.
-        tail = buf[max(0, n - 2):]
-        return tail if 0x3E in tail else b""
+            if i + 1 >= n:
+                break
+            op = buf[i + 1]
+            if op not in ARGS:
+                self.unknown[op] = self.unknown.get(op, 0) + 1
+                if self.unknown[op] == 1:
+                    self.say("unknown opcode", op)
+                j = buf.find(bytes([TX]), i + 1)
+                i = j if j >= 0 else n
+                continue
+            end = i + 2 + ARGS[op]
+            if end > n:
+                break
+            try:
+                self.message(op, list(buf[i + 2:end]))
+            except Exception as e:       # never let one message stop the board
+                self.say("message", op, "failed:", e)
+            i = end
+        self.pend = buf[i:]
+        return self.pend
+
+    def message(self, op, a):
+        if op == 152:                                    # get_switch_state
+            with self.lock:
+                self.send([RX, 152, a[0], self.state.get(a[0], 0)])
+        elif op == 151:
+            self.send([RX, 151] + list(HARDWARE_INFO) + [0])
+        elif op == 150:
+            self.send([RX, 150] + list(FIRMWARE_INFO) + [0])
+        elif op == 168:                                  # get_coil_config
+            cfg = self.coil_config.get(a[0], [0, 0, 0, 0])
+            self.send([RX, 168, a[0]] + cfg)
+        elif op == 143:
+            self.coil_config[a[0]] = a[1:5]
+        elif op in PULSE_OPS:
+            self.fire(a[0], "pulse")
+        elif op in HOLD_OPS:
+            self.fire(a[0], "hold")
+            self.hold(a[0], True)
+        elif op == 191:                                  # pulse and hold <ms>
+            ms = a[1] << 8 | a[2]
+            self.fire(a[0], "hold %d ms" % ms)
+            self.hold(a[0], True)
+            self.later(ms / 1000.0, self.hold, a[0], False, self.hold_gen[a[0]])
+        elif op == 130:
+            self.hold(a[0], False)
+        elif op == 131:             # set pwm: GI, flashers, holds; 0 = off
+            if not a[1]:
+                self.hold(a[0], False)
+            elif a[0] not in self.coil_held:
+                self.fire(a[0], "pwm %d" % a[1])
+                self.hold(a[0], True)
+        elif op == 145:
+            self.coil_config.clear()
+        elif op in (137, 138, 139, 140):
+            what = "pwm" if op in (137, 138) else "48v"
+            on = int(op in (137, 139))
+            if self.power[what] != on:
+                self.say("power", what, "on" if on else "off")
+            self.power[what] = on
+        elif op == 144:
+            self.flippers[a[0]] = (a[1], a[2], a[3])
+        elif op == 142:
+            self.flippers.clear()
+        elif op == 146:
+            self.autoactions[a[0]] = (a[1], a[2])
+        elif op == 147:
+            self.autoactions.clear()
+        elif op == 161:
+            (self.inverted.add if a[1] else self.inverted.discard)(a[0])
+        elif op == 188:                                  # 0 bit = lamp on
+            self.lamps = {"start": int(not a[0] & 1),
+                          "launch": int(not a[0] & 2)}
+        elif op == 153:
+            self.servos[a[0]] = a[1]
+        elif op == 189:
+            self.outputs[a[0]] = a[1]
+        elif op == 154:
+            if a[0] in (0, 1):
+                self.chain[a[0]] = a[1]
+        elif op == 200:
+            self.now_serving = a[0]
+        elif op == 201:
+            self.now_serving = None
+        elif 205 <= op <= 217:
+            self.stepper_message(op, a)
+        else:
+            self.led_message(op, a)
+
+    def led_message(self, op, a):
+        over = op in (172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182,
+                      185, 193, 195, 197, 199, 219)
+        layer = self.overlay if over else self.leds
+        mode = {157: "blink", 175: "blink", 194: "blink", 195: "blink",
+                160: "blink", 177: "blink", 218: "blink", 219: "blink",
+                159: "breathe", 176: "breathe", 182: "breathe", 183: "breathe",
+                196: "breathe", 197: "breathe", 163: "chirp", 164: "chirp",
+                178: "chirp", 179: "chirp", 170: "rainbow", 172: "rainbow",
+                184: "crossfade", 185: "crossfade"}.get(op, "solid")
+        if op in (155, 174):                             # every LED
+            first, count, col = 0, max(sum(self.chain), len(layer)), rgb8(a[0])
+        elif op in (128, 181, 157, 175, 159, 176, 163, 179, 184, 185):
+            first, count, col = a[0], 1, rgb8(a[1])
+        elif op in (160, 177, 164, 178):
+            first, count, col = a[0], 1, PALETTE.get(a[1] >> 4, (255, 255, 255))
+        elif op in (167, 180):                           # 12-bit
+            first, count = a[0], 1
+            col = (a[1] * 17, (a[2] >> 4) * 17, (a[2] & 15) * 17)
+        elif op in (170, 172):
+            first, count, col = a[0], 1, (255, 255, 255)
+        elif op in (171, 173, 182, 183, 218, 219):
+            first, count, col = a[0], 1, (a[1], a[2], a[3])
+        elif op in (192, 193, 194, 195, 196, 197):
+            first, count, col = a[0], a[1], rgb8(a[2])
+        elif op in (198, 199):
+            first, count, col = a[0], a[1], (a[2], a[3], a[4])
+        else:                   # status LEDs (136, 156), switch config, ...
+            return
+        for n in range(first, first + count):
+            if any(col):
+                layer[n] = col
+                self.led_mode[n] = mode
+            else:
+                layer.pop(n, None)
+
+    def stepper_message(self, op, a):
+        s = self.stepper
+        if op == 208:
+            s["accel"] = u32(a)
+        elif op == 209:
+            s["speed"] = u32(a)
+        elif op == 210:
+            s["target"] = u32(a)
+            if s["state"] != STEPPER_DISABLED:
+                s["state"] = STEPPER_MOVING
+                secs = abs(s["target"] - s["mm"]) / float(s["speed"] or 100)
+                self.later(min(3.0, max(0.2, secs)), self.stepper_done,
+                           s["target"])
+        elif op == 211:
+            s["state"], s["target"] = STEPPER_HOMING, 0
+            self.later(1.0, self.stepper_done, 0)
+        elif op == 212:
+            self.send([RX, 212, s["state"]])
+        elif op == 215:
+            s["state"] = STEPPER_IDLE
+        elif op == 216:
+            s["state"] = STEPPER_DISABLED
+        elif op == 217:
+            s["state"] = STEPPER_IDLE
+        self.say("stepper", op, a, "->", s["state"])
+
+    def stepper_done(self, mm):
+        s = self.stepper
+        if s["state"] in (STEPPER_MOVING, STEPPER_HOMING) and s["target"] == mm:
+            s["state"], s["mm"] = STEPPER_IDLE, mm
+
+    def fire(self, coil, how):
+        self.coil_fired[coil] = self.coil_fired.get(coil, 0) + 1
+        self.coil_last.append([time.strftime("%H:%M:%S"), coil, how])
+        del self.coil_last[:-20]
+        self.say("coil", coil, how)
+        for sw in self.resets.get(coil, ()):
+            self.later(0.05, self.set_switch, sw, 1, "reset by coil %d" % coil)
+        if coil in self.eject_coils:
+            self.eject()
+        elif self.state.get(self.launch.get(coil)):
+            self.later(0.1, self.set_switch, self.launch[coil], 0, "launched")
+
+    def hold(self, coil, on, gen=None):
+        """A coil held on or let go (by a timer: only the hold it timed); a
+        held diverter opens its switch."""
+        if gen is not None and gen != self.hold_gen.get(coil):
+            return
+        if on:
+            self.hold_gen[coil] = self.hold_gen.get(coil, 0) + 1
+            self.coil_held.add(coil)
+        else:
+            self.coil_held.discard(coil)
+        if coil in self.holds:
+            self.set_switch(self.holds[coil], not on, "coil %d" % coil)
+
+    def feed_lane(self):
+        """The shooter lane an ejected ball rolls into."""
+        if not self.divert:
+            return self.shooter
+        servo, angle, below, above = self.divert
+        return below if self.servos.get(servo, 180) < angle else above
 
     def eject(self):
-        if self.balls <= 0 or self.state.get(SHOOTER):
-            self.say("eject: nothing to eject" if self.balls <= 0 else "eject: shooter lane full")
+        lane = self.feed_lane()
+        if self.balls <= 0 or self.state.get(lane):
+            self.say("eject: nothing to eject" if self.balls <= 0
+                     else "eject: shooter lane full")
             return
         self.balls -= 1
-        self.say("eject: ball to the shooter lane,", self.balls, "left")
+        self.say("eject: ball to", self.name(lane) + ",", self.balls, "left")
         self.trough_changed()
-        self.later(0.5, self.set_switch, SHOOTER, 1)
+        self.later(SHOOTER_DELAY, self.set_switch, lane, 1, "ball served")
 
     def drain(self):
-        if self.balls >= len(TROUGH):
+        if self.balls >= len(self.trough):
             return
         self.balls += 1
         self.say("drain:", self.balls, "in the trough")
@@ -163,9 +443,14 @@ class Board:
 
     # -- control socket -----------------------------------------------
     def balls_state(self):
-        shooter = 1 if self.state.get(SHOOTER) else 0
+        shooter = sum(1 for n in self.lanes if self.state.get(n))
         return {"trough": self.balls, "shooter": shooter,
-                "in_play": max(0, BALLS - self.balls - shooter)}
+                "in_play": max(0, self.total - self.balls - shooter)}
+
+    def lit(self):
+        both = dict(self.leds)
+        both.update(self.overlay)
+        return both
 
     def command(self, line):
         """One control request -> its one-line reply."""
@@ -175,26 +460,44 @@ class Board:
         if p[0] == "state":
             with self.lock:
                 sw = {str(k): v for k, v in sorted(self.state.items())}
-            return json.dumps({"switches": sw, "balls": self.balls_state(),
-                               "connected": self.connected, "leds_lit": 0})
+            return json.dumps({
+                "title": self.title["name"], "key": self.title_key,
+                "switches": sw,
+                "balls": self.balls_state(), "connected": self.connected,
+                "leds_lit": len(self.lit()),
+                "coils": {"fired": _keyed(self.coil_fired),
+                          "held": sorted(self.coil_held),
+                          "configured": len(self.coil_config),
+                          "last": self.coil_last[-5:]},
+                "power": self.power, "lamps": self.lamps,
+                "flippers": len(self.flippers),
+                "autoactions": len(self.autoactions),
+                "servos": _keyed(self.servos),
+                "stepper": {"state": self.stepper["state"],
+                            "mm": self.stepper["mm"]},
+                "unknown_opcodes": _keyed(self.unknown)})
+        if p[0] == "leds":
+            return json.dumps({str(k): "%02x%02x%02x" % v
+                               for k, v in sorted(self.lit().items())})
         if p[0] == "drain":
             if self.balls_state()["in_play"] <= 0:
                 return "err no ball in play"
             self.drain()
             return "ok"
         if p[0] == "plunge":
-            if not self.state.get(SHOOTER):
+            full = [n for n in self.lanes if self.state.get(n)]
+            if not full:
                 return "err no ball in the shooter lane"
-            self.set_switch(SHOOTER, 0)
+            self.set_switch(full[0], 0, "plunged")
             return "ok"
         if p[0] in ("sw", "tap") and len(p) >= 2 and p[1].isdigit():
             n = int(p[1])
             if p[0] == "sw":
-                self.set_switch(n, len(p) < 3 or p[2] not in ("0", "off"))
+                self.set_switch(n, len(p) < 3 or p[2] not in ("0", "off"), "ctl")
             else:
                 ms = int(p[2]) if len(p) > 2 and p[2].isdigit() else 150
-                self.set_switch(n, 1)
-                self.later(ms / 1000.0, self.set_switch, n, 0)
+                self.set_switch(n, 1, "ctl")
+                self.later(ms / 1000.0, self.set_switch, n, 0, "ctl")
             return "ok"
         return "err unknown request: " + line.strip()
 
@@ -234,8 +537,6 @@ class Board:
             threading.Thread(target=self.client, args=(conn,), daemon=True).start()
 
     def serve(self):
-        pend = b""
-        seen = False
         while True:
             r, _, _ = select.select([self.master], [], [], 1.0)
             if not r:
@@ -247,10 +548,10 @@ class Board:
                 # (or has not opened it yet).  Keep serving: it reopens.
                 time.sleep(0.2)
                 continue
-            if data and not seen:
-                seen = self.connected = True
+            if data and not self.connected:
+                self.connected = True
                 self.say("game connected")
-            pend = self.host_bytes(pend + data)
+            self.host_bytes(data)
 
 
 def main():
@@ -259,7 +560,7 @@ def main():
     with open(os.path.join(rig, "warden.tty.tmp"), "w") as f:
         f.write(b.slave_path + "\n")
     os.rename(os.path.join(rig, "warden.tty.tmp"), os.path.join(rig, "warden.tty"))
-    b.say("board up on", b.slave_path, "balls", b.balls)
+    b.say("board up on", b.slave_path, "for", b.title["name"], "balls", b.balls)
     threading.Thread(target=b.ctl_loop, args=(os.path.join(rig, "ctl.sock"),),
                      daemon=True).start()
     b.serve()

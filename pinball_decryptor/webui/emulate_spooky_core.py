@@ -75,7 +75,8 @@ def rig_available():
     d = rig_dir()
     return all(os.path.isfile(os.path.join(d, s))
                for s in ("watch.sh", "stop.sh", "status.sh", "cancel.sh",
-                         "ctl.sh", "spkshim.so", "spkwarden.py"))
+                         "ctl.sh", "spkshim.so", "spkwarden.py",
+                         "spktitles.py"))
 
 
 def platform_ok():

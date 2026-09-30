@@ -17,12 +17,23 @@ if ! spk_game_alive; then
     exit 1
 fi
 bash "$SPK_TOOLS/shot.sh" "$OUT" > /dev/null
-# Attract = the game said so, and the board it talked to is the rig's.
-BOARD=$(grep -m1 -o 'CONTROLLER: .*' "$SPK_RIG/player.log")
+# Attract = the game said so, and it talked to the rig's board: asked it
+# for switch states and configured its coils.
+HW=$(python3 "$SPK_TOOLS/spkctl.py" --slot "$SPK_SLOT" state 2>/dev/null)
+BOARD=$(printf '%s' "$HW" | python3 -c '
+import json, sys
+try:
+    s = json.load(sys.stdin)
+except ValueError:
+    sys.exit()
+if s["connected"]:
+    print("board: %d coils configured, %d fired, %d LEDs lit" % (
+        s["coils"]["configured"], sum(s["coils"]["fired"].values()),
+        s["leds_lit"]))')
 bash "$SPK_TOOLS/killgame.sh" > /dev/null
-if grep -q 'Attract_mode started' "$SPK_RIG/player.log" && [ -n "$BOARD" ]; then
+if spk_attract && [ -n "$BOARD" ]; then
     echo "VERDICT $B pass attract mode, $BOARD, picture $OUT"
 else
-    echo "VERDICT $B fail no attract (board: ${BOARD:-none}), picture $OUT"
+    echo "VERDICT $B fail no attract (${BOARD:-board not used}), picture $OUT"
     exit 1
 fi

@@ -1,25 +1,32 @@
 #!/bin/bash
 # run_game.sh <build> [--visible] [--audio]
 #
-# Start a Spooky Unity game (Beetlejuice) on this PC, on the rig's emulated
-# Warden board (spkwarden.py).  <build> is a folder prepare.sh made (a name
-# under $SPK_CACHE or a path).  Run as root; it drops to $SPK_USER itself.
-# Returns once the game reached attract mode (or it died).
+# Start a Spooky Warden-era game (spktitles.py: Beetlejuice, Scooby-Doo,
+# Texas Chainsaw Massacre, Evil Dead, Looney Tunes) on this PC, on the rig's
+# emulated Warden board (spkwarden.py).  <build> is a folder prepare.sh made
+# (a name under $SPK_CACHE or a path).  Run as root; it drops to $SPK_USER
+# itself.  Returns once the game reached attract mode (or it died).
 #
 #   --visible    draw on the WSLg desktop instead of the slot's hidden Xvfb
 #                display (the default: windows popping up are disruptive;
 #                shot.sh shows a hidden run)
 #   --audio      play sound through WSLg's PulseAudio (default: no audio
-#                device - Unity runs silent)
+#                device - the game runs silent)
 #
-# The game sees the machine's /game in a private mount namespace:
-#   /game/code/uptest   the build, hard-linked into $SPK_RIG/game (the game
+# The game sees the machine's /game in a private mount namespace.  /game
+# itself is $NV/game, kept between runs, because that is where the games
+# keep settings, audits and high scores - each in folders of its own
+# choosing (code/config, audits, game_settings...).  Bound over it:
+#   /game/code/uptest   the game, hard-linked into $SPK_RIG/game (the game
 #                       writes marker files beside itself, never the cache)
-#   /game/code/config   settings, audits, scores  ($SPK_ROOT/nv<slot>: kept)
-#   /game/logs, /game/tmp, /game/media, /game/backup, /game/update
-# and its own hostname ("pad-rig-<slot>"): the game is in its built-in
-# VIRTUAL mode unless the hostname says "haunted-mansion", and virtual mode
-# is what keeps its sudo/reboot/firmware-flash shell calls from running.
+#   /game/code/assets   its media, for the titles that keep it apart
+#                       (Texas Chainsaw, Evil Dead)
+#   /game/logs, /game/tmp, /game/media, /game/backup, /game/update  per run
+# and its own hostname ("pad-rig-<slot>"): Beetlejuice is in its built-in
+# VIRTUAL mode unless the hostname says "haunted-mansion".  The other titles
+# have no such mode, so the machine's root and power commands they shell
+# out to (sudo, unlock-root, reboot, avrdude, timedatectl...) are no-ops
+# first on the game's PATH, logged to $SPK_RIG/shell.log.
 # Switches: sw.py.  Picture: shot.sh.  Stop: killgame.sh.
 set -u
 . "$(dirname "$0")/spkpath.sh"
@@ -34,45 +41,70 @@ while [ $# -gt 0 ]; do
     shift
 done
 case "$BUILD" in /*) ;; "") ;; *) BUILD=$SPK_CACHE/$BUILD ;; esac
-[ -n "$BUILD" ] && [ -x "$BUILD/main.x86_64" ] || { echo "run_game.sh: not a prepared build: ${BUILD:-<none>} (prepare.sh)" >&2; exit 2; }
+[ -n "$BUILD" ] && { [ -x "$BUILD/main.x86_64" ] || [ -x "$BUILD/uptest/main.x86_64" ]; } ||
+    { echo "run_game.sh: not a prepared build: ${BUILD:-<none>} (prepare.sh)" >&2; exit 2; }
 [ -f "$SPK_SHIM" ] || { echo "run_game.sh: no $SPK_SHIM (build.sh)" >&2; exit 2; }
 [ "$(id -u)" = 0 ] || { echo "run_game.sh: run as root (it drops to $SPK_USER itself)" >&2; exit 2; }
 [ -n "$SPK_USER" ] || { echo "run_game.sh: no ordinary user account to run the game as" >&2; exit 2; }
+
+# Which game: prepare.sh wrote it; a cache from before it did is Beetlejuice.
+TITLE=$(cat "$BUILD/.pad_title" 2>/dev/null || echo bj)
+tget() { python3 "$SPK_TOOLS/spktitles.py" get "$TITLE" "$1"; }
+ENGINE=$(tget engine); LAYOUT=$(tget layout)
+SPK_TITLE_KEY=$TITLE; SPK_ATTRACT=$(tget attract); SPK_ATTRACT_IN=$(tget attract_in)
+FACTORY=$(tget factory_defaults)
+[ -n "$ENGINE" ] || { echo "run_game.sh: unknown title $TITLE" >&2; exit 2; }
 
 bash "$SPK_TOOLS/killgame.sh" >/dev/null 2>&1
 
 rm -rf "$SPK_RIG"
 G=$SPK_RIG/game
-mkdir -p "$SPK_RIG"/{logs,tmp,media,backup,update,home}
+mkdir -p "$SPK_RIG"/{logs,tmp,media,backup,update,bin}
 cp -al "$(realpath "$BUILD")" "$G"
-# Settings, audits and high scores outlive a run, as on a machine: their
-# folder is per slot, outside the rig dir.  SPK_FRESH=1 starts it over.
-NV=$SPK_ROOT/nv$SPK_SLOT
+UPTEST=$G; [ "$LAYOUT" = code ] && UPTEST=$G/uptest
+# Settings, audits, high scores and the game's home outlive a run, as on a
+# machine: per slot and title, outside the rig dir.  SPK_FRESH=1 starts over.
+NV=$SPK_ROOT/nv$SPK_SLOT/$TITLE
 [ "${SPK_FRESH:-0}" = 1 ] && rm -rf "$NV"
-mkdir -p "$NV"
+CFG=$NV/game/code/config
+mkdir -p "$CFG" "$NV/game/audits" "$NV/home"
+# An update's config/ (light and asset lists) is the game's, fresh each time.
+[ -d "$G/config" ] && cp -a "$G/config/." "$CFG/"
 # A machine leaves the factory with its defaults saved (service menu); a
-# fresh settings folder without them stops attract behind a "FACTORY DEFAULT
-# SETTINGS HAVE NOT BEEN SAVED" dialog.  An empty set = the build's own.
-[ -f "$NV/beetlejuice_factory_defaults.json" ] || echo '{}' > "$NV/beetlejuice_factory_defaults.json"
+# fresh Beetlejuice settings folder without them stops attract behind a
+# "FACTORY DEFAULT SETTINGS HAVE NOT BEEN SAVED" dialog.  {} = the build's own.
+[ -n "$FACTORY" ] && [ ! -f "$CFG/$FACTORY" ] && echo '{}' > "$CFG/$FACTORY"
+# Scooby-Doo compares ~/.profile with its own and reboots to install it.
+[ -f "$UPTEST/_profile" ] && cp "$UPTEST/_profile" "$NV/home/.profile"
 chown -R "$SPK_USER": "$NV"
+for c in sudo unlock-root lock-root reboot shutdown poweroff halt systemctl \
+         avrdude timedatectl hwclock swaymsg xrandr wpctl; do
+    printf '#!/bin/sh\necho "$(date +%%T) %s $*" >> %s/shell.log\nexit 0\n' \
+        "$c" "$SPK_RIG" > "$SPK_RIG/bin/$c"
+done
+# The cabinet's kernel, for a game that picks its PC model by it.
+UNAME=$(tget uname)
+[ -n "$UNAME" ] && printf '#!/bin/sh\n[ "$*" = -r ] && echo %s && exit 0\nexec /bin/uname "$@"\n' \
+    "$UNAME" > "$SPK_RIG/bin/uname"
+chmod 755 "$SPK_RIG"/bin/*
 echo "$BUILD" > "$SPK_RIG/build"
+echo "$TITLE" > "$SPK_RIG/title"
 echo "$VISIBLE" > "$SPK_RIG/visible"
 chown -R "$SPK_USER": "$SPK_RIG"
 
-# The board first: the game opens /dev/WARDEN once at start, then retries
-# every half second until it answers.
-setsid -f env SPK_MARK="$SPK_RIG" runuser -u "$SPK_USER" -- \
+# The board first: the games open /dev/WARDEN once at start, then retry.
+setsid -f env SPK_MARK="$SPK_RIG" SPK_TITLE="$TITLE" runuser -u "$SPK_USER" -- \
     python3 -u "$SPK_TOOLS/spkwarden.py" "$SPK_RIG" < /dev/null > "$SPK_RIG/warden.out" 2>&1
 for _ in $(seq 1 50); do [ -s "$SPK_RIG/warden.tty" ] && break; sleep 0.1; done
 TTY=$(cat "$SPK_RIG/warden.tty" 2>/dev/null)
 [ -n "$TTY" ] || { echo "run_game.sh: the board did not come up:" >&2; cat "$SPK_RIG/warden.out" >&2; exit 1; }
 
 # The cabinet's screen is 1920x1080; on the desktop a window that size
-# would cover it, so a visible run draws at 1280x720 (Unity scales).
-SIZE="-screen-width 1920 -screen-height 1080"
+# would cover it, so a visible run draws at 1280x720 (the games scale).
+W=1920; H=1080
 if [ $VISIBLE = 1 ]; then
     DISP=${DISPLAY:-:0}
-    SIZE="-screen-width 1280 -screen-height 720"
+    W=1280; H=720
 else
     DISP=$SPK_DISPLAY
     setsid -f Xvfb "$DISP" -screen 0 1920x1080x24 -nolisten tcp \
@@ -83,26 +115,40 @@ fi
 echo "$DISP" > "$SPK_RIG/display"
 
 if [ $AUDIO = 1 ] && [ -S /mnt/wslg/PulseServer ]; then
-    AUDIO_ENV="PULSE_SERVER=unix:/mnt/wslg/PulseServer"
+    AUDIO_ENV="PULSE_SERVER=unix:/mnt/wslg/PulseServer"; GODOT_AUDIO=PulseAudio
 else
-    AUDIO_ENV="PULSE_SERVER=unix:/nonexistent SDL_AUDIODRIVER=dummy"
+    AUDIO_ENV="PULSE_SERVER=unix:/nonexistent SDL_AUDIODRIVER=dummy"; GODOT_AUDIO=Dummy
+fi
+
+LIBS=
+if [ "$ENGINE" = godot ]; then
+    # Godot 4.1 will not start without a libXinerama (xinerama_stub.c).
+    ldconfig -p | grep -q 'libXinerama\.so\.1 ' || LIBS="LD_LIBRARY_PATH=$SPK_TOOLS/lib"
+    # The project asks for Vulkan (Forward+); the compatibility renderer
+    # runs on llvmpipe's OpenGL.  Its log is stdout.
+    RUN="./main.x86_64 --rendering-method gl_compatibility --rendering-driver opengl3 \\
+    --windowed --resolution ${W}x${H} --position 0,0 --max-fps 60 \\
+    --audio-driver $GODOT_AUDIO >> $SPK_RIG/player.log 2>&1"
+else
+    RUN="./main.x86_64 -logFile $SPK_RIG/player.log -screen-fullscreen 0 \\
+    -screen-width $W -screen-height $H -force-glcore"
 fi
 
 cat > "$SPK_RIG/ns.sh" <<EOF
 hostname pad-rig-$SPK_SLOT
-mount -t tmpfs -o mode=755 tmpfs /game || exit 1
-mkdir -p /game/code/uptest /game/code/config /game/logs /game/tmp /game/media /game/backup /game/update /game/vosk
-mount --bind "$G" /game/code/uptest
-mount --bind "$NV" /game/code/config
+mkdir -p /game && mount --bind "$NV/game" /game || exit 1
+mkdir -p /game/code/uptest /game/code/assets /game/logs /game/tmp /game/media \\
+    /game/backup /game/update /game/vosk
+mount --bind "$UPTEST" /game/code/uptest
+[ -d "$G/assets" ] && [ "$LAYOUT" = code ] && mount --bind "$G/assets" /game/code/assets
 for d in logs tmp media backup update; do mount --bind "$SPK_RIG/\$d" /game/\$d; done
 chown "$SPK_USER": /game /game/code /game/vosk
 cd /game/code/uptest || exit 1
-exec runuser -u $SPK_USER -- env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=$SPK_RIG/home \\
-    USER=$SPK_USER LANG=C.UTF-8 DISPLAY=$DISP $AUDIO_ENV SPK_MARK=$SPK_RIG \\
-    LP_NUM_THREADS=${SPK_LP_THREADS:-4} \\
-    SPK_WARDEN=$TTY LD_PRELOAD=$SPK_SHIM \\
-    ./main.x86_64 -logFile $SPK_RIG/player.log -screen-fullscreen 0 \\
-    $SIZE -force-glcore
+exec runuser -u $SPK_USER -- env -i PATH=$SPK_RIG/bin:/usr/local/bin:/usr/bin:/bin \\
+    HOME=$NV/home USER=$SPK_USER LANG=C.UTF-8 DISPLAY=$DISP $AUDIO_ENV \\
+    SPK_MARK=$SPK_RIG LP_NUM_THREADS=${SPK_LP_THREADS:-4} \\
+    SPK_WARDEN=$TTY LD_PRELOAD=$SPK_SHIM $LIBS \\
+    $RUN
 EOF
 # Detached whole (setsid -f, stdin closed): a child of runuser dies with the
 # wsl.exe that started this (tools/bof_emu learned it).
@@ -114,17 +160,18 @@ for _ in $(seq 1 50); do
     sleep 0.1
 done
 
-# Up = attract mode started (the game logs every mode it starts).  Loading
-# ~4 GB of media takes a while on a spinning disk.
+# Up = attract mode started (spk_attract: the game's log says so, or for
+# Looney Tunes the board's).  Loading several GB of media takes a while on a
+# spinning disk.
 for i in $(seq 1 3000); do
-    grep -q 'Attract_mode started' "$SPK_RIG/player.log" 2>/dev/null && break
+    spk_attract && break
     [ "$i" -gt 100 ] && ! spk_game_alive && break
     sleep 0.1
 done
-if spk_game_alive && grep -q 'Attract_mode started' "$SPK_RIG/player.log" 2>/dev/null; then
+if spk_game_alive && spk_attract; then
     echo "Ready: $(basename "$BUILD"), slot $SPK_SLOT, display $DISP"
 else
     echo "run_game.sh: the game did not reach attract:" >&2
-    tail -20 "$SPK_RIG/player.log" "$SPK_RIG/game.out" >&2 2>/dev/null
+    tail -20 "$SPK_RIG/player.log" "$SPK_RIG/warden.log" "$SPK_RIG/game.out" >&2 2>/dev/null
     exit 1
 fi
