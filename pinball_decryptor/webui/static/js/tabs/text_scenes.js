@@ -554,17 +554,19 @@ function TreeLayers({ t }) {
         class=${cx("sc-item", "ly-item", (t.sel === l.id || sels.includes(l.id)) && "sel", !l.drawn && !l.state_off && "ly-off")}
         style=${`padding-left:${10 + l.depth * 14}px`}
         title=${l.state_off ? "Off in the preview: the part it sits in shows another of its looks. Click to see it on top while it is selected, or click the eye to turn it on here"
+          : l.part_off && !l.hidden ? "The look it sits in is off in the preview: it shows when that look is on. Click to see it on top while it is selected"
           : !l.drawn && !l.hidden ? "Not on the screen at this moment: click to see it on top while it is selected, and edit it" : null}
         onMouseDown=${(e) => { if (e.shiftKey) e.preventDefault(); }}
         onClick=${(e) => call("text_scenes.tree_select", l.id, pickHow(e, true))}>
       <button type="button" class="ly-eye"
         title=${l.hidden ? "Hidden — show it again" : l.state_off ? "Off in the preview: turn it on here (the preview only, not the card)"
           : l.shown ? "Turned on in the preview: turn it back off (the card is not changed)" : l.drawn ? "Hide it"
+          : l.part_off ? "Hide it (it shows only when the look it sits in is on)"
           : "Not on the screen at this moment: see it on top while it is selected"}
         onClick=${(e) => {
           e.stopPropagation();
           if (l.state_off || l.shown) call("text_scenes.tree_force", l.id, !l.shown);
-          else if (!l.hidden && !l.drawn) call("text_scenes.tree_select", l.id);
+          else if (!l.hidden && !l.drawn && !l.part_off) call("text_scenes.tree_select", l.id);
           else call("text_scenes.tree_visible", l.id, l.hidden);
         }}>
         <${Icon} name=${l.hidden || l.state_off ? "eye-off" : "eye"} /></button>

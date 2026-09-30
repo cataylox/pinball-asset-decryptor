@@ -50,6 +50,9 @@ class TreeEditMixin:
         self._tforce = {}            # {card: node ids turned on in the preview only} (PAD-276)
         self._tstate_off = set()     # layers off only because of a switchable part's pick
         self._teye_off = set()       # ... and not turned on in the preview by their eye
+        self._thead = set()          # ... the looks themselves, not what sits inside them
+        self._tpart_off = set()      # layers inside a look that is off (their eye is their own)
+        self._tbase = set()          # what the last render drew, leaving out the peek
         self._tdraws = []            # the draw list of the last render
         self._tworlds = {}
         self._tparents = {}
@@ -146,23 +149,20 @@ class TreeEditMixin:
         draws = scene_eval.draw_list(man, frame, pins=pins, worlds=worlds, show=peek,
                                      force=force)
         self._fit_kept(draws, worlds)
-        if force or peek is not None:
-            plain = {}
-            scene_eval.draw_list(man, frame, pins=pins, worlds=plain)
-        else:
-            plain = worlds
-        self._tstate_off = self._state_off(man, plain)
         # what the eyes show: a layer the eye turned on is on, even though the plain draw has
         # it off (DragonRR, PAD-280: the eyes stayed crossed); a peek is only while selected
         mine = self._tree_force_set(card) if peek is not None else force
         if peek is None:
             lit = worlds
-        elif not mine:
-            lit = plain
         else:
             lit = {}
             scene_eval.draw_list(man, frame, pins=pins, worlds=lit, force=mine)
-        self._teye_off = self._tstate_off - set(lit)
+        # the scene without the peek: a layer the peek brought along with it (the rest of the
+        # part it sits in) is not drawn once something else is picked (DragonRR, PAD-285)
+        self._tbase = set(lit)
+        self._tstate_off, self._thead = self._state_off(man, lit)
+        self._teye_off = (self._tstate_off & self._thead) - set(lit)
+        self._tpart_off = self._tstate_off - self._thead - set(lit)
         self._tdraws, self._tworlds, self._tman = draws, worlds, man
         new_scene = card != self._tshown_card
         state = {"tree": True, "animated": False, "screens": []}
@@ -192,38 +192,40 @@ class TreeEditMixin:
             threading.Thread(target=self._tree_worker, daemon=True, name="scene-tree").start()
 
     def _tree_force_set(self, card, peek=None):
-        """The layers turned on in the preview (and a selected layer that is off only because
-        of a switchable part's pick), with the sprites they sit in: a picture inside a sprite
-        that is off has to have that sprite on to be seen."""
+        """The layers turned on in the preview, and a selected layer that is off only because
+        of a switchable part's pick with the sprites it sits in: a picture inside a sprite that
+        is off has to have that sprite on to be seen while it is selected.  A layer turned on
+        by its eye does not turn on the part it sits in: it shows when that part is on, as in
+        an editor's layers (DragonRR, PAD-285: "only if the head of that tree is made
+        visible")."""
         hidden = {op.get("node") for op in self._tree_ops(card) if op["op"] == "visible"}
-        want = set(self._tforce.get(card) or ()) - hidden
+        out = set(self._tforce.get(card) or ())
         if peek is not None and peek in self._tstate_off:
-            want.add(peek)
-        out = set()
-        for nid in want:
-            p, hops = nid, 0
+            p, hops = peek, 0
             while p is not None and hops < 256:
                 out.add(p)
                 p, hops = self._tparents.get(p), hops + 1
         return out - hidden
 
     def _state_off(self, man, worlds):
-        """Layers the game is not drawing at this moment only because a switchable part (a
-        sprite the game's code picks a look of: the energy meter's Level 0..6) shows another
-        of its looks - there at every moment, unlike a layer the timeline has not reached
-        (DragonRR, PAD-276: "PAD is choosing, not the game")."""
+        """``(off, heads)``: the layers the game is not drawing at this moment only because a
+        switchable part (a sprite the game's code picks a look of: the energy meter's Level
+        0..6) shows another of its looks - there at every moment, unlike a layer the timeline
+        has not reached (DragonRR, PAD-276: "PAD is choosing, not the game") - and of those,
+        the looks themselves (the heads); the rest sit inside a look that is off."""
         from ..plugins.stern import scene_eval
         seek = {nid for nid, _p, _l, _f in scene_eval.seekable(man)}
-        out = set()
+        out, heads = set(), set()
         for n, par, _d in _walk_man(man):
             if n["id"] in worlds or par is None:
                 continue
             if par["id"] in worlds:
                 if par["id"] in seek and any(v for _f, v in n["kf"]):
                     out.add(n["id"])
+                    heads.add(n["id"])
             elif par["id"] in out:
                 out.add(n["id"])
-        return out
+        return out, heads
 
     @rpc
     def tree_force(self, node, on):
@@ -502,6 +504,7 @@ class TreeEditMixin:
             layers.append({"id": n["id"], "name": n["name"], "depth": depth, "kind": kind,
                            "drawn": n["id"] in drawn or n["id"] in self._tworlds,
                            "state_off": n["id"] in self._teye_off,
+                           "part_off": n["id"] in self._tpart_off,
                            "shown": n["id"] in (self._tforce.get(card) or ()),
                            "added": bool(n.get("added")),
                            "hidden": any(op["op"] == "visible" and op.get("node") == n["id"]
@@ -790,7 +793,7 @@ class TreeEditMixin:
             self._tpeek = node
             self._render_tree_preview(self._sel, quiet=True)
             return True
-        if node is not None and node not in self._tworlds and not any(
+        if node is not None and node not in self._tbase and not any(
                 op["op"] == "visible" and op.get("node") == node
                 for op in self._tree_ops(card)):
             self._tpeek = node
