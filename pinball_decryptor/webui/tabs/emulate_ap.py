@@ -29,7 +29,8 @@ from .. import compat
 from ...core import rigslot
 from .. import emulate_ap_core as ap
 from ..emulate_jjp_common import (RigTabMixin, rig_off, audio_ctl_file,
-                                  windows_python)
+                                  windows_python,
+                                  share_distro)
 from .base import TabService, rpc
 
 INTRO = ("Run an American Pinball game on this PC - Houdini, Oktoberfest, "
@@ -378,7 +379,8 @@ class EmulateAPTab(RigTabMixin, TabService):
             cmd += ["--title", ap.title_name(info)]
         # the status bar's VOL / Mute: the same control file as this tab's
         cmd += ["--audio-ctl", audio_ctl_file()]
-        distro = ap.rig_distro()
+        # the default distro's name when the app's runtime is not in use
+        distro = share_distro(ap.rig_distro())
         if distro:
             # the table (and the playfield picture it names) live in the
             # app's Linux; Windows reads them through the distro's share

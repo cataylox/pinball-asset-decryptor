@@ -239,6 +239,30 @@ def test_the_switch_window_command(rig, monkeypatch, tmp_path):
         assert _svc(w)._switch_window_cmd({"running": "0"}) is None
 
 
+def test_the_switch_window_reads_the_default_distros_share(rig, monkeypatch,
+                                                          tmp_path):
+    """PAD-295: with the app's runtime not in use the rig runs in the
+    machine's default distro; the window got the bare Linux path, which
+    Windows cannot open, and died at once on every start.  Now it gets that
+    distro's share."""
+    from pinball_decryptor.core import wsl_disk
+    from pinball_decryptor.webui import emulate_ap_core as core
+    from pinball_decryptor.webui.tabs import emulate_ap as tab
+    monkeypatch.setattr(tab, "windows_python", lambda: "pythonw.exe")
+    monkeypatch.setattr(core, "rig_distro", lambda: None)
+    monkeypatch.setattr(wsl_disk, "default_distro_name", lambda: "Ubuntu")
+    with web_app(tmp_path, mfr="ap") as w:
+        cmd = _svc(w)._switch_window_cmd(dict(RUNNING))
+        assert cmd[cmd.index("--distro") + 1] == "Ubuntu"
+        assert cmd[cmd.index("--table") + 1] == \
+            "\\\\wsl.localhost\\Ubuntu\\var\\tmp\\pad_ap\\rig0\\switches.json"
+        # no distro at all (off Windows): the path is local
+        monkeypatch.setattr(wsl_disk, "default_distro_name", lambda: None)
+        cmd = _svc(w)._switch_window_cmd(dict(RUNNING))
+        assert "--distro" not in cmd
+        assert cmd[cmd.index("--table") + 1] == "/var/tmp/pad_ap/rig0/switches.json"
+
+
 def test_switches_button_needs_a_running_game(rig, tmp_path):
     with web_app(tmp_path, mfr="ap") as w:
         assert not w.call(NS + ".switches")
