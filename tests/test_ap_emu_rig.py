@@ -179,7 +179,7 @@ def test_apswitches_places_the_switches_on_the_games_own_layout(tmp_path):
     pytest.importorskip("yaml")
     aps = _load("apswitches", RIG / "apswitches.py")
     rig, build = _build(tmp_path)
-    t = aps.table(str(rig), str(build), "Legends of Valhalla")
+    t = aps.table(str(rig), str(build), "Legends of Valhalla", root=str(tmp_path / "root"))
     by = {s["name"]: s for s in t["switches"]}
     assert t["title"] == "Legends of Valhalla"
     assert t["art"] == str(build / "playfield.jpg")
@@ -201,10 +201,43 @@ def test_apswitches_writes_switches_json(tmp_path):
     pytest.importorskip("yaml")
     rig, build = _build(tmp_path)
     out = subprocess.run([sys.executable, str(RIG / "apswitches.py"), str(rig), str(build), "LoV"],
-                         check=True, capture_output=True, text=True).stdout
-    assert "11 switches, 2 on the playfield picture" in out
+                         check=True, capture_output=True, text=True,
+                         env=dict(os.environ, AP_ROOT=str(tmp_path / "root"))).stdout
+    assert "11 switches, 2 on the playfield picture (the game's own layout)" in out
     import json
     assert json.loads((rig / "switches.json").read_text())["title"] == "LoV"
+
+
+def test_apswitches_borrows_the_layout_a_newer_package_dropped(tmp_path):
+    """Legends of Valhalla 26.08.22 ships no .layout and no playfield
+    picture: the one kept from 25.08.27 stands in, and with the older build
+    gone from the cache too, the kept copy still does."""
+    pytest.importorskip("yaml")
+    aps = _load("apswitches", RIG / "apswitches.py")
+    root = tmp_path / "root"
+    rig, old = _build(tmp_path)
+    (root / "cache").mkdir(parents=True)
+    old = old.rename(root / "cache" / "lov_25.08.27")
+    (old / "machine_dir").write_text("legends")
+    new = root / "cache" / "lov_26.08.22"
+    new.mkdir()
+    (new / "machine_dir").write_text("legends")
+    # nothing kept yet: another cached build of the title lends its layout
+    t = aps.table(str(rig), str(new), root=str(root))
+    by = {s["name"]: s for s in t["switches"]}
+    assert (by["leftOrbit"]["x"], by["leftOrbit"]["y"]) == (75, 345)
+    assert "lov_25.08.27" in t["art_from"]
+    # ...and is kept: with the old build deleted, the kept copy answers
+    import shutil
+    shutil.rmtree(old)
+    t = aps.table(str(rig), str(new), root=str(root))
+    assert t["art"] == str(root / "layouts" / "legends" / "playfield.jpg")
+    assert "kept" in t["art_from"]
+    # a different title borrows nothing
+    (new / "machine_dir").write_text("tank")
+    t = aps.table(str(rig), str(new), root=str(root))
+    assert t["art"] == "" and t["art_from"] == ""
+    assert not any("x" in s for s in t["switches"])
 
 
 def _ctl(tmp_path, monkeypatch):
@@ -250,7 +283,8 @@ def test_appf_page_model_groups_and_keys(tmp_path):
     aps = _load("apswitches", RIG / "apswitches.py")
     rig, build = _build(tmp_path)
     appf = _load("appf", RIG / "appf.py")
-    m = appf.page_model(aps.table(str(rig), str(build)), "Legends of Valhalla")
+    m = appf.page_model(aps.table(str(rig), str(build), root=str(tmp_path / "root")),
+                        "Legends of Valhalla")
     assert [r["group"] for r in m["switches"]][:1] == ["Cabinet"]
     assert [r["group"] for r in m["switches"]][-1] == "Trough"
     by = {r["name"]: r for r in m["switches"]}

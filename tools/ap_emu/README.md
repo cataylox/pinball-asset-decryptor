@@ -115,7 +115,11 @@ The switch window is `appf.py` on the app's Windows Python (a pfweb page,
 playfield is the game's own: every title ships its developers' OSC
 switch-matrix layout (`<title>.layout`: a playfield picture and each
 switch's spot on it), and `apswitches.py` copies the best-matching one into
-`$AP_RIG/switches.json` with groups and keys.  `py/aprun.py` writes the
+`$AP_RIG/switches.json` with groups and keys.  Newer packages dropped the
+layout (Legends of Valhalla 26.08.22 ships none, nor a playfield picture):
+the first one seen for a title is kept in `$AP_ROOT/layouts/<machine dir>/`
+and stands in, as does another cached build of the title; with neither, the
+window is the list alone.  `py/aprun.py` writes the
 switches the game has active to `$AP_RIG/active` (the window lights them)
 and takes `!drain` (a ball back into the trough).
 

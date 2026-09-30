@@ -10,6 +10,12 @@ every AP title ships its developers' OSC switch-matrix layout
 pixels), which their desktop switch GUI drew.  The layout that places the
 most of this game's switches wins (Houdini ships two).
 
+Newer packages dropped it (Legends of Valhalla 26.08.22 has no .layout and
+no playfield picture), so the first layout seen for a title is kept in
+$AP_ROOT/layouts/<machine dir>/, and a build without one uses that - or
+another cached build of the same title.  With none anywhere the window is
+the list alone.
+
 Each switch gets a group (Cabinet, Trough, Playfield), and the cabinet's
 buttons a key the window answers while it is focused.  Switches the machine
 yaml calls unused are left out.
@@ -20,9 +26,12 @@ import glob
 import json
 import os
 import re
+import shutil
 import sys
 
 import yaml
+
+AP_ROOT = os.environ.get("AP_ROOT", "/var/tmp/pad_ap")
 
 #: (name pattern, key, hold) - the window's keyboard.  Flippers and the
 #: cabinet's extra buttons hold while the key is down; the rest tap.
@@ -87,22 +96,75 @@ def read_layout(path):
 
 
 def best_layout(build, names):
-    best = ("", {}, -1)
+    """(layout path, picture path, spots) of the build's best layout, or
+    ("", "", {})."""
+    best = ("", "", {}, -1)
     for path in sorted(glob.glob(os.path.join(build, "*.layout"))
                        + glob.glob(os.path.join(build, "*", "*.layout"))):
         got = read_layout(path)
         if not got or not got[0]:
             continue
         score = len(names & set(got[1]))
-        if score > best[2]:
-            best = (got[0], got[1], score)
-    return best[0], best[1]
+        if score > best[3]:
+            best = (path, got[0], got[1], score)
+    return best[:3]
 
 
-def table(rig, build, title=""):
+def machine_dir(build):
+    try:
+        with open(os.path.join(build, "machine_dir")) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def keep_layout(mdir, layout, pic, root=AP_ROOT):
+    """Copy a title's layout and its picture to <root>/layouts/<mdir>/ (the
+    picture under the name the layout gives it), once."""
+    if not mdir:
+        return
+    dest = os.path.join(root, "layouts", mdir)
+    if os.path.isfile(os.path.join(dest, os.path.basename(layout))):
+        return
+    try:
+        os.makedirs(dest, exist_ok=True)
+        rel = os.path.relpath(pic, os.path.dirname(layout))
+        os.makedirs(os.path.dirname(os.path.join(dest, rel)), exist_ok=True)
+        shutil.copy2(pic, os.path.join(dest, rel))
+        shutil.copy2(layout, os.path.join(dest, os.path.basename(layout)))
+    except OSError:
+        pass
+
+
+def find_layout(build, names, root=AP_ROOT):
+    """(picture, spots, where) - the build's own layout, else the title's
+    kept one, else another cached build's of the same title."""
+    layout, pic, spots = best_layout(build, names)
+    mdir = machine_dir(build)
+    if pic:
+        keep_layout(mdir, layout, pic, root)
+        return pic, spots, "the game's own layout"
+    if not mdir:
+        return "", {}, ""
+    kept = os.path.join(root, "layouts", mdir)
+    _l, pic, spots = best_layout(kept, names)
+    if pic:
+        return pic, spots, "the layout kept from an earlier %s build" % mdir
+    others = [b for b in glob.glob(os.path.join(root, "cache", "*"))
+              if os.path.realpath(b) != os.path.realpath(build)
+              and machine_dir(b) == mdir]
+    for other in sorted(others, key=os.path.getmtime, reverse=True):
+        layout, pic, spots = best_layout(other, names)
+        if pic:
+            keep_layout(mdir, layout, pic, root)
+            return pic, spots, "the layout of %s" % os.path.basename(other)
+    return "", {}, ""
+
+
+def table(rig, build, title="", root=AP_ROOT):
     sws = [s for s in read_switches(os.path.join(rig, "switches"))
            if not unused(s["name"], s["label"])]
-    art, spots = best_layout(build, {s["name"] for s in sws})
+    art, spots, where = find_layout(build, {s["name"] for s in sws}, root)
     for s in sws:
         s["group"] = group_of(s["name"], s["label"])
         s["nc"] = s["type"] == "NC"
@@ -116,6 +178,7 @@ def table(rig, build, title=""):
     return {
         "title": title or os.path.basename(build.rstrip("/")),
         "art": art,
+        "art_from": where,
         # the bar's buttons: Plunge (the shooter lane lets go), Coin door
         "shooter": by.get("shooter"),
         "coin_door": by.get("coinDoor"),
@@ -132,8 +195,10 @@ def main(argv):
     with open(out + ".tmp", "w") as f:
         json.dump(t, f, indent=1)
     os.rename(out + ".tmp", out)
-    print("%s: %d switches, %d on the playfield picture" % (
-        out, len(t["switches"]), sum(1 for s in t["switches"] if "x" in s)))
+    print("%s: %d switches, %d on the playfield picture%s" % (
+        out, len(t["switches"]), sum(1 for s in t["switches"] if "x" in s),
+        " (%s)" % t["art_from"] if t["art_from"] else
+        " (this package ships no playfield layout)"))
     return 0
 
 

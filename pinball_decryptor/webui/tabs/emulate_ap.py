@@ -340,7 +340,9 @@ class EmulateAPTab(RigTabMixin, TabService):
                 pct = int(line.split()[1])
             except (IndexError, ValueError):
                 return
-            self._footer("copy", pct, "Unpacking the game… %d%%" % pct)
+            # prepare.py: decrypting is the first half, unpacking the rest
+            self._footer("copy", pct, "%s the game… %d%%" % (
+                "Decrypting" if pct < 50 else "Unpacking", pct))
 
     def _stop_async(self):
         if self._refuse_off():

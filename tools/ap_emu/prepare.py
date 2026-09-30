@@ -15,9 +15,10 @@ macOS litter (.DS_Store, ._*, __MACOSX/) is skipped.
 
 A build remembers the .pkg it came from (`source`: size and time); a .pkg
 of the same name that differs - one the Write tab rebuilt - is unpacked
-again.  While unpacking it prints `progress N` (percent) for the app's
-footer.  Exit: 0 ready, 2 no rig env (setup.sh), 4 not an American Pinball
-game-code .pkg (it does not decrypt to a game).
+again.  While it works it prints `progress N` (percent) for the app's
+footer: decrypting is the first half, unpacking the second.  Exit: 0
+ready, 2 no rig env (setup.sh), 4 not an American Pinball game-code .pkg
+(it does not decrypt to a game).
 """
 import argparse
 import os
@@ -53,15 +54,37 @@ def decrypt(pkg, out_zip):
         size = struct.unpack("<Q", f.read(8))[0]
         iv = f.read(16)
     key = ap_key()
+    total = max(os.path.getsize(pkg) - 24, 1)
     with open(pkg, "rb") as src, open(out_zip, "wb") as dst:
         src.seek(24)
         p = subprocess.Popen([OPENSSL, "enc", "-d", "-aes-256-cbc", "-nopad",
                               "-K", key.hex(), "-iv", iv.hex()],
-                             stdin=src, stdout=dst)
+                             stdin=subprocess.PIPE, stdout=dst)
+        # Fed from here, not handed the file: a 1 GB package takes a minute
+        # or two off a spinning disk, and the app's footer shows how far.
+        done = shown = 0
+        try:
+            while True:
+                chunk = src.read(4 << 20)
+                if not chunk:
+                    break
+                p.stdin.write(chunk)
+                done += len(chunk)
+                pct = DECRYPT_SHARE * done // total
+                if pct >= shown + 2:
+                    shown = pct
+                    print("progress %d" % pct, flush=True)
+            p.stdin.close()
+        except BrokenPipeError:
+            pass
         if p.wait() != 0:
             print("prepare.py: openssl failed on %s" % pkg, file=sys.stderr)
             sys.exit(4)
     os.truncate(out_zip, size)
+
+
+#: The progress lines' split: decrypting is the first half, unpacking the rest.
+DECRYPT_SHARE = 50
 
 
 def stamp(pkg):
@@ -97,6 +120,7 @@ def main():
     os.makedirs(dest)
     tmp = dest + ".zip"
     print("decrypting %s ..." % a.pkg, flush=True)
+    print("progress 0", flush=True)
     decrypt(a.pkg, tmp)
     try:
         try:
@@ -110,11 +134,11 @@ def main():
             n = 0
             items = z.infolist()
             total = sum(i.file_size for i in items) or 1
-            done = shown = 0
+            done, shown = 0, DECRYPT_SHARE
             for i in items:
                 done += i.file_size
-                pct = 100 * done // total
-                if pct >= shown + 5:
+                pct = DECRYPT_SHARE + (100 - DECRYPT_SHARE) * done // total
+                if pct >= shown + 2:
                     shown = pct
                     print("progress %d" % pct, flush=True)
                 if litter(i.filename) or i.is_dir():

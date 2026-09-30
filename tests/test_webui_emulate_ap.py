@@ -252,6 +252,9 @@ def test_launch_lines_move_the_footer(rig, tmp_path):
             ("copy", 0), ("copy", 0), ("copy", 0), ("copy", 40), ("boot", None),
             ("run", None)]
         assert "once" in seen[1][2]
+        assert seen[3][2].startswith("Decrypting")
+        svc._footer_line("progress 75")
+        assert seen[-1] == ("copy", 75, "Unpacking the game… 75%")
 
 
 # ------------------------------------------------------------ stop / quit
