@@ -204,13 +204,27 @@ class TreeEditMixin:
             p, hops = self._tparents.get(p), hops + 1
         return out
 
+    def _tree_hidden_in(self, man, nid, ops):
+        """The name of the nearest sprite *nid* sits in that is hidden with its eye, or ""."""
+        hidden = {op.get("node") for op in ops if op["op"] == "visible"}
+        p, hops = self._tparents.get(nid), 0
+        while p is not None and hops < 256:
+            if p in hidden:
+                got = [n for n, _par, _d in _walk_man(man) if n["id"] == p]
+                return got[0]["name"] if got else ""
+            p, hops = self._tparents.get(p), hops + 1
+        return ""
+
     def _tree_force_set(self, card, peek=None):
         """The layers turned on in the preview (and a selected layer that is off only because
         of a switchable part's pick), with the sprites they sit in: a picture inside a sprite
-        that is off has to have that sprite on to be seen."""
+        that is off has to have that sprite on to be seen.  A selected layer inside a sprite
+        hidden with its eye is seen through it too (DragonRR, PAD-286: "it should override and
+        show"; it said the game never draws it)."""
         hidden = {op.get("node") for op in self._tree_ops(card) if op["op"] == "visible"}
         want = set(self._tforce.get(card) or ()) - hidden
-        if peek is not None and peek in self._tstate_off:
+        veiled = self._tree_ancestors(peek) & hidden if peek is not None else set()
+        if peek is not None and (peek in self._tstate_off or veiled):
             want.add(peek)
         out = set()
         for nid in want:
@@ -218,7 +232,7 @@ class TreeEditMixin:
             while p is not None and hops < 256:
                 out.add(p)
                 p, hops = self._tparents.get(p), hops + 1
-        return out - hidden
+        return out - (hidden - veiled)
 
     def _state_off(self, man, worlds):
         """Layers the game is not drawing at this moment only because a switchable part (a
@@ -568,6 +582,7 @@ class TreeEditMixin:
                 "layer": sibs.index(n) + 1, "layers": len(sibs),
                 "drawn": nid in self._tworlds,
                 "peek": nid == self._tpeek and nid in self._tworlds,
+                "hid_in": self._tree_hidden_in(man, nid, ops),
                 "pic": self._tree_pic_props(nid)}
 
     def _tree_picture(self, nid):

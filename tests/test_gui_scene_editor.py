@@ -682,6 +682,36 @@ def test_a_hidden_layer_in_a_sprite_is_shown_alone_and_the_sprite_whole(tmp_path
         w.call("text_scenes.close")
 
 
+def test_a_layer_in_a_sprite_hidden_with_its_eye_is_shown_when_picked(tmp_path):
+    """DragonRR (PAD-286): with a body hidden with its eye, picking a picture in it said "The
+    game does not draw that at any moment of this scene".  It is drawn alone on top, at any
+    moment, and the Selected panel names the hidden sprite; no edit is made."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder, _body_scene())
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        ly = {l["name"]: l for l in _tv(w)["layers"]}
+        body, box, art = ly["BodyB"]["id"], ly["Body_Textbox"]["id"], ly["Body_Art"]["id"]
+        assert w.call("text_scenes.tree_visible", body, False)
+        for f in (1, 2):                        # the picker on A (B off anyway), then on B
+            assert w.call("text_scenes.tree_moment", "f:%d" % f)
+            assert _wait(w, lambda: _tv(w)["frame"] == f)
+            assert w.call("text_scenes.tree_select", box)
+            tv = _tv(w)
+            assert tv["frame"] == f and tv["sel"] == box
+            assert "The game does not draw that" not in " ".join(tv.get("notes") or [])
+            assert tv["props"]["peek"] and tv["props"]["hid_in"] == "BodyB"
+            assert tv["props"]["x"] is not None
+            hits = [h["id"] for h in tv["hits"]]
+            assert box in hits and art not in hits
+            assert w.call("text_scenes.tree_select", None)
+            hits = [h["id"] for h in _tv(w)["hits"]]
+            assert box not in hits and art not in hits
+        assert _ops(folder) == [{"op": "visible", "node": body, "on": False}]
+        w.call("text_scenes.close")
+
+
 def test_play_draws_each_different_frame_once_and_stops(tmp_path):
     """DragonRR: "play the animation as well as step through it". Play draws the scene's
     frames in the background (a held stretch once) and hands them to the page with a map
