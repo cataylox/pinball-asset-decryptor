@@ -212,7 +212,7 @@ def first_visible(node):
 
 
 def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=None,
-              worlds=None, _settled=None, play=False, show=None, force=()):
+              worlds=None, _settled=None, play=False, show=None, force=(), through=()):
     """Every picture and line of text *man* draws at root frame *frame* (default:
     :func:`default_frame`), in draw order.  *pins* ``{node id: frame}`` seeks a nested sprite
     (what the game's code does with labels); *hidden* node ids are not drawn (what code
@@ -230,7 +230,11 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
     *show*, a node id, is drawn even where the timeline has it off at that moment, on top of
     everything else (the editor's look at a layer the game is not drawing now, PAD-276); it
     is only reached when the sprite it sits in is drawn.  *force* node ids are drawn where
-    they are even where the timeline has them off (the editor's own "on", PAD-276)."""
+    they are even where the timeline has them off (the editor's own "on", PAD-276).
+
+    *through* node ids (sprites *show* sits in, in *force* too) are, where the timeline has
+    them off, drawn only as the way to *show*: none of their own pictures and none of their
+    other layers (DragonRR, PAD-284: picking a hidden text box showed its whole sprite)."""
     if frame is None:
         frame = default_frame(man)
     # a labelled sprite's resting frame is found by drawing it (settled_frame), and nested
@@ -239,16 +243,21 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
     pins = pins or {}
     hidden = set(hidden or ())
     force = set(force or ())
+    through = set(through or ())
+    path_only = through | {show}
     objects = man["objects"]
     out = []
     base = (tuple(matrix) if matrix is not None and len(matrix) == 6
             else (1.0, 0.0, 0.0, 1.0, float(origin[0]), float(origin[1])))
 
-    def run(kids, f, world, tint, path):
+    def run(kids, f, world, tint, path, only=None):
         for n in kids:
+            if only is not None and n["id"] not in only:
+                continue
             forced = n["id"] == show or n["id"] in force
             if n["id"] in hidden or not (forced or visible_at(n, f)):
                 continue
+            narrow = n["id"] in through and (only is not None or not visible_at(n, f))
             w = compose(world, transform_at(n, f))
             t = compose_tint(tint, tint_at(n, f))
             if worlds is not None:
@@ -262,7 +271,7 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
                 o = objects.get(str(oid))
                 if o is None or (start > f and not forced):
                     continue
-                emit(n, o, w, t, here, f)
+                emit(n, o, w, t, here, f, path_only if narrow else None)
             if n["id"] == show:
                 on_top.extend(out[at:])
                 del out[at:]
@@ -287,18 +296,20 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
     w_of = {}
     on_top = []
 
-    def emit(n, o, w, t, path, f):
+    def emit(n, o, w, t, path, f, only=None):
         k = o["kind"]
         common = {"node": n["id"], "path": path, "m": w, "mul": t[0], "add": t[1]}
+        if only is not None and k not in ("Sprite", "StreamingFlipbook"):
+            return                                  # only the way through to *show*
         if k in ("Sprite", "StreamingFlipbook"):
             w_of[n["id"]] = w
             lf = local_frame(n, o, f)
-            if k == "StreamingFlipbook" and o.get("seq"):
+            if k == "StreamingFlipbook" and o.get("seq") and only is None:
                 fr = o["seq"][(lf - 1) % len(o["seq"])]
                 if fr is not None:
                     out.append(dict(common, kind="flip", m=compose(w, tuple(fr["m"])),
                                     image=fr.get("image"), w=fr["w"], h=fr["h"]))
-            run(o.get("kids") or (), lf, w, t, path)
+            run(o.get("kids") or (), lf, w, t, path, only)
         elif k == "Bitmap":
             out.append(dict(common, kind="bitmap", image=o.get("image"), w=o["w"], h=o["h"]))
         elif k == "Shape":
