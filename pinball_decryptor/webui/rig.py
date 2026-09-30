@@ -38,6 +38,50 @@ def wsl_path(win_path):
     return p
 
 
+def linux_host_env(environ=None, scrubbed=None):
+    """The ``env(1)`` arguments a rig needs on a Linux DESKTOP, or [] (PAD-291).
+
+    Two things the AppImage gets wrong for the rig if left alone:
+
+    * THE BUNDLE'S LIBRARIES LEAK INTO IT.  PyInstaller points
+      ``LD_LIBRARY_PATH`` (and friends) at the AppImage, so the rig's system
+      programs - bash, python3 + GTK for the playfield window, the GL host -
+      load OUR older ``libmount.so.1`` beside the system's newer glib and fail
+      before a window appears.  A user on Ubuntu 26.04 worked around it with
+      ``LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libmount.so.1``; handing the rig
+      the desktop's own environment (:func:`core.desktop.desktop_env`) is the
+      fix that preload was standing in for.
+    * WAYLAND.  The rig's windows are X11 programs (Xlib + EGL); on a Wayland
+      session they belong on XWayland, so ``GDK_BACKEND=x11`` and
+      ``EGL_PLATFORM=x11`` are pinned - only when XWayland is there
+      (``DISPLAY`` set) and only where the user has not chosen already.
+
+    ``-u NAME`` entries come first because env(1) takes its options before
+    any ``NAME=value``.  Anything but Linux answers [] - WSL and the macOS
+    container are Linux the app does not share an environment with.
+    """
+    if not sys.platform.startswith("linux"):
+        return []
+    import os
+    from ..core import desktop
+    environ = dict(os.environ if environ is None else environ)
+    if scrubbed is None:
+        scrubbed = desktop.desktop_env(environ)
+    unset, assign = [], []
+    for var in sorted(set(environ) | set(scrubbed)):
+        if var in scrubbed and environ.get(var) == scrubbed[var]:
+            continue
+        if var in scrubbed:
+            assign.append("%s=%s" % (var, scrubbed[var]))
+        else:
+            unset += ["-u", var]
+    if environ.get("WAYLAND_DISPLAY") and environ.get("DISPLAY"):
+        for var in ("GDK_BACKEND", "EGL_PLATFORM"):
+            if not environ.get(var):
+                assign.append(var + "=x11")
+    return unset + assign
+
+
 def rig_cmd(rig_dir, script, *args, env=(), distro=None):
     """Run one of ``rig_dir``'s scripts as the ordinary user.
 
@@ -58,8 +102,9 @@ def rig_cmd(rig_dir, script, *args, env=(), distro=None):
     else:
         head = []
         path = "%s/%s" % (rig_dir, script)
-    if env:
-        head = head + ["env"] + [str(e) for e in env]
+    host = linux_host_env()
+    if env or host:
+        head = head + ["env"] + host + [str(e) for e in env]
     return head + ["bash", path] + [str(a) for a in args]
 
 
