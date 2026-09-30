@@ -30,9 +30,13 @@
 .scenes-list .tr { padding: 0 10px; gap: 6px; }
 .scenes-list .th { letter-spacing: .02em; }
 .scenes-center { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
-.scenes-stage { flex: 1 1 auto; min-height: 200px; container-type: size; display: flex; align-items: center; justify-content: center; }
-.scenes-stage > .scenes-canvas, .scenes-stage > .scenes-preparing {
-  width: min(100cqw, calc(100cqh * var(--ar, 1.7708))); max-width: none; min-width: 0; flex: none; aspect-ratio: var(--ar, 1.7708); }
+/* centred by auto margins, not justify-content: a zoomed preview (PAD-282) then scrolls to every edge */
+.scenes-stage { flex: 1 1 auto; min-height: 200px; container-type: size; display: flex; }
+.scenes-stage.zoomed { overflow: auto; }
+.scenes-stage > .scenes-canvas, .scenes-stage > .scenes-preparing { margin: auto;
+  width: calc(var(--z, 1) * min(100cqw, calc(100cqh * var(--ar, 1.7708)))); max-width: none; min-width: 0; flex: none; aspect-ratio: var(--ar, 1.7708); }
+.scenes-zoom { gap: 0; flex-wrap: nowrap; }
+.scenes-zoom-pct { min-width: 38px; text-align: center; font-variant-numeric: tabular-nums; }
 .scenes-stagebar { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; min-height: 32px; flex: 0 0 auto; }
 .scenes-stagebar .grow { flex: 1 1 140px; min-width: 0; }
 .scenes-stagebar .scenes-ctl { margin-top: 0; }
