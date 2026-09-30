@@ -562,12 +562,10 @@ function TreeLayers({ t }) {
         onClick=${(e) => call("text_scenes.tree_select", l.id, pickHow(e, true))}>
       <button type="button" class="ly-eye"
         title=${l.hidden ? "Hidden — show it again" : l.state_off ? "Off in the preview: turn it on here (the preview only, not the card)"
-          : l.shown ? "Turned on in the preview: turn it back off (the card is not changed)" : l.drawn ? "Hide it"
-          : "Not on the screen at this moment: see it on top while it is selected"}
+          : l.shown ? "Turned on in the preview: turn it back off (the card is not changed)" : "Hide it"}
         onClick=${(e) => {
           e.stopPropagation();
           if (l.state_off || l.shown) call("text_scenes.tree_force", l.id, !l.shown);
-          else if (!l.hidden && !l.drawn) call("text_scenes.tree_select", l.id);
           else call("text_scenes.tree_visible", l.id, l.hidden);
         }}>
         <${Icon} name=${l.hidden || l.state_off ? "eye-off" : "eye"} /></button>
@@ -944,7 +942,8 @@ function TreeSide({ t, play, playFrame }) {
     </div>`
     : p ? html`<div class="tree-props">
       <div class="small ellip" title=${p.name}><b>${p.name}</b> <span class="muted">${p.kind}${p.added ? ", added" : ""}</span></div>
-      ${p.peek && p.hid_in ? html`<div class="small muted">It sits in ${p.hid_in}, which you hid, so the card leaves it out. It is shown on top while it is selected.</div>`
+      ${p.peek && p.hidden ? html`<div class="small muted">You hid it with its eye, so the card leaves it out. It is shown on top while it is selected.</div>`
+      : p.peek && p.hid_in ? html`<div class="small muted">It sits in ${p.hid_in}, which you hid, so the card leaves it out. It is shown on top while it is selected.</div>`
       : p.peek ? html`<div class="small muted">The game does not draw this at this moment. It is shown on top while it is selected; an edit holds wherever the game shows it.</div>` : null}
       ${p.pic ? html`<div class="tree-row">
         <span class="small muted" ...${tip("The picture's own size, and how much the game scales it to draw it here. Anything but 100% is resized by the game as it draws, which can leave jagged edges: make the picture at the size it shows, replace it on the Images tab with \"Keep this picture's own size\" ticked, then press Draw 1:1.")}>

@@ -172,8 +172,11 @@ class TreeEditMixin:
         # the sprites a peek sits in are only its way in: drawing them whole showed every
         # other layer in them (DragonRR, PAD-284)
         through = self._tree_ancestors(peek) - self._tree_force_set(card) if peek else set()
+        # a picked sprite shows every layer in it, those hidden with their eye too; the eyes
+        # are not changed (DragonRR, PAD-289)
+        unveil = self._tree_inside(peek, self._tree_hidden(card)) if peek else set()
         draws = scene_eval.draw_list(man, frame, pins=pins, worlds=worlds, show=peek,
-                                     force=force, through=through)
+                                     force=force, through=through, unveil=unveil)
         self._fit_kept(draws, worlds)
         if force or peek is not None:
             plain = {}
@@ -228,6 +231,14 @@ class TreeEditMixin:
             out.add(p)
             p, hops = self._tparents.get(p), hops + 1
         return out
+
+    def _tree_hidden(self, card):
+        """The nodes hidden with their eye."""
+        return {op.get("node") for op in self._tree_ops(card) if op["op"] == "visible"}
+
+    def _tree_inside(self, nid, nodes):
+        """Those of *nodes* that sit inside *nid*, however deep."""
+        return {n for n in nodes if nid in self._tree_ancestors(n)}
 
     def _tree_hidden_in(self, man, nid, ops):
         """The name of the nearest sprite *nid* sits in that is hidden with its eye, or ""."""
@@ -617,7 +628,7 @@ class TreeEditMixin:
                 "hidden": any(op["op"] == "visible" and op.get("node") == nid for op in ops),
                 "layer": sibs.index(n) + 1, "layers": len(sibs),
                 "drawn": nid in self._tworlds,
-                "peek": nid == self._tpeek and nid in self._tworlds,
+                "peek": nid == self._tpeek and nid in self._tworlds and nid not in self._tlit,
                 "hid_in": self._tree_hidden_in(man, nid, ops),
                 "pic": self._tree_pic_props(nid)}
 
@@ -857,11 +868,12 @@ class TreeEditMixin:
             self._tpeek = node
             self._render_tree_preview(self._sel, quiet=True)
             return True
-        if node is not None and node not in self._tlit and not any(
-                op["op"] == "visible" and op.get("node") == node
-                for op in self._tree_ops(card)):
+        if node is not None:
+            # whatever it is - on the screen, hidden with its eye, not drawn now - it is drawn
+            # on top while it is picked, and a sprite with every layer in it; no eye changes
+            # (DragonRR, PAD-289)
             self._tpeek = node
-            self._render_tree_preview(self._sel)
+            self._render_tree_preview(self._sel, quiet=node in self._tlit)
             if node in self._tworlds:
                 return True
             self._tpeek = None
@@ -1224,13 +1236,15 @@ class TreeEditMixin:
         root_frames = [frame] + sorted({f for _n, f in man["root"]["labels"]})
         root_frames += list(range(1, frames + 1, max(1, frames // 60)))
         tried = set()
+        # what the user hid with an eye is looked for too: picking it shows it (PAD-289)
+        veiled = self._tree_hidden(card)
 
         def shows(f, pn):
             key = (f, tuple(sorted(pn.items())))
             if key in tried:
                 return False
             tried.add(key)
-            for d in scene_eval.draw_list(man, f, pins=pn):
+            for d in scene_eval.draw_list(man, f, pins=pn, unveil=veiled):
                 if d["mul"][3] <= 0.01:
                     continue
                 q, hops = d["node"], 0            # it, or something inside it, shows
@@ -1260,6 +1274,8 @@ class TreeEditMixin:
         self._tframe[card] = found[0]
         self._tpins[card] = found[1]
         self._tsel = node
+        self._tsels = [node]
+        self._tpeek = node
         self._render_tree_preview(self._sel)
         return True
 
