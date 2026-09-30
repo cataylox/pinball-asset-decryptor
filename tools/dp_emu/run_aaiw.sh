@@ -82,8 +82,11 @@ cp "$SHIM" "$R/opt/.pad/aaiwshim.so"
 echo /opt/.pad/aaiwshim.so > "$R/etc/ld.so.preload"
 mkfifo -m 666 "$R/tmp/pad_input"
 ln -s "$R/tmp/pad_input" "$DP_RIG/input"
-: > "$R/tmp/rig.log"; chmod 666 "$R/tmp/rig.log"
-ln -s "$R/tmp/rig.log" "$DP_RIG/rig.log"
+# The shim's log lives in the root's /opt/.pad, i.e. in the slot's own
+# writable layer: it outlives the run (a log in the root's /tmp went with the
+# tmpfs when the run was taken down - and with it why the game ended).
+: > "$R/opt/.pad/rig.log"; chmod 666 "$R/opt/.pad/rig.log"
+ln -s "$DP_RIG/upper/opt/.pad/rig.log" "$DP_RIG/rig.log"
 cp "$AAIW/switches.json" "$DP_RIG/switches.json"
 echo "$BUILD" > "$DP_RIG/build"
 cat "$BUILD/version" > "$DP_RIG/ver" 2>/dev/null
@@ -121,8 +124,13 @@ if [ $AUDIO = 1 ] && [ -S /mnt/wslg/PulseServer ]; then
     # ("audio: <rate> <SDL format> <channels>"), so the relay waits for that
     # line.  The game's open of the FIFO waits for a reader, so a format the
     # relay cannot name is still read (and dropped) rather than left to hang.
+    # SDL_DISKAUDIODELAY=0: the disk driver must not keep time itself - its
+    # own sleep drifted against WSLg's playback clock and the sound dropped
+    # out for ~1/4 s every few seconds (PAD-263).  With no delay its writes
+    # block on the FIFO, so the relay's PulseAudio stream sets the pace, as
+    # a real sound card would.
     mkfifo -m 666 "$R/tmp/pad_audio"
-    AUDIO_ENV="SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE=/tmp/pad_audio"
+    AUDIO_ENV="SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE=/tmp/pad_audio SDL_DISKAUDIODELAY=0"
     setsid -f bash -c '
         log=$1 fifo=$2 user=$3 pidf=$4
         echo $$ > "$pidf"
@@ -136,7 +144,7 @@ if [ $AUDIO = 1 ] && [ -S /mnt/wslg/PulseServer ]; then
         exec runuser -u "$user" -- env PULSE_SERVER=unix:/mnt/wslg/PulseServer \
             ffmpeg -nostdin -loglevel error -f "$f" -ar "$2" -ac "$4" -i "$fifo" \
             -f pulse -name "PAD Dutch Pinball" "Alice"
-    ' relay "$R/tmp/rig.log" "$R/tmp/pad_audio" "$DP_USER" "$DP_RIG/audio.pid" \
+    ' relay "$DP_RIG/rig.log" "$R/tmp/pad_audio" "$DP_USER" "$DP_RIG/audio.pid" \
         < /dev/null > "$DP_RIG/audio.log" 2>&1
 else
     AUDIO_ENV="SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE=/dev/null"
@@ -145,9 +153,10 @@ fi
 # shellcheck disable=SC2086
 setsid -f chroot --userspec="$U:$GID" "$R" /usr/bin/env -i \
     HOME=/opt PATH=/usr/bin:/bin:/usr/sbin:/sbin DISPLAY="$DISP" $AUDIO_ENV $WIN_ENV \
-    DPEMU_FIFO=/tmp/pad_input DPEMU_LOG=/tmp/rig.log DPEMU_LABEL="${PAD_LABEL:-PAD}" \
+    DPEMU_FIFO=/tmp/pad_input DPEMU_LOG=/opt/.pad/rig.log DPEMU_LABEL="${PAD_LABEL:-PAD}" \
     AAIW_CLOSED="$CLOSED" \
-    /bin/sh -c 'cd /opt && exec ./pinterface' < /dev/null > "$DP_RIG/game.out" 2>&1
+    /bin/sh -c 'cd /opt && ./pinterface; echo "exit: $?" >> /opt/.pad/rig.log' \
+    < /dev/null > "$DP_RIG/game.out" 2>&1
 
 # Its windows mean it is up.
 for _ in $(seq 1 300); do

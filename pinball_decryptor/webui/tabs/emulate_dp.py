@@ -427,6 +427,8 @@ class EmulateDPTab(RigTabMixin, TabService):
         if was_up and not self._last_up:
             self._started_here = False
             self._close_switches()
+            if not self._busy:           # not our own Stop: say how it ended
+                self._log("DP: " + dp.ended_text(info.get("last_exit")))
         label, hint = dp.state_text(info)
         tone = "ok" if self._last_up else (
             "warn" if label == "WSL not answering" else "")

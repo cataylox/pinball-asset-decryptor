@@ -115,6 +115,23 @@ def state_text(info):
     return "Stopped", ""
 
 
+def ended_text(code):
+    """The log line for a game that ended while nobody pressed Stop.
+    ``code`` is status.sh's last_exit: the game program's exit status (Alice;
+    The Big Lebowski's run has none)."""
+    code = (code or "").strip()
+    what = {"0": "it quit by itself",
+            "134": "it aborted (a crash inside the game)",
+            "139": "it crashed (segmentation fault)",
+            "137": "it was killed from outside (SIGKILL) - not the game's own doing",
+            "143": "it was stopped from outside (SIGTERM)"}.get(code)
+    if what:
+        return "the game ended - %s (exit %s)." % (what, code)
+    if code:
+        return "the game ended (exit %s)." % code
+    return "the game ended."
+
+
 def title_name(info):
     """"The Big Lebowski" - the game's own name, without the "Pinball" its
     machine.yaml adds."""

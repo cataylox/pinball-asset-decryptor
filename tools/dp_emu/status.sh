@@ -34,4 +34,7 @@ if dp_game_alive; then
     echo "slot=$DP_SLOT"
 else
     echo "running=0"
+    # how the last run ended, when the game ended itself (run_aaiw.sh writes
+    # "exit: N": 0 it quit, 134 it aborted, 137 something killed it)
+    echo "last_exit=$(grep '^exit:' "$DP_RIG/rig.log" 2>/dev/null | tail -1 | cut -d' ' -f2)"
 fi

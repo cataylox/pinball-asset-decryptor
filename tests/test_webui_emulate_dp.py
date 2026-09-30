@@ -324,3 +324,26 @@ def test_the_switch_page_model(tmp_path):
     assert rows["trough1"]["opto"] and rows["trough1"]["placed"]
     assert not rows["startButton"]["placed"]
     assert m["coin_door"] == 4
+
+
+def test_a_game_that_ends_by_itself_says_how(rig, tmp_path):
+    """Alice once ended a minute into a game with nothing in its output; the
+    rig now records the exit status and the tab logs what it means."""
+    from pinball_decryptor.webui import emulate_dp_core as core
+    assert "killed from outside" in core.ended_text("137")
+    assert "aborted" in core.ended_text("134")
+    assert "quit by itself" in core.ended_text("0")
+    assert core.ended_text("") == "the game ended."
+    with web_app(tmp_path, mfr="dp") as w:
+        svc = _svc(w)
+        logged = []
+        svc._log = logged.append
+        svc._apply(dict(RUNNING))
+        svc._apply({"wsl": "1", "running": "0", "last_exit": "137"})
+        assert logged and "killed from outside" in logged[-1]
+        # our own Stop is not "ended by itself"
+        logged.clear()
+        svc._apply(dict(RUNNING))
+        svc._busy = True
+        svc._apply({"wsl": "1", "running": "0", "last_exit": "137"})
+        assert logged == []
