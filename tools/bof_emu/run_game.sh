@@ -40,6 +40,7 @@ done
 [ -n "$BOF_USER" ] || { echo "run_game.sh: no ordinary user account to run the game as" >&2; exit 2; }
 
 bash "$BOF_TOOLS/killgame.sh" >/dev/null 2>&1
+AUDIO=$(rigboard_audio "$VISIBLE" "$AUDIO")
 
 TITLE=$(basename "$PROFILE" .json)
 HOMEDIR=$BOF_HOMES/$TITLE
@@ -129,6 +130,7 @@ for _ in $(seq 1 50); do
 done
 [ -n "${GP:-}" ] || { echo "run_game.sh: the game did not start:" >&2; tail -20 "$BOF_RIG/game.log" >&2; exit 4; }
 echo "$GP" > "$BOF_RIG/game.pid"
+rigboard_post bof "$BOF_SLOT" "$GP" "$TITLE" "${PAD_TITLE:-}" "$VISIBLE" "$AUDIO"
 echo "pid=$GP"
 echo "display=$DISP"
 [ $DETACH = 1 ] && exit 0

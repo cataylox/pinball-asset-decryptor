@@ -42,6 +42,7 @@ case "$BUILD" in /*) ;; "") ;; *) BUILD=$AP_CACHE/$BUILD ;; esac
 [ -n "$AP_USER" ] || { echo "run_game.sh: no ordinary user account to run the game as" >&2; exit 2; }
 
 bash "$AP_TOOLS/killgame.sh" >/dev/null 2>&1
+AUDIO=$(rigboard_audio "$VISIBLE" "$AUDIO")
 
 rm -rf "$AP_RIG"
 G=$AP_RIG/game
@@ -216,6 +217,7 @@ for i in $(seq 1 3000); do
 done
 if ap_game_alive && grep -q '^[0-9:]* run_loop' "$AP_RIG/rig.log"; then
     echo "Ready: $(basename "$BUILD") (/game/$MDIR), slot $AP_SLOT, display $DISP$([ -n "$AV" ] && echo ", apiav")"
+    rigboard_post ap "$AP_SLOT" "$(ap_game_pid)" "$(basename "$BUILD")" "${PAD_TITLE:-}" "$VISIBLE" "$AUDIO"
 else
     echo "run_game.sh: the game did not come up:" >&2
     tail -20 "$AP_RIG/game.out" >&2

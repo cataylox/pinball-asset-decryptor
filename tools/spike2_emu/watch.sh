@@ -437,9 +437,12 @@ export PAD_GAME="$GAME"
 BOARD_RUN="$(pad_board_dir)/slot-$PAD_SLOT.run"
 pad_board_run() {
     mkdir -p "$(dirname "$BOARD_RUN")" 2>/dev/null || return 0
-    printf '{"slot":%s,"game":"%s","label":"%s","distro":"%s","root":"%s","pid":%s,"started":%s,"hidden":%s}\n' \
+    # "emu" and "audio" as every emulator's record has them (tools/rigboard.sh,
+    # PAD-296); a hidden run is silent whatever PAD_AUDIO says (see below).
+    printf '{"emu":"spike2","slot":%s,"game":"%s","label":"%s","distro":"%s","root":"%s","pid":%s,"started":%s,"hidden":%s,"audio":%s}\n' \
         "$PAD_SLOT" "$GAME" "$PAD_LABEL" "${WSL_DISTRO_NAME:-$(uname -n)}" "$ROOT" "$$" \
-        "$(date +%s)" "$([ "$PAD_HIDDEN" = 1 ] && echo true || echo false)" > "$BOARD_RUN.tmp" 2>/dev/null \
+        "$(date +%s)" "$([ "$PAD_HIDDEN" = 1 ] && echo true || echo false)" \
+        "$([ "$PAD_HIDDEN" != 1 ] && [ "${PAD_AUDIO:-0}" != 0 ] && echo true || echo false)" > "$BOARD_RUN.tmp" 2>/dev/null \
         && mv -f "$BOARD_RUN.tmp" "$BOARD_RUN" 2>/dev/null
     return 0
 }

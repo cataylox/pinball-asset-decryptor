@@ -49,6 +49,7 @@ fi
 
 echo "killed $(( BEFORE - AFTER )); still running: $AFTER"
 [ "$AFTER" = "0" ] || { echo "REFUSING TO REPORT CLEAN - $AFTER game process(es) survived." >&2; exit 1; }
+rigboard_clear jjp 0
 
 # The Sentinel daemons are deliberately LEFT UP: they are tiny, they hold the
 # dongle registration, and tearing them down costs ~15 s of re-poll on the next

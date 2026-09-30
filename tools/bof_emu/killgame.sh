@@ -32,5 +32,5 @@ for f in game.pid hw/bofhw.pid xvfb.pid; do
         rm -f "$BOF_RIG/$f"
     fi
 done
-[ $left = 0 ] && echo stopped
+[ $left = 0 ] && { rigboard_clear bof "$BOF_SLOT"; echo stopped; }
 exit $left

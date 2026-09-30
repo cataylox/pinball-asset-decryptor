@@ -132,6 +132,14 @@ jjp_game_count() {
 : "${JJP_GAME_LOG:=$JJP_LOG_DIR/jjp_game.log}"
 : "${JJP_PID_FILE:=$JJP_LOG_DIR/jjp_game.pid}"
 
+# The rig board (PAD-296): tools/rigboard.sh, shared by every emulator, posts
+# this rig's runs where the triage dashboard and the app can see them.
+if [ -f "$(dirname "${BASH_SOURCE[0]}")/../rigboard.sh" ]; then
+    . "$(dirname "${BASH_SOURCE[0]}")/../rigboard.sh"
+else
+    rigboard_post() { :; }; rigboard_clear() { :; }; rigboard_audio() { echo "${2:-0}"; }
+fi
+
 # Sentinel LDK (the purple dongle).  0529:0001 is the HASP HL key.
 : "${JJP_HASP_VIDPID:=0529:0001}"
 : "${JJP_AKSUSBD:=/usr/sbin/aksusbd_x86_64}"

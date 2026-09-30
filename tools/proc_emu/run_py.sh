@@ -33,6 +33,11 @@ fi
 if [ $DETACH = 1 ]; then
     setsid "$@" > "$PROC_RIG/game.log" 2>&1 < /dev/null &
     echo $! > "$PROC_RIG/game.pid"
+    # A title's own launcher can post under its own name (PROC_NO_BOARD=1
+    # here); a bare program shows as the program, so a hidden run is never
+    # invisible.
+    [ "${PROC_NO_BOARD:-0}" = 1 ] || rigboard_post proc "$PROC_SLOT" "$!" "$(basename "$1")" "${PAD_TITLE:-}" \
+        "$([ "${PAD_HIDDEN:-0}" = 1 ] && echo 0 || echo 1)" "${PAD_AUDIO:-0}"
     echo "game=$!"
     exit 0
 fi

@@ -20,6 +20,14 @@ BOF_RIG=$BOF_ROOT/rig$BOF_SLOT
 BOF_DISPLAY=${BOF_DISPLAY:-:$((90 + BOF_SLOT))}
 BOF_SHIM=${BOF_SHIM:-$BOF_TOOLS/bofhwshim.so}
 
+# The rig board (PAD-296): tools/rigboard.sh, shared by every emulator, posts
+# this rig's runs where the triage dashboard and the app can see them.
+if [ -f "$BOF_TOOLS/../rigboard.sh" ]; then
+    . "$BOF_TOOLS/../rigboard.sh"
+else
+    rigboard_post() { :; }; rigboard_clear() { :; }; rigboard_audio() { echo "${2:-0}"; }
+fi
+
 # The first ordinary account (uid 1000..59999): "pad" in PAD-Runtime.
 if [ -z "${BOF_USER:-}" ]; then
     BOF_USER=$(getent passwd | awk -F: '$3>=1000 && $3<60000 {print $1; exit}')

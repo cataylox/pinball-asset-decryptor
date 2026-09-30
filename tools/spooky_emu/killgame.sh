@@ -22,4 +22,5 @@ if [ -n "$left" ]; then
     exit 1
 fi
 rm -f "$SPK_RIG/game.pid" "$SPK_RIG/xvfb.pid"
+rigboard_clear spooky "$SPK_SLOT"
 echo stopped
