@@ -1854,6 +1854,74 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         compat.messagebox.showinfo("Copy modes", report.summary())
         return report.to_json()
 
+    @rpc
+    def save_file(self, which="this"):
+        """Save to a file... (PAD-281): the open mode (``which`` "this") or every mode here
+        ("all") into a zip to keep or to share; Load from a file... brings it into any
+        project. Returns the zip's path, or None."""
+        project = self.project()
+        if not project:
+            return None
+        self._save_if_edited()
+        slug = self._code_slug or self._slug
+        if which == "this" and (not slug or self._game_mode is not None):
+            return None
+        slugs = [slug] if which == "this" else None
+        name = (self._spec.name if which == "this" and self._spec and not self._code_slug
+                else slug if which == "this" else os.path.basename(os.path.normpath(project))
+                + " modes")
+        stem = re.sub(r'[\\/:*?"<>|]+', "_", name).strip() or "modes"
+        path = self.window.ask_save(
+            "modes_file", "Save %s to a file" % ("this mode" if which == "this" else
+                                                  "every mode"),
+            initialfile=stem + ".zip", filetypes=[("PAD modes", "*.zip")],
+            defaultextension=".zip")
+        if not path:
+            return None
+        try:
+            done = MP.export_modes(project, path, slugs)
+        except (MP.ModeProjectError, OSError) as e:
+            compat.messagebox.showinfo("Save modes", str(e))
+            return None
+        self._say("saved %s to %s" % (", ".join("modes/" + s for s in done), path))
+        return path
+
+    @rpc
+    def load_file(self, path=None):
+        """Load from a file... (PAD-281): the modes in a zip Save to a file... wrote are added
+        to this project, each matched to this card's shots as Copy to... matches them. A
+        message box sums it up. Returns the report, or None."""
+        project = self.project()
+        if not project:
+            return None
+        self._save_if_edited()
+        if not path:
+            path = self.window.ask_open("modes_file", "Load modes from a file",
+                                        filetypes=[("PAD modes", "*.zip"), ("All files", "*.*")])
+        if not path:
+            return None
+        try:
+            report = MP.import_modes(path, project)
+        except (MP.ModeProjectError, OSError) as e:
+            compat.messagebox.showinfo("Load modes", str(e))
+            return None
+        for line in report.lines():
+            self._say("loaded from %s: %s" % (os.path.basename(path), line))
+        got = [m for m in report.modes if m.new_slug]
+        if got and got[0].state == MP.COPY_CODE:
+            self.refresh(select_code=got[0].new_slug)
+        else:
+            self.refresh(select=got[0].new_slug if got else None)
+        words = "Loaded %d mode%s from %s." % (len(got), "" if len(got) == 1 else "s",
+                                                os.path.basename(path))
+        if report.of(MP.COPY_TO_FIX):
+            words += (" Open each one marked below and pick again what %s does not have."
+                      % report.label)
+        compat.messagebox.showinfo("Load modes", words + "\n\n" + "\n".join(
+            line.replace("open it there and pick again", "pick again")
+            for line in report.lines()))
+        return report.to_json()
+
     def delete_mode(self, slug):
         MP.delete_mode(self.project(), slug)
         self._say("deleted modes/%s" % slug)
