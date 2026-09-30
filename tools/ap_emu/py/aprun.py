@@ -28,6 +28,11 @@ machine has that FakePinPROC lacks are added here, before the launcher runs:
   on/off from the fake P-ROC); and once, `pfpos.json` - the positions the
   machine yaml gives switches and LEDs (x, y: Galactic Tank Force 2026 has
   them, for AP's own playfield simulator).  `!reset` refills the trough.
+* The keyboard in the game's own windows (PAD-292): the same keys as the
+  virtual playfield (apswitches.py's `keymap`, read from switches.json beside
+  $AP_LOG).  A key in the game's SDL window is taken here, before procgame's
+  desktop sees it (its Esc would quit the game; here Esc is the service
+  Back button); apiav's windows forward theirs (apquit.c) as `!key <sym> 1|0`.
 
 Everything the rig injects is logged to $AP_LOG.
 """
@@ -153,13 +158,21 @@ if sdl2 is not None:
 
     def _ext_get_events():
         evs = _orig_ext_get_events()
+        out = []
         for e in evs:
             if e.type == sdl2.SDL_QUIT or (
                     e.type == sdl2.SDL_WINDOWEVENT
                     and e.window.event == sdl2.SDL_WINDOWEVENT_CLOSE):
                 log("window closed: the game quits")
                 os._exit(0)
-        return evs
+            if e.type in (sdl2.SDL_KEYDOWN, sdl2.SDL_KEYUP):
+                code = _SDLK.get(e.key.keysym.sym)
+                if code and code in _keys():
+                    if not e.key.repeat:
+                        _handle_key(code, e.type == sdl2.SDL_KEYDOWN)
+                    continue                    # ours, not the desktop's
+            out.append(e)
+        return out
 
     sdl2.ext.get_events = _ext_get_events
 from procgame import fakepinproc
@@ -337,6 +350,9 @@ def _inject(self):
             continue
         if num == "reset":
             _trough_reset(_game[0])
+            continue
+        if num == "key":
+            _handle_key(*closed)
             continue
         sw = _game[0].switches[num]
         et = (pinproc.EventTypeSwitchClosedDebounced if closed else pinproc.EventTypeSwitchOpenDebounced) \
@@ -529,6 +545,71 @@ def _publish_active():
         os.rename(_ACTIVE + ".tmp", _ACTIVE)
 
 
+# SDL2 keycodes -> the browser's KeyboardEvent.code names the keymap uses.
+# Numeric, so the Python 3 titles (no pysdl2) and apquit.c share them.
+_SDLK = dict([(ord(c), "Key" + c.upper()) for c in "abcdefghijklmnopqrstuvwxyz"]
+             + [(ord(d), "Digit" + d) for d in "0123456789"]
+             + [(0x40000059 + i, "Numpad%d" % (i + 1)) for i in range(9)])
+_SDLK.update({32: "Space", 13: "Enter", 8: "Backspace", 27: "Escape", 45: "Minus",
+              61: "Equal", 0x40000062: "Numpad0", 0x40000058: "NumpadEnter",
+              0x40000056: "NumpadSubtract", 0x40000057: "NumpadAdd",
+              0x40000050: "ArrowLeft", 0x4000004F: "ArrowRight",
+              0x40000052: "ArrowUp", 0x40000051: "ArrowDown",
+              0x40000042: "F9", 0x40000048: "Pause"})
+_KEYS = os.path.join(os.path.dirname(LOG), "switches.json") if LOG else None
+_keymap = [None, {}]                            # [mtime, {code: entry}]
+
+
+def _keys():
+    """{code: keymap entry} from switches.json, re-read when it changes (it
+    is written after the game is up)."""
+    try:
+        mtime = os.stat(_KEYS).st_mtime
+    except (OSError, TypeError):
+        return {}
+    if mtime != _keymap[0]:
+        import json
+        try:
+            with open(_KEYS) as f:
+                km = json.load(f).get("keymap") or []
+        except (IOError, OSError, ValueError):
+            km = []
+        _keymap[0] = mtime
+        _keymap[1] = dict((c, k) for k in km for c in k.get("codes") or [])
+    return _keymap[1]
+
+
+def _handle_key(code, down):
+    """A key pressed in a game window: the switches it holds, or its action.
+    True if the key is the keymap's (and so not the game's)."""
+    k = _keys().get(code)
+    g = _game[0]
+    if k is None or g is None:
+        return False
+    act = k.get("action")
+    if act:
+        if down:
+            if act == "plunge":
+                coil, pos, shooter = _trough_parts(g)
+                if shooter is not None and shooter.is_active():
+                    _set_active(shooter, False)
+            elif act == "drain":
+                _trough_drain(g)
+            elif act == "door" and "coinDoor" in g.switches:
+                sw = g.switches["coinDoor"]
+                _set_active(sw, not sw.is_active())
+            # pause: only the virtual playfield can (a frozen game cannot
+            # read the key that would resume it)
+            log("key: %s %s" % (code, act))
+        return True
+    for n in k.get("ns") or []:
+        try:
+            _set_active(g.switches[n], down)
+        except (KeyError, IndexError):
+            pass
+    return True
+
+
 _LIGHTS = os.path.join(os.path.dirname(LOG), "lights.json") if LOG else None
 _POS = os.path.join(os.path.dirname(LOG), "pfpos.json") if LOG else None
 _lights_seen = [0.0, None, False]
@@ -628,6 +709,14 @@ def _reader(path):
                 if parts == ["!reset"]:
                     log("sw: reset balls")
                     _queue.put(("reset", None))
+                    continue
+                if len(parts) == 3 and parts[0] == "!key":
+                    try:
+                        code = _SDLK.get(int(parts[1]))
+                    except ValueError:
+                        code = None
+                    if code:
+                        _queue.put(("key", (code, parts[2] == "1")))
                     continue
                 if len(parts) < 2 or _game[0] is None:
                     continue

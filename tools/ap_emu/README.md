@@ -136,7 +136,13 @@ BALLS (trough dots, Plunge F, Drain D, Reset balls), Pause / F9 (SIGSTOP of
 the game and apiav) and VOL / Mute (the app's audio_ctl.json).
 `py/aprun.py` publishes what it needs: `active` (switches the game has
 active), `lights.json` (every LED's current_color, lamp drivers on/off) and
-`pfpos.json` (machine-yaml x/y, the ball count).
+`pfpos.json` (machine-yaml x/y, the ball count).  The keys are ONE map,
+`keymap` in switches.json (apswitches.py): the window uses it, and so do the
+game's own windows - aprun.py takes mapped keys out of SDL's events before
+procgame's desktop sees them (its Esc quit the game; here Esc is service
+Back), and apquit.c forwards apiav's as `!key <SDL keycode> 1|0`.  The BALLS
+dots are the machine's balls, not its trough switches (Legends of Valhalla
+has 7 switches for 6 balls).
 
 `apswitches.py` decides where things go.  Galactic Tank Force 2026's
 machine yaml gives LEDs and `sim` switches x/y on AP's own simulator picture

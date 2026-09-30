@@ -51,8 +51,10 @@ GONE_AFTER = 15          # polls without a live game (~3 s) = it is gone
 GEOM_FILE = os.path.join(os.path.expanduser("~"), ".pad_ap_switches.json")
 LED_R = 5.5
 
-#: The coin-door service buttons: switch name, then label, caption, glyph,
-#: fill, ring, caption colour, key codes, key text - the Stern panel's look.
+#: The coin-door service buttons' look: switch name, then label, caption,
+#: glyph, fill, ring, caption colour, key codes, key text - the Stern panel's.
+#: (The keys themselves are apswitches.py's keymap, one map for this window
+#: and the game's own.)
 SERVICE = (
     ("exit", "Service Back", "BACK", "", "#1f9d4e", "#0d5c2a", "#dff5e6",
      ("Backspace", "Escape"), "Bksp/Esc"),
@@ -63,9 +65,6 @@ SERVICE = (
     ("enter", "Service Select", "SELECT", "", "#1c1c1c", "#777", "#d8d8d8",
      ("Enter", "NumpadEnter"), "Enter"),
 )
-#: Letters for playfield switches, in the Stern window's order; T, C, F, D
-#: are the tilt, the coin door, Plunge and Drain.
-LETTERS = "ASZXQWGEOPMRNHJKLIUYVB"
 
 
 def wsl_path(p):
@@ -88,49 +87,6 @@ def _num(name):
 
 
 # --------------------------------------------------------------- the model
-def key_rows(table, unplaced=True):
-    """The key panel's rows: [{label, keys, codes, cabinet, ns, hold}] -
-    the Stern window's cabinet keys, letters for playfield switches, then
-    (unplaced) a row with no key for every other switch the picture does
-    not place, so every switch can be pressed.  The schematic view lists
-    every switch itself, and passes unplaced=False."""
-    sws = table.get("switches") or []
-    by = {s["name"]: s for s in sws}
-    svc = {row[0] for row in SERVICE}
-    rows, taken = [], set()
-
-    def add(names, keys, codes, cabinet, hold):
-        found = [by[n] for n in names if n in by and n not in taken]
-        if not found:
-            return
-        taken.update(s["name"] for s in found)
-        rows.append({"label": " + ".join(s["label"] or s["name"] for s in found),
-                     "keys": keys, "codes": list(codes), "cabinet": cabinet,
-                     "ns": [s["n"] for s in found], "hold": hold})
-    add(["startButton"], "1", ["Digit1", "Numpad1"], True, False)
-    add(["coin1"], "5", ["Digit5", "Numpad5"], True, False)
-    add([n for n in ("ActionButton", "launchButton", "magnaGrab", "diverter") if n in by][:1],
-        "Space", ["Space"], True, True)
-    add(["tilt"], "T", ["KeyT"], True, False)
-    add(sorted(n for n in by if n.startswith("flipper") and n.endswith("L")),
-        "Left", ["ArrowLeft"], False, True)
-    add(sorted(n for n in by if n.startswith("flipper") and n.endswith("R")),
-        "Right", ["ArrowRight"], False, True)
-    letters = list(LETTERS)
-    for s in sorted(sws, key=lambda s: s["n"]):
-        if not letters:
-            break
-        if s["group"] == "Playfield" and s["name"] not in taken:
-            L = letters.pop(0)
-            add([s["name"]], L, ["Key" + L], False, False)
-    for s in sorted(sws, key=lambda s: s["n"]) if unplaced else ():
-        if (s["name"] in taken or s["name"] in svc or s["name"] == "coinDoor"
-                or s["group"] == "Trough" or "x" in s):
-            continue
-        add([s["name"]], "", [], s["group"] == "Cabinet", False)
-    return rows
-
-
 def trough_order(table):
     """The trough's positions from the eject end (as the rig models them)."""
     pos = [s for s in table.get("switches") or []
@@ -228,7 +184,11 @@ class App:
         self.lights_placed = table.get("lights") or []
         self.field = bool(self.art and table.get("size")
                           and (self.placed or self.lights_placed))
-        self.rows = key_rows(table, unplaced=self.field)
+        # the key panel: apswitches.py's rows; the schematic view lists every
+        # switch itself, so there it keeps the keyed rows only
+        self.rows = [r for r in table.get("rows") or []
+                     if self.field or not r.get("unplaced")]
+        self.keymap = table.get("keymap") or []
         # live state
         self.active = set()
         self.lights = {}
@@ -275,6 +235,11 @@ class App:
                 total, tr, sh, play)
         return tr, sh, 0, "trough %d   shooter %d" % (tr, sh)
 
+    def _dots(self):
+        """One dot per BALL (the machine's ball count), not per trough
+        switch: Legends of Valhalla's trough has 7 switches for 6 balls."""
+        return self.t.get("balls") or len(self.trough)
+
     def _panel_dyn(self):
         _tr, sh, play, text = self._balls()
         rows = [[i in self.row_hit or any(n in self.held_ids for n in r["ns"]), "",
@@ -283,8 +248,8 @@ class App:
                 "svc": [s["n"] in self.active for s, _look in self.svc],
                 "door": (self.door["n"] in self.active) if self.door else None,
                 "ball": text, "drain": play > 0 or sh > 0,
-                "dots": {"flags": [s["n"] in self.active for s in self.trough],
-                         "text": "1 = eject end"},
+                "dots": {"flags": [i < _tr for i in range(self._dots())],
+                         "text": "in the trough"},
                 "note": list(self.note[-3:])}
 
     def _panel_spec(self):
@@ -297,7 +262,7 @@ class App:
             "clear": None,
             "door": "C" if self.door else None,
             "trough_keys": "F = plunge   D = drain",
-            "balls": ({"pos": [str(i + 1) for i in range(len(self.trough))]}
+            "balls": ({"pos": [str(i + 1) for i in range(self._dots())]}
                       if self.trough else None),
             "disc": None}
 
@@ -429,26 +394,24 @@ class App:
         return None                    # coil / save / load / clear_alerts: not here
 
     def key(self, code, down):
-        if code in ("Pause", "F9"):
-            if down:
-                self.set_pause(not self.paused)
-            return True
-        if code in ("KeyC", "KeyF", "KeyD"):
-            if down:
-                if code == "KeyC":
-                    self.api("door", [])
-                else:
-                    self.api("ball", ["plunge" if code == "KeyF" else "drain"])
-            return True
-        for s, look in self.svc:
-            if code in look[6]:
-                self._key_switches(code, [s["n"]], down)
+        for k in self.keymap:
+            if code not in k["codes"]:
+                continue
+            act = k.get("action")
+            if act:
+                if down:
+                    if act == "pause":
+                        self.set_pause(not self.paused)
+                    elif act == "door":
+                        self.api("door", [])
+                    else:
+                        self.api("ball", [act])
                 return True
-        for i, r in enumerate(self.rows):
-            if code in r["codes"]:
-                (self.row_hit.add if down else self.row_hit.discard)(i)
-                self._key_switches(code, r["ns"], down)
-                return True
+            for i, r in enumerate(self.rows):
+                if r["ns"] == k["ns"]:
+                    (self.row_hit.add if down else self.row_hit.discard)(i)
+            self._key_switches(code, k["ns"], down)
+            return True
         return False
 
     def _key_switches(self, code, ns, down):

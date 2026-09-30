@@ -429,9 +429,10 @@ def test_appf_snapshot_is_the_stern_field_view(tmp_path):
     assert rows["LeftOrbit"]["keys"] == "A" and rows["RightOrbit"]["keys"] == "S"
     assert [b["label"] for b in spec["svc"]] == ["Service Back", "Service Minus",
                                                 "Service Plus", "Service Select"]
-    assert spec["door"] == "C" and spec["balls"] == {"pos": ["1", "2"]}
+    # one dot per BALL (6), not per trough switch
+    assert spec["door"] == "C" and spec["balls"] == {"pos": ["1", "2", "3", "4", "5", "6"]}
     d = s["panel"]["dyn"]
-    assert d["door"] is True and d["dots"]["flags"] == [False, True]    # troughEject first
+    assert d["door"] is True and d["dots"]["flags"] == [True] + [False] * 5
     assert d["ball"].startswith("balls 6   trough 1") and d["drain"] is True
 
 
@@ -446,6 +447,24 @@ def test_appf_without_a_picture_is_the_schematic_view(tmp_path):
     assert s["dyn"]["grid"] == {"Ship": [255, 0, 0, 1.0], "gi01": None}
     # the schematic lists every switch: the panel keeps its keyed rows only
     assert all(r["keys"] for r in s["panel"]["spec"]["rows"])
+
+
+def test_apswitches_keymap_is_one_map_for_the_window_and_the_game(tmp_path):
+    pytest.importorskip("yaml")
+    aps = _load("apswitches", RIG / "apswitches.py")
+    rig, build = _build(tmp_path)
+    t = aps.table(str(rig), str(build), root=str(tmp_path / "root"))
+    km = {c: k for k in t["keymap"] for c in k["codes"]}
+    assert km["ArrowLeft"]["ns"] == [0, 15] and km["Digit1"]["ns"] == [8]
+    assert km["Escape"]["ns"] == km["Backspace"]["ns"] == [4]        # service Back
+    assert km["Enter"]["ns"] == [3]
+    assert (km["KeyF"]["action"], km["KeyD"]["action"], km["KeyC"]["action"],
+            km["F9"]["action"]) == ("plunge", "drain", "door", "pause")
+    rows = {r["label"]: r for r in t["rows"]}
+    assert rows["LeftOrbit"]["keys"] == "A" and not rows["LeftOrbit"]["unplaced"]
+    assert rows["RightOrbit"]["keys"] == "S"
+    # a switch off the picture with no letter left still gets a row
+    assert all(r["codes"] or r["unplaced"] for r in t["rows"])
 
 
 def test_appf_calls_press_switches_and_move_balls(tmp_path):

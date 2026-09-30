@@ -25,7 +25,14 @@ $AP_ROOT/layouts/<machine dir>/ (Legends of Valhalla 26.08.22 ships none),
 and a build without one uses that - or another cached build's.
 
 Each switch gets a group (Cabinet, Trough, Playfield).  Switches the machine
-yaml calls unused are left out.  Runs on the rig's Python 3 ($AP_PY3: it has
+yaml calls unused are left out.
+
+THE KEYS live here too, one map for both places a key can be pressed: the
+virtual playfield (appf.py, the Stern window's keys) and the game's own
+windows (py/aprun.py reads `keymap` from this table; apquit.c forwards
+apiav's).  `rows` is the key panel; `keymap` is every key: its browser
+KeyboardEvent.code values, the switches it holds, or an action (plunge,
+drain, door, pause).  Runs on the rig's Python 3 ($AP_PY3: it has
 PyYAML; PAD-Runtime's has not).
 """
 import glob
@@ -45,6 +52,20 @@ CALIBRATION = {
     ("legends", "lov.layout"): (-14, 4),
     ("legends", "lov2.layout"): (-14, 4),
 }
+
+#: The coin-door service buttons: switch name, key codes, key text.
+SERVICE_KEYS = (
+    ("exit", ("Backspace", "Escape"), "Bksp/Esc"),
+    ("down", ("Minus", "NumpadSubtract"), "-"),
+    ("up", ("Equal", "NumpadAdd"), "="),
+    ("enter", ("Enter", "NumpadEnter"), "Enter"),
+)
+#: Letters for playfield switches, in the Stern window's order; T, C, F, D
+#: are the tilt, the coin door, Plunge and Drain.
+LETTERS = "ASZXQWGEOPMRNHJKLIUYVB"
+#: Keys that are actions, not switches.
+ACTIONS = ((("KeyF",), "plunge"), (("KeyD",), "drain"), (("KeyC",), "door"),
+           (("Pause", "F9"), "pause"))
 
 CABINET = re.compile(r"^(flipper|startButton|ActionButton|launchButton|magnaGrab|"
                      r"diverter|enter$|exit$|up$|down$|tilt|slamTilt|coin|dollar)")
@@ -255,6 +276,60 @@ def placements(rig, build, names, root=AP_ROOT):
     return lay["pic"], lay["size"], move(lay["switches"]), move(lay["lamps"]), where
 
 
+def key_rows(sws):
+    """The key panel's rows: [{label, keys, codes, cabinet, ns, hold,
+    unplaced}] - the Stern window's cabinet keys, letters for playfield
+    switches, then a row with no key (unplaced) for every other switch the
+    picture does not place, so every switch can be pressed."""
+    by = {s["name"]: s for s in sws}
+    svc = {row[0] for row in SERVICE_KEYS}
+    rows, taken = [], set()
+
+    def add(names, keys, codes, cabinet, hold, unplaced=False):
+        found = [by[n] for n in names if n in by and n not in taken]
+        if not found:
+            return
+        taken.update(s["name"] for s in found)
+        rows.append({"label": " + ".join(s["label"] or s["name"] for s in found),
+                     "keys": keys, "codes": list(codes), "cabinet": cabinet,
+                     "ns": [s["n"] for s in found], "hold": hold, "unplaced": unplaced})
+    add(["startButton"], "1", ["Digit1", "Numpad1"], True, False)
+    add(["coin1"], "5", ["Digit5", "Numpad5"], True, False)
+    add([n for n in ("ActionButton", "launchButton", "magnaGrab", "diverter") if n in by][:1],
+        "Space", ["Space"], True, True)
+    add(["tilt"], "T", ["KeyT"], True, False)
+    add(sorted(n for n in by if n.startswith("flipper") and n.endswith("L")),
+        "Left", ["ArrowLeft"], False, True)
+    add(sorted(n for n in by if n.startswith("flipper") and n.endswith("R")),
+        "Right", ["ArrowRight"], False, True)
+    letters = list(LETTERS)
+    for s in sorted(sws, key=lambda s: s["n"]):
+        if not letters:
+            break
+        if s["group"] == "Playfield" and s["name"] not in taken:
+            L = letters.pop(0)
+            add([s["name"]], L, ["Key" + L], False, False)
+    for s in sorted(sws, key=lambda s: s["n"]):
+        if (s["name"] in taken or s["name"] in svc or s["name"] == "coinDoor"
+                or s["group"] == "Trough" or "x" in s):
+            continue
+        add([s["name"]], "", [], s["group"] == "Cabinet", False, unplaced=True)
+    return rows
+
+
+def key_map(sws, rows):
+    """Every key: [{codes, ns, action}] - the rows', the service buttons',
+    and the actions'.  A key holds its switches while it is down."""
+    by = {s["name"]: s for s in sws}
+    out = [{"codes": r["codes"], "ns": r["ns"], "action": None} for r in rows if r["codes"]]
+    for name, codes, _text in SERVICE_KEYS:
+        if name in by:
+            out.append({"codes": list(codes), "ns": [by[name]["n"]], "action": None})
+    for codes, action in ACTIONS:
+        out.append({"codes": list(codes), "ns": [], "action": action})
+    return out
+
+
 def table(rig, build, title="", root=AP_ROOT):
     sws = [s for s in read_switches(os.path.join(rig, "switches"))
            if not unused(s["name"], s["label"])]
@@ -275,6 +350,7 @@ def table(rig, build, title="", root=AP_ROOT):
             s["x"], s["y"] = xy
     by = {s["name"]: s["n"] for s in sws}
     balls = read_pos(rig).get("balls")
+    rows = key_rows(sws)
     return {
         "title": title or os.path.basename(build.rstrip("/")),
         "art": art if size else "",
@@ -286,6 +362,8 @@ def table(rig, build, title="", root=AP_ROOT):
         "coin_door": by.get("coinDoor"),
         "balls": balls if isinstance(balls, int) else None,
         "switches": sws,
+        "rows": rows,
+        "keymap": key_map(sws, rows),
     }
 
 

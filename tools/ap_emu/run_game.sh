@@ -176,7 +176,7 @@ RUN="runuser -u $AP_USER -- env -i PATH=$(dirname "$GPY"):/usr/local/bin:/usr/bi
 if [ -n "$AV" ]; then
     cd "$GM${ADIR#$G}" || exit 1
     \$RUN LD_LIBRARY_PATH=$AP_AV/lib GST_PLUGIN_SYSTEM_PATH=$AP_AV/lib/gstreamer-1.0 \\
-        GST_REGISTRY=$AP_RIG/gst-registry.bin $AV_PRELOAD $AV > "$AP_RIG/apiav.out" 2>&1 &
+        GST_REGISTRY=$AP_RIG/gst-registry.bin AP_FIFO=$AP_RIG/input $AV_PRELOAD $AV > "$AP_RIG/apiav.out" 2>&1 &
     sleep 2
 fi
 cd "$GM${ADIR#$G}" || exit 1

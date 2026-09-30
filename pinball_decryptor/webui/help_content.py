@@ -1637,12 +1637,14 @@ HELP_CONTENT = {
          "trough, ending the ball - unless the game's ball save is still "
          "running (the first seconds after the ball reaches the playfield, "
          "12 on Legends of Valhalla), when it serves the ball again, as the "
-         "machine would. With that window focused, the arrow keys are the "
+         "machine would. With that window or one of the game's own windows "
+         "focused, the arrow keys are the "
          "flippers, 1 is Start, 5 a coin (two or four make a credit), Space "
          "the Action button, T tilt, the letters beside the playfield "
          "switches press them, F plunges, D drains, C opens and shuts the coin "
          "door, Backspace, -, = and Enter are the service buttons, and Pause "
-         "or F9 freezes the game. Closed it? \"Switches window\" on this tab "
+         "or F9 (in the playfield window) freezes the game. Closed it? "
+         "\"Switches window\" on this tab "
          "brings it back."),
         ("First start is slower",
          "The very first Start sets the emulator up inside the app's Linux: "
