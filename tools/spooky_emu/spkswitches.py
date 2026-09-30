@@ -11,7 +11,8 @@ schematic view: every switch as a row.  [title] overrides the window's
 title.
 
 THE KEYS follow the AP/Stern window (every Warden game wires its cabinet
-inputs to the same numbers): 1 Start, 5 a coin, Space the Launch
+inputs to the same numbers; Halloween's Pinotaur has its own, from its
+profile's "aliases"): 1 Start, 5 a coin, Space the Launch
 button (the plunger), Down the Action button, T tilt, the arrows
 the flippers (lower and upper together, as the game's own arrow keys do),
 letters for playfield switches, Backspace/Esc, -, = and Enter the coin
@@ -28,12 +29,28 @@ import spktitles  # noqa: E402
 #: The same letters, in the same order, as apswitches.py (T, C, F, D are
 #: tilt, the coin door, Plunge and Drain).
 LETTERS = "ASZXQWGEOPMRNHJKLIUYVB"
-#: apswitches.py's service names (appf.py looks the buttons up by them).
-SERVICE = {94: ("exit", ("Backspace", "Escape")), 93: ("down", ("Minus", "NumpadSubtract")),
-           92: ("up", ("Equal", "NumpadAdd")), 91: ("enter", ("Enter", "NumpadEnter"))}
+#: apswitches.py's service names (appf.py looks the buttons up by them),
+#: by the cabinet alias of each button.
+SERVICE_KEYS = {"back": ("exit", ("Backspace", "Escape")),
+                "down": ("down", ("Minus", "NumpadSubtract")),
+                "up": ("up", ("Equal", "NumpadAdd")),
+                "enter": ("enter", ("Enter", "NumpadEnter"))}
 ACTIONS = ((("KeyF",), "plunge"), (("KeyD",), "drain"), (("KeyC",), "door"),
            (("Pause", "F9"), "pause"))
 CABINET = range(80, 100)
+
+
+def service(key=None):
+    """The coin door's buttons of this title: {switch: (name, key codes)}."""
+    al = spktitles.aliases(key)
+    return {al[k]: v for k, v in SERVICE_KEYS.items() if k in al}
+
+
+def cabinet(key=None):
+    """Switches wired to the cabinet (Warden: 80-99, and whatever the
+    title's aliases name)."""
+    al = spktitles.aliases(key)
+    return (set(CABINET) | set(al.values())) - {al["shooter"]}
 
 
 def title_key(rig=None):
@@ -47,9 +64,9 @@ def title_key(rig=None):
     return key if key in spktitles.TITLES else "bj"
 
 
-def name_of(n, t):
-    if n in SERVICE:
-        return SERVICE[n][0]
+def name_of(n, t, svc):
+    if n in svc:
+        return svc[n][0]
     if n == t["shooter"]:
         return "shooter"
     if n in t["trough"]:
@@ -60,8 +77,8 @@ def name_of(n, t):
     return words[0].lower() + "".join(words[1:])
 
 
-def group_of(n, t):
-    if n in CABINET:
+def group_of(n, t, cab):
+    if n in cab:
         return "Cabinet"
     if n in t["trough"] or n == t["jam"] or n == t["shooter"] \
             or n in t["launch"].values():
@@ -76,8 +93,9 @@ def table(title=None, key=None):
     # the flippers' end-of-stroke switches follow the flipper buttons on a
     # machine; they get no letter (the list still has them)
     eos = {n for n, name in t["switches"].items() if "EOS" in name.upper()}
-    sws = [{"name": name_of(n, t), "n": n, "type": "NC" if n in optos else "NO",
-            "label": t["switches"][n].title(), "group": group_of(n, t),
+    svc, cab, al = service(key), cabinet(key), spktitles.aliases(key)
+    sws = [{"name": name_of(n, t, svc), "n": n, "type": "NC" if n in optos else "NO",
+            "label": t["switches"][n].title(), "group": group_of(n, t, cab),
             "nc": n in optos}
            for n in sorted(t["switches"])]
     by = {s["n"]: s for s in sws}
@@ -91,13 +109,15 @@ def table(title=None, key=None):
         rows.append({"label": " + ".join(s["label"] for s in found), "keys": keys,
                      "codes": list(codes), "cabinet": cabinet,
                      "ns": [s["n"] for s in found], "hold": hold, "unplaced": unplaced})
-    add([87], "1", ["Digit1", "Numpad1"], True, False)
-    add([90], "5", ["Digit5", "Numpad5"], True, False)
-    add([85], "Space", ["Space"], True, True)
-    add([81], "Down", ["ArrowDown"], True, True)
-    add([84], "T", ["KeyT"], True, False)
-    add([86, 83], "Left", ["ArrowLeft"], False, True)
-    add([80, 82], "Right", ["ArrowRight"], False, True)
+    def cab(*names):
+        return [al[n] for n in names if n in al]
+    add(cab("start"), "1", ["Digit1", "Numpad1"], True, False)
+    add(cab("coin"), "5", ["Digit5", "Numpad5"], True, False)
+    add(cab("launch"), "Space", ["Space"], True, True)
+    add(cab("action"), "Down", ["ArrowDown"], True, True)
+    add(cab("tilt"), "T", ["KeyT"], True, False)
+    add(cab("lflip", "ulflip"), "Left", ["ArrowLeft"], False, True)
+    add(cab("rflip", "urflip"), "Right", ["ArrowRight"], False, True)
     letters = list(LETTERS)
     for s in sws:
         if (letters and s["group"] == "Playfield" and s["n"] not in taken
@@ -105,11 +125,11 @@ def table(title=None, key=None):
             L = letters.pop(0)
             add([s["n"]], L, ["Key" + L], False, False)
     for s in sws:
-        if s["n"] in taken or s["n"] in SERVICE or s["group"] == "Trough":
+        if s["n"] in taken or s["n"] in svc or s["group"] == "Trough":
             continue
         add([s["n"]], "", [], s["group"] == "Cabinet", False, unplaced=True)
     keymap = [{"codes": r["codes"], "ns": r["ns"], "action": None} for r in rows if r["codes"]]
-    for n, (_name, codes) in SERVICE.items():
+    for n, (_name, codes) in svc.items():
         keymap.append({"codes": list(codes), "ns": [n], "action": None})
     for codes, action in ACTIONS:
         keymap.append({"codes": list(codes), "ns": [], "action": action})

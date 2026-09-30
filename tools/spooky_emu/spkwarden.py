@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """spkwarden.py - the rig's Warden: Spooky's playfield controller board, on
 a pty, for every Warden-era title (spktitles.py; $SPK_TITLE picks one).
+For a Pinotaur title (Halloween) it serves spkpinotaur.py's board instead,
+through the same pty, control socket and logs.
 
     spkwarden.py <rig dir>
 
@@ -116,7 +118,8 @@ PALETTE = {0: (0, 0, 0), 1: (0, 0, 255), 2: (0, 255, 0), 3: (255, 128, 0),
 STEPPER_IDLE, STEPPER_MOVING, STEPPER_DISABLED, STEPPER_HOMING = 3, 2, 4, 5
 SHOOTER_DELAY = 0.5
 EOS_DELAY = 0.015
-#: Every Warden game's Launch button - its plunger.
+#: Every Warden game's Launch button - its plunger (a title's "aliases"
+#: can say otherwise: Halloween's is 84).
 LAUNCH_BUTTON = 85
 #: The shortest press the board passes on (see set_switch).
 MIN_PRESS_S = 0.12
@@ -165,7 +168,10 @@ class Board:
         self.rest = list(t.get("rest", []))
         self.holds = dict(t.get("holds", {}))  # coil -> switch it opens
         self.resets = dict(t.get("resets", {}))  # coil -> switches it makes
+        self.sets = dict(t.get("sets", {}))  # coil -> {switch: 0|1}
         self.total = t["balls"]
+        self.launch_button = spktitles.aliases(self.title_key).get(
+            "launch", LAUNCH_BUTTON)
         self.lock = threading.Lock()
         self.state = {}
         self.balls = self.total
@@ -258,7 +264,7 @@ class Board:
             self.state[sw] = on
             if on:
                 self.on_at[sw] = time.monotonic()
-            self.send([RX, on, sw])
+            self.send(self.switch_msg(sw, on))
         self.say("switch", sw, self.name(sw), "on" if on else "off", why)
         if on and sw in self.autoactions:
             coil, delay = self.autoactions[sw]
@@ -269,6 +275,10 @@ class Board:
                 self.fire(high, "flipper")
             if eos != sw and eos < 96:
                 self.later(EOS_DELAY, self.set_switch, eos, on, "flipper stroke")
+
+    def switch_msg(self, sw, on):
+        """What the board sends when a switch changes."""
+        return [RX, on, sw]
 
     def later(self, secs, fn, *a):
         t = threading.Timer(secs, fn, a)
@@ -449,6 +459,8 @@ class Board:
         self.say("coil", coil, how)
         for sw in self.resets.get(coil, ()):
             self.later(0.05, self.set_switch, sw, 1, "reset by coil %d" % coil)
+        for sw, on in self.sets.get(coil, {}).items():
+            self.later(0.1, self.set_switch, sw, on, "coil %d" % coil)
         if coil in self.eject_coils:
             self.eject()
         elif self.state.get(self.launch.get(coil)):
@@ -493,8 +505,8 @@ class Board:
         the playfield.  So press Launch; if the game does not fire the coil
         (a tilt, a mode holding the ball), let the ball go anyway."""
         full = [n for n in self.lanes if self.state.get(n)]
-        self.set_switch(LAUNCH_BUTTON, 1, "plunge")
-        self.later(0.2, self.set_switch, LAUNCH_BUTTON, 0, "plunge")
+        self.set_switch(self.launch_button, 1, "plunge")
+        self.later(0.2, self.set_switch, self.launch_button, 0, "plunge")
         if full:
             self.later(1.5, self.set_switch, full[0], 0, "plunged")
 
@@ -664,7 +676,11 @@ class Board:
 
 def main():
     rig = sys.argv[1]
-    b = Board(rig)
+    cls = Board
+    if spktitles.get().get("board") == "pinotaur":
+        import spkpinotaur              # Halloween's board, same plumbing
+        cls = spkpinotaur.Pinotaur
+    b = cls(rig)
     with open(os.path.join(rig, "warden.tty.tmp"), "w") as f:
         f.write(b.slave_path + "\n")
     os.rename(os.path.join(rig, "warden.tty.tmp"), os.path.join(rig, "warden.tty"))

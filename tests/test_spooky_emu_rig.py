@@ -1,8 +1,9 @@
-"""tools/spooky_emu (PAD-266, PAD-267): the parts of the Spooky Warden rig
-that can be checked without WSL - the emulated Warden board's framing,
-answers and state, its ball moves and per-title mechanics, the title
-profiles and detection, sw.py's switch names and the virtual playfield's
-table (spkswitches.py) and window (spkpf.py, on tools/ap_emu/appf.py)."""
+"""tools/spooky_emu (PAD-266, PAD-267, PAD-268): the parts of the Spooky
+rig that can be checked without WSL - the emulated Warden board's framing,
+answers and state, its ball moves and per-title mechanics, Halloween's
+Pinotaur board (spkpinotaur.py), the title profiles and detection, sw.py's
+switch names and the virtual playfield's table (spkswitches.py) and window
+(spkpf.py, on tools/ap_emu/appf.py)."""
 
 import importlib.util
 import json
@@ -23,6 +24,8 @@ def _load(name, path):
 
 
 warden = _load("warden", RIG / "spkwarden.py")
+sys.path.insert(0, str(RIG))
+pinotaur = _load("pinotaur", RIG / "spkpinotaur.py")
 titles = warden.spktitles
 # sw.py reads the running rig's title at import: point it at no rig.
 _root = os.environ.get("SPK_ROOT")
@@ -295,16 +298,20 @@ def test_every_title_profile_is_consistent():
         assert "SHOOTER" in names[t["shooter"]], key
         for coil, lane in t["launch"].items():
             assert "SHOOTER" in names[lane], (key, coil)
-        # The Warden's cabinet inputs are the same on every game.
-        assert "START" in names[87].upper(), key
-        assert "COIN" in names[90].upper(), key
-        assert "LAUNCH" in names[85].upper(), key
+        # The Warden's cabinet inputs are the same on every game; the
+        # Pinotaur's are its own (the profile's aliases).
+        al = titles.aliases(key)
+        assert "START" in names[al["start"]].upper(), key
+        assert "COIN" in names[al["coin"]].upper(), key
+        assert "LAUNCH" in names[al["launch"]].upper(), key
+        assert "TILT" in names[al["tilt"]].upper(), key
         assert t["engine"] in ("unity", "godot") and t["layout"] in ("flat", "code")
         assert t["attract"], key
 
 
 @pytest.mark.parametrize("key, balls", [
-    ("bj", 6), ("scooby", 7), ("tcm", 7), ("ed", 6), ("looney", 7)])
+    ("bj", 6), ("scooby", 7), ("tcm", 7), ("ed", 6), ("looney", 7),
+    ("h78", 7)])
 def test_each_title_rests_with_its_trough_full(make, key, balls):
     b = make(key)
     t = titles.TITLES[key]
@@ -398,6 +405,20 @@ def _godot(path, name):
     ("uptest/main_Data", "TCM", "tcm"), ("uptest/main_Data", "Evil Dead", "ed")])
 def test_detect_unity_titles(tmp_path, sub, product, key):
     assert titles.detect(str(_unity(tmp_path, sub, product))) == (key, None)
+
+
+def test_detect_halloween_by_its_update_name_in_its_code(tmp_path):
+    d = _unity(tmp_path / "h78", "uptest/main_Data", "VideoServer")
+    (d / "uptest/main_Data/Managed").mkdir()
+    (d / "uptest/main_Data/Managed/Assembly-CSharp.dll").write_bytes(
+        b"MZ..." + "code_H78.pkg".encode("utf-16-le") + b"...")
+    assert titles.detect(str(d)) == ("h78", None)
+
+
+def test_the_passphrase_comes_from_the_apps_spooky_plugin():
+    from pinball_decryptor.plugins.spooky import games
+    assert titles.passphrase("code_H78.pkg") == games.H78_GPG_PASSPHRASE
+    assert titles.passphrase("v2025.12.01.09.scooby") is None
 
 
 def test_detect_refuses_pinotaur_and_misplaced_builds(tmp_path):
@@ -498,7 +519,9 @@ def test_every_title_gets_its_own_table(key, tmp_path, monkeypatch):
             "trough%d" % i for i in range(1, 8)):
         assert n in names, (key, n)
     keys = {r["keys"]: r["ns"] for r in t["rows"] if r["keys"]}
-    assert keys["1"] == [87] and keys["5"] == [90] and keys["Space"] == [85]
+    al = titles.aliases(key)
+    assert keys["1"] == [al["start"]] and keys["5"] == [al["coin"]]
+    assert keys["Space"] == [al["launch"]] and keys["T"] == [al["tilt"]]
     groups = {s["n"]: s["group"] for s in t["switches"]}
     for lane in p["launch"].values():
         assert groups[lane] == "Trough"
@@ -544,3 +567,117 @@ def test_the_window_says_its_keys_are_its_own(monkeypatch):
     # the flippers' end-of-stroke switches take no letter
     keyed = {n for r in t["rows"] if r["keys"] for n in r["ns"]}
     assert not keyed & {13, 21, 35}
+
+
+# --- Halloween's Pinotaur board (PAD-268) -----------------------------------
+
+PTX, PRX = pinotaur.TX, pinotaur.RX
+
+
+def _msg(op, *args):
+    """A host message: '<' <op> <0x81 + 2n> <n args> (Pinotar.cs)."""
+    return bytes([PTX, op, 0x81 + 2 * len(args)] + list(args))
+
+
+@pytest.fixture
+def pino(tmp_path, monkeypatch):
+    b = pinotaur.Pinotaur(str(tmp_path), pty=False, title="h78")
+    b.sent = []
+    monkeypatch.setattr(b, "send", lambda data: b.sent.append(bytes(data)))
+    monkeypatch.setattr(b, "later", lambda secs, fn, *a: fn(*a))
+    yield b
+    b.log.close()
+
+
+def test_pinotaur_answers_what_halloween_asks_at_boot(pino):
+    pino.host_bytes(_msg(0) + _msg(1) + _msg(2) + _msg(111) + _msg(89))
+    assert pino.sent == [
+        bytes([PRX, 0]) + b"Pinotaur\0",       # IsGameInReadyState wants it
+        bytes([PRX, 1]) + b"PAD 1", bytes([PRX, 2]) + b"PAD 1",
+        bytes([PRX, 111, 255, 255, 255]),       # no coil fault
+        bytes([PRX, 89, 0x7F])]                 # nothing changed
+    assert all(len(m) == n for m, n in zip(pino.sent, (11, 7, 7, 5, 3)))
+
+
+def test_pinotaur_switch_state_and_machine_ready(pino):
+    pino.host_bytes(_msg(88, 65) + _msg(88, 23) + _msg(88, 95))
+    assert pino.sent == [bytes([PRX, 88, 65, 1]),      # TROUGH 1 full
+                         bytes([PRX, 88, 23, 0]),      # shooter lane empty
+                         bytes([PRX, 88, 95, 0])]      # "machine ready"
+
+
+def test_pinotaur_game_name_row_is_halloweens(pino):
+    pino.host_bytes(_msg(40, 0, 0, 0x1F, 0x80))            # readRow(8064)
+    assert pino.sent[-1][:4] == bytes([PRX, 40, 0, 0]) and len(pino.sent[-1]) == 34
+    pino.host_bytes(_msg(40, 0, 0, 0x1F, 0x00))            # another row
+    assert pino.sent[-1] == bytes([PRX, 40]) + b"\xff" * 32
+
+
+def test_pinotaur_frames_by_its_length_byte(pino):
+    """A '<' (60) inside the arguments must not start a message, and a
+    message split across reads waits for the rest."""
+    stream = _msg(48, 60, 60, 60, 60, 1) + _msg(88, 60) + _msg(88, 65)
+    assert pino.host_bytes(stream[:5]) == stream[:5]
+    assert pino.host_bytes(stream[5:]) == b""
+    assert pino.sent == [bytes([PRX, 88, 60, 0]), bytes([PRX, 88, 65, 1])]
+    # a half page is its 32 data bytes, sent in a second write
+    pino.host_bytes(bytes([PTX, 43, 193]))
+    pino.host_bytes(bytes([60] * 32) + _msg(88, 65))
+    assert pino.sent[-1] == bytes([PRX, 88, 65, 1])
+    pino.host_bytes(bytes([PTX, 7, 0x80]) + _msg(88, 65))   # bad length byte
+    assert pino.sent[-1] == bytes([PRX, 88, 65, 1]) and pino.pend == b""
+
+
+def test_pinotaur_reports_switch_changes_as_op_89(pino):
+    pino.command("sw 87 1")
+    pino.command("sw 87 0")
+    assert pino.sent == [bytes([PRX, 89, 0x80 | 87]), bytes([PRX, 89, 87])]
+
+
+def test_pinotaur_serves_launches_and_plunges_on_its_own_buttons(pino):
+    pino.host_bytes(_msg(23, 18, 0))                       # "trough"
+    assert pino.balls == 6 and pino.state[23] == 1 and pino.state[18] == 0
+    assert _ask(pino, "plunge") == {"ok": True}
+    assert bytes([PRX, 89, 0x80 | 84]) in pino.sent        # its Launch is 84
+    pino.host_bytes(_msg(23, 18, 0))
+    pino.host_bytes(_msg(23, 21, 0))                       # "launch"
+    assert pino.state[23] == 0 and pino.balls_state()["in_play"] == 2
+
+
+def test_pinotaur_flippers_slings_and_drop_targets(pino):
+    pino.host_bytes(_msg(30, 81, 19, 255, 255, 255) + _msg(94, 49, 19, 1))
+    pino.command("sw 81 1")
+    assert pino.coil_fired == {19: 1} and pino.state[49] == 1   # LEFT EOS
+    pino.command("sw 81 0")
+    assert pino.state[49] == 0
+    pino.host_bytes(_msg(91, 51, 16, 0, 1, 64))            # LEFT SLING -> 16
+    pino.command("tap 51 10")
+    assert pino.coil_fired[16] == 1
+    pino.host_bytes(_msg(92, 51))
+    pino.command("tap 51 10")
+    assert pino.coil_fired[16] == 1
+    # the pumpkin bank stands at rest (made), knocked down, reset
+    assert [pino.state[n] for n in (27, 28, 29)] == [1, 1, 1]
+    pino.command("sw 28 0")
+    pino.host_bytes(_msg(23, 11, 0))
+    assert pino.state[28] == 1
+    pino.host_bytes(_msg(23, 12, 0))                       # knock the lower drop
+    assert pino.state[31] == 1
+    pino.host_bytes(_msg(23, 13, 0))
+    assert pino.state[31] == 0
+
+
+def test_pinotaur_coils_on_is_attract_and_lights_are_kept(pino, tmp_path):
+    pino.host_bytes(_msg(96, 1) + _msg(96, 0) + _msg(97, 1) + _msg(11, 3))
+    log = (tmp_path / "warden.log").read_text()
+    assert "coils enabled" in log and "coils disabled" in log
+    assert titles.get("h78")["attract"] == "coils enabled"
+    pino.host_bytes(_msg(48, 5, 255, 0, 0, 2) + _msg(49, 9, 0, 0, 255, 7, 1))
+    pino.host_bytes(bytes([PTX, 62, 251, 20] + [0x11, 0x22, 0x33] + [0] * 57))
+    leds = json.loads(pino.command("leds"))
+    assert leds == {"5": "ff0000", "6": "ff0000", "9": "0000ff", "20": "332211"}
+    pino.host_bytes(_msg(63, 0))                           # shows off
+    st = json.loads(pino.command("state"))
+    assert st["leds_lit"] == 3 and st["board"] == "pinotaur"
+    assert st["power"]["flippers"] == 1 and st["gi"] == {"3": 1}
+    assert st["opcodes"]["48"] == 1

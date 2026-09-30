@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""spktitles.py - the Spooky Warden-era games the rig runs, one profile each.
+"""spktitles.py - the Spooky games the rig runs, one profile each.
 
     spktitles.py detect <unpacked update dir>   -> prints the title key, or
                                                    "no <why>" and exits 1
     spktitles.py get <key> <field>              -> one field for the shell
                                                    scripts (a list: spaced)
+    spktitles.py passphrase <update file name>  -> the GPG passphrase of a
+                                                   symmetric .pkg (Halloween's,
+                                                   from the app's Spooky
+                                                   plugin), exit 1 for none
 
-Every title here talks to the same board - the Warden, on /dev/WARDEN at
-115200 - so spkwarden.py serves them all; what differs is the game around
-it:
+Every title but Halloween talks to the same board - the Warden, on
+/dev/WARDEN at 115200 - so spkwarden.py serves them all; what differs is
+the game around it:
 
   engine   unity    Unity 2022.3 Mono, main.x86_64 + UnityPlayer.so
            godot    Godot 4.1 with the game's PCK inside main.x86_64; it finds
@@ -30,24 +34,32 @@ it:
   optos    switches the switch window marks as optos, beyond the trough's
   rest     other switches made at rest; holds = {coil: a switch it opens
            while held}; resets = {coil: switches it makes (a drop bank's
-           reset coil standing its targets back up)}
+           reset coil standing its targets back up)}; sets = {coil:
+           {switch: 0|1}} (what firing a coil does to a switch)
   uname    what `uname -r` says to the game, where it matters
+  seed     ["<file in /game>:<file in the update>", ...] - files a machine
+           has from the factory, copied in when missing
+  board    "pinotaur" for a Pinotaur game (spkpinotaur.py); else the Warden
+  aliases  cabinet names -> switch numbers, where not the Warden's
+           (CABINET_ALIASES)
 
 Switch names are the game's own (Switches.cs / SwitchConfig.cs / switches.cs
 / switches.gd of the build named in the comment); switch numbers are the
 Warden's inputs.
 
-Spooky's other titles are refused with the reason: Halloween and Ultraman
-talk to a Pinotaur board (/dev/pinheck; PAD-268), Rick and Morty, Alice
-Cooper and Total Nuclear Annihilation are P-ROC games (PAD-269).
+Halloween is the one title here on Spooky's other board, the Pinotaur
+(/dev/pinheck, spkpinotaur.py; "board": "pinotaur", PAD-268); its cabinet
+switches are its own ("aliases").  Ultraman runs on the same board but is
+not profiled yet; Rick and Morty, Alice Cooper and Total Nuclear
+Annihilation are P-ROC games (PAD-269).  Both are refused with the reason.
 """
 import os
 import re
 import sys
 
 CABINET_ALIASES = {"start": 87, "launch": 85, "coin": 90, "action": 81,
-                   "tilt": 84, "enter": 91, "back": 94, "lflip": 86,
-                   "rflip": 80}
+                   "tilt": 84, "enter": 91, "back": 94, "up": 92, "down": 93,
+                   "lflip": 86, "rflip": 80, "ulflip": 83, "urflip": 82}
 
 TITLES = {
     # Beetlejuice v2026.09.15.11 (Switches.cs).
@@ -259,12 +271,74 @@ TITLES = {
             92: "UP", 93: "DOWN", 94: "EXIT", 95: "CABINET EXTRA",
         },
     },
+    # Halloween v1.18.1 (SwitchConfig.cs, CoilConfig.cs).  Not a Warden
+    # game: its board is the Pinotaur (spkpinotaur.py), with its own switch
+    # numbers for the cabinet.
+    "h78": {
+        "name": "Halloween", "engine": "unity", "layout": "code",
+        "board": "pinotaur",
+        # Unity's own log is switched off on Linux and the game's text log
+        # keeps exceptions only.  Attract turns the coils on once the
+        # machine is ready (machineMode machine_state_3) - the board says.
+        "attract": "coils enabled", "attract_in": "warden.log",
+        # A machine has its high scores; a first start without them dies
+        # (run_game.sh).
+        "seed": ["highscores.config:config/default_highscores.config"],
+        "trough": [65, 22, 21, 20, 16, 19, 18], "jam": 64, "shooter": 23,
+        # coil 18 "trough", 21 "launch"; installed_balls defaults to 7.
+        "eject": [18], "launch": {21: 23}, "balls": 7,
+        # The board reports raw inputs and the game inverts its reversed
+        # optos (scoops, subway) itself, so at rest they read open here.
+        # The pumpkin drop bank's switches read made while its targets
+        # stand (pumpkinMode.count_targets: the game reverses them twice);
+        # without that it resets the bank five times and calls it a
+        # hardware issue.
+        "rest": [27, 28, 29],
+        # What the other mechanisms do to their switches (the game's own
+        # VirtualCoil.cs): the bank reset stands the pumpkin targets up,
+        # knockdown coils drop a target (made = down), reset coils stand
+        # it up, the mid-playfield scoop kicks its ball out.
+        "sets": {11: {27: 1, 28: 1, 29: 1}, 12: {31: 1}, 13: {31: 0},
+                 7: {30: 1}, 6: {30: 0}, 4: {26: 0}, 5: {6: 0}},
+        "aliases": {"start": 87, "launch": 84, "coin": 56, "tilt": 85,
+                    "enter": 60, "back": 63, "up": 61, "down": 62,
+                    "lflip": 81, "rflip": 80, "ulflip": 83, "urflip": 82},
+        "switches": {
+            4: "UPPER LEFT EOS", 5: "MIDDLE LEFT TARGET", 6: "MID PF SCOOP",
+            7: "MIDDLE RIGHT TARGET", 12: "LEFT SPINNER",
+            13: "RIGHT SPINNER", 14: "UPPER PF ENTRY", 15: "UPPER RIGHT EOS",
+            16: "TROUGH 5", 18: "TROUGH 7", 19: "TROUGH 6", 20: "TROUGH 4",
+            21: "TROUGH 3", 22: "TROUGH 2", 23: "SHOOTER LANE",
+            26: "UP PF DROP", 27: "DROP BANK MID", 28: "DROP BANK RIGHT",
+            29: "DROP BANK LEFT", 30: "MID PF DROP", 31: "LOWER DROP",
+            32: "CAPTURE TARGET", 33: "RIGHT OUTLANE", 34: "RIGHT INLANE",
+            35: "RIGHT ORBIT", 36: "RIGHT EOS", 37: "RIGHT SLING",
+            38: "STANDUP 6", 39: "STANDUP 5", 41: "LEFT RAMP EXIT",
+            48: "LEFT ORBIT", 49: "LEFT EOS", 50: "LEFT OUTLANE",
+            51: "LEFT SLING", 52: "STANDUP 1", 53: "STANDUP 2",
+            54: "STANDUP 3", 55: "STANDUP 4", 56: "COIN LEFT",
+            59: "COIN RIGHT", 60: "MENU ENTER", 61: "VOLUME UP",
+            62: "VOLUME DOWN", 63: "MENU BACK", 64: "TROUGH JAM",
+            65: "TROUGH 1", 66: "LEFT SUBWAY 1", 67: "CROSSOVER",
+            68: "MID RAMP LEFT", 69: "MID PF TO R SCOOP", 70: "RIGHT SUBWAY",
+            71: "LOWER RIGHT SCOOP", 72: "LOWER RIGHT DROP",
+            73: "LEFT SUBWAY 2", 74: "LEFT SUBWAY 4", 75: "MIDDLE RAMP",
+            76: "LEFT BOTTOM SCOOP", 77: "LEFT TOP SCOOP",
+            78: "LEFT SUBWAY 3", 79: "LEFT MIDDLE SCOOP",
+            80: "RIGHT FLIPPER BUTTON", 81: "LEFT FLIPPER BUTTON",
+            82: "UPPER RIGHT FLIPPER BUTTON", 83: "UPPER LEFT FLIPPER BUTTON",
+            84: "LAUNCH BUTTON", 85: "TILT", 87: "START BUTTON",
+        },
+    },
 }
 
 # app.info's product line of a Unity build -> title.
 UNITY_PRODUCTS = {"SPF": "bj", "Scooby": "scooby", "TCM": "tcm",
                   "Evil Dead": "ed"}
 PINOTAUR_PRODUCTS = {"VideoServer"}      # Halloween, Ultraman
+# Which Pinotaur game: the update's own name, kept in its code (staticVars
+# correctUpdateFileName, a UTF-16 string in Assembly-CSharp.dll) -> title.
+PINOTAUR_UPDATES = {"code_H78.pkg": "h78"}
 # application/config/name of a Godot game's PCK -> title.
 GODOT_PROJECTS = {"GDToons": "looney"}
 
@@ -280,8 +354,10 @@ def optos(key=None):
 
 
 def aliases(key=None):
+    """Cabinet names -> switch numbers: the Warden's wiring, unless the
+    title wires its cabinet differently (Halloween's Pinotaur)."""
     t = get(key)
-    return dict(CABINET_ALIASES, shooter=t["shooter"])
+    return dict(t.get("aliases", CABINET_ALIASES), shooter=t["shooter"])
 
 
 def _app_info(d):
@@ -339,8 +415,19 @@ def detect(d):
                           % TITLES[key]["name"])
         return key, None
     if product in PINOTAUR_PRODUCTS:
-        return None, ("a Pinotaur-board game (Halloween or Ultraman) - this "
-                      "emulator answers the Warden board only")
+        if sub != "uptest/main_Data":
+            return None, "a Pinotaur-board game laid out as no update of it is"
+        dll = os.path.join(d, sub, "Managed", "Assembly-CSharp.dll")
+        try:
+            with open(dll, "rb") as f:
+                code = f.read()
+        except OSError:
+            code = b""
+        for upd, key in PINOTAUR_UPDATES.items():
+            if upd.encode("utf-16-le") in code:
+                return key, None
+        return None, ("a Pinotaur-board game this emulator does not know yet "
+                      "(Ultraman?) - it runs Halloween")
     if product is not None:
         return None, "an unknown Unity game (%s)" % (product or "no name")
     exe = os.path.join(d, "main.x86_64")
@@ -352,7 +439,31 @@ def detect(d):
     return None, "no Spooky Warden game in it"
 
 
+def passphrase(name):
+    """The passphrase a GPG-symmetric Spooky .pkg is encrypted with, read
+    from the app's own Spooky plugin (as tools/ap_emu reads AP's key), or
+    None."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    games = os.path.join(here, "..", "..", "pinball_decryptor", "plugins",
+                         "spooky", "games.py")
+    ns = {}
+    try:
+        with open(games) as f:
+            exec(compile(f.read(), "games.py", "exec"), ns)
+    except OSError:
+        return None
+    for prefix, _game, fmt in ns.get("PKG_FILENAME_PATTERNS", ()):
+        if name.startswith(prefix):
+            return ns.get("GPG_PASSPHRASES", {}).get(fmt)
+    return None
+
+
 def main(a):
+    if a[:1] == ["passphrase"] and len(a) == 2:
+        p = passphrase(a[1])
+        if p:
+            print(p)
+        return 0 if p else 1
     if a[:1] == ["detect"] and len(a) == 2:
         key, why = detect(a[1])
         print(key or "no " + why)

@@ -1,10 +1,12 @@
-# Spooky Pinball PC emulator rig (the Warden games)
+# Spooky Pinball PC emulator rig (the Warden games and Halloween)
 
 Runs Spooky's **Warden-era** games on this PC from their update files, the
 way `tools/bof_emu` runs a Barrels of Fun game and `tools/ap_emu` an
 American Pinball one, on an emulated **Warden** - Spooky's playfield
 controller board - that answers the real protocol, so switches, coils, LEDs,
-servos and the stepper behave.
+servos and the stepper behave. **Halloween** runs the same way on an
+emulated **Pinotaur**, the board before the Warden (`spkpinotaur.py`,
+PAD-268; below).
 
 | title | update | engine | status (2026-09-30) |
 |---|---|---|---|
@@ -13,17 +15,17 @@ servos and the stepper behave.
 | Texas Chainsaw Massacre | `tcm-1_00.pkg` (tar.gz) | Unity 2019 | attract, played (PAD-267) |
 | Evil Dead | `2026.07.15.ed` (tar.gz) | Unity 2022.3 | attract, played (PAD-267) |
 | Looney Tunes | `2025.10.08.looney` (plain tar) | Godot 4.1 | attract, played (PAD-267) |
+| Halloween | `code_H78.pkg` v1.18.1 (GPG-symmetric tar.gz) | Unity 2022.3 | attract, played (PAD-268) - Pinotaur board |
 
 "Played" = coins, Start, the ball served by the game's own trough-eject
 coil into the shooter lane, launched by its own launch coil, switches hit
-and scoring, all hidden on a private display. All five were run from
+and scoring, all hidden on a private display. All six were run from
 `D:\Pinball\images\Spooky`. `bootcheck.sh` passes each; Spooky's restore
 images are not needed.
 
-Not Warden games, refused by `prepare.sh` with the reason (exit 4):
-Halloween (`code_H78.pkg`) and Ultraman (`code_UM.pkg`) talk to Spooky's
-**Pinotaur** board (`/dev/pinheck`; PAD-268); Rick and Morty, Alice Cooper
-and Total Nuclear Annihilation are P-ROC games (PAD-269).
+Refused by `prepare.sh` with the reason (exit 4): Ultraman (`code_UM.pkg`),
+the other Pinotaur game - same board, not profiled yet; Rick and Morty,
+Alice Cooper and Total Nuclear Annihilation are P-ROC games (PAD-269).
 
 **In the app** (PAD-266): Spooky Pinball has an **Emulate** tab
 (`webui/tabs/emulate_spooky.py`) built on the American Pinball tab, the
@@ -148,6 +150,55 @@ Behaviour, from the title's profile:
 Everything is logged to `$SPK_RIG/warden.log`; `state` reports it, `leds`
 lists every lit LED.
 
+## Halloween's board (spkpinotaur.py)
+
+Halloween (`code_H78.pkg`, v1.18.1) is a Unity 2022.3 Mono game laid out
+like Texas Chainsaw (`uptest/`, `assets/`, `config/` under `/game/code`),
+encrypted with a GPG passphrase that `prepare.sh` reads from the app's own
+Spooky plugin (`spktitles.py passphrase`). It is told apart from Ultraman
+(same `VideoServer` product) by the update name its code carries. It has no
+licence check; its board is the **Pinotaur** (USB `cafe:4001`, udev's
+`/dev/pinheck`, Mono's SerialPort with a 1 ms read timeout), which
+`spkshim.so` maps onto the rig's pty as it does `/dev/WARDEN`.
+`spkwarden.py` starts `spkpinotaur.Pinotaur` for it - a `Board` with the
+Pinotaur's wire format, so the control socket, trough, flippers, logs
+(`warden.log`) and every client (sw.py, the virtual playfield) are the
+Warden's.
+
+* **Wire**: the host sends `'<' <op> <0x81 + 2n> <n args>` - the third byte
+  frames every message; the board answers `'>' <op> <payload>`. Boot asks
+  the system name (it must say `Pinotaur`), firmware and API versions, the
+  boot fault flag, the game-name row (8064: `0 0` = Halloween), and every
+  switch twice (`88`); the replies for switch 95 are the board's "machine
+  ready", two of the three the game waits for. Then switch changes are
+  pushed as `'>' 89 <0x80|sw>` (active) / `<sw>` (inactive). The game reads
+  one message per frame and reports RAW inputs (it inverts its reversed
+  optos itself).
+* **Kept**: coil pulses (23), patter, 48 V (96) and flippers (97) enable,
+  flipper buttons (30) with their end-of-stroke switches (94),
+  auto-actions (91: slings), GI strings, start/launch lamps, servos, LEDs
+  (48-55) and the light shows' frames (62, drawn over the rest).
+* **Attract** is read off the board: the first "coils enabled" is
+  `machine_state_3`. Unity's own log is switched off on Linux and the
+  game's text log (`/game/logs`) keeps exceptions only.
+* **At rest** (the game's own `VirtualCoil.cs` / `InitialiseVirtualStates`):
+  7 balls; the pumpkin drop bank's switches read made while standing (the
+  game reverses them twice - without it the game fires the bank reset five
+  times and flags a hardware issue); `sets` in the profile say what the
+  bank reset, drop target knockdown/reset and mid-playfield scoop coils do
+  to their switches. Its cabinet is wired differently from the Warden's
+  (Launch 84, Tilt 85, coins 56/59, service 60-63; the profile's
+  `aliases`), and the switch table and `sw.py` follow.
+* **A first start**: a machine leaves the factory with
+  `/game/highscores.config`. Without it the game writes one from its
+  defaults and then dies syncing it through the board object it has not
+  created yet (a black screen, nothing logged); the file it leaves has
+  "null" vanity awards that kill every later start too. `run_game.sh` seeds
+  it from the update's `config/default_highscores.config` (the profile's
+  `seed`) and replaces a "null" one.
+* Its update helper (`config/test`) and firmware reflash
+  (`config/firmware_*.bin`, from the service menu) are not run.
+
 ## Use
 
 The app runs `watch.sh <update>` as root (`PAD_VISIBLE=1` draws on the
@@ -178,7 +229,8 @@ bash $T/bootcheck.sh scooby_v2025.12.01.09        # VERDICT <build> pass|fail ..
 ```
 
 `prepare.sh` and `run_game.sh` are the two halves of `watch.sh`; a build is
-named `<title>_<version.txt>` (`bj_`, `scooby_`, `tcm_`, `ed_`, `looney_`).
+named `<title>_<version.txt>` (`bj_`, `scooby_`, `tcm_`, `ed_`, `looney_`,
+`h78_v118` - Halloween's version is its `uptest/version_118.txt` name).
 The game's log is `$SPK_RIG/player.log` (Unity's log, or Godot's stdout),
 the board's `$SPK_RIG/warden.log`, the no-op'd shell calls
 `$SPK_RIG/shell.log`, the volume keeper's `$SPK_RIG/spkvol.log`.
@@ -187,7 +239,12 @@ the board's `$SPK_RIG/warden.log`, the no-op'd shell calls
 
 * **The app offers Beetlejuice only.** The Emulate Spooky tab's file picker,
   supported-games card and labels are Beetlejuice's; the rig runs the
-  other four.
+  other five (Halloween: offering it in the tab is a follow-up to PAD-268).
+* **Halloween's plunger**: sw.py `plunge` presses its Launch button (84);
+  the game fires its launch coil for ball saves and multiballs, and
+  otherwise the rig lets the ball go after 1.5 s as a manual shooter would.
+  Its subway, scoops, crossover and lock mechanisms are switches you press
+  yourself.
 * **It draws on the GPU.** Mesa's d3d12 driver renders the games' OpenGL
   on the Windows GPU (WSL's /dev/dxg + libd3d12), on the desktop and on a
   hidden Xvfb alike (`run_game.sh` picks it whenever WSL offers it). Beetlejuice's
@@ -195,7 +252,8 @@ the board's `$SPK_RIG/warden.log`, the no-op'd shell calls
   1280x720 desktop window, ~170% CPU (2026-09-30, an AMD Radeon iGPU);
   Mesa's llvmpipe (the old default, and the fallback where WSL has no GPU;
   `SPK_GL=llvmpipe` forces it) managed 5.5-7.8 fps on ~500% CPU. The other
-  four titles were not measured on d3d12. `status.sh` reports `gl=` and
+  five titles were not measured on d3d12 (Halloween was proven on
+  llvmpipe, before the GPU renderer landed). `status.sh` reports `gl=` and
   `fps=` (Mesa's HUD, sampled once a second into `$SPK_RIG/hud/fps`, drawn
   nowhere). ~3 GB of memory; on llvmpipe `LP_NUM_THREADS` is capped at 4
   (`SPK_LP_THREADS`).
