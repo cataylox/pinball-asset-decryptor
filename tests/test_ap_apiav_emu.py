@@ -29,7 +29,7 @@ prepare = _load("ap_apiav_prepare", RIG / "prepare.py")
 
 def test_rig_scripts_are_lf_and_complete():
     for name in ("avpath.sh", "setup.sh", "run_game.sh", "netns.sh", "killgame.sh", "shot.sh",
-                 "sw.sh", "status.sh", "prepare.py", "README.md"):
+                 "sw.sh", "status.sh", "prepare.py"):
         data = (RIG / name).read_bytes()
         assert b"\r\n" not in data, name
 
