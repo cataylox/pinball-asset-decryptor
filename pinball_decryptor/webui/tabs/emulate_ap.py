@@ -47,10 +47,10 @@ VOLUME_TIP = ("The game's sound on this PC - Volume and Mute follow at once, "
               "while the game plays (the same knob every Emulate tab shares). "
               "The game's own volume is in its service menu.")
 
-SWITCHES_TIP = ("The machine's switches: the game's own playfield picture with "
-                "every switch on it, and a labelled list. Hold a switch with "
-                "the mouse, right-click to latch it; Plunge and Drain move "
-                "the ball.")
+SWITCHES_TIP = ("The virtual playfield, as on the Stern Emulate tab: the game's "
+                "playfield with its switches and lights, the keyboard, the "
+                "service buttons, the coin door and the balls (Plunge, "
+                "Drain, Reset balls), Pause and the volume.")
 
 #: The status grid (label, key into the values _apply computes).
 CELLS = (
@@ -365,6 +365,8 @@ class EmulateAPTab(RigTabMixin, TabService):
                "--slot", info.get("slot") or "0"]
         if ap.title_name(info):
             cmd += ["--title", ap.title_name(info)]
+        # the status bar's VOL / Mute: the same control file as this tab's
+        cmd += ["--audio-ctl", audio_ctl_file()]
         distro = ap.rig_distro()
         if distro:
             # the table (and the playfield picture it names) live in the

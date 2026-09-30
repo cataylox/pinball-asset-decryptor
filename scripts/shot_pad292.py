@@ -95,16 +95,23 @@ def tab_shot(out, prefix, width, height, cache=False):
     return errors
 
 
-def switch_shots(out, prefix, slot, playfield_switch):
+def switch_shots(out, prefix, slot, playfield_key):
+    """The virtual playfield (the Stern page, served by appf.py) against the
+    live game: coins and Start on their key-panel rows, Plunge, then a
+    playfield switch held on its key while the window is captured."""
     sys.path.insert(0, os.path.join(REPO, "tools", "ap_emu"))
     import appf  # noqa: E402
     table_unc = r"\\wsl.localhost\%s\var\tmp\pad_ap\rig%s\switches.json" % (DISTRO, slot)
     with open(table_unc, encoding="utf-8") as f:
         table = json.load(f)
-    model = appf.page_model(table, table.get("title") or "American Pinball")
     rig = appf.Rig(DISTRO, slot)
-    app = appf.App(model, rig, appf.win_path(table.get("art") or "", DISTRO))
-    host = appf.pfweb.WebHost(os.path.join(appf.HERE, "appage"), app)
+    # a scratch Volume / Mute file: the status bar shows VOL as in the app
+    ctl = os.path.join(tempfile.mkdtemp(prefix="padshot292-"), "audio_ctl.json")
+    with open(ctl, "w") as f:
+        json.dump({"gain": 0.47, "muted": False}, f)
+    app = appf.App(table, rig, appf.win_path(table.get("art") or "", DISTRO),
+                   table.get("title") or "American Pinball", slot=slot, audio_ctl=ctl)
+    host = appf.pfweb.WebHost(appf.PAGE_DIR, app)
     app.host = host
     host.start()
     threading.Thread(target=app.poll, daemon=True).start()
@@ -112,33 +119,25 @@ def switch_shots(out, prefix, slot, playfield_switch):
     errors = []
     with sync_playwright() as p:
         b = p.chromium.launch(channel="msedge")
-        page = b.new_page(viewport={"width": 900, "height": 900})
+        page = b.new_page(viewport={"width": 1000, "height": 980})
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(host.url())
-        page.wait_for_selector(".row")
+        page.wait_for_selector(".kp-row")
         time.sleep(2)
-        # coins and Start, pressed on their rows the way a user would; then
-        # the ball the game serves to the shooter lane is plunged
         for _ in range(4):
-            page.locator(".row", has_text="Coin 1").first.click()
+            page.keyboard.press("5")
             time.sleep(0.5)
         time.sleep(4)
-        page.locator(".row", has_text="StartButton").first.click()
+        page.keyboard.press("1")
         time.sleep(6)
         page.locator(".btn", has_text="Plunge").first.click()
-        time.sleep(2)
-        # a playfield switch, held while the window is captured
-        row = page.locator(".row", has_text=playfield_switch).first
-        row.hover()
-        page.mouse.down()
-        time.sleep(0.6)
-        page.screenshot(path=os.path.join(out, prefix + "switches.png"))
-        page.mouse.up()
-        for _ in range(2):
-            time.sleep(0.8)
-            row.click()
         time.sleep(3)
-        print("live:", app.live)
+        page.keyboard.down(playfield_key)
+        time.sleep(0.8)
+        page.screenshot(path=os.path.join(out, prefix + "switches.png"))
+        page.keyboard.up(playfield_key)
+        time.sleep(2)
+        print("status:", app._status())
         b.close()
     app.stopping = True
     rig.close()
@@ -158,8 +157,8 @@ def main():
     ap.add_argument("--cache", action="store_true",
                     help="also shoot the Cache window (<prefix>cache.png)")
     ap.add_argument("--slot", default="0")
-    ap.add_argument("--switch", default="LeftOrbit",
-                    help="the playfield switch's label to press")
+    ap.add_argument("--switch", default="a",
+                    help="the key of a playfield switch to hold for the shot")
     ap.add_argument("--width", type=int, default=1440)
     ap.add_argument("--height", type=int, default=900)
     args = ap.parse_args()

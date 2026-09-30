@@ -23,7 +23,11 @@ machine has that FakePinPROC lacks are added here, before the launcher runs:
   ball back in the trough (the playfield has no physics to drain it).
 * What the game sees, for the switch window: the numbers of the switches
   the game has active, in `active` beside $AP_LOG, rewritten when they change
-  (checked five times a second from the game loop).
+  (checked five times a second from the game loop); every light's colour in
+  `lights.json` ({name: [r, g, b]}: an LED's current_color, a lamp driver's
+  on/off from the fake P-ROC); and once, `pfpos.json` - the positions the
+  machine yaml gives switches and LEDs (x, y: Galactic Tank Force 2026 has
+  them, for AP's own playfield simulator).  `!reset` refills the trough.
 
 Everything the rig injects is logged to $AP_LOG.
 """
@@ -331,6 +335,9 @@ def _inject(self):
         if num == "drain":
             _trough_drain(_game[0])
             continue
+        if num == "reset":
+            _trough_reset(_game[0])
+            continue
         sw = _game[0].switches[num]
         et = (pinproc.EventTypeSwitchClosedDebounced if closed else pinproc.EventTypeSwitchOpenDebounced) \
             if sw.debounce else \
@@ -454,6 +461,24 @@ def _trough_drain(g):
     log("trough: drained a ball in at %s, %d in the trough" % (entry.name, balls + 1))
 
 
+def _trough_reset(g):
+    """Every ball home: the trough full (PRGame.numBalls, from the eject
+    end), the shooter lane empty - the window's Reset balls."""
+    if g is None:
+        return
+    coil, pos, shooter = _trough_parts(g)
+    try:
+        balls = int(g.config["PRGame"]["numBalls"])
+    except Exception:
+        balls = len(pos)
+    for i, s in enumerate(pos):
+        if s.is_active() != (i < balls):
+            _set_active(s, i < balls)
+    if shooter is not None and shooter.is_active():
+        _set_active(shooter, False)
+    log("trough: reset, %d in the trough" % min(balls, len(pos)))
+
+
 def _coil_fired(driver):
     g = _game[0]
     if g is None or os.environ.get("AP_BALLS", "1") == "0":
@@ -504,10 +529,71 @@ def _publish_active():
         os.rename(_ACTIVE + ".tmp", _ACTIVE)
 
 
+_LIGHTS = os.path.join(os.path.dirname(LOG), "lights.json") if LOG else None
+_POS = os.path.join(os.path.dirname(LOG), "pfpos.json") if LOG else None
+_lights_seen = [0.0, None, False]
+
+
+def _rgb(c):
+    c = list(c or [])[:3]
+    if len(c) == 1:                             # a single-colour LED
+        c = c * 3
+    return [max(0, min(255, int(v))) for v in c] + [0] * (3 - len(c))
+
+
+def _publish_lights():
+    """lights.json: every LED's colour and every lamp driver's on/off (a lit
+    lamp is warm white), rewritten when anything changed, at most ten times
+    a second.  pfpos.json once: switch / LED positions from the machine yaml."""
+    import json
+    now = time.time()
+    g = _game[0]
+    if not _LIGHTS or g is None or now - _lights_seen[0] < 0.1:
+        return
+    _lights_seen[0] = now
+    out = {}
+    try:
+        for led in getattr(g, "leds", None) or []:
+            cur = getattr(led, "current_color", None)
+            if cur is not None:
+                out[led.name] = _rgb(cur)
+        for lamp in getattr(g, "lamps", None) or []:
+            try:
+                st = lamp.state() or {}
+                on = bool(st.get("state"))
+            except Exception:
+                on = False
+            out[lamp.name] = [255, 214, 140] if on else [0, 0, 0]
+    except Exception:
+        return
+    if not _lights_seen[2]:
+        _lights_seen[2] = True
+        pos = {"switches": {}, "leds": {}}
+        try:
+            pos["balls"] = int(g.config["PRGame"]["numBalls"])
+        except Exception:
+            pass
+        for kind, items in (("switches", g.switches), ("leds", getattr(g, "leds", None) or [])):
+            for it in items:
+                x, y = getattr(it, "x", None), getattr(it, "y", None)
+                if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+                    pos[kind][it.name] = [x, y]
+        with open(_POS + ".tmp", "w") as f:
+            json.dump(pos, f)
+        os.rename(_POS + ".tmp", _POS)
+    text = json.dumps(out, sort_keys=True)
+    if text != _lights_seen[1]:
+        _lights_seen[1] = text
+        with open(_LIGHTS + ".tmp", "w") as f:
+            f.write(text)
+        os.rename(_LIGHTS + ".tmp", _LIGHTS)
+
+
 def get_events(self):
     _release_later()
     _inject(self)
     _publish_active()
+    _publish_lights()
     return _orig_get_events(self)
 
 
@@ -515,6 +601,7 @@ def get_events_noDMD(self):
     _release_later()
     _inject(self)
     _publish_active()
+    _publish_lights()
     return _orig_get_events_nodmd(self)
 
 
@@ -537,6 +624,10 @@ def _reader(path):
                 if parts == ["!drain"]:
                     log("sw: drain")
                     _queue.put(("drain", None))
+                    continue
+                if parts == ["!reset"]:
+                    log("sw: reset balls")
+                    _queue.put(("reset", None))
                     continue
                 if len(parts) < 2 or _game[0] is None:
                     continue

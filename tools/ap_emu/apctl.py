@@ -5,6 +5,8 @@
     apctl.py [--slot N] tap <n> [ms]      activate it for ms (default 150)
     apctl.py [--slot N] plunge            the shooter lane lets its ball go
     apctl.py [--slot N] drain             a ball drains into the trough
+    apctl.py [--slot N] reset             every ball back in the trough
+    apctl.py [--slot N] pause 1|0         freeze / resume the game (and apiav)
     apctl.py [--slot N] state             one line of JSON (below)
     apctl.py [--slot N] --stream          the same commands, one per line on
                                           stdin, one reply line each
@@ -15,14 +17,16 @@ turns it into the raw state.  Every command is a line down the game's input
 FIFO, as sw.py's are.  The switch window keeps one --stream pipe open, so a
 click is a line down an open pipe, not a wsl.exe start.
 
-state: {"up": bool, "held": [n...], "switches": {n: 1}} - `switches` is
-every switch the GAME has active (aprun.py rewrites `active` in the rig when
-they change: balls in the trough, the one in the shooter lane) plus what
-this pipe holds.  "up" is false once the game has stopped reading its input,
-and the window closes itself on that.
+state: {"up": bool, "held": [n...], "switches": {n: 1}, "lights": {name:
+[r, g, b]}, "paused": bool} - `switches` is every switch the GAME has active
+(aprun.py rewrites `active` in the rig when they change: balls in the
+trough, the one in the shooter lane) plus what this pipe holds; `lights` is
+aprun.py's lights.json.  "up" is false once the game has stopped reading its
+input, and the window closes itself on that.
 """
 import json
 import os
+import signal
 import sys
 import threading
 import time
@@ -41,6 +45,7 @@ class Ctl:
         self.shooter = None
         self.held = set()
         self.pressed_at = {}
+        self.paused = False
         try:
             with open(os.path.join(self.rig, "switches.json"), encoding="utf-8") as f:
                 t = json.load(f)
@@ -79,6 +84,41 @@ class Ctl:
         except (OSError, ValueError):
             return set()
 
+    def lights(self):
+        try:
+            with open(os.path.join(self.rig, "lights.json")) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    def slot_pids(self):
+        """The game's and apiav's pids: the processes whose environment names
+        this rig's log (as appath.sh's ap_slot_pids)."""
+        want = ("AP_LOG=%s/rig.log" % self.rig).encode()
+        pids = []
+        for d in os.listdir("/proc"):
+            if d.isdigit():
+                try:
+                    with open("/proc/%s/environ" % d, "rb") as f:
+                        if want in f.read().split(b"\0"):
+                            pids.append(int(d))
+                except OSError:
+                    pass
+        return pids
+
+    def pause(self, on):
+        sig = signal.SIGSTOP if on else signal.SIGCONT
+        n = 0
+        for p in self.slot_pids():
+            try:
+                os.kill(p, sig)
+                n += 1
+            except OSError:
+                pass
+        if n:
+            self.paused = bool(on)
+        return n > 0
+
     def _hold(self, n, on):
         if on:
             self.pressed_at[n] = time.monotonic()
@@ -99,10 +139,17 @@ class Ctl:
         cmd = words[0]
         if cmd == "state":
             on = self.active() | self.held
-            return {"up": self.up(), "held": sorted(self.held),
-                    "switches": {str(n): 1 for n in sorted(on)}}
+            # a frozen game reads nothing: it is up while it is paused
+            return {"up": self.paused or self.up(), "held": sorted(self.held),
+                    "switches": {str(n): 1 for n in sorted(on)},
+                    "lights": self.lights(), "paused": self.paused}
         if cmd == "drain":
             return {"ok": self.send("!drain")}
+        if cmd == "reset":
+            return {"ok": self.send("!reset")}
+        if cmd == "pause":
+            return {"ok": self.pause(len(words) > 1 and words[1] == "1"),
+                    "paused": self.paused}
         if cmd == "plunge":
             if self.shooter is None:
                 return {"ok": False, "error": "no shooter lane switch"}
@@ -134,7 +181,10 @@ def main(argv):
                 reply = ctl.run(line.split())
                 sys.stdout.write(json.dumps(reply) + "\n")
                 sys.stdout.flush()
-        # The window went away: let go of anything it was holding.
+        # The window went away: never leave the game frozen, and let go of
+        # anything it was holding.
+        if ctl.paused:
+            ctl.pause(False)
         for n in list(ctl.held):
             ctl.run(["sw", str(n), "0"])
         return 0

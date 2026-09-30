@@ -125,16 +125,33 @@ and Dutch Pinball tabs drive theirs, always on slot 0:
   `envs`, what `setup.sh` downloaded.  A running game's build, and `envs`
   while any game runs, are refused.
 
-The switch window is `appf.py` on the app's Windows Python (a pfweb page,
-`appage/`), talking to `apctl.py` through one `ctl.sh --stream` pipe.  Its
-playfield is the game's own: every title ships its developers' OSC
-switch-matrix layout (`<title>.layout`: a playfield picture and each
-switch's spot on it), and `apswitches.py` copies the best-matching one into
-`$AP_RIG/switches.json` with groups and keys.  Newer packages dropped the
-layout (Legends of Valhalla 26.08.22 ships none, nor a playfield picture):
-the first one seen for a title is kept in `$AP_ROOT/layouts/<machine dir>/`
-and stands in, as does another cached build of the title; with neither, the
-window is the list alone.
+The virtual playfield is `appf.py` on the app's Windows Python: the Stern
+rigs' own page (`tools/spike2_emu/pfpage`, unchanged) with an AP host behind
+it, talking to `apctl.py` through one `ctl.sh --stream` pipe - the Stern
+window's layout: switches and lights on the art (or, with no picture, the
+page's schematic view: a light grid and every switch), the key panel
+(arrows = flippers, 1 Start, 5 coin, Space Action, T tilt, letters for
+playfield switches), SERVICE (Bksp/Esc, -, =, Enter), the coin door (C),
+BALLS (trough dots, Plunge F, Drain D, Reset balls), Pause / F9 (SIGSTOP of
+the game and apiav) and VOL / Mute (the app's audio_ctl.json).
+`py/aprun.py` publishes what it needs: `active` (switches the game has
+active), `lights.json` (every LED's current_color, lamp drivers on/off) and
+`pfpos.json` (machine-yaml x/y, the ball count).
+
+`apswitches.py` decides where things go.  Galactic Tank Force 2026's
+machine yaml gives LEDs and `sim` switches x/y on AP's own simulator picture
+(`assets/screen/service/playfield.png`).  The others have only the
+developers' OSC layouts (`<title>.layout`, `bg_image` shipped as .png or
+.jpg), and only Legends of Valhalla's and Houdini's `houdini.layout` were
+really laid out - Hot Wheels', Oktoberfest's and Tank's are defaults piled
+at the picture's edge, refused by a quality check (most points on the
+picture, spread over it).  Legends of Valhalla's sits ~14 px right and 4 px
+high of its picture (measured on its rollover slots); `CALIBRATION` moves it
+back.  Only playfield switches are placed: the layouts park coins and the
+trough in a corner, and the panel has those.  The first usable layout seen
+for a title is kept in `$AP_ROOT/layouts/<machine dir>/` (Legends of
+Valhalla 26.08.22 ships none) and stands in, as does another cached build
+of the title.
 
 Drain (`!drain`) drops the ball on the trough's ENTRY switch, then rolls it
 down to the next free position: SkeletonGame only looks for a drain once
