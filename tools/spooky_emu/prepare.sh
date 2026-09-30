@@ -1,8 +1,10 @@
 #!/bin/bash
-# prepare.sh <update file> - unpack a Spooky Warden-era game update into the
-# build cache and print its name.  What it takes (spktitles.py says which
-# game it is from what is inside):
+# prepare.sh <update file> - unpack a Spooky game update into the build
+# cache and print its name.  What it takes (spktitles.py says which game it
+# is from what is inside):
 #   Beetlejuice   v<date>.beetlejuice  GPG-SIGNED (not encrypted) tar.gz
+#   Halloween     code_H78.pkg         GPG-SYMMETRIC tar.gz (the passphrase
+#                                      is the app's Spooky plugin's)
 #   Scooby-Doo    v<date>.scooby       tar.gz
 #   Evil Dead     <date>.ed            tar.gz
 #   Texas Chainsaw Massacre tcm-*.pkg  tar.gz
@@ -27,11 +29,11 @@ NAME=$(basename "$UPD")
 
 # Spooky's other boards, known by the name before anything is unpacked.
 case "$NAME" in
-    code_H78*|code_UM*)
-        echo "prepare.sh: $NAME is Halloween or Ultraman, which run on Spooky's Pinotaur board - this emulator answers the Warden board only" >&2
+    code_UM*)
+        echo "prepare.sh: $NAME is Ultraman, which runs on Spooky's Pinotaur board - this emulator runs Halloween on it, not Ultraman yet" >&2
         exit 4 ;;
     rm-gamecode*|ac-gamecode*|tna-gamecode*)
-        echo "prepare.sh: $NAME is a P-ROC game (Rick and Morty, Alice Cooper or Total Nuclear Annihilation) - this emulator answers the Warden board only; proc/ runs Rick and Morty and Alice Cooper" >&2
+        echo "prepare.sh: $NAME is a P-ROC game (Rick and Morty, Alice Cooper or Total Nuclear Annihilation) - this emulator answers the Warden and Pinotaur boards; proc/ runs Rick and Morty and Alice Cooper" >&2
         exit 4 ;;
 esac
 
@@ -58,6 +60,8 @@ if [ "$magic" = 1f8b ]; then
     FMT=gz; GROW=15
 elif [ "$(dd if="$UPD" bs=1 skip=257 count=5 2>/dev/null)" = ustar ]; then
     FMT=tar; GROW=10
+elif PASS=$(python3 "$SPK_TOOLS/spktitles.py" passphrase "$NAME"); then
+    FMT=gpgsym; GROW=11
 else
     FMT=gpg; GROW=22
 fi
@@ -78,6 +82,9 @@ case $FMT in
     gz)  ( tar -xzf "$UPD" -C "$TMP" 2>/dev/null ) & ;;
     tar) ( tar -xf "$UPD" -C "$TMP" 2>/dev/null ) & ;;
     gpg) ( gpg --homedir "$GH" --batch --quiet -d "$UPD" 2>/dev/null | tar -xz -C "$TMP" ) & ;;
+    gpgsym) ( printf '%s' "$PASS" | gpg --homedir "$GH" --batch --quiet \
+                  --pinentry-mode loopback --passphrase-fd 0 -d "$UPD" 2>/dev/null |
+              tar -xz -C "$TMP" ) & ;;
 esac
 job=$!
 last=-1
@@ -109,6 +116,8 @@ fi
 # Beetlejuice's version.txt says v2026.09.15.11, Scooby-Doo's v2025.12.01.09,
 # Evil Dead's 2026.07.15.ed, Texas Chainsaw's "TCM V1.00", Looney's 2025_10_08.
 v=$(head -1 "$TMP/version.txt" 2>/dev/null | tr -d '\r' | tr -cs 'A-Za-z0-9._-' '_' | sed 's/^_*//; s/_*$//')
+# Halloween's is an empty uptest/version_118.txt: its name is the version.
+[ -z "$v" ] && v=$(cd "$TMP/uptest" 2>/dev/null && ls version_*.txt 2>/dev/null | head -1 | sed 's/^version_/v/; s/\.txt$//')
 DEST=$SPK_CACHE/${key}_${v:-unknown}
 echo "$key" > "$TMP/.pad_title"
 echo "$SOURCE" > "$TMP/.pad_source"

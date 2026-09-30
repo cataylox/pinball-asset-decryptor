@@ -6,6 +6,7 @@
 #   running=0|1
 #   title=<spktitles key> title_name= build= version= pid= rss_kb= uptime_s= display= visible=0|1
 #   window=WxH  switches=<count>  slot=  attract=0|1               (while running)
+#   gl=d3d12|llvmpipe  fps=<frames a second, last sample>         (while running)
 #   switches_json=<the virtual playfield's table, Linux path>      (once written)
 . "$(dirname "$0")/spkpath.sh"
 echo "wsl=1"
@@ -24,6 +25,10 @@ if spk_game_alive; then
     echo "display=$(cat "$SPK_RIG/display" 2>/dev/null)"
     echo "visible=$(cat "$SPK_RIG/visible" 2>/dev/null)"
     echo "window=$(cat "$SPK_RIG/window" 2>/dev/null)"
+    # the renderer (d3d12 = the GPU through WSL, llvmpipe = the CPU) and the
+    # frame rate Mesa's HUD last sampled (run_game.sh)
+    echo "gl=$(cat "$SPK_RIG/gl" 2>/dev/null)"
+    echo "fps=$(tail -1 "$SPK_RIG/hud/fps" 2>/dev/null | cut -d. -f1)"
     echo "switches=$(grep -c '"n":' "$SPK_RIG/switches.json" 2>/dev/null)"
     [ -f "$SPK_RIG/switches.json" ] && echo "switches_json=$SPK_RIG/switches.json"
     echo "slot=$SPK_SLOT"

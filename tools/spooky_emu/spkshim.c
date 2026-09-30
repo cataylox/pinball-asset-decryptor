@@ -9,6 +9,7 @@
  *
  *   - REWRITES THE PATH: /dev/WARDEN -> $SPK_WARDEN (the pty's slave), so
  *     every slot has its own board without touching the shared /dev;
+ *     Halloween's /dev/pinheck (its Pinotaur board, spkpinotaur.py) too;
  *   - makes the modem-line ioctls succeed on it: Mono sets DtrEnable right
  *     after Open(), a pty refuses TIOCMGET/TIOCMSET/TIOCMBIS/TIOCMBIC with
  *     ENOTTY, Mono turns that into an IOException, and the game gives up on
@@ -47,15 +48,22 @@
  * a comms reset). */
 static int warden_fd = -1;
 
+/* The board's name on the machine: the Warden's, or Halloween's Pinotaur
+ * (udev's /dev/pinheck for USB cafe:4001). */
+static int is_board(const char *path) {
+    return path && (strcmp(path, "/dev/WARDEN") == 0
+                    || strcmp(path, "/dev/pinheck") == 0);
+}
+
 static const char *map_path(const char *path) {
     const char *w = getenv("SPK_WARDEN");
-    if (path && w && *w && strcmp(path, "/dev/WARDEN") == 0)
+    if (w && *w && is_board(path))
         return w;
     return path;
 }
 
 static int opened(const char *path, int fd) {
-    if (fd >= 0 && path && strcmp(path, "/dev/WARDEN") == 0 && getenv("SPK_WARDEN"))
+    if (fd >= 0 && is_board(path) && getenv("SPK_WARDEN"))
         warden_fd = fd;
     return fd;
 }

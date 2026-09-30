@@ -1751,8 +1751,9 @@ HELP_CONTENT = {
          "Linux, which takes a few minutes; the build is kept, so starting "
          "the same file again skips that. Cache... beside Browse... shows "
          "what is kept and deletes it. Loading the game itself then takes a "
-         "minute or two, as it does on the machine; it draws without the "
-         "graphics card, so it is busy on the processor."),
+         "minute or two, as it does on the machine. It draws on this PC's "
+         "graphics card (through WSL); on a PC where WSL has no graphics "
+         "card it draws on the processor, and the picture is much slower."),
         ("Settings and high scores",
          "The game keeps its settings, audits and high scores between runs, "
          "as a machine does."),

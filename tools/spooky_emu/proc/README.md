@@ -3,7 +3,7 @@
 Runs Spooky's **P-ROC-era** games on this PC from their game-code `.pkg`,
 on `tools/proc_emu`'s emulated P3-ROC (PAD-262), the way `tools/ap_emu/apiav`
 runs Barry-O's BBQ. The Warden games (Beetlejuice on) are `tools/spooky_emu`'s
-own; Halloween and Ultraman (Pinotaur) are PAD-268.
+own, and so is Halloween on its Pinotaur board (PAD-268; Ultraman not yet).
 
 | title | file | status (2026-09-30, PAD-269) |
 |---|---|---|
