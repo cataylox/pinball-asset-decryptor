@@ -1,0 +1,258 @@
+"""tools/pbio_emu (PAD-272): the parts of the Pinball Brothers I/O-board rig
+that can be checked without WSL - the emulated board's framing, answers and
+state (pbioboard.py), its ball moves and Alien's tongue, the title profiles
+(pbiotitles.py) and sw.py's switch names."""
+
+import importlib.util
+import json
+import os
+import pathlib
+import sys
+
+import pytest
+
+RIG = pathlib.Path(__file__).resolve().parents[1] / "tools" / "pbio_emu"
+
+
+def _load(name, path):
+    spec = importlib.util.spec_from_file_location("pbio_" + name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+sys.path.insert(0, str(RIG))
+board_mod = _load("board", RIG / "pbioboard.py")
+titles = board_mod.pbiotitles
+# sw.py reads the running rig's title at import: point it at no rig.
+_root = os.environ.get("PBIO_ROOT")
+os.environ["PBIO_ROOT"] = str(RIG / "no-such-rig")
+try:
+    sw = _load("sw", RIG / "sw.py")
+finally:
+    if _root is None:
+        del os.environ["PBIO_ROOT"]
+    else:
+        os.environ["PBIO_ROOT"] = _root
+
+ACK = bytes([0x52, 0x00])
+
+
+def _board(tmp_path, monkeypatch, title="alien"):
+    b = board_mod.Board(str(tmp_path), title=title, pty=False)
+    b.sent = []
+    monkeypatch.setattr(b, "send", lambda data: b.sent.append(bytes(data)))
+    monkeypatch.setattr(b, "later", lambda secs, fn, *a: fn(*a))
+    return b
+
+
+@pytest.fixture
+def board(tmp_path, monkeypatch):
+    b = _board(tmp_path, monkeypatch)
+    yield b
+    b.log.close()
+
+
+@pytest.fixture
+def abba(tmp_path, monkeypatch):
+    b = _board(tmp_path, monkeypatch, "abba")
+    yield b
+    b.log.close()
+
+
+# --- framing ---------------------------------------------------------------
+
+def test_frames_split_short_and_long_forms_and_keep_a_partial():
+    buf = bytes([0xA2, 0x00, 0xA3, 0x53, 0x05, 0xA0, 0x34, 0x05, 0x01, 0x02,
+                 0xA9, 0x4E])
+    got, kept, skipped = board_mod.frames(buf)
+    assert got == [b"\xa2\x00", b"\xa3\x53\x05", b"\xa0\x34\x05\x01\x02"]
+    assert kept == b"\xa9\x4e"       # a coil request, 7 bytes still to come
+    assert skipped == 0
+
+
+def test_frames_skip_bytes_outside_a_frame():
+    got, kept, skipped = board_mod.frames(b"\x00\x13\xa2\x01")
+    assert got == [b"\xa2\x01"] and kept == b"" and skipped == 2
+
+
+def test_every_command_is_acked_once(board):
+    board.host_bytes("acm", bytes([0xA3, 0x14, 0x01, 0xA3, 0x61, 0x0B,
+                                   0xA7, 0x34, 0x05, 0x00, 0x00, 0xFF, 0x00]))
+    assert board.sent == [ACK, ACK, ACK]
+    assert board.coils_enabled == 1 and 11 in board.gpio
+
+
+# --- requests --------------------------------------------------------------
+
+def test_versions_answer_alien_firmware_072_and_hardware_004(board):
+    board.host_bytes("acm", bytes([0xA2, 0x00, 0xA2, 0x01]))
+    assert board.sent == [bytes([0x55, 0x20, 0, 72, 0]),
+                          bytes([0x54, 0x21, 0, 4])]
+
+
+def test_abba_reports_firmware_103_it_refuses_below_100(abba):
+    abba.host_bytes("acm", bytes([0xA2, 0x00]))
+    fw = abba.sent[0]
+    assert fw[2] << 8 | fw[3] >= 0x100
+
+
+def test_switch_read_reply_is_0x53_first_and_made_is_1(board):
+    board.host_bytes("acm", bytes([0xA3, 0x53, 42, 0xA3, 0x53, 36]))
+    # TROUGH 1 has a ball at rest, the shooter lane is empty
+    assert board.sent == [bytes([0x53, 0x33, 1]), bytes([0x53, 0x33, 0])]
+
+
+def test_names_mode_reports_every_switch_made_once(tmp_path, monkeypatch):
+    monkeypatch.setenv("PBIO_NAMES", "1")
+    b = _board(tmp_path, monkeypatch)
+    b.host_bytes("acm", bytes([0xA3, 0x53, 36]))
+    assert b.sent[0] == bytes([0x53, 0x33, 1])
+    b.host_bytes("acm", bytes([0xA3, 0x53, 95]))
+    # after the last one it tells the game the truth, switch by switch
+    assert bytes([0x54, 0x31, 36, 0]) in b.sent
+    assert bytes([0x54, 0x31, 42, 1]) in b.sent
+    b.log.close()
+
+
+# --- switches, balls, coils ------------------------------------------------
+
+def test_a_switch_change_is_reported_as_type_0x31(board):
+    board.set_switch(82, 1, now=True)
+    board.set_switch(82, 0, now=True)
+    assert board.sent == [bytes([0x54, 0x31, 82, 1]), bytes([0x54, 0x31, 82, 0])]
+
+
+def test_alien_at_rest_six_balls_and_the_tongue_home(board):
+    on = sorted(n for n, v in board.state.items() if v)
+    assert on == [0, 42, 43, 44, 45, 46, 47, 60]
+    assert board.balls_state() == {"trough": 6, "shooter": 0, "in_play": 0}
+
+
+def _coil(board, coil, mode):
+    board.host_bytes("acm", bytes([0xA9, 0x4E, coil, 100, 20, 0, 0, 0, mode]))
+
+
+def test_trough_coil_serves_a_ball_and_launch_coil_plays_it(board):
+    _coil(board, 1, 5)                           # TROUGH: kicking now
+    assert board.state[47] == 0 and board.state[36] == 1
+    assert board.balls_state() == {"trough": 5, "shooter": 1, "in_play": 0}
+    _coil(board, 0, 5)                           # the Launch button's coil
+    assert board.state[36] == 0
+    assert board.balls_state()["in_play"] == 1
+    board.command("drain")
+    assert board.balls_state() == {"trough": 6, "shooter": 0, "in_play": 0}
+
+
+def test_configuring_a_coil_fires_nothing(board):
+    _coil(board, 1, 0)
+    assert board.balls == 6 and not board.coil_fired
+    assert board.coil_config[1] == [100, 20, 0, 0]
+
+
+def test_kickers_empty_their_switch(board):
+    board.set_switch(70, 1, now=True)            # a ball in the AIRLOCK scoop
+    _coil(board, 23, 5)
+    assert board.state[70] == 0
+
+
+def test_abba_serves_from_coil_0_and_launches_with_coil_1(abba):
+    _coil(abba, 0, 5)
+    assert abba.state[37] == 1 and abba.balls == 5
+    _coil(abba, 1, 5)
+    assert abba.state[37] == 0
+
+
+def test_flipper_button_closes_its_eos(board):
+    board.set_switch(77, 1, now=True)
+    assert board.state[48] == 1
+    board.set_switch(77, 0, now=True)
+    assert board.state[48] == 0
+
+
+def test_switch_rules_fire_their_coils(board):
+    board.host_bytes("acm", bytes([0xA7, 0x57, 39, 12, 0xFF, 0, 0]))
+    board.set_switch(39, 1, now=True)
+    assert board.coil_fired.get(12) == 1
+
+
+def test_leds_are_kept_by_number(board):
+    board.host_bytes("acm", bytes([0xA7, 0x34, 0x05, 0x01, 0x10, 0x20, 0x30]))
+    assert json.loads(board.command("leds")) == {"261": "102030"}
+
+
+# --- Alien's tongue ----------------------------------------------------------
+
+def test_tongue_runs_out_and_back_on_gpio_6_and_7(board, monkeypatch):
+    t = [100.0]
+    monkeypatch.setattr(board_mod.time, "monotonic", lambda: t[0])
+    board.tongue["at"] = t[0]
+    board.host_bytes("acm", bytes([0xA3, 0x61, 7, 0xA3, 0x61, 6]))  # forward
+    t[0] += 0.2                                  # 50 pulses: off the home cam
+    board.tongue_tick()
+    assert board.state[0] == 0
+    t[0] += 1.0                                  # full reach: the far cam
+    board.tongue_tick()
+    assert board.state[0] == 1 and board.tongue["pos"] == 240
+    board.host_bytes("acm", bytes([0xA3, 0x62, 7]))                  # reverse
+    t[0] += 0.3
+    board.tongue_tick()
+    assert board.state[0] == 0
+    t[0] += 1.0
+    board.tongue_tick()
+    assert board.state[0] == 1 and board.tongue["pos"] == 0
+    board.host_bytes("acm", bytes([0xA3, 0x62, 6]))                  # off
+    t[0] += 1.0
+    board.tongue_tick()
+    assert board.tongue["pos"] == 0
+
+
+# --- control socket requests ------------------------------------------------
+
+def test_state_reports_what_the_board_keeps(board):
+    board.host_bytes("acm", bytes([0xA2, 0x00, 0xA3, 0x14, 0x01]))
+    s = json.loads(board.command("state"))
+    assert s["title"] == "Alien" and s["frames"] == 2
+    assert s["coils"]["enabled"] == 1 and s["ops"] == {"00": 1, "14": 1}
+    assert s["balls"]["trough"] == 6 and s["switches"]["42"] == 1
+
+
+def test_unknown_request_is_an_error(board):
+    assert "err" in json.loads(board.command("jump"))
+
+
+def test_plunge_presses_the_launch_button(board):
+    board.command("plunge")
+    assert bytes([0x54, 0x31, 76, 1]) in board.sent
+
+
+# --- profiles and sw.py -------------------------------------------------------
+
+@pytest.mark.parametrize("key", sorted(titles.TITLES))
+def test_profiles_are_whole(key):
+    t = titles.get(key)
+    assert len(t["switches"]) == 96
+    for n in t["trough"] + [t["shooter"]] + list(t["buttons"].values()):
+        assert t["switches"][n] != "UNUSED", (key, n)
+    assert t["screen"] and t["firmware"]
+
+
+def test_detect_finds_the_title_folder(tmp_path):
+    (tmp_path / "game" / "abba").mkdir(parents=True)
+    (tmp_path / "game" / "abba" / "pinprog").write_bytes(b"")
+    assert titles.detect(str(tmp_path)) == "abba"
+    assert titles.detect(str(tmp_path / "nothing")) == ""
+
+
+def test_switches_json_lists_only_used_switches():
+    j = json.loads(titles.switches_json("alien"))
+    names = {s["name"] for s in j["switches"]}
+    assert "Start Button" in names and "Unused" not in names
+    assert j["trough"] == [42, 43, 44, 45, 46, 47]
+
+
+def test_sw_names_aliases_and_numbers():
+    assert sw.lookup("start") == 75
+    assert sw.lookup("left orbit") == 9
+    assert sw.lookup("12") == 12
+    assert sw.lookup("tongue opto") == 60
