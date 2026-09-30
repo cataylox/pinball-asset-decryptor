@@ -38,6 +38,7 @@ done
 case "$BUILD" in /*) ;; "") ;; *) BUILD=$SPK_CACHE/$BUILD ;; esac
 [ -n "$BUILD" ] && [ -x "$BUILD/main.x86_64" ] || { echo "run_game.sh: not a prepared build: ${BUILD:-<none>} (prepare.sh)" >&2; exit 2; }
 [ -f "$SPK_SHIM" ] || { echo "run_game.sh: no $SPK_SHIM (build.sh)" >&2; exit 2; }
+AUDIO=$(rigboard_audio "$VISIBLE" "$AUDIO")
 [ "$(id -u)" = 0 ] || { echo "run_game.sh: run as root (it drops to $SPK_USER itself)" >&2; exit 2; }
 [ -n "$SPK_USER" ] || { echo "run_game.sh: no ordinary user account to run the game as" >&2; exit 2; }
 
@@ -143,6 +144,7 @@ for i in $(seq 1 3000); do
 done
 if spk_game_alive && grep -q 'Attract_mode started' "$SPK_RIG/player.log" 2>/dev/null; then
     echo "Ready: $(basename "$BUILD"), slot $SPK_SLOT, display $DISP"
+    rigboard_post spooky "$SPK_SLOT" "$(spk_game_pid)" "$(basename "$BUILD")" "${PAD_TITLE:-}" "$VISIBLE" "$AUDIO"
 else
     echo "run_game.sh: the game did not reach attract:" >&2
     tail -20 "$SPK_RIG/player.log" "$SPK_RIG/game.out" >&2 2>/dev/null
