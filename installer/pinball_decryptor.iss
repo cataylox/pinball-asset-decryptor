@@ -114,6 +114,13 @@ Source: "{#ProjectDir}\tools\jjp_emu\*"; DestDir: "{app}\tools\jjp_emu"; \
 Source: "{#ProjectDir}\tools\bof_emu\*"; DestDir: "{app}\tools\bof_emu"; \
     Flags: recursesubdirs ignoreversion; \
     Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.fun"
+; The American Pinball rig (tools/ap_emu, PAD-264/PAD-292): the Emulate AP
+; tab.  Sources only: the Python the games run on is downloaded inside WSL on
+; the first Start (setup.sh), and the unpacked game lives under /var/tmp
+; there, never here.
+Source: "{#ProjectDir}\tools\ap_emu\*"; DestDir: "{app}\tools\ap_emu"; \
+    Flags: recursesubdirs ignoreversion; \
+    Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.pkg,*.zip"
 
 ; --- Entry point + bundled launcher --------------------------------------
 Source: "{#ProjectDir}\Pinball Asset Decryptor.pyw"; DestDir: "{app}"; Flags: ignoreversion

@@ -19,7 +19,11 @@ machine has that FakePinPROC lacks are added here, before the launcher runs:
   `<switch> close|open|tap [ms]` from the FIFO $AP_FIFO (sw.py writes them)
   and the game loop delivers them through FakePinPROC.add_switch_event, the
   hook its own switch simulator uses - so every switch in the machine yaml
-  can be pressed, not only the keyboard_switch_map ones.
+  can be pressed, not only the keyboard_switch_map ones.  `!drain` puts a
+  ball back in the trough (the playfield has no physics to drain it).
+* What the game sees, for the switch window: the numbers of the switches
+  the game has active, in `active` beside $AP_LOG, rewritten when they change
+  (checked five times a second from the game loop).
 
 Everything the rig injects is logged to $AP_LOG.
 """
@@ -117,7 +121,17 @@ except ImportError:                             # Tank: no SDL on the Python sid
 if sdl2 is not None:
     _orig_create_window = sdl2.video.SDL_CreateWindow
 
+    # A visible run's windows say whose they are (the line in
+    # $AP_TITLE_FILE, "PAD - Legends of Valhalla"), not "PyProcGameHD.
+    # [CTRL-C to exit]".
+    try:
+        with open(os.environ["AP_TITLE_FILE"], "rb") as f:
+            _title = f.read().strip()
+    except (KeyError, IOError, OSError):
+        _title = b""
+
     def _create_window(title, x, y, w, h, flags):
+        title = _title or title
         win = _orig_create_window(title, x, y, w, h, flags)
         log("window: %dx%d+%d+%d %s" % (w, h, x, y, title))
         return win
@@ -293,6 +307,9 @@ def _inject(self):
         if num == "state":
             _log_state(_game[0])
             continue
+        if num == "drain":
+            _trough_drain(_game[0])
+            continue
         sw = _game[0].switches[num]
         et = (pinproc.EventTypeSwitchClosedDebounced if closed else pinproc.EventTypeSwitchOpenDebounced) \
             if sw.debounce else \
@@ -372,6 +389,20 @@ def _trough_eject(g, pos, shooter):
     log("trough: ejected a ball, %d left%s" % (balls - 1, ", into " + shooter.name if shooter else ""))
 
 
+def _trough_drain(g):
+    """A ball drains: it lands on the next free trough position (they fill
+    from the eject end)."""
+    if g is None:
+        return
+    coil, pos, shooter = _trough_parts(g)
+    balls = sum(1 for s in pos if s.is_active())
+    if balls >= len(pos):
+        log("trough: drain with the trough full")
+        return
+    _set_active(pos[balls], True)
+    log("trough: drained a ball, %d in the trough" % (balls + 1))
+
+
 def _coil_fired(driver):
     g = _game[0]
     if g is None or os.environ.get("AP_BALLS", "1") == "0":
@@ -399,15 +430,40 @@ for _m in ("pulse", "future_pulse", "patter", "pulsed_patter"):
             _hook(_cls, _m)
 
 
+_ACTIVE = os.path.join(os.path.dirname(LOG), "active") if LOG else None
+_active_seen = [0.0, None]
+
+
+def _publish_active():
+    """Rewrite `active` (the switch numbers the game has active) when they
+    changed - at most five times a second."""
+    now = time.time()
+    g = _game[0]
+    if not _ACTIVE or g is None or now - _active_seen[0] < 0.2:
+        return
+    _active_seen[0] = now
+    try:
+        line = " ".join(str(n) for n in sorted(sw.number for sw in g.switches if sw.is_active()))
+    except Exception:                           # the game still setting up
+        return
+    if line != _active_seen[1]:
+        _active_seen[1] = line
+        with open(_ACTIVE + ".tmp", "w") as f:
+            f.write(line + "\n")
+        os.rename(_ACTIVE + ".tmp", _ACTIVE)
+
+
 def get_events(self):
     _release_later()
     _inject(self)
+    _publish_active()
     return _orig_get_events(self)
 
 
 def get_events_noDMD(self):
     _release_later()
     _inject(self)
+    _publish_active()
     return _orig_get_events_nodmd(self)
 
 
@@ -426,6 +482,10 @@ def _reader(path):
                 parts = line.split()
                 if parts == ["!state"]:
                     _queue.put(("state", None))     # answered from the game loop
+                    continue
+                if parts == ["!drain"]:
+                    log("sw: drain")
+                    _queue.put(("drain", None))
                     continue
                 if len(parts) < 2 or _game[0] is None:
                     continue

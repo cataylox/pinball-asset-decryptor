@@ -1,0 +1,3 @@
+/* Emulate (American Pinball): the shared Emulate layout.  The switches live
+   in their own window (tools/ap_emu/appf.py). */
+@import url("./emulate_jjp.css");

@@ -126,3 +126,147 @@ def test_sw_reads_the_switch_list(tmp_path, monkeypatch):
     assert sw.switches() == [("trough1", 54, "NC", "TROUGH JAM"),
                              ("startButton", 60, "NO", "Start Button"),
                              ("plain", 3, "NO", "")]
+
+
+def test_mkconfig_frames_a_visible_run(tmp_path):
+    game = tmp_path / "legends"
+    (game / "assets").mkdir(parents=True)
+    assert _mkconfig(tmp_path, game)["dmd_window_border"] is False
+    assert _mkconfig(tmp_path, game, {"AP_VISIBLE": "1"})["dmd_window_border"] is True
+
+
+# -- PAD-292: the Emulate AP tab's switch table, control pipe and window ------
+SWITCHES = (
+    "flipperLwL 0 NO LeftFlipper\n"
+    "flipperLwR 1 NO RightFlipper\n"
+    "ActionButton 2 NO Action Button\n"
+    "startButton 8 NO StartButton\n"
+    "coinDoor 9 NO Coin Door\n"
+    "coin1 10 NO Coin 1\n"
+    "flipperMwL 15 NO MiddleFlipper\n"
+    "leftOrbit 32 NO LeftOrbit\n"
+    "scoop 41 NC Scoop\n"
+    "trough1 48 NC Trough1\n"
+    "shooter 55 NO ShooterLane\n"
+    "unused_24 56 NO Unused\n"
+    "TBD39 57 NO Not Used\n"
+    "SD2 58 NO Not Used\n")
+
+
+def _build(tmp_path):
+    rig = tmp_path / "rig0"
+    rig.mkdir()
+    (rig / "switches").write_text(SWITCHES)
+    build = tmp_path / "lov_25.08.27"
+    build.mkdir()
+    (build / "playfield.jpg").write_bytes(b"jpg")
+    # the one naming more of this game's switches wins; one whose picture is
+    # missing never does
+    (build / "lov.layout").write_text(
+        "bg_image: playfield.jpg\nbutton_locations:\n"
+        "- leftOrbit:\n    x: 75\n    y: 345\n"
+        "- scoop:\n    x: 300\n    y: 400\n"
+        "- nothere:\n    x: 1\n    y: 1\n")
+    (build / "old.layout").write_text(
+        "bg_image: playfield.jpg\nbutton_locations:\n- leftOrbit:\n    x: 1\n    y: 2\n")
+    (build / "nopic.layout").write_text(
+        "bg_image: gone.jpg\nbutton_locations:\n"
+        "- leftOrbit: {x: 1, y: 1}\n- scoop: {x: 1, y: 1}\n- shooter: {x: 1, y: 1}\n")
+    return rig, build
+
+
+def test_apswitches_places_the_switches_on_the_games_own_layout(tmp_path):
+    pytest.importorskip("yaml")
+    aps = _load("apswitches", RIG / "apswitches.py")
+    rig, build = _build(tmp_path)
+    t = aps.table(str(rig), str(build), "Legends of Valhalla")
+    by = {s["name"]: s for s in t["switches"]}
+    assert t["title"] == "Legends of Valhalla"
+    assert t["art"] == str(build / "playfield.jpg")
+    assert (by["leftOrbit"]["x"], by["leftOrbit"]["y"]) == (75, 345)
+    assert "x" not in by["startButton"]
+    # unused switches are left out
+    assert not {"unused_24", "TBD39", "SD2"} & set(by)
+    assert by["scoop"]["nc"] and not by["leftOrbit"]["nc"]
+    assert [by[n]["group"] for n in ("flipperLwL", "coin1", "leftOrbit", "trough1", "shooter")] == [
+        "Cabinet", "Cabinet", "Playfield", "Trough", "Trough"]
+    # both left flippers on one key; flippers hold, Start taps
+    assert by["flipperLwL"]["key"] == by["flipperMwL"]["key"] == "LShift"
+    assert by["flipperLwL"]["hold"] and not by["startButton"]["hold"]
+    assert (by["startButton"]["key"], by["coin1"]["key"], by["ActionButton"]["key"]) == ("1", "5", "Space")
+    assert (t["shooter"], t["coin_door"]) == (55, 9)
+
+
+def test_apswitches_writes_switches_json(tmp_path):
+    pytest.importorskip("yaml")
+    rig, build = _build(tmp_path)
+    out = subprocess.run([sys.executable, str(RIG / "apswitches.py"), str(rig), str(build), "LoV"],
+                         check=True, capture_output=True, text=True).stdout
+    assert "11 switches, 2 on the playfield picture" in out
+    import json
+    assert json.loads((rig / "switches.json").read_text())["title"] == "LoV"
+
+
+def _ctl(tmp_path, monkeypatch):
+    apctl = _load("apctl", RIG / "apctl.py")
+    rig = tmp_path / "rig0"
+    rig.mkdir(exist_ok=True)
+    import json
+    (rig / "switches.json").write_text(json.dumps({
+        "shooter": 55, "switches": [{"n": 0}, {"n": 8}, {"n": 48}, {"n": 55}]}))
+    (rig / "input").write_text("")               # stands in for the FIFO
+    (rig / "game.pid").write_text("%d\n" % os.getpid())
+    monkeypatch.setattr(apctl, "ROOT", str(tmp_path))
+    monkeypatch.setattr(apctl, "MIN_HOLD_S", 0)
+    return apctl.Ctl("0"), rig
+
+
+def test_apctl_turns_presses_into_fifo_lines(tmp_path, monkeypatch):
+    ctl, rig = _ctl(tmp_path, monkeypatch)
+    assert ctl.run(["sw", "0", "1"]) == {"ok": True}
+    assert ctl.held == {0}
+    assert ctl.run(["sw", "0", "0"]) == {"ok": True}
+    assert ctl.run(["tap", "8"]) == {"ok": True}
+    assert ctl.run(["plunge"]) == {"ok": True}
+    assert ctl.run(["drain"]) == {"ok": True}
+    assert ctl.run(["sw", "99", "1"])["ok"] is False          # not this machine's
+    assert (rig / "input").read_text().splitlines() == [
+        "0 close", "0 open", "8 tap 150", "55 open", "!drain"]
+
+
+def test_apctl_state_is_what_the_game_has_active_plus_what_it_holds(tmp_path, monkeypatch):
+    ctl, rig = _ctl(tmp_path, monkeypatch)
+    (rig / "active").write_text("48 55\n")
+    ctl.run(["sw", "0", "1"])
+    st = ctl.run(["state"])
+    assert st["up"] is True and st["held"] == [0]
+    assert st["switches"] == {"0": 1, "48": 1, "55": 1}
+    (rig / "game.pid").write_text("999999999\n")
+    assert ctl.run(["state"])["up"] is False
+
+
+def test_appf_page_model_groups_and_keys(tmp_path):
+    pytest.importorskip("yaml")
+    aps = _load("apswitches", RIG / "apswitches.py")
+    rig, build = _build(tmp_path)
+    appf = _load("appf", RIG / "appf.py")
+    m = appf.page_model(aps.table(str(rig), str(build)), "Legends of Valhalla")
+    assert [r["group"] for r in m["switches"]][:1] == ["Cabinet"]
+    assert [r["group"] for r in m["switches"]][-1] == "Trough"
+    by = {r["name"]: r for r in m["switches"]}
+    assert by["flipperLwL"]["key"] == "Z" and "KeyZ" in by["flipperLwL"]["codes"]
+    assert by["flipperLwR"]["key"] == "/" and "ShiftRight" in by["flipperLwR"]["codes"]
+    assert by["startButton"]["codes"] == ["Digit1", "Numpad1"]
+    assert by["leftOrbit"]["placed"] and not by["startButton"]["placed"]
+    assert by["scoop"]["opto"]
+    assert (m["shooter"], m["coin_door"]) == (55, 9)
+    assert appf.win_path("/var/tmp/pad_ap/cache/x/playfield.jpg", "PAD-Runtime") == \
+        r"\\wsl.localhost\PAD-Runtime\var\tmp\pad_ap\cache\x\playfield.jpg"
+
+
+def test_prepare_redoes_a_changed_pkg(tmp_path):
+    pkg = tmp_path / "lov-gamecode_25.08.27.pkg"
+    pkg.write_bytes(b"x" * 10)
+    first = prepare.stamp(str(pkg))
+    pkg.write_bytes(b"x" * 11)
+    assert prepare.stamp(str(pkg)) != first

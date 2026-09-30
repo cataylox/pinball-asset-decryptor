@@ -75,6 +75,10 @@ if os.environ.get("AP_AVC") == "1":
     # The desktop window then only shows the boot splash, over apiav's screen:
     # park it off the display (the desktop itself stays - it owns SDL).
     cfg["screen_position_x"] = 4000
+# A visible run (AP_VISIBLE=1) is a window on somebody's desktop: framed, so
+# it can be moved; the machine's (and a hidden run's) is borderless at 0,0.
+if os.environ.get("AP_VISIBLE") == "1":
+    cfg["dmd_window_border"] = True
 cfg.setdefault("dmd_dots_w", 1366)
 cfg.setdefault("dmd_dots_h", 768)
 cfg.setdefault("desktop_dmd_scale", 1)

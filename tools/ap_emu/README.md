@@ -11,7 +11,8 @@ take switch input**, hidden, several at once (`bootcheck.sh`: VERDICT pass
 for all five in one run). Houdini, Hot Wheels and Galactic Tank Force were
 also played: coins, Start, Ball 1, the ball served to the shooter lane,
 plunged, and playfield switches scoring (Houdini 89, Hot Wheels 36,150, Tank
-50,550). Wiring it into the app's Emulate tab is a follow-up ticket.
+50,550). The app's **Emulate tab** for American Pinball (PAD-292) runs it:
+see "The Emulate AP tab" below.
 Barry-O's BBQ Challenge is PAD-265.
 
 ## Why this is small
@@ -94,6 +95,36 @@ frames' variables on a crash - the games ship bytecode, not source.
 Credits: Houdini takes 2 coins a credit, Hot Wheels/Tank 4 (ApiLib's coin
 event closes a few seconds after the last coin).
 
+## The Emulate AP tab (PAD-292)
+
+`webui/tabs/emulate_ap.py` drives the rig through four scripts, as the BoF
+and Dutch Pinball tabs drive theirs, always on slot 0:
+
+* `watch.sh <game.pkg>` (root) - `setup.sh` the first time (a ~1 GB
+  download), `prepare.py` (a build remembers its .pkg's size and time, so a
+  rebuilt one of the same name is unpacked again; `progress N` lines),
+  `run_game.sh --visible [--audio]`, then `apswitches.py` and `status.sh`.
+  `== Setup/Prepare/Game/Ready ==` headers drive the app's footer; exit codes
+  are listed in the script.  Barry-O's BBQ is refused (exit 10): it is
+  `apiav/`'s.
+* `status.sh` - key=value lines (the app parses them).
+* `stop.sh`, `cancel.sh` - Stop, and Cancel while a start is in flight.
+
+The switch window is `appf.py` on the app's Windows Python (a pfweb page,
+`appage/`), talking to `apctl.py` through one `ctl.sh --stream` pipe.  Its
+playfield is the game's own: every title ships its developers' OSC
+switch-matrix layout (`<title>.layout`: a playfield picture and each
+switch's spot on it), and `apswitches.py` copies the best-matching one into
+`$AP_RIG/switches.json` with groups and keys.  `py/aprun.py` writes the
+switches the game has active to `$AP_RIG/active` (the window lights them)
+and takes `!drain` (a ball back into the trough).
+
+Two fixes it needed: Legends of Valhalla's launcher sets
+`USING_AVCONTROLLER = "0"`, which `run_game.sh` read as an A/V title and
+parked its window off-screen (every picture was black); and `--audio` could
+not connect: WSLg's PulseAudio shares no memory with this distro, so the
+envs' libpulse gets `enable-shm = no` (`PULSE_CLIENTCONFIG`).
+
 ## What is open
 
 * **One A/V title at a time** across all slots: the game reaches `apiav` at
@@ -107,4 +138,7 @@ event closes a few seconds after the last coin).
   which 3.14 lacks, on the attract high-score page - the machine may run an
   older Python 3 from source. The rig uses 3.14 plus the stand-in.
 * Tank 25.08.28 (the older package) and Oktoberfest on the rig were not
-  played past attract. `--audio` and `--visible` are wired but not exercised.
+  played past attract.  `--audio` and `--visible` were exercised on Legends
+  of Valhalla only (PAD-292).
+* Settings, audits and high scores do not survive a run: `run_game.sh`
+  starts each from a fresh copy of the build.

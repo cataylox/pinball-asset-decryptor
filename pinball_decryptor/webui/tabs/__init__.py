@@ -38,6 +38,8 @@ TABS = (
      "emulate"),
     ("emulate_spike1", "emulate_spike1", "Emulate Spike1", "Emulate",
      "Play", "emulate"),
+    ("emulate_ap", "emulate_ap", "Emulate AP", "Emulate", "Play",
+     "emulate"),
     ("emulate_bof", "emulate_bof", "Emulate BoF", "Emulate", "Play",
      "emulate"),
     # Not a tab: the app-wide menus, windows and banners (settings, help,

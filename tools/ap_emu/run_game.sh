@@ -12,6 +12,9 @@
 #   --audio      play sound through WSLg's PulseAudio (default: SDL's disk
 #                writer into /dev/null - the game still opens its mixer)
 #
+# PAD_TITLE (the game's name, "Legends of Valhalla") and PAD_LABEL (whose
+# run, "PAD-292") title a visible run's windows "<label> - <title>".
+#
 # The game runs in $AP_RIG/game, a hard-linked copy of the build (it writes
 # its audits, settings and logs there, never into the cache), seen by the
 # game at its machine path /game/<machine_dir> in a private mount namespace
@@ -65,19 +68,25 @@ ADIR=$G/$LSUB
 if [ ! -d "$ADIR/assets" ]; then
     for d in "$G"/*/; do [ -d "$d/assets" ] && { ADIR=${d%/}; break; }; done
 fi
-AVC=0; grep -q USING_AVCONTROLLER "$G/$LAUNCHER" && AVC=1
-AP_AVC=$AVC "$AP_PY/bin/python2" "$AP_TOOLS/py/mkconfig.py" "$G/$LSUB" "$ADIR/../local_config/config.yaml" \
-    "$AP_PY/lib" "$ADIR" > "$AP_RIG/rig.log"
+# An A/V-controller title's launcher sets USING_AVCONTROLLER to "1" (below);
+# Legends of Valhalla's sets it to "0" and draws itself.
+AVC=0; grep -qE "USING_AVCONTROLLER['\"]\] *= *['\"]1" "$G/$LAUNCHER" && AVC=1
+AP_AVC=$AVC AP_VISIBLE=$VISIBLE "$AP_PY/bin/python2" "$AP_TOOLS/py/mkconfig.py" "$G/$LSUB" \
+    "$ADIR/../local_config/config.yaml" "$AP_PY/lib" "$ADIR" > "$AP_RIG/rig.log"
 mkfifo "$AP_RIG/input"
 echo "$BUILD" > "$AP_RIG/build"
 echo "$VISIBLE" > "$AP_RIG/visible"
+echo "${PAD_TITLE:-}" > "$AP_RIG/title"
+echo "${PAD_LABEL:-PAD} - ${PAD_TITLE:-$(basename "$BUILD")}" > "$AP_RIG/window_title"
 chown -R "$AP_USER": "$AP_RIG"
 
 if [ $VISIBLE = 1 ]; then
     DISP=${DISPLAY:-:0}
 else
     DISP=$AP_DISPLAY
-    setsid -f Xvfb "$DISP" -screen 0 2560x1440x24 -nolisten tcp \
+    # -noreset: Xvfb otherwise resets when its last client goes, and a
+    # connection arriving meanwhile fails (tools/dp_emu learned it).
+    setsid -f Xvfb "$DISP" -screen 0 2560x1440x24 -nolisten tcp -noreset \
         < /dev/null > "$AP_RIG/xvfb.log" 2>&1
     for _ in $(seq 1 50); do [ -e "/tmp/.X11-unix/X${DISP#:}" ] && break; sleep 0.1; done
     pgrep -xf "Xvfb $DISP .*" | head -1 > "$AP_RIG/xvfb.pid"
@@ -85,7 +94,12 @@ fi
 echo "$DISP" > "$AP_RIG/display"
 
 if [ $AUDIO = 1 ] && [ -S /mnt/wslg/PulseServer ]; then
-    AUDIO_ENV="SDL_AUDIODRIVER=pulse PULSE_SERVER=unix:/mnt/wslg/PulseServer"
+    # No shared memory with WSLg's PulseAudio: it runs in WSLg's own distro,
+    # whose /dev/shm this one cannot see, and the envs' libpulse (no memfd)
+    # then fails the whole connection ("shm_open() failed" -> "Could not
+    # connect to PulseAudio", and SkeletonGame refuses to start).
+    echo 'enable-shm = no' > "$AP_RIG/pulse-client.conf"
+    AUDIO_ENV="SDL_AUDIODRIVER=pulse PULSE_SERVER=unix:/mnt/wslg/PulseServer PULSE_CLIENTCONFIG=$AP_RIG/pulse-client.conf"
 else
     AUDIO_ENV="SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE=/dev/null SDL_DISKAUDIODELAY=0"
 fi
@@ -136,7 +150,7 @@ if [ $AVC = 1 ] && [ -x "$G/apiav" ]; then
     # only on its abstract socket, which a network namespace cannot see.)
     if awk '$4 == "0A" && $2 ~ /:4156$/ {f=1} END {exit !f}' /proc/net/tcp; then
         echo "run_game.sh: another slot's apiav holds port 16726 (one A/V title at a time)" >&2
-        exit 2
+        exit 9          # watch.sh passes it on: the app says why
     fi
 fi
 cat > "$AP_RIG/ns.sh" <<EOF
@@ -148,7 +162,7 @@ if [ -n "$FONTS" ]; then
     mkdir -p /game/houdini/assets/dmd/fonts
     mount --bind "$FONTS" /game/houdini/assets/dmd/fonts
 fi
-RUN="runuser -u $AP_USER -- env -i PATH=$(dirname "$GPY"):/usr/local/bin:/usr/bin:/bin HOME=$AP_RIG USER=$AP_USER LANG=C.UTF-8 DISPLAY=$DISP $AUDIO_ENV AP_LOG=$AP_RIG/rig.log"
+RUN="runuser -u $AP_USER -- env -i PATH=$(dirname "$GPY"):/usr/local/bin:/usr/bin:/bin HOME=$AP_RIG USER=$AP_USER LANG=C.UTF-8 DISPLAY=$DISP $AUDIO_ENV AP_LOG=$AP_RIG/rig.log AP_TITLE_FILE=$AP_RIG/window_title"
 if [ -n "$AV" ]; then
     cd "$GM${ADIR#$G}" || exit 1
     \$RUN LD_LIBRARY_PATH=$AP_AV/lib GST_PLUGIN_SYSTEM_PATH=$AP_AV/lib/gstreamer-1.0 \\

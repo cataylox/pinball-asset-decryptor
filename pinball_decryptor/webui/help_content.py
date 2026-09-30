@@ -1610,6 +1610,46 @@ HELP_CONTENT = {
          "runs, as a machine does. Sound follows Mute; the game's own volume "
          "is in its service menu."),
     ],
+    "Emulate AP": [
+        ("What it does",
+         "Runs the real American Pinball game on this PC - Houdini, "
+         "Oktoberfest, Hot Wheels, Legends of Valhalla or Galactic Tank Force "
+         "- in its own window, with its sound. The game carries its own "
+         "stand-in for the machine's controller board; the emulator gives it "
+         "what the machine's computer did (the Python it runs on, a full "
+         "trough, the coin door shut) and a way to press every switch, and "
+         "it boots into attract mode."),
+        ("Which file to pick",
+         "The game-code file (.pkg) - the one the machine installs from a "
+         "USB stick. That can be American Pinball's own, or one the Write "
+         "tab built from your edits: emulating it first is the quick way to "
+         "check a mod before it goes on a stick. The file is only read."),
+        ("Playing",
+         "When the game is up its switch window opens beside it: the game's "
+         "own playfield picture with its switches on it, and a list of them "
+         "all by name; the ones the game sees closed light up (the balls in "
+         "the trough, the one in the shooter lane). Hold a switch with the "
+         "mouse; right-click to latch it until you right-click again. There "
+         "is no ball physics: Start serves a ball to the shooter lane, "
+         "Plunge puts it into play, you press the switches it would hit, and "
+         "Drain sends it back to the trough. With that window focused, Z and "
+         "/ (or the Shift keys) are the flippers, 1 is Start, 5 a coin (two "
+         "or four make a credit), Space the Action button, P Plunge, D Drain, "
+         "and 7, 8, 9, 0 the service buttons. Closed it? \"Switches window\" "
+         "on this tab brings it back."),
+        ("First start is slower",
+         "The very first Start sets the emulator up inside the app's Linux: "
+         "it downloads the Python the games run on (about 1 GB, a few "
+         "minutes, once). Each new .pkg is then unpacked once (under a "
+         "minute) and kept, so starting it again is quick; a rebuilt mod is "
+         "unpacked fresh. While a game is starting the Start button is "
+         "Cancel."),
+        ("One at a time",
+         "Hot Wheels and Galactic Tank Force play their pictures and sound "
+         "through American Pinball's own player, which only one game at a "
+         "time can use. Barry-O's BBQ Challenge does not run here yet. "
+         "Sound follows Mute; the game's own volume is in its service menu."),
+    ],
     "Emulate": [
         ("What it does",
          "Runs the real Stern Spike 2 game binary on this PC — in its own "
