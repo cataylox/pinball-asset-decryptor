@@ -318,6 +318,42 @@ def test_ctl_commands(tmp_path):
     assert d.on_ctl("quit") == "ok bye" and not d.running
 
 
+def test_ball_model_serves_launches_and_drains(monkeypatch, tmp_path):
+    # PAD-269: off until `balls` turns it on; then the eject coil takes a ball
+    # out of the trough (packed from trough1) into the shooter lane half a
+    # second later, the launch coil empties the lane, `drain` puts one back.
+    clock = [100.0]
+    machine = prochw.Machine(str(YAML))
+    f = prochw.Fpga("p3roc", machine, machine.initial_closed(), clock=lambda: clock[0])
+    d = prochw.Daemon(str(tmp_path), f, open(tmp_path / "log", "w"))
+    p = attach(monkeypatch, f)
+    for n in (40, 41):
+        p.driver_update_state(blank(n))
+    p.driver_pulse(40, 20)
+    p.flush()
+    assert f.trough_balls() == 3                 # no model yet: nothing moves
+    assert d.on_ctl("plunge").startswith("err no ball model")
+    assert json.loads(d.on_ctl("balls eject=40 shooter=shooter launch=41")) == {
+        "eject": 40, "shooter": 79, "launch": 41, "trough": 3, "in_play": 0}
+    p.driver_pulse(40, 20)
+    p.flush()
+    assert f.trough_balls() == 2 and f.active(72) and f.active(73) and not f.active(74)
+    assert not f.active(79)
+    clock[0] += 0.5
+    f.tick()
+    assert f.active(79)                          # in the shooter lane
+    p.driver_pulse(41, 15)
+    p.flush()
+    clock[0] += 0.1
+    f.tick()
+    assert not f.active(79) and f.state()["balls"]["in_play"] == 1
+    assert d.on_ctl("plunge") == "err no ball in the shooter lane"
+    assert d.on_ctl("drain") == "ok drained" and f.trough_balls() == 3
+    assert d.on_ctl("drain") == "ok drained" and f.trough_balls() == 4
+    assert d.on_ctl("drain") == "err the trough is full"
+    assert d.on_ctl("balls eject=40").startswith("err")
+
+
 def test_write_i2c_data_is_a_buffered_module_7_write(monkeypatch):
     # AP's own pypinproc (BBQ on: rgb_led.py's PCA9685 LED chips): the same
     # burst as write_data(7, ...), but queued until the next flush.

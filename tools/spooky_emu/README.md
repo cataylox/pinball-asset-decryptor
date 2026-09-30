@@ -23,7 +23,8 @@ images are not needed.
 Not Warden games, refused by `prepare.sh` with the reason (exit 4):
 Halloween (`code_H78.pkg`) and Ultraman (`code_UM.pkg`) talk to Spooky's
 **Pinotaur** board (`/dev/pinheck`; PAD-268); Rick and Morty, Alice Cooper
-and Total Nuclear Annihilation are P-ROC games (PAD-269).
+and Total Nuclear Annihilation are P-ROC games: `proc/` runs the first two
+on tools/proc_emu's board (PAD-269, its README).
 
 **In the app** (PAD-266): Spooky Pinball has an **Emulate** tab
 (`webui/tabs/emulate_spooky.py`) built on the American Pinball tab, the

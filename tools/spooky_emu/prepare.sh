@@ -31,7 +31,7 @@ case "$NAME" in
         echo "prepare.sh: $NAME is Halloween or Ultraman, which run on Spooky's Pinotaur board - this emulator answers the Warden board only" >&2
         exit 4 ;;
     rm-gamecode*|ac-gamecode*|tna-gamecode*)
-        echo "prepare.sh: $NAME is a P-ROC game (Rick and Morty, Alice Cooper or Total Nuclear Annihilation) - this emulator answers the Warden board only" >&2
+        echo "prepare.sh: $NAME is a P-ROC game (Rick and Morty, Alice Cooper or Total Nuclear Annihilation) - this emulator answers the Warden board only; proc/ runs Rick and Morty and Alice Cooper" >&2
         exit 4 ;;
 esac
 
