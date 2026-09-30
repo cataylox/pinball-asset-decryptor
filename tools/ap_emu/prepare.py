@@ -12,6 +12,13 @@ it (`launcher`) and the folder it lives in on the machine (`machine_dir`,
 
 <name> defaults to the .pkg's name without "-gamecode" (houdini_21.10.25).
 macOS litter (.DS_Store, ._*, __MACOSX/) is skipped.
+
+A build remembers the .pkg it came from (`source`: size and time); a .pkg
+of the same name that differs - one the Write tab rebuilt - is unpacked
+again.  While it works it prints `progress N` (percent) for the app's
+footer: decrypting is the first half, unpacking the second.  Exit: 0
+ready, 2 no rig env (setup.sh), 4 not an American Pinball game-code .pkg
+(it does not decrypt to a game).
 """
 import argparse
 import os
@@ -47,14 +54,42 @@ def decrypt(pkg, out_zip):
         size = struct.unpack("<Q", f.read(8))[0]
         iv = f.read(16)
     key = ap_key()
+    total = max(os.path.getsize(pkg) - 24, 1)
     with open(pkg, "rb") as src, open(out_zip, "wb") as dst:
         src.seek(24)
         p = subprocess.Popen([OPENSSL, "enc", "-d", "-aes-256-cbc", "-nopad",
                               "-K", key.hex(), "-iv", iv.hex()],
-                             stdin=src, stdout=dst)
+                             stdin=subprocess.PIPE, stdout=dst)
+        # Fed from here, not handed the file: a 1 GB package takes a minute
+        # or two off a spinning disk, and the app's footer shows how far.
+        done = shown = 0
+        try:
+            while True:
+                chunk = src.read(4 << 20)
+                if not chunk:
+                    break
+                p.stdin.write(chunk)
+                done += len(chunk)
+                pct = DECRYPT_SHARE * done // total
+                if pct >= shown + 2:
+                    shown = pct
+                    print("progress %d" % pct, flush=True)
+            p.stdin.close()
+        except BrokenPipeError:
+            pass
         if p.wait() != 0:
-            sys.exit("prepare.py: openssl failed on %s" % pkg)
+            print("prepare.py: openssl failed on %s" % pkg, file=sys.stderr)
+            sys.exit(4)
     os.truncate(out_zip, size)
+
+
+#: The progress lines' split: decrypting is the first half, unpacking the rest.
+DECRYPT_SHARE = 50
+
+
+def stamp(pkg):
+    st = os.stat(pkg)
+    return "%d %d" % (st.st_size, int(st.st_mtime))
 
 
 def litter(name):
@@ -69,21 +104,43 @@ def main():
     ap.add_argument("--force", action="store_true")
     a = ap.parse_args()
     if not os.path.exists(OPENSSL):
-        sys.exit("prepare.py: no %s - run setup.sh first" % OPENSSL)
+        print("prepare.py: no %s - run setup.sh first" % OPENSSL, file=sys.stderr)
+        sys.exit(2)
     name = a.name or os.path.basename(a.pkg).rsplit(".", 1)[0].replace("-gamecode", "")
     dest = os.path.join(AP_CACHE, name)
-    if os.path.exists(os.path.join(dest, "launcher")) and not a.force:
+    try:
+        with open(os.path.join(dest, "source")) as f:
+            same = f.read().strip() == stamp(a.pkg)
+    except OSError:
+        same = False
+    if os.path.exists(os.path.join(dest, "launcher")) and same and not a.force:
         print("%s: already prepared (--force to redo)" % dest)
         return
     shutil.rmtree(dest, ignore_errors=True)
     os.makedirs(dest)
     tmp = dest + ".zip"
     print("decrypting %s ..." % a.pkg, flush=True)
+    print("progress 0", flush=True)
     decrypt(a.pkg, tmp)
     try:
-        with zipfile.ZipFile(tmp) as z:
+        try:
+            z = zipfile.ZipFile(tmp)
+        except zipfile.BadZipFile:
+            print("prepare.py: %s is not an American Pinball game-code package" % a.pkg,
+                  file=sys.stderr)
+            shutil.rmtree(dest, ignore_errors=True)
+            sys.exit(4)
+        with z:
             n = 0
-            for i in z.infolist():
+            items = z.infolist()
+            total = sum(i.file_size for i in items) or 1
+            done, shown = 0, DECRYPT_SHARE
+            for i in items:
+                done += i.file_size
+                pct = DECRYPT_SHARE + (100 - DECRYPT_SHARE) * done // total
+                if pct >= shown + 2:
+                    shown = pct
+                    print("progress %d" % pct, flush=True)
                 if litter(i.filename) or i.is_dir():
                     continue
                 z.extract(i, dest)
@@ -94,12 +151,20 @@ def main():
         os.remove(tmp)
     launcher = next((l for l in LAUNCHERS if os.path.exists(os.path.join(dest, l))), None)
     if not launcher:
-        sys.exit("prepare.py: %s has none of %s" % (dest, ", ".join(LAUNCHERS)))
+        print("prepare.py: %s has none of %s" % (dest, ", ".join(LAUNCHERS)), file=sys.stderr)
+        shutil.rmtree(dest, ignore_errors=True)
+        sys.exit(4)
     # Where it lives on the machine (/game/<dir>): run_game.sh puts it there.
     mdir = subprocess.check_output([os.path.join(AP_ROOT, "py27", "bin", "python2"),
                                     os.path.join(HERE, "py", "machinedir.py"), dest]).decode().strip()
     with open(os.path.join(dest, "machine_dir"), "w") as f:
         f.write(mdir + "\n")
+    with open(os.path.join(dest, "source"), "w") as f:
+        f.write(stamp(a.pkg) + "\n")
+    # which .pkg it came from, for the Emulate AP tab's Cache window
+    with open(os.path.join(dest, "pkg"), "w") as f:
+        f.write(os.path.abspath(a.pkg) + "\n")
+    # `launcher` last: it is what marks the build finished.
     with open(os.path.join(dest, "launcher"), "w") as f:
         f.write(launcher + "\n")
     print("%s: %d files, launcher %s, on the machine /game/%s" % (dest, n, launcher, mdir))

@@ -65,6 +65,11 @@ if not (grid and os.path.isdir(os.path.join(here, grid))):
 # fixed port (9000), so a second slot's game dies on it.  sw.py is the input.
 cfg.setdefault("default_modes", {})
 cfg["default_modes"]["osc_input"] = False
+# Ball search: with no ball rolling, ~18 s without a switch hit is normal on
+# the rig, and the search it starts fires coils that end in a free ball save
+# (Legends of Valhalla's ship release grants 5 s) - so the Drain that follows
+# never ends the ball (PAD-292).  Nothing on the rig is ever lost to find.
+cfg["default_modes"]["ball_search"] = False
 # An A/V-controller title (AP_AVC=1: its launcher sets USING_AVCONTROLLER)
 # hands the screen and sound to apiav: SkeletonGame does that when its own HD
 # display is off.
@@ -75,6 +80,10 @@ if os.environ.get("AP_AVC") == "1":
     # The desktop window then only shows the boot splash, over apiav's screen:
     # park it off the display (the desktop itself stays - it owns SDL).
     cfg["screen_position_x"] = 4000
+# A visible run (AP_VISIBLE=1) is a window on somebody's desktop: framed, so
+# it can be moved; the machine's (and a hidden run's) is borderless at 0,0.
+if os.environ.get("AP_VISIBLE") == "1":
+    cfg["dmd_window_border"] = True
 cfg.setdefault("dmd_dots_w", 1366)
 cfg.setdefault("dmd_dots_h", 768)
 cfg.setdefault("desktop_dmd_scale", 1)

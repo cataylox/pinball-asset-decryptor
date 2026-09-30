@@ -11,6 +11,11 @@
 #                shot.sh shows a hidden run)
 #   --audio      play sound through WSLg's PulseAudio (default: SDL's disk
 #                writer into /dev/null - the game still opens its mixer)
+#                PAD_AUDIO_CTL (the app's audio_ctl.json, a WSL path) makes
+#                its level follow the app's Volume / Mute, live (apvol.py)
+#
+# PAD_TITLE (the game's name, "Legends of Valhalla") and PAD_LABEL (whose
+# run, "PAD-292") title a visible run's windows "<label> - <title>".
 #
 # The game runs in $AP_RIG/game, a hard-linked copy of the build (it writes
 # its audits, settings and logs there, never into the cache), seen by the
@@ -65,19 +70,26 @@ ADIR=$G/$LSUB
 if [ ! -d "$ADIR/assets" ]; then
     for d in "$G"/*/; do [ -d "$d/assets" ] && { ADIR=${d%/}; break; }; done
 fi
-AVC=0; grep -q USING_AVCONTROLLER "$G/$LAUNCHER" && AVC=1
-AP_AVC=$AVC "$AP_PY/bin/python2" "$AP_TOOLS/py/mkconfig.py" "$G/$LSUB" "$ADIR/../local_config/config.yaml" \
-    "$AP_PY/lib" "$ADIR" > "$AP_RIG/rig.log"
+# An A/V-controller title's launcher sets USING_AVCONTROLLER to "1" (below);
+# Legends of Valhalla's sets it to "0" and draws itself.
+AVC=0; grep -qE "USING_AVCONTROLLER['\"]\] *= *['\"]1" "$G/$LAUNCHER" && AVC=1
+AP_AVC=$AVC AP_VISIBLE=$VISIBLE "$AP_PY/bin/python2" "$AP_TOOLS/py/mkconfig.py" "$G/$LSUB" \
+    "$ADIR/../local_config/config.yaml" "$AP_PY/lib" "$ADIR" > "$AP_RIG/rig.log"
 mkfifo "$AP_RIG/input"
 echo "$BUILD" > "$AP_RIG/build"
+touch "$BUILD/used"                         # the Cache window's "Last played"
 echo "$VISIBLE" > "$AP_RIG/visible"
+echo "${PAD_TITLE:-}" > "$AP_RIG/title"
+echo "${PAD_LABEL:-PAD} - ${PAD_TITLE:-$(basename "$BUILD")}" > "$AP_RIG/window_title"
 chown -R "$AP_USER": "$AP_RIG"
 
 if [ $VISIBLE = 1 ]; then
     DISP=${DISPLAY:-:0}
 else
     DISP=$AP_DISPLAY
-    setsid -f Xvfb "$DISP" -screen 0 2560x1440x24 -nolisten tcp \
+    # -noreset: Xvfb otherwise resets when its last client goes, and a
+    # connection arriving meanwhile fails (tools/dp_emu learned it).
+    setsid -f Xvfb "$DISP" -screen 0 2560x1440x24 -nolisten tcp -noreset \
         < /dev/null > "$AP_RIG/xvfb.log" 2>&1
     for _ in $(seq 1 50); do [ -e "/tmp/.X11-unix/X${DISP#:}" ] && break; sleep 0.1; done
     pgrep -xf "Xvfb $DISP .*" | head -1 > "$AP_RIG/xvfb.pid"
@@ -85,7 +97,12 @@ fi
 echo "$DISP" > "$AP_RIG/display"
 
 if [ $AUDIO = 1 ] && [ -S /mnt/wslg/PulseServer ]; then
-    AUDIO_ENV="SDL_AUDIODRIVER=pulse PULSE_SERVER=unix:/mnt/wslg/PulseServer"
+    # No shared memory with WSLg's PulseAudio: it runs in WSLg's own distro,
+    # whose /dev/shm this one cannot see, and the envs' libpulse (no memfd)
+    # then fails the whole connection ("shm_open() failed" -> "Could not
+    # connect to PulseAudio", and SkeletonGame refuses to start).
+    echo 'enable-shm = no' > "$AP_RIG/pulse-client.conf"
+    AUDIO_ENV="SDL_AUDIODRIVER=pulse PULSE_SERVER=unix:/mnt/wslg/PulseServer PULSE_CLIENTCONFIG=$AP_RIG/pulse-client.conf"
 else
     AUDIO_ENV="SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE=/dev/null SDL_DISKAUDIODELAY=0"
 fi
@@ -126,7 +143,7 @@ fi
 # commands over localhost TCP to AP's native `apiav`, which the machine's
 # xinitrc starts first: `apiav -d <game>/assets -x &` in the game folder.
 # apiav's GStreamer/SDL2 come from their own env ($AP_AV, setup.sh).
-AV=""
+AV=""; AV_PRELOAD=""
 if [ $AVC = 1 ] && [ -x "$G/apiav" ]; then
     AV="$GM/apiav -d $GM${ADIR#$G}/assets -x"
     echo 1 > "$AP_RIG/av"
@@ -136,8 +153,15 @@ if [ $AVC = 1 ] && [ -x "$G/apiav" ]; then
     # only on its abstract socket, which a network namespace cannot see.)
     if awk '$4 == "0A" && $2 ~ /:4156$/ {f=1} END {exit !f}' /proc/net/tcp; then
         echo "run_game.sh: another slot's apiav holds port 16726 (one A/V title at a time)" >&2
-        exit 2
+        exit 9          # watch.sh passes it on: the app says why
     fi
+    # apquit.so: closing an apiav window ends it (apiav ignores SDL's close
+    # events; apquit.c).  Built here, once, against the env's SDL headers.
+    QUIT=$AP_ROOT/apquit.so
+    if [ ! -f "$QUIT" ] || [ "$AP_TOOLS/apquit.c" -nt "$QUIT" ]; then
+        gcc -shared -fPIC -O2 -I"$AP_AV/include" -o "$QUIT" "$AP_TOOLS/apquit.c" -ldl             || echo "run_game.sh: could not build apquit.so - an apiav window's X will do nothing" >&2
+    fi
+    [ -f "$QUIT" ] && AV_PRELOAD="LD_PRELOAD=$QUIT" || AV_PRELOAD=""
 fi
 cat > "$AP_RIG/ns.sh" <<EOF
 mount -t tmpfs -o mode=755 tmpfs /game || exit 1
@@ -148,22 +172,40 @@ if [ -n "$FONTS" ]; then
     mkdir -p /game/houdini/assets/dmd/fonts
     mount --bind "$FONTS" /game/houdini/assets/dmd/fonts
 fi
-RUN="runuser -u $AP_USER -- env -i PATH=$(dirname "$GPY"):/usr/local/bin:/usr/bin:/bin HOME=$AP_RIG USER=$AP_USER LANG=C.UTF-8 DISPLAY=$DISP $AUDIO_ENV AP_LOG=$AP_RIG/rig.log"
+RUN="runuser -u $AP_USER -- env -i PATH=$(dirname "$GPY"):/usr/local/bin:/usr/bin:/bin HOME=$AP_RIG USER=$AP_USER LANG=C.UTF-8 DISPLAY=$DISP $AUDIO_ENV AP_LOG=$AP_RIG/rig.log AP_TITLE_FILE=$AP_RIG/window_title"
 if [ -n "$AV" ]; then
     cd "$GM${ADIR#$G}" || exit 1
     \$RUN LD_LIBRARY_PATH=$AP_AV/lib GST_PLUGIN_SYSTEM_PATH=$AP_AV/lib/gstreamer-1.0 \\
-        GST_REGISTRY=$AP_RIG/gst-registry.bin $AV > "$AP_RIG/apiav.out" 2>&1 &
+        GST_REGISTRY=$AP_RIG/gst-registry.bin AP_FIFO=$AP_RIG/input $AV_PRELOAD $AV > "$AP_RIG/apiav.out" 2>&1 &
     sleep 2
 fi
 cd "$GM${ADIR#$G}" || exit 1
-exec \$RUN PYTHONPATH="$PYP" PYSDL2_DLL_PATH="$AP_PY/lib" \\
+\$RUN PYTHONPATH="$PYP" PYSDL2_DLL_PATH="$AP_PY/lib" \\
     AP_FIFO="$AP_RIG/input" AP_PIDFILE="$AP_RIG/game.pid" \\
-    "$GPY" -u "$AP_TOOLS/py/aprun.py" "$(realpath --relative-to="$ADIR" "$G/$LAUNCHER")"
+    "$GPY" -u "$AP_TOOLS/py/aprun.py" "$(realpath --relative-to="$ADIR" "$G/$LAUNCHER")" &
+# The game and apiav go together: when either ends - the game's window X
+# (aprun.py quits on it), apiav's window closed, a crash - the other is
+# stopped, so no window of the run is left behind (PAD-292).
+GAME=\$!
+if [ -n "$AV" ]; then
+    PAD_SLOT=$AP_SLOT . "$AP_TOOLS/appath.sh"
+    while kill -0 \$GAME 2>/dev/null && pgrep -f '^$GM/apiav ' >/dev/null; do sleep 1; done
+    for p in \$(ap_slot_pids); do kill -TERM \$p 2>/dev/null; done
+fi
+wait \$GAME
 EOF
 # Detached whole (setsid -f, stdin closed): a child of runuser dies with the
 # wsl.exe that started this (tools/bof_emu learned it).
 setsid -f unshare -m --propagation private bash "$AP_RIG/ns.sh" \
     < /dev/null > "$AP_RIG/game.out" 2>&1
+# The app's Volume / Mute, live: apvol.py holds this slot's streams (the
+# game's, apiav's) at the level in the control file every Emulate tab writes.
+# It waits for the game, and ends with it.
+if [ $AUDIO = 1 ] && [ -n "${PAD_AUDIO_CTL:-}" ] && [ -S /mnt/wslg/PulseServer ]; then
+    setsid -f python3 "$AP_TOOLS/apvol.py" --ctl "$PAD_AUDIO_CTL" --rig "$AP_RIG" \
+        --pactl "$AP_AV/bin/pactl" --client-conf "$AP_RIG/pulse-client.conf" \
+        < /dev/null >> "$AP_RIG/apvol.log" 2>&1
+fi
 
 # Up = its run loop started (aprun.py logs it; the window comes first).  A
 # big title loads its assets for a minute or more before that.

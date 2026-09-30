@@ -47,6 +47,7 @@ PROJECT_FIELDS = (
     ("emulate_topper", "emulate._topper_var", "bool", True),
     ("jjp_emulate_iso", "jjp_emulate_iso_var", "path", ""),
     ("spike1_emulate_card", "spike1_emulate_card_var", "path", ""),
+    ("ap_emulate_pkg", "ap_emulate_pkg_var", "path", ""),
     ("bof_emulate_fun", "bof_emulate_fun_var", "path", ""),
     ("dp_emulate_img", "dp_emulate_img_var", "path", ""),
     ("dp_emulate_zip", "dp_emulate_zip_var", "path", ""),

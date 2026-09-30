@@ -12,6 +12,8 @@ stop_pid() {        # <pid>: TERM, wait up to 3 s, then KILL
 }
 
 for p in $(ap_slot_pids); do stop_pid "$p"; done
+# the volume follower (apvol.py) ends with the game; this is for a hard stop
+pkill -f "apvol\.py .*--rig $AP_RIG " 2>/dev/null
 stop_pid "$(cat "$AP_RIG/xvfb.pid" 2>/dev/null)"
 
 left=$(ap_slot_pids)

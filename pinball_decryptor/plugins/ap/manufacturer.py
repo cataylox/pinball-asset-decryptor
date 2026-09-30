@@ -24,6 +24,9 @@ class AmericanPinballManufacturer(Manufacturer):
         # any loose video clip (LCD attract / mode footage) round-trips the
         # same way audio does.  The tab self-empties for games that ship none.
         replace_video=True,
+        # Emulate tab: any title from its .pkg on the game's own
+        # FakePinPROC (tools/ap_emu).
+        emulate_ap=True,
     )
     input_spec = InputSpec(
         label="American Pinball game files",

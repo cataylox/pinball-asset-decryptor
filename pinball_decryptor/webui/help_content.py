@@ -1652,6 +1652,60 @@ HELP_CONTENT = {
          "runs, as a machine does. Sound follows Mute; the game's own volume "
          "is in its service menu."),
     ],
+    "Emulate AP": [
+        ("What it does",
+         "Runs the real American Pinball game on this PC - Houdini, "
+         "Oktoberfest, Hot Wheels, Legends of Valhalla or Galactic Tank Force "
+         "- in its own window, with its sound. The game carries its own "
+         "stand-in for the machine's controller board; the emulator gives it "
+         "what the machine's computer did (the Python it runs on, a full "
+         "trough, the coin door shut) and a way to press every switch, and "
+         "it boots into attract mode."),
+        ("Which file to pick",
+         "The game-code file (.pkg) - the one the machine installs from a "
+         "USB stick. That can be American Pinball's own, or one the Write "
+         "tab built from your edits: emulating it first is the quick way to "
+         "check a mod before it goes on a stick. The file is only read."),
+        ("Playing",
+         "When the game is up its virtual playfield opens beside it - the "
+         "same window as the Stern Emulate tab's. Where the game has a "
+         "playfield picture (Legends of Valhalla, Houdini, Galactic Tank "
+         "Force) its switches and lights are drawn on it, the lights lit in "
+         "the game's colours; otherwise its lights show as a grid and its "
+         "switches as a list. A green dot is a switch the game sees made. "
+         "Hold a switch with the mouse; hold the right button on one to rip "
+         "it (a spinner spinning), as on Stern. There is no ball physics: Start "
+         "serves a ball to the shooter lane, Plunge puts it into play, you "
+         "press the switches it would hit, and Drain sends it back to the "
+         "trough, ending the ball - unless the game's ball save is still "
+         "running (the first seconds after the ball reaches the playfield, "
+         "12 on Legends of Valhalla), when it serves the ball again, as the "
+         "machine would. With that window or one of the game's own windows "
+         "focused, the arrow keys are the "
+         "flippers, 1 is Start, 5 a coin (two or four make a credit), Space "
+         "the Action button, T tilt, the letters beside the playfield "
+         "switches press them, F plunges, D drains, C opens and shuts the coin "
+         "door, Backspace, -, = and Enter are the service buttons, and Pause "
+         "or F9 (in the playfield window) freezes the game. Closed it? "
+         "\"Switches window\" on this tab "
+         "brings it back."),
+        ("First start is slower",
+         "The very first Start sets the emulator up inside the app's Linux: "
+         "it downloads the Python the games run on (about 1 GB, a few "
+         "minutes, once). Each new .pkg is then unpacked once (under a "
+         "minute) and kept, so starting it again is quick; a rebuilt mod is "
+         "unpacked fresh. While a game is starting the Start button is "
+         "Cancel."),
+        ("One at a time",
+         "Hot Wheels and Galactic Tank Force play their pictures and sound "
+         "through American Pinball's own player, which only one game at a "
+         "time can use. Barry-O's BBQ Challenge does not run here yet. "
+         "Volume and Mute change the game's sound while it plays; the game's "
+         "own volume is in its service menu."),
+        ("Stopping",
+         "Stop ends the game and closes its switch window. So does closing "
+         "any of the game's own windows with its X."),
+    ],
     "Emulate": [
         ("What it does",
          "Runs the real Stern Spike 2 game binary on this PC — in its own "
