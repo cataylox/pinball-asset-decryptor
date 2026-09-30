@@ -62,17 +62,16 @@ export default function EmulateAP() {
     <span class="emu-sp"></span>
     <${Check} ns="emulate_ap" k="mute" checked=${!!s.mute} label="Mute" title=${s.sound_tip} />`;
   return html`<div class="page emu-page">
-    <${PageHead} title="Emulate" sub=${introLines(s.intro)}>
-      <${Button} kind="ghost" disabled=${!s.rig_ok} onClick=${() => call("emulate_ap.open_cache")}
-        title="Shows and manages what the emulator keeps in the app's Linux: each game unpacked from its .pkg, and the one-time setup. Deleting frees the space now; it is unpacked (or downloaded) again on the next Start.">Cache…<//>
-    <//>
+    <${PageHead} title="Emulate" sub=${introLines(s.intro)} />
     <div class="cols c75 emu-cols">
       <div class="stack emu-col">
         <${Card} title="Game" cls="emu-src"
           extra=${s.game ? html`<${Chip} kind="ok" dot>${s.game}<//>` : null} footer=${footer}>
           <label class="small">Game code (.pkg)</label>
           <${PathField} ns="emulate_ap" k="pkg" value=${s.pkg} title=${s.pkg_tip} history=${hist}
-            placeholder="lov-gamecode_25.08.27.pkg - or a build from Write" onBrowse=${() => call("emulate_ap.browse")} />
+            placeholder="lov-gamecode_25.08.27.pkg - or a build from Write" onBrowse=${() => call("emulate_ap.browse")}
+            extra=${html`<${Button} kind="ghost" disabled=${!s.rig_ok} onClick=${() => call("emulate_ap.open_cache")}
+              title="Shows and manages what the emulator keeps in the app's Linux: each game unpacked from its .pkg, and the one-time setup. Deleting frees the space now; it is unpacked (or downloaded) again on the next Start.">Cache…<//>`} />
           <span class="small muted">${s.pkg_tip}</span>
         <//>
         ${s.note ? html`<${Note} kind="warn">${s.note}<//>` : null}
