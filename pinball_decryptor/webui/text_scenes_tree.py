@@ -435,6 +435,7 @@ class TreeEditMixin:
             return
         self._fonts = None
         self._tsizes = None
+        self._tree_unselect()                    # it comes back with nothing selected (PAD-294)
         self._restate_list()                     # a Write since: its scenes are written now
         if self._tree_available(self._sel):
             self._render_tree_preview(self._sel, quiet=True)
@@ -781,6 +782,14 @@ class TreeEditMixin:
             size = _kept_size(picks.get(d["image"]) or {})
             if size is not None:
                 d["w"], d["h"] = size
+
+    def _tree_unselect(self):
+        """Nothing selected: a scene opens, and the Scenes tab comes forward, with no layer
+        picked, since a selected one is drawn on top (DragonRR, PAD-294)."""
+        self._tsel = None
+        self._tsels = []
+        self._tanchor = None
+        self._tpeek = None
 
     def _tree_sels(self):
         """Every selected node, the last one picked (``_tsel``) last.  Whatever selects a

@@ -645,6 +645,34 @@ def test_a_greyed_layer_is_shown_on_top_where_it_is_while_selected(tmp_path):
         w.call("text_scenes.close")
 
 
+def test_the_scene_and_the_tab_come_back_with_nothing_selected(tmp_path):
+    """DragonRR (PAD-294): a selected layer is drawn on top, and it stayed selected when the
+    Scenes tab came forward again or the scene was picked again.  Both start with nothing
+    selected now; the page drops the selection on a click outside the picture."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _open(w, folder)
+        assert _tv(w)["sel"] is None and _tv(w)["sels"] == []
+        assert w.call("text_scenes.tree_moment", "f:12")
+        assert _wait(w, lambda: _tv(w)["frame"] == 12)
+        off = [l for l in _tv(w)["layers"] if not l["drawn"]][0]["id"]
+        assert w.call("text_scenes.tree_select", off)
+        assert _tv(w)["sel"] == off and _tv(w)["props"]["peek"]
+        w.run(svc.refresh_view)                                        # the tab comes forward
+        assert _wait(w, lambda: _tv(w)["sel"] is None)
+        tv = _tv(w)
+        assert tv["sels"] == [] and tv["props"] is None
+        assert off not in {l["id"] for l in tv["layers"] if l["drawn"]}   # no longer on top
+        pic = tv["hits"][0]["id"]
+        assert w.call("text_scenes.tree_select", pic)
+        assert _tv(w)["sel"] == pic
+        w.call("text_scenes.select", "/g/scene1")                      # the same scene again
+        assert _wait(w, lambda: _tv(w)["sel"] is None)
+        w.call("text_scenes.close")
+
+
 def _meter_scene():
     """Godzilla's energy meter in small: a sprite the game picks a look of (Level 0, Level 1),
     one picture per level, and a picture the timeline only reaches at frame 10."""
