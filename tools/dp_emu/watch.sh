@@ -37,9 +37,13 @@ python3 "$HERE/prepare.py" image "$IMG" --name "$NAME" --keep 2 | tee "$DP_ROOT/
 rc=${PIPESTATUS[0]}
 [ "$rc" = 0 ] || exit "$rc"
 BUILD=$DP_CACHE/$NAME
+# Alice takes no update here (it installs them from a USB stick).  An update
+# in the field is most likely a Big Lebowski zip left from an earlier run -
+# the tab remembers it per project - so it is set aside, not a reason to
+# refuse the start (PAD-263: TBL-v1.10.zip stopped an Alice start).
 if [ $# -gt 0 ] && [ "$(cat "$BUILD/kind" 2>/dev/null)" = aaiw ]; then
-    echo "watch.sh: Alice's Adventures in Wonderland installs its updates from a USB stick; play the disk image as it is" >&2
-    exit 5
+    echo "note: Alice's Adventures in Wonderland takes no update here - playing the disk image as it is (set aside: $(for z in "$@"; do basename "$z"; done | paste -sd' '))"
+    set --
 fi
 if [ $# -gt 0 ]; then
     ZNAME=$NAME

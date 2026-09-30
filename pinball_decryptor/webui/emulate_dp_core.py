@@ -47,8 +47,8 @@ EXIT_TEXT = {
     2: "The disk image or update file could not be read.",
     3: "Not enough free space in the app's Linux to unpack this game.",
     4: "This disk image holds no Dutch Pinball game (/home/dp/game).",
-    5: "The update does not install onto the version on this disk image "
-       "(Alice's Adventures in Wonderland takes no update here).",
+    5: "The update does not install onto the version on this disk image - "
+       "clear the Update field to play the image as it is.",
     6: "The game did not start.",
     8: "The game started, then exited during start-up.",
 }
