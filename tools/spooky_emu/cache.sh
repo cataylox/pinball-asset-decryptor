@@ -26,10 +26,12 @@ in_use() {          # the builds running games use, one per line
 case "${1:-}" in
     --list)
         for b in "$SPK_CACHE"/*/; do
-            [ -x "$b/main.x86_64" ] || continue
+            # Texas Chainsaw's and Evil Dead's game is in uptest/
+            exe=$b/main.x86_64; [ -x "$exe" ] || exe=$b/uptest/main.x86_64
+            [ -x "$exe" ] || continue
             n=$(basename "$b")
             echo "entry=$n kind=build kb=$(du -sk "$b" 2>/dev/null | cut -f1)" \
-                "used=$(stat -c %Y "$b/used" 2>/dev/null || stat -c %Y "$b/main.x86_64")" \
+                "used=$(stat -c %Y "$b/used" 2>/dev/null || stat -c %Y "$exe")" \
                 "src=$(cat "$b/src" 2>/dev/null)"
         done
         mkdir -p "$SPK_ROOT"
