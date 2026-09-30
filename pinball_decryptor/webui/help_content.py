@@ -464,6 +464,15 @@ HELP_CONTENT = {
          "Battle Select) changes after a restart. Untick \"Include my Scenes tab edits\" (under \"Apply my replaced assets on top\") to run the card with your other replacements but the scenes as they were. Lines of W's (or AAA) are the game's own placeholders "
          "for text it fills in while it runs, such as high score initials: the game writes the "
          "player's letters there, so they are as wide as the widest name can be."),
+        ("Save and load scene edits",
+         "\"Save / load edits\" at the head of the Scenes page saves this scene's "
+         "edits, or every edited scene's, to one .zip with the pictures they add, "
+         "to share or keep. Loading such a file replaces a scene's own edits (it "
+         "asks first when the scene has some). A scene is found by its path, so a "
+         "file from the LE loads on the Pro; a scene this card lacks is left out "
+         "and named, and an added picture whose name is taken by a different one "
+         "is renamed. The file holds the scene editor's edits only, not Text-tab "
+         "colours or text layout."),
         ("Size limits",
          "On most games patching is size-neutral: a same-or-smaller "
          "replacement fits as-is, a larger one is re-encoded down to the "
@@ -2615,6 +2624,12 @@ PREVIEW_HELP = {
              "same game, or its Pro beside the Premium, keeps every sound "
              "number; another game keeps only the callouts the app measured on "
              "both."),
+            ("Save and load a file",
+             "Save / load, under the list, saves the open mode, or every mode, "
+             "to one .zip holding each mode's whole folder (picture, clip, "
+             "sounds and code), to share or keep. Loading such a file adds its "
+             "modes to this project exactly as Copy to… would: each is matched "
+             "to this card's shots by name, and a name already here gets _2."),
             ("Try it",
              "Try it builds this project's modes exactly as Write puts them on a "
              "card, then starts the card in the Emulate tab with them; the run is "
