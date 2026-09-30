@@ -101,6 +101,24 @@ else
     AUDIO_ENV="PULSE_SERVER=unix:/nonexistent SDL_AUDIODRIVER=dummy"
 fi
 
+# The renderer.  Mesa's llvmpipe (software, on the CPU) was the default and
+# drew the game at a crawl on the desktop.  WSL gives Linux the Windows GPU
+# (/dev/dxg + /usr/lib/wsl/lib/libd3d12.so) and Mesa's d3d12 driver renders
+# OpenGL on it - on WSLg's desktop and on a hidden Xvfb alike.  SPK_GL=
+# llvmpipe forces the CPU (a machine without a usable GPU does that anyway:
+# Mesa falls back).  The frame rate: Mesa's HUD samples it, draws nothing
+# (GALLIUM_HUD_VISIBLE=false) and appends it to $SPK_RIG/hud/fps; status.sh
+# reports the latest.
+GL=${SPK_GL:-auto}
+if [ "$GL" = auto ]; then
+    GL=llvmpipe
+    [ -e /dev/dxg ] && [ -e /usr/lib/wsl/lib/libd3d12.so ] && GL=d3d12
+fi
+echo "$GL" > "$SPK_RIG/gl"
+mkdir -p "$SPK_RIG/hud"; chown "$SPK_USER": "$SPK_RIG/hud"
+GL_ENV="GALLIUM_DRIVER=$GL GALLIUM_HUD=fps GALLIUM_HUD_VISIBLE=false GALLIUM_HUD_PERIOD=1 GALLIUM_HUD_DUMP_DIR=$SPK_RIG/hud"
+[ "$GL" = d3d12 ] && GL_ENV="$GL_ENV LD_LIBRARY_PATH=/usr/lib/wsl/lib"
+
 cat > "$SPK_RIG/ns.sh" <<EOF
 hostname pad-rig-$SPK_SLOT
 mount -t tmpfs -o mode=755 tmpfs /game || exit 1
@@ -112,7 +130,7 @@ chown "$SPK_USER": /game /game/code /game/vosk
 cd /game/code/uptest || exit 1
 exec runuser -u $SPK_USER -- env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=$SPK_RIG/home \\
     USER=$SPK_USER LANG=C.UTF-8 DISPLAY=$DISP $AUDIO_ENV SPK_MARK=$SPK_RIG \\
-    LP_NUM_THREADS=${SPK_LP_THREADS:-4} \\
+    LP_NUM_THREADS=${SPK_LP_THREADS:-4} $GL_ENV \\
     SPK_WARDEN=$TTY LD_PRELOAD=$SPK_SHIM \\
     ./main.x86_64 -logFile $SPK_RIG/player.log -screen-fullscreen 0 \\
     $SIZE -force-glcore

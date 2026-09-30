@@ -45,8 +45,9 @@ Beetlejuice is a Unity 2022.3 game with the Mono backend (`main.x86_64` +
 So the update alone runs on PAD-Runtime's Ubuntu 24.04; Spooky's restore
 image (`bj_production_base_image_2026.04.10.zip`, the cabinet's whole OS) is
 not needed. The cabinet runs `sway` (Wayland) on tty1; the Unity player is
-just as happy on X, so the rig uses Xvfb and Mesa's llvmpipe (OpenGL core,
-`-force-glcore`).
+just as happy on X, so the rig uses WSLg's desktop (or a hidden Xvfb) and
+OpenGL core (`-force-glcore`), drawn on the Windows GPU by Mesa's d3d12
+driver (below).
 
 | the machine | the rig |
 |---|---|
@@ -126,8 +127,14 @@ board's `$SPK_RIG/warden.log`, the volume keeper's `$SPK_RIG/spkvol.log`.
 
 ## What is open
 
-* **It is heavy.** ~3.2 GB of memory and, on llvmpipe, every core it is
-  given: `LP_NUM_THREADS` is capped at 4 (`SPK_LP_THREADS`). Two slots at
+* **It draws on the GPU.** Mesa's d3d12 driver renders the game's OpenGL
+  on the Windows GPU (WSL's /dev/dxg + libd3d12), on the desktop and on a
+  hidden Xvfb alike: attract measured 52-65 fps hidden at 1920x1080 and
+  66-80 fps in the 1280x720 desktop window, ~170% CPU (2026-09-30, an AMD
+  Radeon iGPU). Mesa's llvmpipe (the old default, and the fallback where WSL
+  has no GPU; `SPK_GL=llvmpipe` forces it) managed 5.5-7.8 fps on ~500% CPU.
+  `status.sh` reports `gl=` and `fps=` (Mesa's HUD, sampled once a second
+  into `$SPK_RIG/hud/fps`, drawn nowhere). ~3 GB of memory. Two slots at
   once work in principle (own namespace, hostname, pty and display each; the
   second one's debug terminal cannot bind 2200 and says so) but were not run.
 * No physics beyond the trough and shooter lane: scoops, the couch lock, the
