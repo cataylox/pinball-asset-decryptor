@@ -1185,6 +1185,98 @@ def test_the_ipc_dir_is_granted_to_the_user_on_windows(tmp_path, monkeypatch):
     assert calls == []
 
 
+def _fake_appimage(tmp_path, monkeypatch):
+    """A frozen Linux run from an AppImage: the binary sits inside APPDIR (the mount)."""
+    from pinball_decryptor.core import elevated_flash as ef
+    appimage = tmp_path / "Pinball_Asset_Decryptor.AppImage"
+    appimage.write_bytes(b"\x7fELF")
+    mount = tmp_path / ".mount_Pinbal"
+    (mount / "usr" / "bin").mkdir(parents=True)
+    exe = mount / "usr" / "bin" / "pinball-decryptor"
+    exe.write_bytes(b"\x7fELF")
+    monkeypatch.setattr(ef.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(ef.sys, "executable", str(exe))
+    monkeypatch.setattr(ef.sys, "platform", "linux")
+    monkeypatch.setenv("APPIMAGE", str(appimage))
+    monkeypatch.setenv("APPDIR", str(mount))
+    return ef, str(appimage), str(exe)
+
+
+def test_the_appimage_flash_helper_runs_the_appimage_file(tmp_path, monkeypatch):
+    """PAD-288 (GitHub #10): root cannot enter the user's FUSE mount, so pkexec on the
+    binary INSIDE it failed before any prompt - the helper must re-exec the .AppImage."""
+    ef, appimage, _exe = _fake_appimage(tmp_path, monkeypatch)
+    assert ef._helper_argv("/tmp/ipc") == [appimage, "--flash-helper", "/tmp/ipc"]
+
+
+def test_a_stray_appimage_variable_is_not_trusted(tmp_path, monkeypatch):
+    """An APPIMAGE inherited from some other AppImage that launched us (our binary is
+    not inside its APPDIR) is ignored, and so is one on another platform."""
+    ef, _appimage, exe = _fake_appimage(tmp_path, monkeypatch)
+    other = tmp_path / "other_mount"
+    other.mkdir()
+    monkeypatch.setenv("APPDIR", str(other))
+    assert ef._helper_argv("/tmp/ipc") == [exe, "--flash-helper", "/tmp/ipc"]
+    monkeypatch.delenv("APPIMAGE")
+    assert ef._helper_argv("/tmp/ipc") == [exe, "--flash-helper", "/tmp/ipc"]
+
+
+class _FakePkexec:
+    def __init__(self, rc, err):
+        self.rc, self.err = rc, err
+
+    def poll(self):
+        return self.rc
+
+    def communicate(self):
+        return "", self.err
+
+
+def _pkexec_run(monkeypatch, rc, err):
+    from pinball_decryptor.core import elevated_flash as ef
+    monkeypatch.setattr(ef, "_which", lambda name: "/usr/bin/pkexec")
+    monkeypatch.setattr(ef.subprocess, "Popen", lambda *a, **kw: _FakePkexec(rc, err))
+    return ef, ef._PkexecRun(["/x/pinball-decryptor", "--flash-helper", "/tmp/ipc"])
+
+
+@pytest.mark.parametrize("rc,err,declined", [
+    (126, "Error executing command as another user: Request dismissed\n", True),
+    (127, "Error executing command as another user: Not authorized\n\n"
+          "This incident has been reported.\n", True),
+    (127, "Error accessing /tmp/.mount_Pinbal/usr/bin/pinball-decryptor: "
+          "Permission denied\n", False),
+    (127, "Error executing command as another user: No authentication agent found.\n", False),
+])
+def test_only_a_real_no_to_pkexec_reads_as_declined(monkeypatch, rc, err, declined):
+    _ef, run = _pkexec_run(monkeypatch, rc, err)
+    assert run.poll() == rc
+    assert run.declined is declined
+    assert (run.stderr == "") is declined
+
+
+def test_a_pkexec_that_never_prompted_says_why(tmp_path, monkeypatch):
+    """The report's case: the flash names pkexec's own error, never "declined"."""
+    err = ("Error accessing /tmp/.mount_Pinbal/usr/bin/pinball-decryptor: "
+           "Permission denied\n")
+    ef, run = _pkexec_run(monkeypatch, 127, err)
+    with pytest.raises(ef.FlashError) as exc:
+        ef._relay_until_done(run, str(tmp_path), log=None, progress=None, cancel=None,
+                             on_verify_start=None)
+    msg = str(exc.value)
+    assert "declined" not in msg and "Permission denied" in msg and "127" in msg
+
+
+def test_no_polkit_agent_is_named_with_what_to_do(tmp_path, monkeypatch):
+    ef, run = _pkexec_run(
+        monkeypatch, 127, "Error executing command as another user: No authentication "
+                          "agent found.\n")
+    with pytest.raises(ef.FlashError) as exc:
+        ef._relay_until_done(run, str(tmp_path), log=None, progress=None, cancel=None,
+                             on_verify_start=None)
+    msg = str(exc.value)
+    assert "declined" not in msg and "polkit authentication agent" in msg
+
+
 # ---------------------------------------------------------------------------
 # Reading the card IMAGE off a bigger card (the Multi-boot tab's whole-card read).
 # ---------------------------------------------------------------------------
