@@ -78,6 +78,73 @@ def _ops(folder):
     return scene_edit.ops_for(str(folder), CARD)
 
 
+def test_undo_and_redo_take_back_every_kind_of_edit(tmp_path):
+    """PAD-283 (DragonRR): Undo steps back over ANY edit - Draw 1:1, Show, As shipped and a
+    new tint too, which change the list in place rather than adding to its end - and Redo
+    (Ctrl+Y, Ctrl+Shift+Z) steps forward again until a new edit is made."""
+    from pinball_decryptor.plugins.stern import scene_edit
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    # an edit left by an earlier session: Undo still takes it off, one op at a time
+    scene_edit.add(str(folder), CARD, {"op": "order", "node": 1, "index": 0})
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        tv = _tv(w)
+        assert tv["can_undo"] and not tv["can_redo"]
+        art = next(h for h in tv["hits"] if h["name"] == "Art")["id"]
+        title = next(h for h in tv["hits"] if h["name"] == "Title")["id"]
+        start = _ops(folder)
+
+        assert w.call("text_scenes.tree_select", art)
+        assert w.call("text_scenes.tree_set_scale", art, 40)
+        s40 = _ops(folder)
+        assert w.call("text_scenes.tree_one_to_one", art)
+        one = _ops(folder)
+        assert one[-1]["op"] == "scale" and one[-1]["node"] == art
+        assert w.call("text_scenes.tree_visible", title, False)
+        hid = _ops(folder)
+        assert w.call("text_scenes.tree_visible", title, True)       # Show drops the hide
+        assert _ops(folder) == one
+        assert w.call("text_scenes.tree_tint", art, "#ff0000", 100)
+        assert w.call("text_scenes.tree_tint", art, "#00ff00", 100)  # replaces the tint
+        green = _ops(folder)
+        assert w.call("text_scenes.tree_reset", art)                  # As shipped
+        assert _ops(folder) == [op for op in green if op.get("node") != art]
+
+        assert w.call("text_scenes.tree_undo")
+        assert _ops(folder) == green
+        assert _tv(w)["can_redo"]
+        assert w.call("text_scenes.tree_undo")
+        assert [op["mul"][:3] for op in _ops(folder) if op["op"] == "tint"] == [[1.0, 0.0, 0.0]]
+        assert w.call("text_scenes.tree_undo")
+        assert _ops(folder) == one
+        assert w.call("text_scenes.tree_undo")
+        assert _ops(folder) == hid                                    # back before the Show
+        assert w.call("text_scenes.tree_undo")
+        assert _ops(folder) == one
+        assert w.call("text_scenes.tree_undo")                        # Draw 1:1 taken back
+        assert _ops(folder) == s40
+        assert w.call("text_scenes.tree_undo")
+        assert _ops(folder) == start
+
+        # forward again, step by step, to where it was
+        for want in (s40, one, hid, one):
+            assert w.call("text_scenes.tree_redo")
+            assert _ops(folder) == want
+
+        # a new edit ends the redo; the earlier session's edit still comes off at the end
+        assert w.call("text_scenes.tree_move", title, 5, 0)
+        assert not _tv(w)["can_redo"] and not w.call("text_scenes.tree_redo")
+        for _ in range(5):
+            assert w.call("text_scenes.tree_undo")
+        assert _ops(folder) == start
+        assert w.call("text_scenes.tree_undo")
+        assert _ops(folder) == [] and not _tv(w)["can_undo"]
+        assert not w.call("text_scenes.tree_undo")
+        assert w.call("text_scenes.tree_redo") and _ops(folder) == start
+
+
 def test_the_editor_draws_the_tree_and_edits_it(tmp_path):
     from pinball_decryptor.webui import write_scan
     folder = tmp_path / "proj"
@@ -727,6 +794,9 @@ def test_several_picked_at_once_move_and_hide_together(tmp_path):
         assert w.call("text_scenes.tree_select", art)
         assert _tv(w)["sels"] == [art]
         assert (_tv(w)["props"]["x"], _tv(w)["props"]["y"]) == (a0["x"] + 25, a0["y"] + 5)
+        # each drag is still its own undo step (PAD-283)
+        assert w.call("text_scenes.tree_undo")
+        assert sorted((op["dx"], op["dy"]) for op in _ops(folder)) == [(20.0, 5.0)] * 2
         assert w.call("text_scenes.tree_undo")
         assert _ops(folder) == []
 

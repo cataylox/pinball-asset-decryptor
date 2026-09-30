@@ -704,8 +704,28 @@ function TreeCanvas({ s }) {
       e.preventDefault(); flushNudge();
       if (multi) call("text_scenes.tree_remove_many", sels); else call("text_scenes.tree_remove", p.id);
     }
-    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); flushNudge(); call("text_scenes.tree_undo"); }
   };
+  // Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z anywhere on the page, not only with the preview focused
+  // (PAD-283: after a click on Draw 1:1 or any side-panel button the preview has no focus).
+  // A text box keeps its own undo; a dialog or another tab is left alone.
+  const flushRef = useRef(flushNudge);
+  flushRef.current = flushNudge;
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const k = e.key.toLowerCase();
+      const redo = k === "y" || (k === "z" && e.shiftKey);
+      if (k !== "z" && !redo) return;
+      const el = e.target;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      if (!box.current || !box.current.getClientRects().length || document.querySelector(".scrim")) return;
+      e.preventDefault();
+      flushRef.current();
+      call(redo ? "text_scenes.tree_redo" : "text_scenes.tree_undo");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // what is moved by hand: the drag under way, then edits not yet drawn (on the picture) or
   // not yet in the outlines the page was sent (on the outline)
@@ -862,8 +882,10 @@ function TreeActions({ t }) {
     <${Button} size="sm" kind="ghost" icon="plus" title="Add a line of text to this scene"
       onClick=${() => { setWords(""); setAdding(true); }}>Text…<//>
     <span class="tree-actions-sep"></span>
-    <${Button} size="sm" kind="ghost" icon="undo" disabled=${!t.edits} title="Undo the last edit in this scene (Ctrl+Z)"
+    <${Button} size="sm" kind="ghost" icon="undo" disabled=${!t.can_undo} title="Undo the last edit in this scene (Ctrl+Z)"
       onClick=${() => call("text_scenes.tree_undo")}>Undo<//>
+    <${Button} size="sm" kind="ghost" icon="redo" disabled=${!t.can_redo} title="Redo the edit just undone (Ctrl+Y or Ctrl+Shift+Z)"
+      onClick=${() => call("text_scenes.tree_redo")}>Redo<//>
     <${Button} size="sm" kind="ghost" iconRight="down" disabled=${!t.edits && !t.all_edits}
       title="Put this scene (or every scene) back: as the last Write left it, or as the game shipped it"
       onClick=${(e) => openMenu(e.currentTarget, [
