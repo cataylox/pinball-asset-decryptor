@@ -48,6 +48,8 @@ PROJECT_FIELDS = (
     ("jjp_emulate_iso", "jjp_emulate_iso_var", "path", ""),
     ("spike1_emulate_card", "spike1_emulate_card_var", "path", ""),
     ("bof_emulate_fun", "bof_emulate_fun_var", "path", ""),
+    ("dp_emulate_img", "dp_emulate_img_var", "path", ""),
+    ("dp_emulate_zip", "dp_emulate_zip_var", "path", ""),
     ("compare_a", "compare_a_var", "path", ""),
     ("compare_b", "compare_b_var", "path", ""),
     ("partition_image", "partition_image_var", "path", ""),
