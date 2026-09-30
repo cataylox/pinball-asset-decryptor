@@ -439,16 +439,24 @@ HELP_CONTENT = {
          "whichever button or key made it, and Redo (Ctrl+Y or Ctrl+Shift+Z) puts it back. A greyed layer is one the game is not "
          "drawing at this moment: click its name and it is shown on top, "
          "where it sits, at this same moment while it stays selected, ready to edit "
-         "(an edit belongs to the layer, so it holds at every moment); its eye hides it. "
-         "Picking any layer shows it on top, even one you hid with its eye, and picking "
-         "a sprite shows everything in it; the eye itself never changes by picking. A dark layer "
+         "(an edit belongs to the layer, so it holds at every moment). A layer's eye works as in "
+         "Photoshop or Fusion: it hides the layer in the preview only, to place things or reach "
+         "what is under it, and never changes the card. H hides or shows the selected layers, "
+         "and Alt+click on an eye shows that layer alone (Alt+click again brings the others "
+         "back). Hiding a layer in the game is its own mark, like Fusion's Suppress: the card "
+         "at the end of its row (or right-click, Hide in the game). The Write leaves it out of "
+         "the card, the row is struck through and reads 'hidden in game', the status line names "
+         "every such layer, and the preview is not changed. A scene opened for the first time "
+         "starts with its eyes shut on the layers hidden in the game; after that the eyes stay "
+         "as you set them until Reset puts them back ('Preview eyes as in the game', or As "
+         "shipped). Delete hides a layer in both. Picking any layer shows it on top, even one "
+         "hidden with its eye, and picking "
+         "a sprite shows everything in it; no eye changes by picking. A dark layer "
          "with a crossed-out eye is off only because its switchable part shows another "
-         "look: its eye turns it on in the preview (the eye turns it back off). The "
+         "look: its eye turns it on in the preview (and back off). The "
          "layers inside that look keep their own eyes, like an editor's layers: one "
          "shows only while the look it sits in is on, and turning the look on leaves "
-         "a layer you hid inside it hidden. A layer hidden in the game (the Write "
-         "leaves it out of the card) has an orange eye and reads 'hidden in game', "
-         "and the status line names every such layer. Select "
+         "a layer you hid inside it hidden. Select "
          "something else and the scene goes back to what the game draws. A layer that draws a picture "
          "(itself or through what it holds) has a picture button at the end of its row: it opens "
          "that picture on the Images tab (a layer with several lists them to pick from). "
@@ -1569,6 +1577,40 @@ HELP_CONTENT = {
          "Windows. If music sounds wrong, judge it by ear rather than by a "
          "test tone — the audio path is known to pass a plain tone cleanly "
          "while distorting music."),
+    ],
+    "Emulate DP": [
+        ("What it does",
+         "Runs the real Dutch Pinball game on this PC - The Big Lebowski or "
+         "Alice's Adventures in Wonderland - in its own window (Alice opens "
+         "two: the main screen and the round one). The emulator stands in "
+         "for the machine's controller board and gives the game what the "
+         "machine's disk gave it, a window, sound, and a way to press every "
+         "switch, and it boots into attract mode."),
+        ("Which files to pick",
+         "The machine's disk image (.img; for Alice, the full_image "
+         "installer) - it is the only place most of the "
+         "game's pictures and sounds exist; the update zips carry only what "
+         "changed. The first Start copies the game out of the image (several "
+         "GB, a few minutes); the next is quick. Optionally add an update "
+         "(.zip, The Big Lebowski only): the official one, or one the Write "
+         "tab built from your "
+         "edits. It is laid over the version on the image the way the "
+         "machine installs it, so you can play a mod before it goes on a USB "
+         "stick. Both files are only read."),
+        ("Playing",
+         "When the game is up its switch window opens beside it: the game's "
+         "own drawing of the machine with every switch on it (for Alice, a "
+         "list), and a list of them all by name. Hold a switch with the "
+         "mouse (a flipper, a ball resting in the scoop); right-click to "
+         "latch it until you right-click again. With that window focused "
+         "the game's own keys work: for The Big Lebowski N and M are the "
+         "flippers, 1 is Start, 3 a coin and 7, 8, 9, 0 the service buttons; "
+         "for Alice the Shift keys are the flippers, 1 is Start and 7, 0, 8, "
+         "9 are Escape, Enter and the volume. Closed it? "
+         "\"Switches window\" on this tab brings it back."),
+        ("Cancel",
+         "While a game is starting the Start button is Cancel: it stops the "
+         "copy off the image and throws away the half-copied game."),
     ],
     "Emulate BoF": [
         ("What it does",

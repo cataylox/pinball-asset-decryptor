@@ -1,0 +1,3 @@
+/* Emulate (Dutch Pinball): the shared Emulate layout.  The switches live in
+   their own window (tools/dp_emu/dppf.py). */
+@import url("./emulate_jjp.css");
