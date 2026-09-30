@@ -164,6 +164,7 @@ POSTS = {
     ("dp_emu", "run_game.sh"): "rigboard_post dp ",
     ("dp_emu", "run_aaiw.sh"): "rigboard_post dp ",
     ("jjp_emu", "run_game.sh"): "rigboard_post jjp ",
+    ("pb_emu", "run_game.sh"): "rigboard_post pb ",
     ("proc_emu", "run_py.sh"): "rigboard_post proc ",
     ("spike1_emu", "start.sh"): "rigboard_post spike1 ",
     ("spooky_emu", "run_game.sh"): "rigboard_post spooky ",
@@ -173,6 +174,7 @@ CLEARS = {
     ("bof_emu", "killgame.sh"): "rigboard_clear bof ",
     ("dp_emu", "killgame.sh"): "rigboard_clear dp ",
     ("jjp_emu", "killgame.sh"): "rigboard_clear jjp ",
+    ("pb_emu", "killgame.sh"): "rigboard_clear pb ",
     ("proc_emu", "killgame.sh"): "rigboard_clear proc ",
     ("spike1_emu", "stop.sh"): "rigboard_clear spike1 ",
     ("spooky_emu", "killgame.sh"): "rigboard_clear spooky ",
@@ -189,7 +191,7 @@ def test_every_emulator_clears_on_stop(where, call):
     assert call in _src(*where)
 
 
-@pytest.mark.parametrize("emu", ["ap_emu", "bof_emu", "dp_emu", "spooky_emu"])
+@pytest.mark.parametrize("emu", ["ap_emu", "bof_emu", "dp_emu", "pb_emu", "spooky_emu"])
 def test_the_hidden_mute_runs_before_the_launch(emu):
     s = _src(emu, "run_game.sh")
     assert 'AUDIO=$(rigboard_audio "$VISIBLE" "$AUDIO")' in s
@@ -198,7 +200,8 @@ def test_the_hidden_mute_runs_before_the_launch(emu):
 
 @pytest.mark.parametrize("path", ["ap_emu/appath.sh", "bof_emu/bofpath.sh",
                                   "dp_emu/dppath.sh", "proc_emu/procpath.sh",
-                                  "jjp_emu/padpath.sh", "spooky_emu/spkpath.sh"])
+                                  "jjp_emu/padpath.sh", "pb_emu/pbpath.sh",
+                                  "spooky_emu/spkpath.sh"])
 def test_a_missing_helper_is_a_no_op(path):
     """An old install's tools folder without rigboard.sh still runs."""
     s = _src(*path.split("/"))
