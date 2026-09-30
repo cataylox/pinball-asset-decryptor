@@ -127,7 +127,7 @@
 .tree-states-hint { margin: 6px 0; }
 .tree-state { display: grid; grid-template-columns: 22px minmax(0, 1fr) 150px; gap: 6px; align-items: center; margin: 3px 0; }
 .tree-state-n { text-align: right; }
-.ly-item { grid-template-columns: 20px minmax(0, 1.2fr) minmax(0, 1fr) 20px; cursor: pointer; }
+.ly-item { grid-template-columns: 16px 16px minmax(0, 1.2fr) minmax(0, 1fr) 20px; gap: 8px; cursor: pointer; }
 .ly-img { all: unset; cursor: pointer; display: inline-flex; color: var(--ink-3); border-radius: 4px; }
 .ly-img:hover { color: var(--accent); }
 .ly-img:focus-visible, .ly-eye:focus-visible { outline: 2px solid var(--accent); }
@@ -137,10 +137,12 @@
 .sc-views > .seg button:hover { background: var(--panel); }
 .sc-views > .seg button.on { background: var(--accent-soft); box-shadow: inset 0 -2px 0 var(--accent); }
 .ly-off { opacity: .5; }
-.ly-eye { all: unset; cursor: pointer; display: inline-flex; color: var(--ink-3); }
-.ly-eye:hover { color: var(--ink); }
-/* PAD-290: hidden with its eye = left out in the game, not just the preview */
-.ly-eye.in-game, .ly-eye.in-game:hover, .ly-item .sc-i.in-game { color: var(--warn); }
+.ly-eye { all: unset; cursor: pointer; display: inline-flex; color: var(--ink-3); opacity: .55; }
+.ly-eye:hover, .ly-eye.shut { opacity: 1; }
+/* PAD-293: the blue eye is the preview's only, the red eye the game's (Write leaves it out) */
+.ly-eye.view { color: var(--info); }
+.ly-eye.game { color: var(--err); }
+.ly-item .sc-i.in-game, .tree-props .in-game { color: var(--err); }
 
 /* a narrow window: the scene list goes across the top, the preview and inspector under it */
 @container (max-width: 1060px) {

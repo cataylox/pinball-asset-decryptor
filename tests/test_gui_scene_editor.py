@@ -195,8 +195,11 @@ def test_the_editor_draws_the_tree_and_edits_it(tmp_path):
         title = next(h for h in _tv(w)["hits"] if h["name"] == "Title")["id"]
         assert w.call("text_scenes.tree_order", title, "back")
         assert w.call("text_scenes.tree_visible", title, False)
-        assert all(h["id"] != title for h in _tv(w)["hits"])
+        assert any(h["id"] == title for h in _tv(w)["hits"])          # the game's eye (PAD-293)
         assert w.call("text_scenes.tree_visible", title, True)
+        assert w.call("text_scenes.tree_view", title, False)
+        assert all(h["id"] != title for h in _tv(w)["hits"])          # the preview's eye
+        assert w.call("text_scenes.tree_view", title, True)
         assert any(h["id"] == title for h in _tv(w)["hits"])
 
         # add a line of text in the selected line's font; it is selected and drawn
@@ -784,7 +787,7 @@ def test_a_layer_in_a_sprite_hidden_with_its_eye_is_shown_when_picked(tmp_path):
         _open(w, folder)
         ly = {l["name"]: l for l in _tv(w)["layers"]}
         body, box, art = ly["BodyB"]["id"], ly["Body_Textbox"]["id"], ly["Body_Art"]["id"]
-        assert w.call("text_scenes.tree_visible", body, False)
+        assert w.call("text_scenes.tree_view", body, False)
         for f in (1, 2):                        # the picker on A (B off anyway), then on B
             assert w.call("text_scenes.tree_moment", "f:%d" % f)
             assert _wait(w, lambda: _tv(w)["frame"] == f)
@@ -792,14 +795,15 @@ def test_a_layer_in_a_sprite_hidden_with_its_eye_is_shown_when_picked(tmp_path):
             tv = _tv(w)
             assert tv["frame"] == f and tv["sel"] == box
             assert "The game does not draw that" not in " ".join(tv.get("notes") or [])
-            assert tv["props"]["peek"] and tv["props"]["hid_in"] == "BodyB"
+            assert tv["props"]["peek"] and tv["props"]["view_in"] == "BodyB"
+            assert tv["props"]["hid_in"] == ""
             assert tv["props"]["x"] is not None
             hits = [h["id"] for h in tv["hits"]]
             assert box in hits and art not in hits
             assert w.call("text_scenes.tree_select", None)
             hits = [h["id"] for h in _tv(w)["hits"]]
             assert box not in hits and art not in hits
-        assert _ops(folder) == [{"op": "visible", "node": body, "on": False}]
+        assert _ops(folder) == []
         w.call("text_scenes.close")
 
 
@@ -824,24 +828,24 @@ def test_a_picked_layer_is_drawn_on_top_whatever_its_eye_says(tmp_path):
         assert w.call("text_scenes.tree_select", None)
         assert [h["id"] for h in _tv(w)["hits"]] == hits
         # hidden with its eye: picked, it is shown on top, and its eye stays shut
-        assert w.call("text_scenes.tree_visible", art, False)
+        assert w.call("text_scenes.tree_view", art, False)
         assert art not in [h["id"] for h in _tv(w)["hits"]]
         assert w.call("text_scenes.tree_select", art)
         tv = _tv(w)
-        assert tv["hits"][-1]["id"] == art and tv["props"]["peek"] and tv["props"]["hidden"]
+        assert tv["hits"][-1]["id"] == art and tv["props"]["peek"] and tv["props"]["view_off"]
         assert tv["props"]["x"] is not None
-        assert next(l for l in tv["layers"] if l["id"] == art)["hidden"]
+        assert next(l for l in tv["layers"] if l["id"] == art)["view_off"]
         # the sprite it sits in, picked: every layer in it, the hidden one too, on top
         assert w.call("text_scenes.tree_select", body)
         tv = _tv(w)
         assert [h["id"] for h in tv["hits"]][-2:] == [art, box]
         assert w.call("text_scenes.tree_select", None)
         assert art not in [h["id"] for h in _tv(w)["hits"]]
-        assert _ops(folder) == [{"op": "visible", "node": art, "on": False}]
+        assert _ops(folder) == []
         # the sprite hidden too: its eye opened again, the art stays hidden (its own eye)
-        assert w.call("text_scenes.tree_visible", body, False)
+        assert w.call("text_scenes.tree_view", body, False)
         assert box not in [h["id"] for h in _tv(w)["hits"]]
-        assert w.call("text_scenes.tree_visible", body, True)
+        assert w.call("text_scenes.tree_view", body, True)
         hits = [h["id"] for h in _tv(w)["hits"]]
         assert box in hits and art not in hits
         w.call("text_scenes.close")
@@ -862,8 +866,62 @@ def test_an_eye_hide_is_named_as_hidden_in_the_game(tmp_path):
         tv = _tv(w)
         assert tv["hidden_names"] == ["BodyB"]
         assert next(l for l in tv["layers"] if l["name"] == "BodyB")["edits"] == "hidden in game"
+        assert ly["Body_Art"]["id"] in [h["id"] for h in tv["hits"]]   # not in the preview
         assert w.call("text_scenes.tree_visible", ly["BodyB"]["id"], True)
         assert _tv(w)["hidden_names"] == []
+        w.call("text_scenes.close")
+
+
+def test_the_game_eye_and_the_preview_eye_are_apart(tmp_path):
+    """DragonRR (PAD-293): two eyes per layer.  The red eye hides a layer in the game (Write
+    leaves it out) and never changes the preview; the blue eye hides it in the preview only.
+    A scene opened for the first time starts with its blue eyes as its red ones; after that
+    they are apart until the scene is reset."""
+    from pinball_decryptor.plugins.stern import scene_edit
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    man = _seed(folder, _body_scene())
+    from pinball_decryptor.webui.text_scenes_tree import _walk_man
+    ids = {n["name"]: n["id"] for n, _p, _d in _walk_man(man)}
+    art, box = ids["Body_Art"], ids["Body_Textbox"]
+    # hidden in the game before the scene was ever opened
+    scene_edit.add(str(folder), CARD, {"op": "visible", "node": art, "on": False})
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        ly = {l["name"]: l for l in _tv(w)["layers"]}
+        assert w.call("text_scenes.tree_state", ly["Select"]["id"], 2)     # the picker on B
+        hits = lambda: [h["id"] for h in _tv(w)["hits"]]                  # noqa: E731
+        lay = lambda: {l["id"]: l for l in _tv(w)["layers"]}               # noqa: E731
+        # first open: the blue eye copies the red one
+        assert lay()[art]["hidden"] and lay()[art]["view_off"]
+        assert art not in hits() and box in hits() and not _tv(w)["view_apart"]
+        # the red eye alone: the card changes, the preview does not
+        assert w.call("text_scenes.tree_visible", art, True)
+        assert _ops(folder) == [] and not lay()[art]["hidden"] and lay()[art]["view_off"]
+        assert art not in hits() and _tv(w)["view_apart"]
+        assert w.call("text_scenes.tree_visible", box, False)
+        assert lay()[box]["hidden"] and not lay()[box]["view_off"] and box in hits()
+        assert _tv(w)["hidden_names"] == ["Body_Textbox"]
+        # the blue eye alone: the preview changes, the card does not
+        assert w.call("text_scenes.tree_view", art, True)
+        assert art in hits()
+        assert w.call("text_scenes.tree_view", box, False)
+        assert box not in hits()
+        assert _ops(folder) == [{"op": "visible", "node": box, "on": False}]
+        # picked, a layer hidden with its blue eye is shown on top; no eye changes
+        assert w.call("text_scenes.tree_select", box)
+        assert hits()[-1] == box and lay()[box]["view_off"]
+        assert w.call("text_scenes.tree_select", None)
+        # kept while another scene is looked at, and put back to the game's by Reset
+        w.call("text_scenes.select", "")
+        _open(w, folder)
+        assert lay()[box]["view_off"] and not lay()[art]["view_off"]
+        assert w.call("text_scenes.tree_view_reset")
+        assert lay()[box]["view_off"] and not lay()[art]["view_off"] and not _tv(w)["view_apart"]
+        assert w.call("text_scenes.tree_view", box, True)
+        w.answers.append("yes")
+        assert w.call("text_scenes.tree_clear")                    # As shipped
+        assert _ops(folder) == [] and not lay()[box]["view_off"] and box in hits()
         w.call("text_scenes.close")
 
 
@@ -880,6 +938,7 @@ def test_a_hidden_layer_the_game_draws_elsewhere_is_found_when_picked(tmp_path):
         ly = {l["name"]: l for l in _tv(w)["layers"]}
         art = ly["Body_Art"]["id"]
         assert w.call("text_scenes.tree_visible", art, False)
+        assert w.call("text_scenes.tree_view", art, False)
         assert w.call("text_scenes.tree_select", art)
         tv = _tv(w)
         assert "The game does not draw that" not in " ".join(tv.get("notes") or [])
@@ -922,11 +981,11 @@ def test_a_layer_inside_a_look_that_is_off_keeps_its_own_eye(tmp_path):
         assert not lay()["Gigan_Art"]["drawn"] and lay()["Gigan"]["state_off"]
         assert w.call("text_scenes.tree_force", art, False)
         # the name box hidden while its look is off stays hidden when the look is turned on
-        assert w.call("text_scenes.tree_visible", box, False)
+        assert w.call("text_scenes.tree_view", box, False)
         assert w.call("text_scenes.tree_force", ly["Gigan"]["id"], True)
         ly = lay()
         assert ly["Gigan"]["drawn"] and ly["Gigan_Art"]["drawn"]
-        assert not ly["Gigan_Box"]["drawn"] and ly["Gigan_Box"]["hidden"]
+        assert not ly["Gigan_Box"]["drawn"] and ly["Gigan_Box"]["view_off"]
         assert ly["Ebirah_Art"]["drawn"]
         w.call("text_scenes.close")
 
@@ -1046,11 +1105,17 @@ def test_several_picked_at_once_move_and_hide_together(tmp_path):
 
         # hidden together, one undo step; a plain click picks one again
         assert w.call("text_scenes.tree_visible_many", [art, title], False)
-        assert not any(h["id"] in (art, title) for h in _tv(w)["hits"])
+        assert all(any(h["id"] == n for h in _tv(w)["hits"]) for n in (art, title))
         assert w.call("text_scenes.tree_undo")
         assert _ops(folder) == []
+        assert w.call("text_scenes.tree_view_many", [art, title], False)
+        assert not any(h["id"] in (art, title) for h in _tv(w)["hits"])
+        assert w.call("text_scenes.tree_view_many", [art, title], True)
+        assert _ops(folder) == []
+        # Delete: gone from the card and the preview
         assert w.call("text_scenes.tree_remove_many", [art, title])
         assert {op["node"] for op in _ops(folder)} == {art, title}
+        assert not any(h["id"] in (art, title) for h in _tv(w)["hits"])
         assert w.call("text_scenes.tree_visible_many", [art, title], True)
         assert _ops(folder) == []
         w.call("text_scenes.close")
