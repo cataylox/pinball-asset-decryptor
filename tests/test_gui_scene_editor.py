@@ -719,6 +719,30 @@ def _body_scene():
             + u32(1360) + u32(768) + fs(30.0) + fs(0.2, 0.2, 0.2, 1.0) + root)
 
 
+def _battle_select_scene():
+    """Godzilla's Kaiju Battle Select in small: a sprite the game picks a look of (Level 0,
+    Level 1), each look a sprite of its own with a picture and a name box in it."""
+    from tests.test_stern_scene_tree import (FLAG, bitmap, cls, node, sprite, texture, u8,
+                                             u32, u64, fs)
+    lib = [
+        u32(3) + cls(1, "Bitmap") + u32(FLAG | 10) + bitmap(3, 8, 4, texture(20)),
+        u32(5) + cls(2, "Sprite") + u32(FLAG | 12) + sprite(5, "", 1, [
+            node(60, "Ebirah_Art", [u32(1) + cls(1) + u32(10)]),
+            node(61, "Ebirah_Box", [u32(1) + cls(1) + u32(10)])]),
+        u32(6) + cls(2) + u32(FLAG | 13) + sprite(6, "", 1, [
+            node(70, "Gigan_Art", [u32(1) + cls(1) + u32(10)]),
+            node(71, "Gigan_Box", [u32(1) + cls(1) + u32(10)])]),
+        u32(4) + cls(2) + u32(FLAG | 11) + sprite(4, "", 2, [
+            node(40, "Ebirah", [u32(1) + cls(2) + u32(12)], kf=((1, 1), (2, 0))),
+            node(41, "Gigan", [u32(1) + cls(2) + u32(13)], kf=((1, 0), (2, 1)))],
+            labels=[("Ebirah", 1), ("Gigan", 2)]),
+    ]
+    root = sprite(2, "", 20, [node(50, "Select", [u32(1) + cls(2) + u32(11)])],
+                  labels=[("Start", 1)])
+    return (u8(1) + u64(len(lib)) + b"".join(lib) + u64(0)
+            + u32(1360) + u32(768) + fs(30.0) + fs(0.2, 0.2, 0.2, 1.0) + root)
+
+
 def test_a_hidden_layer_in_a_sprite_is_shown_alone_and_the_sprite_whole(tmp_path):
     """DragonRR (PAD-284): picking the text box of a body the game is not showing drew the
     whole body; picking the body after it then did nothing.  The text box is drawn alone; the
@@ -841,6 +865,49 @@ def test_a_hidden_layer_the_game_draws_elsewhere_is_found_when_picked(tmp_path):
         assert "The game does not draw that" not in " ".join(tv.get("notes") or [])
         assert tv["sel"] == art and tv["hits"][-1]["id"] == art
         assert _ops(folder) == [{"op": "visible", "node": art, "on": False}]
+        w.call("text_scenes.close")
+
+
+def test_a_layer_inside_a_look_that_is_off_keeps_its_own_eye(tmp_path):
+    """DragonRR (PAD-285): with Gigan's name box selected (shown with the Gigan look it sits
+    in), clicking the Gigan picture beside it showed nothing - the picture counted as drawn
+    because the name box's peek had brought it along.  And the eyes work as in an editor's
+    layers: a layer inside a look keeps its own eye, shows only while that look is on, and
+    turning the look on leaves a layer hidden inside it hidden."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder, _battle_select_scene())
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        assert w.call("text_scenes.tree_moment", "f:1")
+        assert _wait(w, lambda: _tv(w)["frame"] == 1)
+        lay = lambda: {l["name"]: l for l in _tv(w)["layers"]}      # noqa: E731
+        ly = lay()
+        assert ly["Gigan"]["state_off"] and not ly["Gigan"]["part_off"]
+        for name in ("Gigan_Art", "Gigan_Box"):
+            assert not ly[name]["drawn"] and ly[name]["part_off"] and not ly[name]["state_off"]
+        art, box = ly["Gigan_Art"]["id"], ly["Gigan_Box"]["id"]
+
+        # the name box, then the picture beside it: each is shown while selected
+        assert w.call("text_scenes.tree_select", box)
+        assert _tv(w)["props"]["peek"] and not lay()["Gigan_Art"]["drawn"]  # alone (PAD-284)
+        assert w.call("text_scenes.tree_select", art)
+        p = _tv(w)["props"]
+        assert p["peek"] and p["x"] is not None
+        assert w.call("text_scenes.tree_select", None)
+        assert not any(lay()[n]["drawn"] for n in ("Gigan", "Gigan_Art", "Gigan_Box"))
+
+        # an eye inside the look does not turn the look on
+        assert w.call("text_scenes.tree_force", art, True)
+        assert not lay()["Gigan_Art"]["drawn"] and lay()["Gigan"]["state_off"]
+        assert w.call("text_scenes.tree_force", art, False)
+        # the name box hidden while its look is off stays hidden when the look is turned on
+        assert w.call("text_scenes.tree_visible", box, False)
+        assert w.call("text_scenes.tree_force", ly["Gigan"]["id"], True)
+        ly = lay()
+        assert ly["Gigan"]["drawn"] and ly["Gigan_Art"]["drawn"]
+        assert not ly["Gigan_Box"]["drawn"] and ly["Gigan_Box"]["hidden"]
+        assert ly["Ebirah_Art"]["drawn"]
         w.call("text_scenes.close")
 
 
