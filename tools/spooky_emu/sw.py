@@ -9,7 +9,8 @@
 
 <switch> is a name from the running game's table (spktitles.py; case and
 '_'/'-'/' ' do not matter), an alias (start, coin, launch, action, tilt,
-enter, back, shooter, lflip, rflip) or a number.  PAD_SLOT picks the slot.
+enter, back, up, down, shooter, lflip, rflip, ulflip, urflip - each title's
+own numbers: Halloween's differ) or a number.  PAD_SLOT picks the slot.
 The board (spkwarden.py) reports the change to the game the way the Warden
 does; the trough and shooter lane move by themselves when the game fires
 the eject and launch coils.

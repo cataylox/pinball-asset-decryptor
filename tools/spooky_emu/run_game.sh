@@ -77,6 +77,15 @@ mkdir -p "$CFG" "$NV/game/audits" "$NV/home"
 # fresh Beetlejuice settings folder without them stops attract behind a
 # "FACTORY DEFAULT SETTINGS HAVE NOT BEEN SAVED" dialog.  {} = the build's own.
 [ -n "$FACTORY" ] && [ ! -f "$CFG/$FACTORY" ] && echo '{}' > "$CFG/$FACTORY"
+# Files a machine leaves the factory with, from the update's own defaults
+# (spktitles "seed": <in /game>:<in the update>).  Halloween without its
+# highscores.config writes one from its defaults and then dies syncing it
+# through a board it has not opened yet; the file it leaves (vanity awards
+# "null") kills every later start too, so that one is replaced.
+for s in $(tget seed); do
+    dst=$NV/game/${s%%:*}; src=$G/${s#*:}
+    { [ ! -s "$dst" ] || grep -qx null "$dst"; } && [ -f "$src" ] && cp "$src" "$dst"
+done
 # Scooby-Doo compares ~/.profile with its own and reboots to install it.
 [ -f "$UPTEST/_profile" ] && cp "$UPTEST/_profile" "$NV/home/.profile"
 chown -R "$SPK_USER": "$NV"
