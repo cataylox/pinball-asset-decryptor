@@ -318,6 +318,23 @@ def test_ctl_commands(tmp_path):
     assert d.on_ctl("quit") == "ok bye" and not d.running
 
 
+def test_write_i2c_data_is_a_buffered_module_7_write(monkeypatch):
+    # AP's own pypinproc (BBQ on: rgb_led.py's PCA9685 LED chips): the same
+    # burst as write_data(7, ...), but queued until the next flush.
+    f = board()
+    p = attach(monkeypatch, f)
+    sent = []
+    real = f.write
+    monkeypatch.setattr(f, "write", lambda m, a, w: (
+        m == 7 and sent.append((m, a, list(w))), real(m, a, w)))
+    p.write_i2c_data(0x40 << 9 | 0x08, 0x1FF)
+    assert sent == []
+    p.flush()
+    assert sent == [(7, 0x40 << 9 | 0x08, [0x1FF])]
+    p.write_data(7, 0x41 << 9, 5)
+    assert sent[-1] == (7, 0x41 << 9, [5])
+
+
 def test_rig_scripts_are_lf_and_complete():
     for name in ("procpath.sh", "build.sh", "hw.sh", "run_py.sh", "ctl.sh", "killgame.sh",
                  "status.sh", "prochw.py", "procctl.py", "fakeftdi.c", "pystub/pinproc.py",
