@@ -1,0 +1,6 @@
+/* Emulate (Spooky): the American Pinball tab's layout (the shared Emulate
+   layout and its Cache window), plus the supported-games card.  The virtual
+   playfield lives in its own window (tools/spooky_emu/spkpf.py). */
+@import url("./emulate_ap.css");
+
+.spk-games { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }

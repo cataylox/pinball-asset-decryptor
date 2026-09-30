@@ -646,7 +646,10 @@ function startMain() {
     const root = el("aside", "pf-panel");
     const kb = el("div", "kp-sec");
     const head = el("div", "kp-head");
-    head.append(el("span", "h", "KEYBOARD"), el("span", "s", "works here and in the game window"));
+    // spec.where: a host whose game window has keys of its own says so
+    // (Beetlejuice, tools/spooky_emu/spkpf.py)
+    head.append(el("span", "h", "KEYBOARD"),
+                el("span", "s", spec.where != null ? spec.where : "works here and in the game window"));
     kb.append(head);
     let section = null;
     const rowEls = spec.rows.map((r) => {
