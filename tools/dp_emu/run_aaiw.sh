@@ -168,6 +168,7 @@ for p in $(pgrep -x pinterface); do
 done > "$DP_RIG/game.pid"
 if dp_game_alive && grep -q '^video:' "$DP_RIG/rig.log"; then
     echo "Ready: $NAME, slot $DP_SLOT, display $DISP ($(grep '^video:' "$DP_RIG/rig.log" | cut -d' ' -f2 | paste -sd' '))"
+    rigboard_post dp "$DP_SLOT" "$(dp_game_pid)" "$NAME" "${PAD_TITLE:-Alice's Adventures in Wonderland}" "$VISIBLE" "$AUDIO"
 else
     echo "run_aaiw.sh: the game did not come up:" >&2
     tail -20 "$DP_RIG/game.out" >&2

@@ -1,10 +1,11 @@
 /*
- * spkshim.c - LD_PRELOAD shim that shows a Spooky Unity game (Beetlejuice)
- * the rig's emulated Warden board instead of the real USB one.
+ * spkshim.c - LD_PRELOAD shim that shows a Spooky Warden-era game the
+ * rig's emulated Warden board instead of the real USB one.
  *
- * Warden.Connect() opens "/dev/WARDEN" (the machine's udev symlink for the
- * USB product "WARDEN") with Mono's SerialPort.  spkwarden.py serves the
- * board on a pty; this shim only
+ * The Unity games open "/dev/WARDEN" (the machine's udev symlink for the
+ * USB product "WARDEN") with Mono's SerialPort; Looney Tunes (Godot) LISTS
+ * the serial ports first and opens the one named /dev/WARDEN.
+ * spkwarden.py serves the board on a pty; this shim only
  *
  *   - REWRITES THE PATH: /dev/WARDEN -> $SPK_WARDEN (the pty's slave), so
  *     every slot has its own board without touching the shared /dev;
@@ -17,7 +18,11 @@
  *     timeout as a comms error, and after ten it resets its board link and
  *     stops reacting to switches.  A real Warden at 115200 baud paces the
  *     game the same way - a slow moment on the PC must not look like a
- *     dead board (PAD-266).  Reads keep their timeout.
+ *     dead board (PAD-266).  Reads keep their timeout;
+ *   - LISTS THE PORT: Godot's SerialPort.list_ports() globs /dev/ttyACM*,
+ *     /dev/ttyS*, /dev/ttyUSB*... - never /dev/WARDEN, which on the machine
+ *     is a symlink it finds another way - so the /dev/ttyUSB* glob gains
+ *     /dev/WARDEN.
  *
  * Unity's Mono reaches the port through libMonoPosixHelper's open() and
  * ioctl() in libc, which is what this interposes.  build.sh proves no symbol
@@ -27,6 +32,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <glob.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -155,4 +161,36 @@ int ioctl(int fd, unsigned long req, ...) {
         }
     }
     return r;
+}
+
+/* Godot (list_ports_linux.cc) globs each pattern, GLOB_APPEND after the
+ * first.  The ttyUSB one also finds the rig's board, whatever else matched:
+ * GLOB_NOCHECK hands the name back without looking for it. */
+static int add_warden(const char *pat, int flags, glob_t *g, int r,
+                      int (*real)(const char *, int,
+                                  int (*)(const char *, int), glob_t *)) {
+    const char *w = getenv("SPK_WARDEN");
+    if (!w || !*w || !pat || strcmp(pat, "/dev/ttyUSB*") != 0)
+        return r;
+    if (r != 0 && r != GLOB_NOMATCH)
+        return r;
+    int keep = flags & (GLOB_DOOFFS | GLOB_MARK);
+    return real("/dev/WARDEN", keep | GLOB_APPEND | GLOB_NOCHECK, NULL, g);
+}
+
+int glob(const char *pat, int flags, int (*errfunc)(const char *, int),
+         glob_t *g) {
+    REAL(glob);
+    return add_warden(pat, flags, g, real_glob(pat, flags, errfunc, g),
+                      real_glob);
+}
+
+int glob64(const char *pat, int flags, int (*errfunc)(const char *, int),
+           glob64_t *g) {
+    REAL(glob64);
+    /* glob64_t is glob_t on x86-64. */
+    return add_warden(pat, flags, (glob_t *)g,
+                      real_glob64(pat, flags, errfunc, g),
+                      (int (*)(const char *, int, int (*)(const char *, int),
+                               glob_t *))real_glob64);
 }

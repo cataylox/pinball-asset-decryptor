@@ -27,6 +27,14 @@ AP_CACHE=$AP_ROOT/cache
 AP_RIG=$AP_ROOT/rig$AP_SLOT
 AP_DISPLAY=${AP_DISPLAY:-:$((140 + AP_SLOT))}
 
+# The rig board (PAD-296): tools/rigboard.sh, shared by every emulator, posts
+# this rig's runs where the triage dashboard and the app can see them.
+if [ -f "$AP_TOOLS/../rigboard.sh" ]; then
+    . "$AP_TOOLS/../rigboard.sh"
+else
+    rigboard_post() { :; }; rigboard_clear() { :; }; rigboard_audio() { echo "${2:-0}"; }
+fi
+
 # The first ordinary account (uid 1000..59999): "pad" in PAD-Runtime.
 if [ -z "${AP_USER:-}" ]; then
     AP_USER=$(getent passwd | awk -F: '$3>=1000 && $3<60000 {print $1; exit}')

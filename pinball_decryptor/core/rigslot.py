@@ -80,6 +80,22 @@ def rig_env():
     return out
 
 
+def board_env():
+    """``NAME=value`` entries for the OTHER emulators' launches (AP, BoF, DP,
+    JJP, Spike 1 - tools/rigboard.sh, PAD-296), so their runs post to the
+    board too: where the board is, as WSL opens it (an install under Program
+    Files is nowhere near the profile the tools would guess it from), and the
+    triage ticket the run is for. Windows only - elsewhere there is no board
+    the dashboard reads."""
+    if sys.platform != "win32":
+        return []
+    from ..webui.rig import wsl_path
+    out = ["PAD_BOARD=%s" % wsl_path(board_dir())]
+    if label():
+        out.append("PAD_TICKET=%s" % label())
+    return out
+
+
 def title_tag():
     """The app window's own tag, in the words the rig's windows use."""
     n, l = slot(), label()

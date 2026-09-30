@@ -32,6 +32,7 @@ import time
 
 from pinball_decryptor.webui import rig as _rig
 from .. import compat
+from ...core import rigslot
 from .. import emulate_spooky_core as spk
 from ..emulate_jjp_common import (RigTabMixin, rig_off, audio_ctl_file,
                                   windows_python)
@@ -476,8 +477,14 @@ class EmulateSpookyTab(RigTabMixin, TabService):
                         # sound always on: Volume / Mute follow live through
                         # the control file (spkvol.py), so unmuting a game
                         # started muted works
+                        # the rig board names the run by its title
+                        # (PAD-296); the file's extension says which
                         env=["PAD_VISIBLE=1", "PAD_AUDIO=1",
-                             "PAD_AUDIO_CTL=%s" % _rig.wsl_path(audio_ctl_file())]),
+                             "PAD_AUDIO_CTL=%s" % _rig.wsl_path(audio_ctl_file()),
+                             "PAD_TITLE=%s" % next(
+                                 (t for t, ext in spk.SUPPORTED
+                                  if path.lower().endswith(ext)), "")]
+                        + rigslot.board_env()),
                     timeout=1800, on_line=self._footer_line)
                 if self._cancelling:
                     self._started_here = False

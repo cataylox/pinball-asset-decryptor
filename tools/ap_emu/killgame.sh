@@ -24,4 +24,5 @@ if [ -n "$left" ]; then
     exit 1
 fi
 rm -f "$AP_RIG/game.pid" "$AP_RIG/xvfb.pid"
+rigboard_clear ap "$AP_SLOT"
 echo stopped

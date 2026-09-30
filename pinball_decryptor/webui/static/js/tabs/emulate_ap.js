@@ -1,7 +1,9 @@
 // Emulate (American Pinball): run an AP game on this PC from its .pkg.
 // Python half: webui/tabs/emulate_ap.py.  The machine's switches are a window
 // of their own (tools/ap_emu/appf.py), as the other rigs' are; it opens by
-// itself when the game is up, and "Switches window" brings it back.
+// itself when the game is up, and "Playfield window" brings it back (or to
+// the front).  A real button, not a ghost one: as ghost text beside Stop it
+// read as a caption, and a player never found it (PAD-295).
 
 import { html, PageHead, Card, Button, PathField, Chip, Note, Modal, Table, call } from "../core/ui.js";
 import { useNs } from "../core/store.js";
@@ -59,8 +61,8 @@ export default function EmulateAP() {
   const footer = html`
     <${Button} kind=${goKind} size="big" icon=${stopish ? "stop" : "play"} busy=${s.go_busy}
       disabled=${!s.go_enabled} onClick=${() => call("emulate_ap.toggle")}>${s.go_label || "Start"}<//>
-    ${up ? html`<${Button} kind="ghost" title=${s.switches_tip}
-      onClick=${() => call("emulate_ap.switches")}>Switches window<//>` : null}
+    ${up ? html`<${Button} icon="external" title=${s.switches_tip}
+      onClick=${() => call("emulate_ap.switches")}>Playfield window<//>` : null}
     <span class="emu-sp"></span>
     <${VolumeControl} ns="emulate_ap" s=${s} title=${s.volume_tip} />`;
   return html`<div class="page emu-page">

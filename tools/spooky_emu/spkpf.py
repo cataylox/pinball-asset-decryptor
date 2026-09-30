@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-r"""spkpf.py - the Beetlejuice virtual playfield: the American Pinball
+r"""spkpf.py - a Spooky game's virtual playfield: the American Pinball
 window (tools/ap_emu/appf.py, on the Stern rigs' page tools/spike2_emu/pfpage)
 pointed at this rig's board, so every maker's Emulate window looks and works
 the same - the key panel, the coin-door service buttons, BALLS (trough dots,
@@ -9,9 +9,10 @@ Plunge, Drain, Reset balls), Pause and the Volume / Mute bar.
         [--slot 0] [--audio-ctl <audio_ctl.json>] [--parent-pipe]
 
 The table is spkswitches.py's (apswitches.py's format); the board answers
-appf's requests over ctl.sh --stream (spkwarden.py).  Beetlejuice ships no
-playfield picture with switch positions, so the window is appf's schematic
-view: every switch as a row.
+appf's requests over ctl.sh --stream (spkwarden.py).  The table names the
+running game (spktitles.py).  The Spooky games ship no playfield picture
+with switch positions, so the window is appf's schematic view: every switch
+as a row.
 """
 import argparse
 import json
@@ -38,9 +39,10 @@ class Rig(appf.Rig):
 
 
 class App(appf.App):
-    """appf's host, with one difference the page shows: Beetlejuice's own
-    window keeps the game's built-in keys (Enter starts, Space launches, the
-    arrows flip), so this window's keys work in this window only."""
+    """appf's host, with one difference the page shows: a Spooky game's own
+    window keeps the game's built-in keys (Beetlejuice's: Enter starts,
+    Space launches, the arrows flip), so this window's keys work in this
+    window only."""
 
     def _panel_spec(self):
         spec = super()._panel_spec()
@@ -71,7 +73,7 @@ def load_geom():
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Beetlejuice virtual playfield")
+    ap = argparse.ArgumentParser(description="Spooky virtual playfield")
     ap.add_argument("--table", required=True, help="the rig's switches.json")
     ap.add_argument("--distro", default="")
     ap.add_argument("--slot", default=os.environ.get("PAD_SLOT", "0"))

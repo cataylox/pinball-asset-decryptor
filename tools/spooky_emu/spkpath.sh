@@ -21,6 +21,14 @@ SPK_RIG=$SPK_ROOT/rig$SPK_SLOT
 SPK_DISPLAY=${SPK_DISPLAY:-:$((160 + SPK_SLOT))}
 SPK_SHIM=$SPK_TOOLS/spkshim.so
 
+# The rig board (PAD-296): tools/rigboard.sh, shared by every emulator, posts
+# this rig's runs where the triage dashboard and the app can see them.
+if [ -f "$SPK_TOOLS/../rigboard.sh" ]; then
+    . "$SPK_TOOLS/../rigboard.sh"
+else
+    rigboard_post() { :; }; rigboard_clear() { :; }; rigboard_audio() { echo "${2:-0}"; }
+fi
+
 # The first ordinary account (uid 1000..59999): "pad" in PAD-Runtime.
 if [ -z "${SPK_USER:-}" ]; then
     SPK_USER=$(getent passwd | awk -F: '$3>=1000 && $3<60000 {print $1; exit}')
@@ -37,6 +45,16 @@ spk_game_alive() {
 spk_slot_pids() {
     local p
     for p in $(pgrep -f 'main\.x86_64|spkwarden\.py'); do
-        tr '\0' '\n' < "/proc/$p/environ" 2>/dev/null | grep -qx "SPK_MARK=$SPK_RIG" && echo "$p"
+        tr '\0' '\n' 2>/dev/null < "/proc/$p/environ" | grep -qx "SPK_MARK=$SPK_RIG" && echo "$p"
     done
+}
+
+# Has this slot's game reached attract mode?  Each title says how it shows
+# (spktitles.py: attract, attract_in); the caller may have them already in
+# SPK_ATTRACT / SPK_ATTRACT_IN.
+spk_attract() {
+    local t=${SPK_TITLE_KEY:-$(cat "$SPK_RIG/title" 2>/dev/null || echo bj)}
+    local a=${SPK_ATTRACT:-$(python3 "$SPK_TOOLS/spktitles.py" get "$t" attract)}
+    local f=${SPK_ATTRACT_IN-$(python3 "$SPK_TOOLS/spktitles.py" get "$t" attract_in)}
+    grep -qE "$a" "$SPK_RIG/${f:-player.log}" 2>/dev/null
 }

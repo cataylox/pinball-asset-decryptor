@@ -57,4 +57,5 @@ if [ -n "$left" ]; then
     exit 1
 fi
 rm -f "$DP_RIG/game.pid" "$DP_RIG/xvfb.pid"
+rigboard_clear dp "$DP_SLOT"
 echo stopped
