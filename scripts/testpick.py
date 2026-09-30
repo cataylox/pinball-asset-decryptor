@@ -90,7 +90,7 @@ ZONES = [
     ("ap_apiav", ["tools/ap_emu/apiav/"], ["test_ap_apiav_emu.py"]),
     ("cgc",     ["pinball_decryptor/plugins/cgc/"],
      ["test_cgc_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
-    ("spooky",  ["pinball_decryptor/plugins/spooky/"],
+    ("spooky",  ["pinball_decryptor/plugins/spooky/", "tools/spooky_emu/"],
      ["test_spooky_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
     ("williams", ["pinball_decryptor/plugins/williams/"],
      ["test_williams_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
