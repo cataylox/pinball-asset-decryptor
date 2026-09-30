@@ -127,7 +127,15 @@
 .tree-states-hint { margin: 6px 0; }
 .tree-state { display: grid; grid-template-columns: 22px minmax(0, 1fr) 150px; gap: 6px; align-items: center; margin: 3px 0; }
 .tree-state-n { text-align: right; }
-.ly-item { grid-template-columns: 20px minmax(0, 1.2fr) minmax(0, 1fr); cursor: pointer; }
+.ly-item { grid-template-columns: 20px minmax(0, 1.2fr) minmax(0, 1fr) 20px; cursor: pointer; }
+.ly-img { all: unset; cursor: pointer; display: inline-flex; color: var(--ink-3); border-radius: 4px; }
+.ly-img:hover { color: var(--accent); }
+.ly-img:focus-visible, .ly-eye:focus-visible { outline: 2px solid var(--accent); }
+/* PAD-287: Layers / Contents reads as two tabs to click, not a heading */
+.sc-views > .seg { display: flex; }
+.sc-views > .seg button { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: var(--bg); }
+.sc-views > .seg button:hover { background: var(--panel); }
+.sc-views > .seg button.on { background: var(--accent-soft); box-shadow: inset 0 -2px 0 var(--accent); }
 .ly-off { opacity: .5; }
 .ly-eye { all: unset; cursor: pointer; display: inline-flex; color: var(--ink-3); }
 .ly-eye:hover { color: var(--ink); }

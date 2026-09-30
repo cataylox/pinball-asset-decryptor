@@ -530,8 +530,11 @@ function inPoly(pts, x, y) {
 function TreeTop({ s, onMenu }) {
   const [view, setView] = useState("layers");
   return html`<div class="scenes-top">
-    <${Seg} value=${view} onChange=${setView}
-      options=${[{ value: "layers", label: "Layers" }, { value: "contents", label: "Contents" }]} />
+    <div class="sc-views"><${Seg} value=${view} onChange=${setView} options=${[
+      { value: "layers", label: html`<${Icon} name="scenes" />Layers`,
+        title: "Every part of the scene, in the order it is drawn: pick, hide or edit them" },
+      { value: "contents", label: html`<${Icon} name="list" />Contents`,
+        title: "The pictures, fonts and text this scene uses: double-click one to find it on its own tab" }]} /></div>
     ${view === "layers" ? html`<${TreeLayers} t=${s.tree_view} />` : html`<${Contents} s=${s} onMenu=${onMenu} />`}
   </div>`;
 }
@@ -570,8 +573,26 @@ function TreeLayers({ t }) {
         <${Icon} name=${l.hidden || l.state_off ? "eye-off" : "eye"} /></button>
       <span class="sc-t ellip" title=${l.name}>${l.name}${l.added ? " (added)" : ""}</span>
       <span class="sc-i small muted ellip" title=${l.edits || l.kind}>${l.edits || l.kind}</span>
+      ${(l.pics || []).length ? html`<button type="button" class="ly-img"
+        aria-label="Show on the Images tab" ...${tip(l.pics.length === 1 ? "Show this picture on the Images tab"
+          : `Show one of the ${l.pics.length} pictures it draws on the Images tab`)}
+        onClick=${(e) => { e.stopPropagation(); showPics(l.pics, e); }}><${Icon} name="image" /></button>`
+        : html`<span></span>`}
     </div>`)}
   </div>`;
+}
+
+// PAD-287: a layer's button to its picture on the Images tab; a group that draws several
+// lists them to pick from.
+const MAX_PICS = 25;
+function showPics(pics, e) {
+  if (pics.length === 1) { call("text_scenes.activate", "img::" + pics[0]); return; }
+  const items = pics.slice(0, MAX_PICS).map((rel) => ({
+    label: rel.split("/").pop(), onClick: () => call("text_scenes.activate", "img::" + rel) }));
+  if (pics.length > MAX_PICS) {
+    items.push({ sep: true }, { label: `${pics.length - MAX_PICS} more: see Contents`, disabled: true, onClick: () => {} });
+  }
+  openMenu({ x: e.clientX, y: e.clientY }, items);
 }
 
 // A set of pictures, handed over only once the browser has every one of them: the canvas
