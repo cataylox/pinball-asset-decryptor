@@ -1220,6 +1220,15 @@ class PinPROC(object):
         self._ok(self._dev.write_data([create_burst_command(int(module), int(address), 1),
                                        _u32(data)]), _last_error[0])
 
+    def write_i2c_data(self, address, data):
+        # Not in upstream pypinproc: American Pinball's own build (the Aimtron
+        # motherboard's) adds it for the PCA9685 RGB LED chips on the P3-ROC's
+        # I2C bus (procgame/game/rgb_led.py, BBQ on).  It is write_data(7,
+        # address, data) BUFFERED - queued with the other prepared writes and
+        # sent on the next flush, where write_data flushes and sends at once.
+        self._ok(self._dev.prepare_write_data([create_burst_command(7, int(address), 1),
+                                               _u32(data)]), _last_error[0])
+
     def watchdog_tickle(self):
         self._dev.driver_watchdog_tickle()
 

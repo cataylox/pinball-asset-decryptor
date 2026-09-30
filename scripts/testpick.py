@@ -86,6 +86,8 @@ ZONES = [
       "test_rig_leaf_imports.py"]),
     # PAD-262: the shared fake P-ROC (AP, Dutch Pinball, Spooky rigs build on it)
     ("proc_emu", ["tools/proc_emu/"], ["test_proc_emu.py"]),
+    # PAD-265: the apiav-era American Pinball rig (BBQ on), on proc_emu's board
+    ("ap_apiav", ["tools/ap_emu/apiav/"], ["test_ap_apiav_emu.py"]),
     ("cgc",     ["pinball_decryptor/plugins/cgc/"],
      ["test_cgc_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
     ("spooky",  ["pinball_decryptor/plugins/spooky/"],
