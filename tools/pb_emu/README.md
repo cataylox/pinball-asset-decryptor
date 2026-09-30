@@ -14,8 +14,13 @@ private display, muted.
 
 Alien, Queen and ABBA are **not** FAST machines (PB's own Heighway-lineage
 I/O boards): `prepare.sh` refuses them with exit 4, and `tools/pbio_emu`
-(PAD-272) covers them. The app's Emulate tab for Predator is a follow-up
-ticket; this rig is driven by hand (below).
+(PAD-272) covers them.
+
+The app's **Emulate PB** tab (`webui/tabs/emulate_pb.py`, laid out as the
+AP and Spooky tabs are) drives it through `watch.sh`, `stop.sh`,
+`status.sh`, `cancel.sh`, `cache.sh` and `setup.sh`; the switch window is
+AP's (`tools/ap_emu/appf.py`, through `pbpf.py`), the live volume Spooky's
+(`tools/spooky_emu/spkvol.py`, through `pbvol.py`).
 
 ## Why this is small
 
@@ -78,6 +83,12 @@ As root in PAD-Runtime (`wsl -d PAD-Runtime -u root`), with `PAD_SLOT` and
 `PAD_LABEL=PAD-n` set as for every rig:
 
 ```bash
+# what the app's Start runs: setup (once), unpack, board, game, attract
+PAD_VISIBLE=0 bash tools/pb_emu/watch.sh ".../pbpp_predator_game_1_0_1.upd"
+bash tools/pb_emu/stop.sh                    # the app's Stop
+bash tools/pb_emu/cache.sh --list            # the app's Cache window
+bash tools/pb_emu/ctl.sh state               # the switch window's pipe (JSON)
+
 bash tools/pb_emu/setup.sh                   # once: the libraries (~700 MB)
 bash tools/pb_emu/build.sh                   # developers: rebuild pbshim.so
 bash tools/pb_emu/prepare.sh ".../pbpp_predator_game_1_0.upd" ".../pbpp_predator_game_1_0_1.upd"
@@ -100,10 +111,28 @@ bash tools/pb_emu/bootcheck.sh <build>       # VERDICT line: attract + a coin se
 have the same names and run as the same user. Every stop here is filtered by
 this slot's `PB_MARK`.
 
+## The app's tab
+
+* **Which file.** A person picks ONE update - the version to play.
+  `pbupdates.py` finds the rest of its chain beside it (every
+  `<game>_game_<version>.upd` of the same game up to that version, oldest
+  first), so picking `…_1_0_1.upd` unpacks `…_1_0.upd` and then the delta.
+* **status.sh** speaks the AP rig's keys (`running=`, `attract=`,
+  `switches_json=`, ...) plus `ready=` (setup.sh done), `balls=` and
+  `leds_lit=`.
+* **The switch window** (`pbpf.py`) is appf's schematic view: every switch
+  from `pbswitches.py`'s table (the game's own names, AP's keys), and the
+  LEDs the game has lit as its lights grid.  `pbctl.py` turns the board's
+  `ok` / `err` replies into the JSON appf reads.  The board adds `rip`,
+  `reset`, `pause` (SIGSTOP/SIGCONT of this rig's pinprog and vidprog) and
+  holds any `sw` press at least 100 ms: a 1 ms click reached pinprog as
+  "SW 5 COIN 2 unstable" and was dropped.
+* **Stop** also ends run_game.sh's namespace shell and its `runuser`
+  wrappers (by `ns.pid`): they carry no `PB_MARK`, and once their programs
+  were killed they sat stopped with zombies under them, one pair per run.
+
 ## Not done yet
 
-* The app's Emulate tab (and shipping this folder in the installer) - the
-  follow-up ticket.
 * The main toy (helicopter/minigun motors, `TOY *` position switches) is
   answered but not modelled: its sensors all read clear, and the game's diags
   report 0 errors in attract. A mode that moves the toy may complain.

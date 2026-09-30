@@ -46,6 +46,8 @@ TABS = (
      "emulate"),
     ("emulate_spooky", "emulate_spooky", "Emulate Spooky", "Emulate", "Play",
      "emulate"),
+    ("emulate_pb", "emulate_pb", "Emulate PB", "Emulate", "Play",
+     "emulate"),
     # Not a tab: the app-wide menus, windows and banners (settings, help,
     # projects, updates).  Its key is empty, so the rail never shows it.
     ("shell_extras", "shellx", "", "", "", ""),

@@ -10,7 +10,9 @@
 #                (the default: windows popping up are disruptive; shot.sh
 #                shows a hidden run)
 #   --audio      play sound through WSLg's PulseAudio (default: none - a
-#                hidden rig nobody can find must never be heard)
+#                hidden rig nobody can find must never be heard); with
+#                PAD_AUDIO_CTL (the app's audio_ctl.json, a WSL path) pbvol.py
+#                holds it at the app's Volume / Mute, live
 #
 # The machine is two programs in /opt/game, both started by the machine's
 # init: pinprog (rules + the FAST boards, writes raven.log and nvram/ in its
@@ -84,6 +86,9 @@ chmod 755 "$PB_RIG"/bin/* "$PB_RIG"/utils/* "$PB_RIG"/initd/*
 echo "$BUILD" > "$PB_RIG/build"
 echo "$TITLE" > "$PB_RIG/title"
 echo "$VISIBLE" > "$PB_RIG/visible"
+# the version the machine would show: the last update's name, 1_0_1 -> 1.0.1
+tail -1 "$BUILD/.pad_sources" 2>/dev/null | sed -n 's/.*_game_\([0-9_]*\)\.upd$/\1/p' |
+    tr _ . > "$PB_RIG/version"
 touch "$(realpath "$BUILD")/.used"
 chown -R "$PB_USER": "$PB_RIG"
 
@@ -110,6 +115,7 @@ else
     pgrep -xf "Xvfb $DISP .*" | head -1 > "$PB_RIG/xvfb.pid"
 fi
 echo "$DISP" > "$PB_RIG/display"
+echo "${W}x${H}" > "$PB_RIG/window"
 
 if [ $AUDIO = 1 ] && [ -S /mnt/wslg/PulseServer ]; then
     AUDIO_ENV="PULSE_SERVER=unix:/mnt/wslg/PulseServer"
@@ -123,7 +129,11 @@ ENVS="PATH=$PB_RIG/bin:/usr/local/bin:/usr/bin:/bin HOME=$PB_RIG/home USER=$PB_U
 DISPLAY=$DISP $AUDIO_ENV PB_MARK=$PB_RIG PB_DEV=$PB_RIG/dev PB_VIDPORT=$VIDPORT \
 LD_LIBRARY_PATH=$PB_ENV/lib LD_PRELOAD=$PB_SHIM $GST"
 
+# ns.sh records itself: neither it nor the runuser wrappers it starts carry
+# PB_MARK, and a wrapper whose program was killed sits STOPPED (T) with a
+# zombie under it, forever - killgame.sh ends them by this pid.
 cat > "$PB_RIG/ns.sh" <<EOF
+echo \$\$ > $PB_RIG/ns.pid
 mount -t tmpfs -o mode=755 tmpfs /opt || exit 1
 mkdir -p /opt/game /opt/utils
 mount --bind "$G" /opt/game || exit 1
@@ -140,6 +150,13 @@ EOF
 # wsl.exe that started this (tools/bof_emu learned it).
 setsid -f unshare -m --propagation private bash "$PB_RIG/ns.sh" \
     < /dev/null > "$PB_RIG/ns.out" 2>&1
+# The app's Volume / Mute, live, as on the AP and Spooky rigs: pbvol.py
+# holds this slot's stream at the level in the control file every Emulate
+# tab writes.  It waits for the game, and ends with it.
+if [ $AUDIO = 1 ] && [ -n "${PAD_AUDIO_CTL:-}" ] && [ -S /mnt/wslg/PulseServer ]; then
+    setsid -f python3 "$PB_TOOLS/pbvol.py" --ctl "$PAD_AUDIO_CTL" --rig "$PB_RIG" \
+        < /dev/null >> "$PB_RIG/pbvol.log" 2>&1
+fi
 for _ in $(seq 1 50); do
     p=$(pgrep -u "$PB_USER" -xf './pinprog' | while read -r q; do
         tr '\0' '\n' < /proc/$q/environ 2>/dev/null | grep -qx "PB_MARK=$PB_RIG" && echo $q; done | head -1)
@@ -154,6 +171,8 @@ for i in $(seq 1 600); do
     sleep 0.1
 done
 if pb_game_alive && grep -qE "$ATTRACT" "$G/raven.log" 2>/dev/null; then
+    # the virtual playfield's table (pbpf.py reads it; status.sh names it)
+    python3 "$PB_TOOLS/pbswitches.py" "$PB_RIG" && chmod 644 "$PB_RIG/switches.json"
     echo "Ready: $(basename "$BUILD"), slot $PB_SLOT, display $DISP"
     rigboard_post pb "$PB_SLOT" "$(pb_game_pid)" "$(basename "$BUILD")" "${PAD_TITLE:-$(tget title)}" "$VISIBLE" "$AUDIO"
 else

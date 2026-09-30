@@ -12,6 +12,7 @@
 set -eu
 . "$(dirname "$0")/pbpath.sh"
 [ -f "$PB_ENV/.ready" ] && { echo "setup.sh: $PB_ENV ready"; exit 0; }
+# (patchelf: prepare.sh points both programs at Ubuntu's loader with it)
 mkdir -p "$PB_ROOT/bin"
 MM=$PB_ROOT/bin/micromamba
 if [ ! -x "$MM" ]; then
@@ -22,7 +23,7 @@ if [ ! -x "$MM" ]; then
     rm -f "$PB_ROOT/mm.tar.bz2"
 fi
 MAMBA_ROOT_PREFIX=$PB_ROOT/mamba "$MM" create -y -p "$PB_ENV" -c conda-forge \
-    sdl2 sdl2_mixer sdl2_image sdl2_ttf libxml2 \
+    sdl2 sdl2_mixer sdl2_image sdl2_ttf libxml2 patchelf \
     gstreamer gst-plugins-base gst-plugins-good gst-libav
 # GNU Pth: the .so out of Debian's package (ar archive, data.tar.xz).
 PTH_DEB=libpth20_2.0.7-22_amd64.deb

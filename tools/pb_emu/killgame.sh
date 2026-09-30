@@ -16,6 +16,15 @@ stop_pid() {        # <pid>: TERM, wait up to 3 s, then KILL
 stop_pid "$(pb_game_pid)"
 for p in $(pb_slot_pids); do stop_pid "$p"; done
 stop_pid "$(cat "$PB_RIG/xvfb.pid" 2>/dev/null)"
+# The namespace shell (run_game.sh's ns.sh) and its runuser wrappers: they
+# have no PB_MARK, and once their programs are gone the wrappers sit stopped
+# with zombies under them.  Checked by name, so a reused pid is left alone.
+ns=$(cat "$PB_RIG/ns.pid" 2>/dev/null)
+if [ -n "$ns" ] && tr '\0' ' ' < "/proc/$ns/cmdline" 2>/dev/null | grep -q "$PB_RIG/ns.sh"; then
+    for c in $(ps -o pid= --ppid "$ns"); do kill -KILL "$c" 2>/dev/null; done
+    kill -KILL "$ns" 2>/dev/null
+fi
+rm -f "$PB_RIG/ns.pid"
 
 left=$(pb_slot_pids)
 xp=$(cat "$PB_RIG/xvfb.pid" 2>/dev/null)

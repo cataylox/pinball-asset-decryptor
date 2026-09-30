@@ -25,7 +25,15 @@ TITLES = {
         "exp_boards": {"48": "FP-CPU-2000", "B4": "FP-EXP-0071",
                        "D0": "FP-EXP-0051", "30": "FP-EXP-1313"},
         "trough_switches": [24, 25, 26, 27, 28, 29],
+        "jam_switch": 30,
         "shooter_switch": 31,
+        # below this the switches are the cabinet's and the coin door's
+        "first_playfield_switch": 24,
+        # the cabinet's buttons by role, for the virtual playfield's keys
+        # (pbswitches.py); exit/down/up/enter are the coin door's
+        "cabinet": {"start": 10, "coin": 5, "launch": 18, "tilt": 11,
+                    "lflip": 8, "ulflip": 9, "rflip": 16, "urflip": 17,
+                    "exit": 0, "down": 1, "up": 2, "enter": 3},
         "trough_eject_driver": 0x11,        # TROUGH RELEASE
         "launch_drivers": [0x10],           # AUTO LAUNCH
         # bank reset driver -> the drop targets it stands back up

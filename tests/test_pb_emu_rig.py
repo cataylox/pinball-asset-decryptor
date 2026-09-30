@@ -221,7 +221,8 @@ def test_titles_cli_prints_a_field(capsys):
 def test_scripts_are_lf_and_source_the_path_file(script):
     raw = (RIG / script).read_bytes()
     assert b"\r\n" not in raw
-    if script not in ("pbpath.sh", "build.sh"):
+    # ctl.sh only execs pbctl.py (hot path: one per switch-window pipe)
+    if script not in ("pbpath.sh", "build.sh", "ctl.sh"):
         assert b'pbpath.sh"' in raw
 
 
@@ -232,3 +233,119 @@ def test_kills_are_filtered_by_this_rigs_mark():
         src = (RIG / script).read_text()
         assert "pkill" not in src
     assert "PB_MARK=$PB_RIG" in (RIG / "pbpath.sh").read_text()
+
+
+# ---------------------------------------- the Emulate tab's window (appf)
+def test_state_carries_what_the_virtual_playfield_reads():
+    """appf.App.poll: up, switches, lights, paused."""
+    e = emu()
+    e.on_exp_line("EA:B40")
+    e.on_exp_line("RS:0CDC1020")
+    e.on_exp_line("RS:0D000000")
+    st = e.state()
+    assert st["up"] is True and st["paused"] is False
+    assert st["lights"] == {"B4:12": [0xDC, 0x10, 0x20]}     # lit ones only
+    assert "24" in st["switches"]                           # a full trough
+
+
+def test_reset_puts_every_ball_back():
+    e = emu()
+    e.on_net_line("TL:%02X,01" % PRED["trough_eject_driver"])
+    run_timers(e)
+    e.plunge()
+    assert e.in_play == 1
+    e.reset_balls()
+    assert e.in_play == 0 and e.in_trough == len(PRED["trough_switches"])
+    assert not e.switches.get(PRED["shooter_switch"])
+    assert all(e.switches[n] for n in PRED["trough_switches"])
+
+
+def test_rip_flips_a_switch_until_released():
+    e = emu()
+    e.rip(59, 1)                        # LEFT CRYPT SPINNER
+    for _ in range(3):
+        _, _, fn, args = e.timers.pop(0)
+        fn(*args)
+    assert take(e, pbfast.NET).count("L:3B") == 3
+    e.rip(59, 0)
+    _, _, fn, args = e.timers.pop(0)
+    fn(*args)
+    assert not e.switches.get(59) and not e.timers
+
+
+def test_pause_signals_only_this_rigs_programs(monkeypatch):
+    e = emu()
+    monkeypatch.setattr(e, "game_pids", lambda: [101, 102])
+    # stand-ins: Windows has no SIGSTOP / SIGCONT
+    monkeypatch.setattr(pbfast.signal, "SIGSTOP", "STOP", raising=False)
+    monkeypatch.setattr(pbfast.signal, "SIGCONT", "CONT", raising=False)
+    sent = []
+    monkeypatch.setattr(pbfast.os, "kill", lambda p, s: sent.append((p, s)))
+    assert e.set_pause(1) is True and e.state()["paused"]
+    assert sent == [(101, "STOP"), (102, "STOP")]
+    sent.clear()
+    assert e.set_pause(0) is False
+    assert sent == [(101, "CONT"), (102, "CONT")]
+
+
+def test_ctl_replies_are_json_for_the_window():
+    pbctl = _load("pbctl")
+    assert pbctl.as_json("ok") == '{"ok": true}'
+    assert pbctl.as_json("err no ball in play") == '{"err": "no ball in play"}'
+    assert pbctl.as_json('{"paused": true}\n') == '{"paused": true}'
+
+
+def test_switch_table_is_the_ap_windows_format():
+    pbswitches = _load("pbswitches")
+    t = pbswitches.table(key="predator")
+    by = {s["n"]: s for s in t["switches"]}
+    assert len(by) == len(PRED["switches"]) and t["balls"] == 6
+    # appf.py finds the trough, the shooter and the service buttons by name
+    assert [by[n]["name"] for n in PRED["trough_switches"]] == [
+        "trough%d" % i for i in range(1, 7)]
+    assert by[31]["name"] == "shooter" and by[30]["name"] == "troughJam"
+    assert [by[n]["name"] for n in (0, 1, 2, 3)] == ["exit", "down", "up", "enter"]
+    assert by[24]["nc"] and not by[35]["nc"]            # optos: the game's mask
+    keys = {r["keys"]: r["ns"] for r in t["rows"]}
+    assert keys["1"] == [10] and keys["5"] == [5] and keys["Space"] == [18]
+    assert keys["Left"] == [8, 9] and keys["Right"] == [16, 17]
+    # the flippers' EOS switches get no letter
+    lettered = {n for r in t["rows"] if len(r["keys"]) == 1 and r["keys"].isalpha()
+                for n in r["ns"]}
+    assert not lettered & {36, 54, 67}
+    acts = {k["action"] for k in t["keymap"] if k["action"]}
+    assert acts == {"plunge", "drain", "pause"}
+
+
+def test_a_delta_brings_the_full_update_it_builds_on(tmp_path):
+    pbupdates = _load("pbupdates")
+    for n in ("pbpp_predator_game_1_0.upd", "pbpp_predator_game_1_0_1.upd",
+              "pbpp_predator_game_1_1.upd", "pbap412.upd"):
+        (tmp_path / n).write_bytes(b"x")
+    names = lambda p: [pathlib.Path(x).name for x in pbupdates.chain(str(tmp_path / p))]
+    assert names("pbpp_predator_game_1_0_1.upd") == [
+        "pbpp_predator_game_1_0.upd", "pbpp_predator_game_1_0_1.upd"]
+    assert names("pbpp_predator_game_1_0.upd") == ["pbpp_predator_game_1_0.upd"]
+    assert names("pbpp_predator_game_1_1.upd")[-1] == "pbpp_predator_game_1_1.upd"
+    # 1_0_1 sorts before 1_1, not after it
+    assert names("pbpp_predator_game_1_1.upd") == [
+        "pbpp_predator_game_1_0.upd", "pbpp_predator_game_1_0_1.upd",
+        "pbpp_predator_game_1_1.upd"]
+    assert names("pbap412.upd") == ["pbap412.upd"]
+
+
+def test_a_tap_from_the_window_is_held_long_enough_for_the_debounce():
+    """A 1 ms click reached pinprog as "SW 5 COIN 2 unstable" and was dropped;
+    the board holds a press from outside at least MIN_PRESS_S."""
+    e = emu()
+    e.press(5, 1)
+    e.press(5, 0)                       # at once
+    assert e.switches[5] == 1 and len(e.timers) == 1
+    run_timers(e)
+    assert e.switches[5] == 0
+    # pressed again before the late release: that release does not cut it short
+    e.press(5, 1)
+    e.press(5, 0)
+    e.press(5, 1)
+    run_timers(e)
+    assert e.switches[5] == 1

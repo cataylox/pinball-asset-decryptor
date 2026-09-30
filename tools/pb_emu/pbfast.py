@@ -30,7 +30,14 @@ Control: a unix socket at <dir>/ctl.sock, one command per line:
   tap <n> [ms]      press, then release after ms (default 150)
   plunge            the ball in the shooter lane leaves it (into play)
   drain             one ball in play drains into the trough
-  state             JSON: switches, balls, driver pulses, board status
+  rip <n> <0|1>     flip a switch every RIP_S while on (a spinner spinning)
+  reset             every ball back in the trough (nothing in play or the lane)
+  pause <0|1>       freeze / thaw the game (SIGSTOP / SIGCONT of this rig's
+                    pinprog and vidprog, found by their PB_MARK); JSON reply
+  state             JSON: switches, balls, driver pulses, board status - and
+                    the keys the virtual playfield (tools/ap_emu/appf.py via
+                    pbpf.py) reads: up, paused, lights ("<board>:<index>" ->
+                    [r, g, b], the lit ones)
   leds              JSON: every LED the game has set, "<board>:<index>" -> rrggbb
   quit
 """
@@ -39,11 +46,17 @@ import heapq
 import json
 import os
 import select
+import signal
 import socket
 import time
 
 NET, EXP = "net", "exp"
 SWITCH_BYTES = 15               # SA: reply covers switches 0..119
+RIP_S = 0.04                    # a ripped switch flips this often
+# The shortest press `sw` lets through: pinprog's debounce drops a switch
+# that is back within a scan or two ("SW 5 COIN 2 unstable"), and a click or
+# a key tap in the switch window can be 1-2 ms from press to release.
+MIN_PRESS_S = 0.1
 
 
 class Port:
@@ -81,6 +94,9 @@ class Emulator:
                        "exp": [], "sa": 0, "watchdog": 0}
         self.timers = []
         self.seq = 0
+        self.ripping = set()        # switches flipping (rip)
+        self.pressed = {}           # sw n -> (press count, when) for MIN_PRESS_S
+        self.paused = False
         self.trace = os.environ.get("PBFAST_TRACE") == "1"   # every line in
         for n in profile.get("active_at_boot", []):
             self.switches[int(n)] = 1
@@ -171,6 +187,83 @@ class Emulator:
         self.in_trough += 1
         self.layout_trough()
         return True
+
+    def reset_balls(self):
+        self.in_play = 0
+        self.in_trough = len(self.trough)
+        if self.shooter is not None:
+            self.set_switch(self.shooter, 0, "ball")
+        self.layout_trough()
+        return True
+
+    def press(self, n, on):
+        """A press from outside (the switch window, sw.py): as set_switch,
+        but a release that comes sooner than MIN_PRESS_S after its press
+        waits out the rest, so the game's debounce sees it."""
+        now = time.monotonic()
+        count, since = self.pressed.get(n, (0, 0.0))
+        if on:
+            self.pressed[n] = (count + 1, now)
+            self.set_switch(n, 1)
+            return
+        held = now - since
+        if held < MIN_PRESS_S:
+            self.after(MIN_PRESS_S - held, self._late_release, n, count)
+        else:
+            self.set_switch(n, 0)
+
+    def _late_release(self, n, count):
+        # pressed again meanwhile: that press's own release lets it go
+        if self.pressed.get(n, (0, 0.0))[0] == count:
+            self.set_switch(n, 0)
+
+    def rip(self, n, on):
+        if not on:
+            self.ripping.discard(n)
+            return
+        if n not in self.ripping:
+            self.ripping.add(n)
+            self.after(RIP_S, self._rip_tick, n)
+
+    def _rip_tick(self, n):
+        if n not in self.ripping:
+            self.set_switch(n, 0, "rip")
+            return
+        self.set_switch(n, not self.switches.get(n, 0), "rip")
+        self.after(RIP_S, self._rip_tick, n)
+
+    # ---------------------------------------------------------------- pause
+    def game_pids(self):
+        """This rig's pinprog and vidprog: every process whose environment
+        carries PB_MARK=<this rig> and whose name is one of the programs
+        (never this board, nor the rig's Xvfb)."""
+        want = ("PB_MARK=%s" % self.root.rstrip("/")).encode()
+        progs = set(self.profile.get("programs", ["pinprog", "vidprog"]))
+        pids = []
+        for d in os.listdir("/proc"):
+            if not d.isdigit():
+                continue
+            try:
+                with open("/proc/%s/comm" % d) as f:
+                    if f.read().strip() not in progs:
+                        continue
+                with open("/proc/%s/environ" % d, "rb") as f:
+                    if want in f.read().split(b"\0"):
+                        pids.append(int(d))
+            except OSError:
+                pass
+        return pids
+
+    def set_pause(self, on):
+        sig = signal.SIGSTOP if on else signal.SIGCONT
+        for p in self.game_pids():
+            try:
+                os.kill(p, sig)
+            except OSError:
+                pass
+        self.paused = bool(on)
+        self.log("PAUSE %s" % ("on" if on else "off"))
+        return self.paused
 
     def on_pulse(self, drv):
         if drv == self.profile.get("trough_eject_driver"):
@@ -287,8 +380,12 @@ class Emulator:
     # -------------------------------------------------------------- control
     def state(self):
         return {
+            "up": True,
+            "paused": self.paused,
             "title": self.profile.get("title", ""),
             "switches": {str(k): v for k, v in sorted(self.switches.items()) if v},
+            "lights": {"%s:%d" % k: list(v) for k, v in sorted(self.leds.items())
+                       if any(v)},
             "optos": sorted(self.opto),
             "balls": {"trough": self.in_trough, "in_play": self.in_play,
                       "shooter": bool(self.shooter is not None
@@ -306,7 +403,7 @@ class Emulator:
             return
         try:
             if words[0] == "sw":
-                self.set_switch(int(words[1], 0), int(words[2]))
+                self.press(int(words[1], 0), int(words[2]))
                 conn.sendall(b"ok\n")
             elif words[0] == "tap":
                 n = int(words[1], 0)
@@ -318,6 +415,15 @@ class Emulator:
                 conn.sendall(b"ok\n" if self.plunge() else b"err no ball in the shooter lane\n")
             elif words[0] == "drain":
                 conn.sendall(b"ok\n" if self.drain() else b"err no ball in play\n")
+            elif words[0] == "rip":
+                self.rip(int(words[1], 0), int(words[2]))
+                conn.sendall(b"ok\n")
+            elif words[0] == "reset":
+                self.reset_balls()
+                conn.sendall(b"ok\n")
+            elif words[0] == "pause":
+                conn.sendall((json.dumps({"paused": self.set_pause(int(words[1]))})
+                              + "\n").encode())
             elif words[0] == "state":
                 conn.sendall((json.dumps(self.state()) + "\n").encode())
             elif words[0] == "leds":

@@ -2,7 +2,10 @@
 
 **Goal** (the 2026-09-29 survey's scope for every maker): a rig under
 `tools/pb_emu` that boots the game to attract mode on a PC and takes switch
-input, emulator-proven. The app's Emulate tab is a follow-up ticket.
+input, emulator-proven.  Then (David, 2026-09-30: "don't we need a emulate
+tab for pinball brothers? ... modeled off the same look and feel of the
+other emulate tabs (like AP and stern)") the app's Emulate PB tab, on this
+same ticket.
 
 **Result (2026-09-30):** done. Predator 1.0.1 (`pbpp_predator_game_1_0.upd` +
 the `_1_0_1` delta) boots to attract with 0 diag errors, draws its real
@@ -107,8 +110,10 @@ Decisions:
 
 ## Owed / next
 
-* The Emulate tab (follow-up ticket), with a virtual playfield from
-  `pbtitles.py`'s switch names, and the installer shipping `tools/pb_emu`.
+* ~~The Emulate tab~~ - done on this ticket (`webui/tabs/emulate_pb.py`):
+  AP's layout, setup notice, Cache window and switch window, Spooky's
+  supported-games card; the installer ships `tools/pb_emu`.  When PAD-272
+  (Alien, ABBA on `tools/pbio_emu`) lands, this tab is where they join.
 * The main toy (helicopter/minigun motors and the `TOY *` sensors) is
   answered but not modelled.
 * `setup.sh` fetches ~700 MB of conda packages; if the tab ships, the same

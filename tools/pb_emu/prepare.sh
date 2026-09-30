@@ -73,11 +73,32 @@ fi
 
 rm -rf "$DEST.tmp"
 mkdir -p "$DEST.tmp"
+# `progress <pct>` lines (of every file's bytes together) for the app's footer
+total=0
+for f in "$@"; do total=$((total + $(stat -c %s "$f"))); done
+done_b=0
 for f in "$@"; do
-    python3 - "$f" "$DEST.tmp" <<'EOF' || { rm -rf "$DEST.tmp"; echo "prepare.sh: unpacking $f failed" >&2; exit 5; }
+    python3 - "$f" "$DEST.tmp" "$done_b" "$total" <<'EOF' || { rm -rf "$DEST.tmp"; echo "prepare.sh: unpacking $f failed" >&2; exit 5; }
 import sys, tarfile
 src, dest = sys.argv[1], sys.argv[2]
-with tarfile.open(src, "r|gz") as t:
+base, total = int(sys.argv[3]), max(1, int(sys.argv[4]))
+
+
+class Counted:
+    """The raw .upd, counting what the gzip stream has read of it."""
+    def __init__(self, f):
+        self.f, self.said = f, -1
+
+    def read(self, n=-1):
+        b = self.f.read(n)
+        pct = int((base + self.f.tell()) * 100 / total)
+        if pct != self.said:
+            self.said = pct
+            print("progress %d" % pct, flush=True)
+        return b
+
+
+with open(src, "rb") as raw, tarfile.open(fileobj=Counted(raw), mode="r|gz") as t:
     for m in t:
         n = m.name
         while n.startswith("./"):
@@ -89,6 +110,7 @@ with tarfile.open(src, "r|gz") as t:
             continue
         t.extract(m, dest, filter="tar")
 EOF
+    done_b=$((done_b + $(stat -c %s "$f")))
 done
 [ -f "$DEST.tmp/pinprog" ] && [ -f "$DEST.tmp/vidprog" ] ||
     { rm -rf "$DEST.tmp"; echo "prepare.sh: no pinprog/vidprog in the update" >&2; exit 5; }

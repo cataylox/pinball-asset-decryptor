@@ -244,7 +244,7 @@ def test_board_env_is_empty_off_windows(monkeypatch):
 
 
 @pytest.mark.parametrize("tab", ["emulate_ap", "emulate_bof", "emulate_dp",
-                                 "emulate_jjp", "emulate_spike1",
+                                 "emulate_jjp", "emulate_pb", "emulate_spike1",
                                  "emulate_spooky"])
 def test_every_emulate_tab_launch_carries_the_board(tab):
     with open(os.path.join(REPO, "pinball_decryptor", "webui", "tabs", tab + ".py"),
