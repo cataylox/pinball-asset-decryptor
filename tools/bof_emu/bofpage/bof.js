@@ -159,6 +159,9 @@ function build() {
     const h = Math.max(...placed.map((s) => s.y), 600) + 12;
     place(w, h);
   }
+  // A title with no switch positions (Beetlejuice, tools/spooky_emu):
+  // the list is the whole window.
+  if (!placed.length && !M.art) { pf.hidden = true; list.classList.add("wide"); }
   body.append(pf, list);
   app.append(bar, body);
   paint();

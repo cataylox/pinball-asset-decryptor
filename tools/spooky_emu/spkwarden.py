@@ -30,17 +30,25 @@ The machine at rest: the trough full (Game.expectedBallCount = 6: TROUGH
 
 Physics, just enough to play: the trough eject coil (51) takes a ball out
 and makes the shooter lane (8) active half a second later; the auto-launch
-coil (54) clears the shooter lane.  `sw.py drain` puts a ball back in the
+coil (54) clears the shooter lane.  `drain` puts a ball back in the
 trough.
 
-Switch input comes from sw.py over the FIFO <rig>/input, one line each:
-    <sw> on | off | pulse [ms]      (sw = number)
-    drain
-    dump                            (writes <rig>/switches.txt)
+Switch input comes over the control socket <rig>/ctl.sock, one line per
+request, one line per reply - the same protocol as tools/bof_emu's boards,
+so the app's switch window (spkpf.py, on tools/bof_emu/bofpf.py) drives it:
+    sw <n> <0|1>        hold / release a switch          -> ok
+    tap <n> [ms]        press and release (150 ms)       -> ok
+    plunge              the ball in the shooter lane goes into play -> ok
+    drain               one ball in play back to the trough          -> ok
+    state               {"switches": {n: 0|1}, "balls": {...},
+                         "connected": bool, "leds_lit": 0}
+ctl.sh / spkctl.py and sw.py are its clients.
 Everything the board does is logged to <rig>/warden.log.
 """
+import json
 import os
 import select
+import socket
 import sys
 import threading
 import time
@@ -72,6 +80,7 @@ class Board:
             tty.setraw(slave)
             self.slave_path = os.ttyname(slave)
             self.slave = slave      # keep one handle open: no EIO on reopen
+        self.connected = False
         self._set_trough()
 
     def say(self, *a):
@@ -152,39 +161,77 @@ class Board:
         self.say("drain:", self.balls, "in the trough")
         self.trough_changed()
 
-    # -- sw.py -> board -------------------------------------------------
+    # -- control socket -----------------------------------------------
+    def balls_state(self):
+        shooter = 1 if self.state.get(SHOOTER) else 0
+        return {"trough": self.balls, "shooter": shooter,
+                "in_play": max(0, BALLS - self.balls - shooter)}
+
     def command(self, line):
+        """One control request -> its one-line reply."""
         p = line.split()
         if not p:
-            return
-        if p[0] == "drain":
-            self.drain()
-        elif p[0] == "dump":
+            return "err empty"
+        if p[0] == "state":
             with self.lock:
-                txt = "".join("%d %d\n" % kv for kv in sorted(self.state.items()))
-            with open(os.path.join(self.rig, "switches.txt"), "w") as f:
-                f.write(txt)
-        elif len(p) >= 2 and p[0].isdigit():
-            sw = int(p[0])
-            if p[1] == "on":
-                self.set_switch(sw, 1)
-            elif p[1] == "off":
-                self.set_switch(sw, 0)
-            elif p[1] == "pulse":
-                ms = int(p[2]) if len(p) > 2 else 200
-                self.set_switch(sw, 1)
-                self.later(ms / 1000.0, self.set_switch, sw, 0)
-        else:
-            self.say("bad command", line)
+                sw = {str(k): v for k, v in sorted(self.state.items())}
+            return json.dumps({"switches": sw, "balls": self.balls_state(),
+                               "connected": self.connected, "leds_lit": 0})
+        if p[0] == "drain":
+            if self.balls_state()["in_play"] <= 0:
+                return "err no ball in play"
+            self.drain()
+            return "ok"
+        if p[0] == "plunge":
+            if not self.state.get(SHOOTER):
+                return "err no ball in the shooter lane"
+            self.set_switch(SHOOTER, 0)
+            return "ok"
+        if p[0] in ("sw", "tap") and len(p) >= 2 and p[1].isdigit():
+            n = int(p[1])
+            if p[0] == "sw":
+                self.set_switch(n, len(p) < 3 or p[2] not in ("0", "off"))
+            else:
+                ms = int(p[2]) if len(p) > 2 and p[2].isdigit() else 150
+                self.set_switch(n, 1)
+                self.later(ms / 1000.0, self.set_switch, n, 0)
+            return "ok"
+        return "err unknown request: " + line.strip()
 
-    def fifo_loop(self, path):
-        while True:
-            with open(path) as f:           # blocks until a writer opens it
-                for line in f:
+    def client(self, conn):
+        buf = b""
+        with conn:
+            while True:
+                try:
+                    data = conn.recv(4096)
+                except OSError:
+                    return
+                if not data:
+                    return
+                buf += data
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
                     try:
-                        self.command(line.strip())
-                    except Exception as e:  # never let a typo stop the board
-                        self.say("command failed", line.strip(), e)
+                        reply = self.command(line.decode("utf-8", "replace"))
+                    except Exception as e:      # never let a typo stop the board
+                        reply = "err %s" % e
+                    try:
+                        conn.sendall((reply + "\n").encode())
+                    except OSError:
+                        return
+
+    def ctl_loop(self, path):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        srv = socket.socket(socket.AF_UNIX)
+        srv.bind(path)
+        os.chmod(path, 0o666)       # the app's switch window may run as root
+        srv.listen(8)
+        while True:
+            conn, _ = srv.accept()
+            threading.Thread(target=self.client, args=(conn,), daemon=True).start()
 
     def serve(self):
         pend = b""
@@ -201,7 +248,7 @@ class Board:
                 time.sleep(0.2)
                 continue
             if data and not seen:
-                seen = True
+                seen = self.connected = True
                 self.say("game connected")
             pend = self.host_bytes(pend + data)
 
@@ -213,10 +260,8 @@ def main():
         f.write(b.slave_path + "\n")
     os.rename(os.path.join(rig, "warden.tty.tmp"), os.path.join(rig, "warden.tty"))
     b.say("board up on", b.slave_path, "balls", b.balls)
-    fifo = os.path.join(rig, "input")
-    if not os.path.exists(fifo):
-        os.mkfifo(fifo)
-    threading.Thread(target=b.fifo_loop, args=(fifo,), daemon=True).start()
+    threading.Thread(target=b.ctl_loop, args=(os.path.join(rig, "ctl.sock"),),
+                     daemon=True).start()
     b.serve()
 
 

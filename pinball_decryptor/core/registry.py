@@ -100,6 +100,12 @@ class Capabilities:
     # expansion LED bus, BoF's BICS board), which the rig answers.  No key,
     # no CPU emulation.  See webui/tabs/emulate_bof.py.
     emulate_bof: bool = False
+    # Emulate tab for Spooky Pinball (PAD-266).  Its own flag for the same
+    # reason: a fifth rig (tools/spooky_emu) - a native x86-64 Unity game in
+    # its own desktop mode, whose one missing piece is Spooky's Warden board
+    # on USB serial.  Beetlejuice only so far; the tab says which games it
+    # runs.  See webui/tabs/emulate_spooky.py.
+    emulate_spooky: bool = False
     # Multi-boot tab (item 90): build ONE SD card that carries several
     # complete game images and a boot-time menu (the code selector in
     # tools/spike2_emu/codeselect) - stock code and a custom build on the

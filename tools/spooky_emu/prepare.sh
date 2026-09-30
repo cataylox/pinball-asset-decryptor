@@ -1,11 +1,12 @@
 #!/bin/bash
 # prepare.sh <update file> - unpack a Beetlejuice update (v<date>.beetlejuice:
-# a GPG-SIGNED, not encrypted, tar.gz of the game folder) into the build
-# cache and print its name.
+# a GPG-SIGNED, not encrypted, tar.gz of the game folder - Spooky's, or one
+# the Write tab built) into the build cache and print its name.
 #
 #   stdout:  progress <0-100>   while unpacking (repeatable)
 #            build=<name>       last line on success (run_game.sh <name>)
-#   exit:    0 ok, 2 bad args, 3 no space, 4 unpack failed, 5 no game in it
+#   exit:    0 ok, 2 bad args, 3 no space, 4 unpack failed or not
+#            Beetlejuice, 5 no game in it
 #
 # The name is bj_<version.txt>, so the same update again starts at once.
 # Only SPK_CACHE_KEEP builds are kept (each is ~5 GB); the oldest idle ones
@@ -48,7 +49,12 @@ rm -rf "$TMP"; mkdir -p "$TMP"
 GH=$(mktemp -d)
 # No key to check the signature with: gpg still unwraps the data (and says
 # "Can't check signature", which is fine - the game is Spooky's as shipped).
-( gpg --homedir "$GH" --batch --quiet -d "$UPD" 2>/dev/null | tar -xz -C "$TMP" ) &
+# A plain tar.gz (gzip magic 1f8b) is taken as it is.
+if [ "$(head -c 2 "$UPD" | od -An -tx1 | tr -d ' ')" = 1f8b ]; then
+    ( tar -xzf "$UPD" -C "$TMP" ) &
+else
+    ( gpg --homedir "$GH" --batch --quiet -d "$UPD" 2>/dev/null | tar -xz -C "$TMP" ) &
+fi
 job=$!
 last=-1
 while kill -0 $job 2>/dev/null; do
@@ -68,6 +74,13 @@ if [ ! -x "$TMP/main.x86_64" ] || [ ! -f "$TMP/UnityPlayer.so" ]; then
     rm -rf "$TMP"
     echo "prepare.sh: no Unity game (main.x86_64) in $UPD" >&2
     exit 5
+fi
+# Beetlejuice only, for now: its game code names its modes (BeetleSnakeMode).
+# Scooby-Doo and Halloween are Unity games too; neither has been tried.
+if ! grep -aq BeetleSnakeMode "$TMP/main_Data/Managed/Assembly-CSharp.dll" 2>/dev/null; then
+    rm -rf "$TMP"
+    echo "prepare.sh: $(basename "$UPD") is not a Beetlejuice update (the only Spooky game this emulator runs so far)" >&2
+    exit 4
 fi
 v=$(tr -d '\r\n ' < "$TMP/version.txt" 2>/dev/null)
 DEST=$SPK_CACHE/bj_${v:-$ver}

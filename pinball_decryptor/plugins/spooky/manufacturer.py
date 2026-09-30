@@ -42,6 +42,10 @@ class SpookyManufacturer(Manufacturer):
         # doesn't is the engine derivatives Extract generates — see
         # video_slot_dirs().
         replace_video=True,
+        # Emulate tab (PAD-266): run a game's update on this PC against the
+        # emulated Warden board in tools/spooky_emu.  Beetlejuice only so
+        # far; the tab lists the games it runs.
+        emulate_spooky=True,
     )
     input_spec = InputSpec(
         label="Spooky game files",

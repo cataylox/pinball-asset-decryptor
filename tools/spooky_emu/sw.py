@@ -2,7 +2,8 @@
 """sw.py - press Beetlejuice's switches on this slot's rig board.
 
     sw.py <switch> [on|off|pulse [ms]]   default: pulse (200 ms)
-    sw.py drain                          a ball back into the trough
+    sw.py drain | plunge                 a ball back to the trough / the
+                                         shooter lane's ball into play
     sw.py --list                         every switch name and number
     sw.py --state                        the board's switch states now
 
@@ -11,9 +12,9 @@ PAD_SLOT picks the slot.  The board (spkwarden.py) reports the change to the
 game the way the Warden does; the trough and shooter lane move by themselves
 when the game fires the eject and launch coils.
 """
+import json
 import os
 import sys
-import time
 
 # Switches.cs (Beetlejuice v2026.09.15.11): number -> name.
 SWITCHES = {
@@ -61,26 +62,16 @@ def lookup(s):
     sys.exit("sw.py: %s switch: %s" % ("ambiguous" if hits else "no such", s))
 
 
-def rig():
-    root = os.environ.get("SPK_ROOT", "/var/tmp/pad_spooky")
-    return os.path.join(root, "rig%s" % os.environ.get("PAD_SLOT", "0"))
-
-
-def send(line):
-    fifo = os.path.join(rig(), "input")
-    if not os.path.exists(fifo):
-        sys.exit("sw.py: no rig running in %s" % rig())
-    # The board reopens the FIFO after each writer: ENXIO = between two.
-    for _ in range(100):
-        try:
-            fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
-            break
-        except OSError:
-            time.sleep(0.02)
-    else:
-        sys.exit("sw.py: the board is not reading %s" % fifo)
-    os.write(fd, (line + "\n").encode())
-    os.close(fd)
+def ask(line):
+    """One request to the board (spkctl.py) -> its reply."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, here)
+    import spkctl
+    try:
+        s = spkctl.connect(os.environ.get("PAD_SLOT", "0"))
+        return spkctl.ask(s, line)
+    except OSError as e:
+        sys.exit("sw.py: no rig running (%s)" % e)
 
 
 def main(a):
@@ -92,30 +83,25 @@ def main(a):
             print("%3d  %s" % (n, name))
         return
     if a[0] == "--state":
-        out = os.path.join(rig(), "switches.txt")
-        try:
-            os.remove(out)
-        except OSError:
-            pass
-        send("dump")
-        for _ in range(50):
-            if os.path.exists(out):
-                break
-            time.sleep(0.05)
-        for line in open(out):
-            n, v = map(int, line.split())
+        st = json.loads(ask("state"))
+        for n, v in sorted(st["switches"].items(), key=lambda kv: int(kv[0])):
             if v:
-                print("%3d  %s" % (n, SWITCHES.get(n, "?")))
+                print("%3d  %s" % (int(n), SWITCHES.get(int(n), "?")))
+        print("balls: %(trough)d in the trough, %(shooter)d in the shooter lane, "
+              "%(in_play)d in play" % st["balls"])
         return
-    if a[0] == "drain":
-        send("drain")
+    if a[0] in ("drain", "plunge"):
+        print(ask(a[0]))
         return
     n = lookup(a[0])
     act = a[1] if len(a) > 1 else "pulse"
     if act not in ("on", "off", "pulse"):
         sys.exit("sw.py: on, off or pulse, not %s" % act)
-    send(" ".join([str(n), act] + a[2:3]))
-    print("%s %s" % (SWITCHES.get(n, n), act))
+    if act == "pulse":
+        req = "tap %d %s" % (n, a[2] if len(a) > 2 else "200")
+    else:
+        req = "sw %d %d" % (n, 1 if act == "on" else 0)
+    print("%s %s: %s" % (SWITCHES.get(n, n), act, ask(req)))
 
 
 if __name__ == "__main__":

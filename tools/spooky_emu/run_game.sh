@@ -15,7 +15,7 @@
 # The game sees the machine's /game in a private mount namespace:
 #   /game/code/uptest   the build, hard-linked into $SPK_RIG/game (the game
 #                       writes marker files beside itself, never the cache)
-#   /game/code/config   settings, audits, scores  ($SPK_RIG/config)
+#   /game/code/config   settings, audits, scores  ($SPK_ROOT/nv<slot>: kept)
 #   /game/logs, /game/tmp, /game/media, /game/backup, /game/update
 # and its own hostname ("pad-rig-<slot>"): the game is in its built-in
 # VIRTUAL mode unless the hostname says "haunted-mansion", and virtual mode
@@ -43,12 +43,18 @@ bash "$SPK_TOOLS/killgame.sh" >/dev/null 2>&1
 
 rm -rf "$SPK_RIG"
 G=$SPK_RIG/game
-mkdir -p "$SPK_RIG"/{config,logs,tmp,media,backup,update,home}
+mkdir -p "$SPK_RIG"/{logs,tmp,media,backup,update,home}
 cp -al "$(realpath "$BUILD")" "$G"
+# Settings, audits and high scores outlive a run, as on a machine: their
+# folder is per slot, outside the rig dir.  SPK_FRESH=1 starts it over.
+NV=$SPK_ROOT/nv$SPK_SLOT
+[ "${SPK_FRESH:-0}" = 1 ] && rm -rf "$NV"
+mkdir -p "$NV"
 # A machine leaves the factory with its defaults saved (service menu); a
 # fresh settings folder without them stops attract behind a "FACTORY DEFAULT
 # SETTINGS HAVE NOT BEEN SAVED" dialog.  An empty set = the build's own.
-echo '{}' > "$SPK_RIG/config/beetlejuice_factory_defaults.json"
+[ -f "$NV/beetlejuice_factory_defaults.json" ] || echo '{}' > "$NV/beetlejuice_factory_defaults.json"
+chown -R "$SPK_USER": "$NV"
 echo "$BUILD" > "$SPK_RIG/build"
 echo "$VISIBLE" > "$SPK_RIG/visible"
 chown -R "$SPK_USER": "$SPK_RIG"
@@ -61,8 +67,12 @@ for _ in $(seq 1 50); do [ -s "$SPK_RIG/warden.tty" ] && break; sleep 0.1; done
 TTY=$(cat "$SPK_RIG/warden.tty" 2>/dev/null)
 [ -n "$TTY" ] || { echo "run_game.sh: the board did not come up:" >&2; cat "$SPK_RIG/warden.out" >&2; exit 1; }
 
+# The cabinet's screen is 1920x1080; on the desktop a window that size
+# would cover it, so a visible run draws at 1280x720 (Unity scales).
+SIZE="-screen-width 1920 -screen-height 1080"
 if [ $VISIBLE = 1 ]; then
     DISP=${DISPLAY:-:0}
+    SIZE="-screen-width 1280 -screen-height 720"
 else
     DISP=$SPK_DISPLAY
     setsid -f Xvfb "$DISP" -screen 0 1920x1080x24 -nolisten tcp \
@@ -83,7 +93,7 @@ hostname pad-rig-$SPK_SLOT
 mount -t tmpfs -o mode=755 tmpfs /game || exit 1
 mkdir -p /game/code/uptest /game/code/config /game/logs /game/tmp /game/media /game/backup /game/update /game/vosk
 mount --bind "$G" /game/code/uptest
-for d in config; do mount --bind "$SPK_RIG/\$d" /game/code/\$d; done
+mount --bind "$NV" /game/code/config
 for d in logs tmp media backup update; do mount --bind "$SPK_RIG/\$d" /game/\$d; done
 chown "$SPK_USER": /game /game/code /game/vosk
 cd /game/code/uptest || exit 1
@@ -92,7 +102,7 @@ exec runuser -u $SPK_USER -- env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=$SPK_
     LP_NUM_THREADS=${SPK_LP_THREADS:-4} \\
     SPK_WARDEN=$TTY LD_PRELOAD=$SPK_SHIM \\
     ./main.x86_64 -logFile $SPK_RIG/player.log -screen-fullscreen 0 \\
-    -screen-width 1920 -screen-height 1080 -force-glcore
+    $SIZE -force-glcore
 EOF
 # Detached whole (setsid -f, stdin closed): a child of runuser dies with the
 # wsl.exe that started this (tools/bof_emu learned it).
