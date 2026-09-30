@@ -1686,9 +1686,9 @@ HELP_CONTENT = {
          "the Action button, T tilt, the letters beside the playfield "
          "switches press them, F plunges, D drains, C opens and shuts the coin "
          "door, Backspace, -, = and Enter are the service buttons, and Pause "
-         "or F9 (in the playfield window) freezes the game. Closed it? "
-         "\"Switches window\" on this tab "
-         "brings it back."),
+         "or F9 (in the playfield window) freezes the game. Closed it, or "
+         "lost it behind the game? The \"Playfield window\" button beside "
+         "Stop brings it back to the front."),
         ("First start is slower",
          "The very first Start sets the emulator up inside the app's Linux: "
          "it downloads the Python the games run on (about 1 GB, a few "

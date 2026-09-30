@@ -2,6 +2,7 @@
 touching a rig: the harness sets PAD_UI_NO_RIG, conftest points the rig dir
 at an empty directory, and the tests that need more stub it."""
 
+import os
 import time
 
 import pytest
@@ -241,6 +242,80 @@ def test_the_switch_window_command(rig, monkeypatch, tmp_path):
 def test_switches_button_needs_a_running_game(rig, tmp_path):
     with web_app(tmp_path, mfr="ap") as w:
         assert not w.call(NS + ".switches")
+
+
+def test_switches_button_brings_an_open_window_to_the_front(rig, monkeypatch,
+                                                            tmp_path):
+    """PAD-295: the window opens while the game has the focus and could sit
+    behind it; the button then did nothing.  Now it raises the open one by
+    its title, and never opens a second."""
+    from pinball_decryptor.webui.tabs import emulate_ap as tab
+    raised, opened = [], []
+    monkeypatch.setattr(tab, "rig_off", lambda: False)
+    monkeypatch.setattr(tab, "raise_window",
+                        lambda title: raised.append(title) or True)
+
+    class Alive:
+        def poll(self):
+            return None
+    with web_app(tmp_path, mfr="ap") as w:
+        svc = _svc(w)
+        svc._apply(dict(RUNNING))
+        svc._open_switches = lambda info=None: opened.append(info)
+        svc._sw_proc = Alive()
+        assert w.call(NS + ".switches")
+        end = time.time() + 5
+        while not raised and time.time() < end:
+            time.sleep(0.02)
+        assert raised == ["Legends of Valhalla - virtual playfield"]
+        assert not opened
+        svc._sw_proc = None
+
+
+def test_a_new_switch_window_is_raised_or_its_error_logged(rig, monkeypatch,
+                                                           tmp_path):
+    """_front_when_up raises the window once it shows, and when the window's
+    process dies at once, logs the tail of its error file instead of
+    nothing (PAD-295)."""
+    from pinball_decryptor.webui.tabs import emulate_ap as tab
+    tries = []
+    monkeypatch.setattr(tab, "raise_window",
+                        lambda title: tries.append(title) or len(tries) > 1)
+    monkeypatch.setattr(tab.time, "sleep", lambda s: None)
+
+    class Proc:
+        def __init__(self, rc):
+            self.returncode = rc
+
+        def poll(self):
+            return self.returncode
+    err = tmp_path / "pf.log"
+    err.write_text("Traceback (most recent call last):\nOSError: no table\n")
+    with web_app(tmp_path, mfr="ap") as w:
+        svc = _svc(w)
+        logged = []
+        svc._log = logged.append
+        live = Proc(None)
+        svc._sw_proc = live
+        svc._front_when_up(live, "X - virtual playfield", str(err))
+        assert tries == ["X - virtual playfield"] * 2 and not logged
+        dead = Proc(1)
+        svc._sw_proc = dead
+        svc._front_when_up(dead, "X - virtual playfield", str(err))
+        assert "closed at once" in logged[0] and "OSError: no table" in logged[0]
+        # closed by Stop (which clears _sw_proc first): nothing to say
+        logged.clear()
+        svc._sw_proc = None
+        svc._front_when_up(dead, "X - virtual playfield", str(err))
+        assert not logged
+
+
+def test_raise_window_finds_nothing_off_windows_or_unknown(monkeypatch):
+    from pinball_decryptor.webui.tabs import emulate_ap as tab
+    assert not tab.raise_window("no such window %d - virtual playfield"
+                                % os.getpid())
+    monkeypatch.setattr(tab.sys, "platform", "linux")
+    assert not tab.raise_window("")
 
 
 def test_launch_lines_move_the_footer(rig, tmp_path):

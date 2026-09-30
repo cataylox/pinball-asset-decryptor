@@ -200,12 +200,22 @@ class EmulateAPTab(RigTabMixin, TabService):
 
     @rpc
     def switches(self):
-        """Open (or bring back) the switch window for the running game."""
+        """Open (or bring back) the switch window for the running game.  One
+        already open is brought to the front: it opens while the game's own
+        windows hold the focus, so it could sit behind them, and this button
+        then did nothing at all (PAD-295)."""
         if rig_off() or not self._last_up:
             return False
         info = dict(self._info)
 
         def work():
+            proc = self._sw_proc
+            if proc is not None and proc.poll() is None:
+                if not raise_window(_window_title(info)):
+                    self._log("AP: the playfield window is open but could "
+                              "not be brought to the front - look for it on "
+                              "the taskbar.")
+                return
             self._open_switches(info)
         threading.Thread(target=work, daemon=True,
                          name="pad-ap-switches").start()
@@ -387,15 +397,51 @@ class EmulateAPTab(RigTabMixin, TabService):
             self._log("AP: could not open the switch window (no Python to "
                       "run it with, or the game is not running).")
             return False
+        # its errors go to a file: with stderr thrown away, a window that
+        # never came up left nothing to go on (PAD-295)
+        err_path = _sw_log_path()
+        try:
+            err = open(err_path, "wb")
+        except OSError:
+            err, err_path = subprocess.DEVNULL, ""
         try:
             self._sw_proc = subprocess.Popen(
                 cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL, creationflags=_rig.CREATE_FLAGS)
-            return True
+                stderr=err, creationflags=_rig.CREATE_FLAGS)
         except Exception as exc:                           # noqa: BLE001
             self._sw_proc = None
             self._log("AP: could not open the switch window: %s" % exc)
             return False
+        finally:
+            if err is not subprocess.DEVNULL:
+                err.close()
+        threading.Thread(target=self._front_when_up,
+                         args=(self._sw_proc, _window_title(info or {}),
+                               err_path),
+                         daemon=True, name="pad-ap-switches-front").start()
+        return True
+
+    #: how long a new switch window gets to appear before the tab gives up
+    #: bringing it to the front
+    SW_SHOW_S = 30.0
+
+    def _front_when_up(self, proc, title, err_path):
+        """Bring the new switch window in front of the game's once it is
+        on screen - the game's windows hold the focus when it opens, so it
+        came up behind them (PAD-295) - or log why it closed at once."""
+        deadline = time.time() + self.SW_SHOW_S
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                # not when Stop closed it (that clears _sw_proc first), nor
+                # when the player closed it
+                if proc is self._sw_proc and proc.returncode != 0:
+                    self._log("AP: the playfield window closed at once "
+                              "(exit %s). %s" % (proc.returncode,
+                                                 _tail(err_path)))
+                return
+            if raise_window(title):
+                return
+            time.sleep(0.5)
 
     #: how long the switch window gets to close itself before it is killed
     SW_CLOSE_S = 4.0
@@ -613,6 +659,84 @@ class EmulateAPTab(RigTabMixin, TabService):
             pass
 
     shutdown_sync = emulate_shutdown
+
+
+#: appf.py's window title is "<game> - virtual playfield"
+PF_SUFFIX = " - virtual playfield"
+
+
+def _window_title(info):
+    """The switch window's title for *info*'s game ("" = any AP one)."""
+    name = ap.title_name(info)
+    return (name + PF_SUFFIX) if name else ""
+
+
+def _sw_log_path():
+    import tempfile
+    return os.path.join(tempfile.gettempdir(), "pad_ap_playfield.log")
+
+
+def _tail(path, n=3):
+    """The last *n* lines of the switch window's error log, one line."""
+    if not path:
+        return ""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            lines = [ln.strip() for ln in f if ln.strip()]
+    except OSError:
+        return ""
+    return " / ".join(lines[-n:])
+
+
+def raise_window(title):
+    """Bring the switch window titled *title* (or, with "", any window whose
+    title ends in PF_SUFFIX) to the front of every window, the game's
+    included.  True when one was found.  Windows only.
+
+    SetForegroundWindow alone is refused when this app is not the
+    foreground process - the case right after a start, when the game's
+    windows have the focus - so the window is first put topmost and back,
+    which lifts it over them either way.  Explorer's leaked
+    Windows.Internal.Shell.* title proxies are skipped (PAD-260)."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        u = ctypes.windll.user32
+        found = []
+        buf = ctypes.create_unicode_buffer(512)
+        cls = ctypes.create_unicode_buffer(256)
+
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        def each(h, _lp):
+            if not u.IsWindowVisible(h):
+                return True
+            u.GetWindowTextW(h, buf, 512)
+            text = buf.value
+            if not (text == title if title else text.endswith(PF_SUFFIX)):
+                return True
+            u.GetClassNameW(h, cls, 256)
+            if cls.value.startswith("Windows.Internal.Shell."):
+                return True
+            found.append(h)
+            return False
+        u.EnumWindows(each, 0)
+        if not found:
+            return False
+        h = found[0]
+        u.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int,
+                                   ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                   ctypes.c_uint]
+        if u.IsIconic(h):
+            u.ShowWindow(h, 9)                             # SW_RESTORE
+        flags = 0x0001 | 0x0002 | 0x0040       # NOSIZE | NOMOVE | SHOWWINDOW
+        u.SetWindowPos(h, wintypes.HWND(-1), 0, 0, 0, 0, flags)  # TOPMOST
+        u.SetWindowPos(h, wintypes.HWND(-2), 0, 0, 0, 0, flags)  # NOTOPMOST
+        u.SetForegroundWindow(h)
+        return True
+    except Exception:                                      # noqa: BLE001
+        return False
 
 
 def _kill_tree(proc):
