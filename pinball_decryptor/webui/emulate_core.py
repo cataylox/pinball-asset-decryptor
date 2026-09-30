@@ -960,6 +960,9 @@ def rig_cmd(script, *args, env=()):
     else:
         head = []
         path = os.path.join(rig_dir(), script)
+        # A Linux desktop: the AppImage's own libraries out, XWayland in
+        # (PAD-291, rig.linux_host_env).
+        env = _rig.linux_host_env() + list(env)
     if env:
         head = head + ["env"] + list(env)
     return head + ["bash", path] + [str(a) for a in args]

@@ -435,13 +435,24 @@ HELP_CONTENT = {
          "parts it lists, numbered down the list) shows each part of the scene the "
          "game's code switches between looks (which monster Battle Select shows, a "
          "tile's Locked or city) - the file holds them all, the game chooses; pick one "
-         "to preview it, which changes only the preview. A greyed layer is one the game is not "
-         "drawing at this moment: click its name or its eye and it is shown on top, "
+         "to preview it, which changes only the preview. Undo (Ctrl+Z) takes back the last edit, "
+         "whichever button or key made it, and Redo (Ctrl+Y or Ctrl+Shift+Z) puts it back. A greyed layer is one the game is not "
+         "drawing at this moment: click its name and it is shown on top, "
          "where it sits, at this same moment while it stays selected, ready to edit "
-         "(an edit belongs to the layer, so it holds at every moment). A dark layer "
+         "(an edit belongs to the layer, so it holds at every moment); its eye hides it. "
+         "Picking any layer shows it on top, even one you hid with its eye, and picking "
+         "a sprite shows everything in it; the eye itself never changes by picking. A dark layer "
          "with a crossed-out eye is off only because its switchable part shows another "
-         "look: its eye turns it on in the preview (the eye turns it back off). Select "
-         "something else and the scene goes back to what the game draws. Every edit is kept in the project and "
+         "look: its eye turns it on in the preview (the eye turns it back off). The "
+         "layers inside that look keep their own eyes, like an editor's layers: one "
+         "shows only while the look it sits in is on, and turning the look on leaves "
+         "a layer you hid inside it hidden. A layer hidden in the game (the Write "
+         "leaves it out of the card) has an orange eye and reads 'hidden in game', "
+         "and the status line names every such layer. Select "
+         "something else and the scene goes back to what the game draws. A layer that draws a picture "
+         "(itself or through what it holds) has a picture button at the end of its row: it opens "
+         "that picture on the Images tab (a layer with several lists them to pick from). "
+         "Every edit is kept in the project and "
          "listed on the Write tab; the Write puts them on the card (moves, resizes, "
          "tints, hides and layer changes even straight to an SD card; an added picture "
          "or line of text makes the scene bigger, which needs an image build). The "
@@ -453,7 +464,7 @@ HELP_CONTENT = {
          "stays up and a small \"Updating\" tag shows while the change is drawn. Drag the "
          "dividers between the scene list, the preview and the panel on the right (and the one "
          "above Layers) to share the room the way you like; the app remembers them, and a "
-         "double-click puts one back. There is nothing to save: every edit is kept the "
+         "double-click puts one back. To look closer, hold Ctrl (or Shift, or Cmd on a Mac) and turn the mouse wheel over the preview, or use the zoom buttons in the bar above it; the fit button goes back to 100%, and while zoomed you can drag the view with the middle mouse button. There is nothing to save: every edit is kept the "
          "moment you make it, and Write puts it on the card (\"Export picture…\" only makes a "
          "picture for you). Reset, under the preview, puts a scene back the way the last Write "
          "left it or the way the game shipped it, or every scene at once. With the Emulate "
@@ -464,6 +475,15 @@ HELP_CONTENT = {
          "Battle Select) changes after a restart. Untick \"Include my Scenes tab edits\" (under \"Apply my replaced assets on top\") to run the card with your other replacements but the scenes as they were. Lines of W's (or AAA) are the game's own placeholders "
          "for text it fills in while it runs, such as high score initials: the game writes the "
          "player's letters there, so they are as wide as the widest name can be."),
+        ("Save and load scene edits",
+         "\"Save / load edits\" at the head of the Scenes page saves this scene's "
+         "edits, or every edited scene's, to one .zip with the pictures they add, "
+         "to share or keep. Loading such a file replaces a scene's own edits (it "
+         "asks first when the scene has some). A scene is found by its path, so a "
+         "file from the LE loads on the Pro; a scene this card lacks is left out "
+         "and named, and an added picture whose name is taken by a different one "
+         "is renamed. The file holds the scene editor's edits only, not Text-tab "
+         "colours or text layout."),
         ("Size limits",
          "On most games patching is size-neutral: a same-or-smaller "
          "replacement fits as-is, a larger one is re-encoded down to the "
@@ -1549,6 +1569,40 @@ HELP_CONTENT = {
          "Windows. If music sounds wrong, judge it by ear rather than by a "
          "test tone — the audio path is known to pass a plain tone cleanly "
          "while distorting music."),
+    ],
+    "Emulate DP": [
+        ("What it does",
+         "Runs the real Dutch Pinball game on this PC - The Big Lebowski or "
+         "Alice's Adventures in Wonderland - in its own window (Alice opens "
+         "two: the main screen and the round one). The emulator stands in "
+         "for the machine's controller board and gives the game what the "
+         "machine's disk gave it, a window, sound, and a way to press every "
+         "switch, and it boots into attract mode."),
+        ("Which files to pick",
+         "The machine's disk image (.img; for Alice, the full_image "
+         "installer) - it is the only place most of the "
+         "game's pictures and sounds exist; the update zips carry only what "
+         "changed. The first Start copies the game out of the image (several "
+         "GB, a few minutes); the next is quick. Optionally add an update "
+         "(.zip, The Big Lebowski only): the official one, or one the Write "
+         "tab built from your "
+         "edits. It is laid over the version on the image the way the "
+         "machine installs it, so you can play a mod before it goes on a USB "
+         "stick. Both files are only read."),
+        ("Playing",
+         "When the game is up its switch window opens beside it: the game's "
+         "own drawing of the machine with every switch on it (for Alice, a "
+         "list), and a list of them all by name. Hold a switch with the "
+         "mouse (a flipper, a ball resting in the scoop); right-click to "
+         "latch it until you right-click again. With that window focused "
+         "the game's own keys work: for The Big Lebowski N and M are the "
+         "flippers, 1 is Start, 3 a coin and 7, 8, 9, 0 the service buttons; "
+         "for Alice the Shift keys are the flippers, 1 is Start and 7, 0, 8, "
+         "9 are Escape, Enter and the volume. Closed it? "
+         "\"Switches window\" on this tab brings it back."),
+        ("Cancel",
+         "While a game is starting the Start button is Cancel: it stops the "
+         "copy off the image and throws away the half-copied game."),
     ],
     "Emulate BoF": [
         ("What it does",
@@ -2652,6 +2706,12 @@ PREVIEW_HELP = {
              "same game, or its Pro beside the Premium, keeps every sound "
              "number; another game keeps only the callouts the app measured on "
              "both."),
+            ("Save and load a file",
+             "Save / load, under the list, saves the open mode, or every mode, "
+             "to one .zip holding each mode's whole folder (picture, clip, "
+             "sounds and code), to share or keep. Loading such a file adds its "
+             "modes to this project exactly as Copy to… would: each is matched "
+             "to this card's shots by name, and a name already here gets _2."),
             ("Try it",
              "Try it builds this project's modes exactly as Write puts them on a "
              "card, then starts the card in the Emulate tab with them; the run is "

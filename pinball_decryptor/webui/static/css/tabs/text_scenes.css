@@ -30,9 +30,13 @@
 .scenes-list .tr { padding: 0 10px; gap: 6px; }
 .scenes-list .th { letter-spacing: .02em; }
 .scenes-center { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
-.scenes-stage { flex: 1 1 auto; min-height: 200px; container-type: size; display: flex; align-items: center; justify-content: center; }
-.scenes-stage > .scenes-canvas, .scenes-stage > .scenes-preparing {
-  width: min(100cqw, calc(100cqh * var(--ar, 1.7708))); max-width: none; min-width: 0; flex: none; aspect-ratio: var(--ar, 1.7708); }
+/* centred by auto margins, not justify-content: a zoomed preview (PAD-282) then scrolls to every edge */
+.scenes-stage { flex: 1 1 auto; min-height: 200px; container-type: size; display: flex; }
+.scenes-stage.zoomed { overflow: auto; }
+.scenes-stage > .scenes-canvas, .scenes-stage > .scenes-preparing { margin: auto;
+  width: calc(var(--z, 1) * min(100cqw, calc(100cqh * var(--ar, 1.7708)))); max-width: none; min-width: 0; flex: none; aspect-ratio: var(--ar, 1.7708); }
+.scenes-zoom { gap: 0; flex-wrap: nowrap; }
+.scenes-zoom-pct { min-width: 38px; text-align: center; font-variant-numeric: tabular-nums; }
 .scenes-stagebar { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; min-height: 32px; flex: 0 0 auto; }
 .scenes-stagebar .grow { flex: 1 1 140px; min-width: 0; }
 .scenes-stagebar .scenes-ctl { margin-top: 0; }
@@ -123,10 +127,20 @@
 .tree-states-hint { margin: 6px 0; }
 .tree-state { display: grid; grid-template-columns: 22px minmax(0, 1fr) 150px; gap: 6px; align-items: center; margin: 3px 0; }
 .tree-state-n { text-align: right; }
-.ly-item { grid-template-columns: 20px minmax(0, 1.2fr) minmax(0, 1fr); cursor: pointer; }
+.ly-item { grid-template-columns: 20px minmax(0, 1.2fr) minmax(0, 1fr) 20px; cursor: pointer; }
+.ly-img { all: unset; cursor: pointer; display: inline-flex; color: var(--ink-3); border-radius: 4px; }
+.ly-img:hover { color: var(--accent); }
+.ly-img:focus-visible, .ly-eye:focus-visible { outline: 2px solid var(--accent); }
+/* PAD-287: Layers / Contents reads as two tabs to click, not a heading */
+.sc-views > .seg { display: flex; }
+.sc-views > .seg button { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: var(--bg); }
+.sc-views > .seg button:hover { background: var(--panel); }
+.sc-views > .seg button.on { background: var(--accent-soft); box-shadow: inset 0 -2px 0 var(--accent); }
 .ly-off { opacity: .5; }
 .ly-eye { all: unset; cursor: pointer; display: inline-flex; color: var(--ink-3); }
 .ly-eye:hover { color: var(--ink); }
+/* PAD-290: hidden with its eye = left out in the game, not just the preview */
+.ly-eye.in-game, .ly-eye.in-game:hover, .ly-item .sc-i.in-game { color: var(--warn); }
 
 /* a narrow window: the scene list goes across the top, the preview and inspector under it */
 @container (max-width: 1060px) {

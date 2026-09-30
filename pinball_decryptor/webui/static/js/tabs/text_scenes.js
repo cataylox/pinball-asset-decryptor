@@ -2,7 +2,7 @@
 // own now, the Scenes tab (tabs/scenes.js hosts ScenesPage); it was a floating window.
 // Python: webui/text_scenes.py (ns "text_scenes").
 
-import { html, useState, useEffect, useRef, Button, Field, Select, Seg, Table, Modal, openMenu, InfoBadge,
+import { html, useState, useEffect, useLayoutEffect, useRef, Button, Field, Select, Seg, Table, Modal, openMenu, InfoBadge,
          Icon, Progress, Spinner, tip, call, mediaUrl, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 
@@ -59,6 +59,98 @@ const clampSplit = (k, v) => Math.round(Math.max(SPLIT_LIMITS[k][0], Math.min(SP
 
 // One divider.  *measure(event)* turns the pointer into the size it sets (unzoomed px);
 // *dir* is the sign an arrow key moves it by.
+// The preview's magnifier (PAD-282): 1 = the whole screen fits the room, more = bigger, and the
+// stage scrolls.  Ctrl or Shift + the wheel zooms about the pointer; the buttons about the middle.
+const ZOOM_MAX = 8;
+const ZOOM_STEPS = [1, 1.25, 1.5, 2, 3, 4, 6, 8];
+const clampZoom = (z) => Math.max(1, Math.min(ZOOM_MAX, z));
+function useStageZoom() {
+  const [zoom, setZoom] = useState(1);
+  const ref = useRef(null);                     // the .scenes-stage (the part that scrolls)
+  const zoomRef = useRef(1);
+  zoomRef.current = zoom;
+  const anchor = useRef(null);                  // where the zoom holds still: {fx, fy, px, py}
+  // zoom to *z*, keeping the point under (clientX, clientY) (the middle without) where it is
+  const zoomTo = (z, at) => {
+    const el = ref.current;
+    const c = el && el.firstElementChild;
+    z = clampZoom(Math.round(z * 100) / 100);
+    if (!el || !c || z === zoomRef.current) return;
+    const r = el.getBoundingClientRect(), cr = c.getBoundingClientRect();
+    const x = at ? at[0] : r.left + r.width / 2, y = at ? at[1] : r.top + r.height / 2;
+    const frac = (v, lo, len) => (len ? Math.max(0, Math.min(1, (v - lo) / len)) : 0.5);
+    anchor.current = { fx: frac(x, cr.left, cr.width), fy: frac(y, cr.top, cr.height), px: x - r.left, py: y - r.top };
+    setZoom(z);
+  };
+  const step = (dir) => {
+    const z = zoomRef.current;
+    zoomTo(dir > 0 ? ZOOM_STEPS.find((v) => v > z + 0.01) || ZOOM_MAX
+      : [...ZOOM_STEPS].reverse().find((v) => v < z - 0.01) || 1);
+  };
+  useLayoutEffect(() => {
+    const el = ref.current, a = anchor.current;
+    anchor.current = null;
+    const c = el && el.firstElementChild;
+    if (!a || !c) return;
+    const r = el.getBoundingClientRect(), cr = c.getBoundingClientRect();
+    const k = r.width ? el.offsetWidth / r.width : 1;     // screen px -> page px (the app can be zoomed)
+    el.scrollLeft += (cr.left + a.fx * cr.width - (r.left + a.px)) * k;
+    el.scrollTop += (cr.top + a.fy * cr.height - (r.top + a.py)) * k;
+  }, [zoom]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const wheel = (e) => {
+      if (!e.ctrlKey && !e.shiftKey && !e.metaKey) return;
+      e.preventDefault();
+      // (Shift + the wheel comes in sideways on Windows)
+      const d = e.deltaY || e.deltaX;
+      if (d) zoomTo(zoomRef.current * Math.exp(-d * (e.deltaMode === 1 ? 0.05 : 0.0015)), [e.clientX, e.clientY]);
+    };
+    // the middle button drags the view about when it is zoomed
+    let pan = null;
+    const down = (e) => {
+      if (e.button !== 1 || zoomRef.current <= 1) return;
+      e.preventDefault();
+      pan = { x: e.clientX, y: e.clientY, l: el.scrollLeft, t: el.scrollTop };
+      el.setPointerCapture(e.pointerId);
+    };
+    const move = (e) => {
+      if (!pan) return;
+      const r = el.getBoundingClientRect(), k = r.width ? el.offsetWidth / r.width : 1;
+      el.scrollLeft = pan.l - (e.clientX - pan.x) * k;
+      el.scrollTop = pan.t - (e.clientY - pan.y) * k;
+    };
+    const up = () => { pan = null; };
+    el.addEventListener("wheel", wheel, { passive: false });
+    el.addEventListener("pointerdown", down);
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+    return () => {
+      el.removeEventListener("wheel", wheel);
+      el.removeEventListener("pointerdown", down);
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+    };
+  }, []);
+  return { zoom, ref, zoomTo, step };
+}
+
+function ZoomControls({ z }) {
+  const pct = Math.round(z.zoom * 100);
+  return html`<div class="row scenes-zoom" role="group" aria-label="Zoom">
+    <${Button} size="xs" kind="ghost" icon="zoomout" disabled=${z.zoom <= 1} title="Zoom out (or Ctrl + the mouse wheel)"
+      onClick=${() => z.step(-1)} />
+    <span class="small muted scenes-zoom-pct" title="How big the preview is drawn: 100% = the whole screen fits">${pct}%</span>
+    <${Button} size="xs" kind="ghost" icon="zoomin" disabled=${z.zoom >= ZOOM_MAX} title="Zoom in (or Ctrl + the mouse wheel over the spot to look at)"
+      onClick=${() => z.step(1)} />
+    <${Button} size="xs" kind="ghost" icon="fit" disabled=${z.zoom <= 1} title="Back to the whole screen"
+      onClick=${() => z.zoomTo(1)} />
+  </div>`;
+}
+
 function Divider({ k, horizontal, measure, split, setSplit, save, dir = 1, label }) {
   const drag = useRef(false);
   const down = (e) => {
@@ -103,6 +195,20 @@ export function ScenesActions() {
       onClick=${() => call("text_scenes.save_preview")}>${s.exporting ? "Cancel" : "Export picture…"}<//>
     <${Button} kind="ghost" title=${tips.save_all} disabled=${!(s.scenes || []).length && !s.bulk}
       onClick=${() => call("text_scenes.save_all")}>${s.bulk ? "Cancel" : "Export all pictures…"}<//>
+    <${Button} kind="ghost" iconRight="down" disabled=${!(s.scenes || []).length}
+      title="Save your scene edits to a file, to keep as a backup or send to someone, and load a file of scene edits into this project"
+      onClick=${(e) => openMenu(e.currentTarget, [
+        { label: "Save this scene's edits to a file…", icon: "download", disabled: !(s.tree_view || {}).edits,
+          title: "The moves, resizes, tints, hidden layers and added pictures and text of this scene, in one .zip file",
+          onClick: () => call("text_scenes.edits_save", "this") },
+        { label: "Save every scene's edits to a file…", icon: "download", disabled: !(s.tree_view || {}).all_edits,
+          title: "The edits of every scene you changed in this project, in one .zip file",
+          onClick: () => call("text_scenes.edits_save", "all") },
+        { sep: true },
+        { label: "Load scene edits from a file…", icon: "upload",
+          title: "Put the edits in a file saved here or by someone else onto the same scenes of this card. A scene this card does not have is left out.",
+          onClick: () => call("text_scenes.edits_load") },
+      ])}>Save / load edits<//>
     <${Button} kind="ghost" icon=${s.rebuilding ? "x" : "refresh"} title=${tips.rebuild}
       onClick=${() => call("text_scenes.rebuild")}>${s.rebuilding ? "Cancel" : "Re-read from card…"}<//>`;
 }
@@ -114,6 +220,7 @@ export function ScenesPage() {
   const [playFrame, setPlayFrame] = useState(0); // the frame a playback is on
   useEffect(() => { if (!s.tree_play) setPlayFrame(0); }, [s.tree_play]);
   const [split, setSplit] = useState(loadSplit);
+  const zoom = useStageZoom();
   const splitRef = useRef(split);
   splitRef.current = split;
   const saveSplit = () => { try { localStorage.setItem(SPLIT_KEY, JSON.stringify(splitRef.current)); } catch (e) {} };
@@ -226,7 +333,8 @@ export function ScenesPage() {
       <div class="scenes-center">
         ${[s.card_note, editor && s.pic_note].filter(Boolean).map((t, i) => html`<div key=${"w" + i}
           class="note warn scenes-warn" role="status"><${Icon} name="warn" /><div class="body-text small">${t}</div></div>`)}
-        <div class="scenes-stage" style=${`--ar:${stage[0] / stage[1]}`}>
+        <div class=${cx("scenes-stage", zoom.zoom > 1 && "zoomed")} ref=${zoom.ref}
+          style=${`--ar:${stage[0] / stage[1]};--z:${zoom.zoom}`}>
           ${s.preparing ? html`<${Preparing} p=${s.preparing} />`
             : editor && s.tree_play ? html`<${TreePlayer} s=${s} onFrame=${setPlayFrame} />`
             : editor ? html`<${TreeCanvas} s=${s} />` : html`<${Preview} s=${s} tip=${tips.preview} />`}
@@ -234,6 +342,7 @@ export function ScenesPage() {
         <div class="scenes-stagebar">
           <${Button} size="sm" kind="ghost" icon=${wide ? "right" : "left"} label=${wide ? "Show the scene list" : "Hide the scene list"}
             title=${wide ? "Show the scene list" : "Hide the scene list: more room for the preview"} onClick=${() => setWide(!wide)} />
+          <${ZoomControls} z=${zoom} />
           ${s.preparing ? html`<span class="grow"></span>`
             : editor ? html`<${TreeActions} t=${s.tree_view} /><span class="grow"></span>
               ${s.tree_live ? html`<span class=${cx("chip sm tree-live-chip", s.tree_live.kind === "live" ? "ok" : "warn")}
@@ -421,8 +530,11 @@ function inPoly(pts, x, y) {
 function TreeTop({ s, onMenu }) {
   const [view, setView] = useState("layers");
   return html`<div class="scenes-top">
-    <${Seg} value=${view} onChange=${setView}
-      options=${[{ value: "layers", label: "Layers" }, { value: "contents", label: "Contents" }]} />
+    <div class="sc-views"><${Seg} value=${view} onChange=${setView} options=${[
+      { value: "layers", label: html`<${Icon} name="scenes" />Layers`,
+        title: "Every part of the scene, in the order it is drawn: pick, hide or edit them" },
+      { value: "contents", label: html`<${Icon} name="list" />Contents`,
+        title: "The pictures, fonts and text this scene uses: double-click one to find it on its own tab" }]} /></div>
     ${view === "layers" ? html`<${TreeLayers} t=${s.tree_view} />` : html`<${Contents} s=${s} onMenu=${onMenu} />`}
   </div>`;
 }
@@ -445,24 +557,44 @@ function TreeLayers({ t }) {
         class=${cx("sc-item", "ly-item", (t.sel === l.id || sels.includes(l.id)) && "sel", !l.drawn && !l.state_off && "ly-off")}
         style=${`padding-left:${10 + l.depth * 14}px`}
         title=${l.state_off ? "Off in the preview: the part it sits in shows another of its looks. Click to see it on top while it is selected, or click the eye to turn it on here"
+          : l.part_off && !l.hidden ? "The look it sits in is off in the preview: it shows when that look is on. Click to see it on top while it is selected"
           : !l.drawn && !l.hidden ? "Not on the screen at this moment: click to see it on top while it is selected, and edit it" : null}
         onMouseDown=${(e) => { if (e.shiftKey) e.preventDefault(); }}
         onClick=${(e) => call("text_scenes.tree_select", l.id, pickHow(e, true))}>
-      <button type="button" class="ly-eye"
-        title=${l.hidden ? "Hidden — show it again" : l.state_off ? "Off in the preview: turn it on here (the preview only, not the card)"
-          : l.shown ? "Turned on in the preview: turn it back off (the card is not changed)" : l.drawn ? "Hide it"
-          : "Not on the screen at this moment: see it on top while it is selected"}
+      <button type="button" class=${cx("ly-eye", l.hidden && "in-game")}
+        title=${l.hidden ? "Hidden in the game: Write leaves it out of the card, so the machine never draws it. Click to show it again"
+          : l.state_off ? "Off in the preview: turn it on here (the preview only, not the card)"
+          : l.shown ? "Turned on in the preview: turn it back off (the card is not changed)"
+          : l.part_off ? "Hide it in the game: Write leaves it out of the card, so the machine never draws it (it shows only when the look it sits in is on)"
+          : "Hide it in the game: Write leaves it out of the card, so the machine never draws it (not just the preview)"}
         onClick=${(e) => {
           e.stopPropagation();
           if (l.state_off || l.shown) call("text_scenes.tree_force", l.id, !l.shown);
-          else if (!l.hidden && !l.drawn) call("text_scenes.tree_select", l.id);
           else call("text_scenes.tree_visible", l.id, l.hidden);
         }}>
         <${Icon} name=${l.hidden || l.state_off ? "eye-off" : "eye"} /></button>
       <span class="sc-t ellip" title=${l.name}>${l.name}${l.added ? " (added)" : ""}</span>
-      <span class="sc-i small muted ellip" title=${l.edits || l.kind}>${l.edits || l.kind}</span>
+      <span class=${cx("sc-i small ellip", l.hidden ? "in-game" : "muted")} title=${l.edits || l.kind}>${l.edits || l.kind}</span>
+      ${(l.pics || []).length ? html`<button type="button" class="ly-img"
+        aria-label="Show on the Images tab" ...${tip(l.pics.length === 1 ? "Show this picture on the Images tab"
+          : `Show one of the ${l.pics.length} pictures it draws on the Images tab`)}
+        onClick=${(e) => { e.stopPropagation(); showPics(l.pics, e); }}><${Icon} name="image" /></button>`
+        : html`<span></span>`}
     </div>`)}
   </div>`;
+}
+
+// PAD-287: a layer's button to its picture on the Images tab; a group that draws several
+// lists them to pick from.
+const MAX_PICS = 25;
+function showPics(pics, e) {
+  if (pics.length === 1) { call("text_scenes.activate", "img::" + pics[0]); return; }
+  const items = pics.slice(0, MAX_PICS).map((rel) => ({
+    label: rel.split("/").pop(), onClick: () => call("text_scenes.activate", "img::" + rel) }));
+  if (pics.length > MAX_PICS) {
+    items.push({ sep: true }, { label: `${pics.length - MAX_PICS} more: see Contents`, disabled: true, onClick: () => {} });
+  }
+  openMenu({ x: e.clientX, y: e.clientY }, items);
 }
 
 // A set of pictures, handed over only once the browser has every one of them: the canvas
@@ -704,8 +836,28 @@ function TreeCanvas({ s }) {
       e.preventDefault(); flushNudge();
       if (multi) call("text_scenes.tree_remove_many", sels); else call("text_scenes.tree_remove", p.id);
     }
-    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); flushNudge(); call("text_scenes.tree_undo"); }
   };
+  // Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z anywhere on the page, not only with the preview focused
+  // (PAD-283: after a click on Draw 1:1 or any side-panel button the preview has no focus).
+  // A text box keeps its own undo; a dialog or another tab is left alone.
+  const flushRef = useRef(flushNudge);
+  flushRef.current = flushNudge;
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const k = e.key.toLowerCase();
+      const redo = k === "y" || (k === "z" && e.shiftKey);
+      if (k !== "z" && !redo) return;
+      const el = e.target;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      if (!box.current || !box.current.getClientRects().length || document.querySelector(".scrim")) return;
+      e.preventDefault();
+      flushRef.current();
+      call(redo ? "text_scenes.tree_redo" : "text_scenes.tree_undo");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // what is moved by hand: the drag under way, then edits not yet drawn (on the picture) or
   // not yet in the outlines the page was sent (on the outline)
@@ -794,7 +946,9 @@ function TreeSide({ t, play, playFrame }) {
     </div>`
     : p ? html`<div class="tree-props">
       <div class="small ellip" title=${p.name}><b>${p.name}</b> <span class="muted">${p.kind}${p.added ? ", added" : ""}</span></div>
-      ${p.peek ? html`<div class="small muted">The game does not draw this at this moment. It is shown on top while it is selected; an edit holds wherever the game shows it.</div>` : null}
+      ${p.peek && p.hidden ? html`<div class="small muted">You hid it with its eye, so the card leaves it out. It is shown on top while it is selected.</div>`
+      : p.peek && p.hid_in ? html`<div class="small muted">It sits in ${p.hid_in}, which you hid, so the card leaves it out. It is shown on top while it is selected.</div>`
+      : p.peek ? html`<div class="small muted">The game does not draw this at this moment. It is shown on top while it is selected; an edit holds wherever the game shows it.</div>` : null}
       ${p.pic ? html`<div class="tree-row">
         <span class="small muted" ...${tip("The picture's own size, and how much the game scales it to draw it here. Anything but 100% is resized by the game as it draws, which can leave jagged edges: make the picture at the size it shows, replace it on the Images tab with \"Keep this picture's own size\" ticked, then press Draw 1:1.")}>
           Picture ${p.pic.w} x ${p.pic.h} px, drawn at ${p.pic.sx === p.pic.sy ? p.pic.sx : `${p.pic.sx} x ${p.pic.sy}`}%</span>
@@ -862,8 +1016,10 @@ function TreeActions({ t }) {
     <${Button} size="sm" kind="ghost" icon="plus" title="Add a line of text to this scene"
       onClick=${() => { setWords(""); setAdding(true); }}>Text…<//>
     <span class="tree-actions-sep"></span>
-    <${Button} size="sm" kind="ghost" icon="undo" disabled=${!t.edits} title="Undo the last edit in this scene (Ctrl+Z)"
+    <${Button} size="sm" kind="ghost" icon="undo" disabled=${!t.can_undo} title="Undo the last edit in this scene (Ctrl+Z)"
       onClick=${() => call("text_scenes.tree_undo")}>Undo<//>
+    <${Button} size="sm" kind="ghost" icon="redo" disabled=${!t.can_redo} title="Redo the edit just undone (Ctrl+Y or Ctrl+Shift+Z)"
+      onClick=${() => call("text_scenes.tree_redo")}>Redo<//>
     <${Button} size="sm" kind="ghost" iconRight="down" disabled=${!t.edits && !t.all_edits}
       title="Put this scene (or every scene) back: as the last Write left it, or as the game shipped it"
       onClick=${(e) => openMenu(e.currentTarget, [
@@ -882,6 +1038,9 @@ function TreeActions({ t }) {
     ${t.built === "same" && t.edits ? html`<span class="small nw ok-ink" title=${STATE_TIP.written}><span class="sc-dot written"></span> Written to a card</span>`
       : t.edits || t.built === "changed" ? html`<span class="small nw warn-ink" title="Edits are kept as you make them; there is nothing to save. The next Write puts them on the card.">
           <span class="sc-dot edited"></span> ${t.edits ? `${t.edits} edit${t.edits === 1 ? "" : "s"}` : "Back as shipped"}, not written yet</span>` : null}
+    ${(t.hidden_names || []).length ? html`<span class="small nw warn-ink"
+        title=${`Hidden with its eye, so the machine never draws it: ${t.hidden_names.join(", ")}. Click its eye in Layers to show it again.`}>
+        <${Icon} name="eye-off" /> ${t.hidden_names.length} hidden in game</span>` : null}
     ${adding ? html`<${Modal} title="Add a line of text" onClose=${() => setAdding(false)}
         footer=${html`<${Button} onClick=${() => setAdding(false)}>Cancel<//><${Button} kind="primary"
           disabled=${!words.trim()} onClick=${() => { setAdding(false); call("text_scenes.tree_add_text", words); }}>Add<//>`}>

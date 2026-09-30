@@ -114,6 +114,12 @@ Source: "{#ProjectDir}\tools\jjp_emu\*"; DestDir: "{app}\tools\jjp_emu"; \
 Source: "{#ProjectDir}\tools\bof_emu\*"; DestDir: "{app}\tools\bof_emu"; \
     Flags: recursesubdirs ignoreversion; \
     Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.fun"
+; The Dutch Pinball rig (tools/dp_emu, PAD-263): the Emulate DP tab.  Sources
+; only: the input shim (dpinput.c) is compiled inside WSL on first use, and
+; the game copied off the disk image lives under /var/tmp there, never here.
+Source: "{#ProjectDir}\tools\dp_emu\*"; DestDir: "{app}\tools\dp_emu"; \
+    Flags: recursesubdirs ignoreversion; \
+    Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.so,*.img,*.zip"
 ; The Spooky rig (tools/spooky_emu, PAD-266): the Emulate Spooky tab.  Like
 ; the BoF rig it carries one BUILT file, spkshim.so, so .so must never join
 ; the excludes; its switch window reuses tools/bof_emu's page.  The unpacked

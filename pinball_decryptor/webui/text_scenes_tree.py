@@ -50,8 +50,11 @@ class TreeEditMixin:
         self._tforce = {}            # {card: node ids turned on in the preview only} (PAD-276)
         self._tstate_off = set()     # layers off only because of a switchable part's pick
         self._teye_off = set()       # ... and not turned on in the preview by their eye
+        self._thead = set()          # ... the looks themselves, not what sits inside them
+        self._tpart_off = set()      # layers inside a look that is off (their eye is their own)
         self._tdraws = []            # the draw list of the last render
         self._tworlds = {}
+        self._tlit = {}              # what is drawn without a peek (the game's + the eyes')
         self._tparents = {}
         self._tman = None
         self._tonce = []             # notes for the next picture only (tree_show)
@@ -67,6 +70,7 @@ class TreeEditMixin:
         self._tlive = {}             # card -> (push result, "HH:MM:SS") handed to a running game
         self._tlive_job = None
         self._tlive_lock = threading.Lock()
+        self._thist = {}             # (project, card) -> undo / redo lists of whole op lists
 
     def _tree_reset(self):
         self._trees = None
@@ -92,8 +96,32 @@ class TreeEditMixin:
             return None, None
         for card, man in self._load_trees().items():
             if card.replace("\\", "/").rsplit("/", 1)[0] == want:
+                if scene_dir is None and self._tree_hist(card) is None:
+                    self._tree_track(card)
                 return card, man
         return None, None
+
+    # -- undo / redo (PAD-283) ---------------------------------------------
+    # Every change to a scene's op list is one step, whatever made it (a drag, Draw 1:1, Show,
+    # As shipped, a new tint), so Undo puts back the list as it was and Redo the one it undid.
+    def _tree_hist(self, card):
+        return self._thist.get((self.assets_dir, card))
+
+    def _tree_track(self, card):
+        """Note *card*'s op list; a change since it was last noted becomes an undo step."""
+        ops = self._tree_ops(card)
+        h = self._tree_hist(card)
+        if h is None:
+            self._thist[(self.assets_dir, card)] = {"now": ops, "undo": [], "redo": []}
+        elif ops != h["now"]:
+            h["undo"].append(h["now"])
+            del h["undo"][:-self._UNDO_STEPS]
+            h["redo"] = []
+            h["now"] = ops
+        return self._tree_hist(card)
+
+    #: undo steps kept per scene
+    _UNDO_STEPS = 200
 
     def _tree_ops(self, card):
         from ..plugins.stern import scene_edit
@@ -143,26 +171,29 @@ class TreeEditMixin:
                           for n, par, _d in _walk_man(man)}
         peek = self._tpeek if self._tpeek is not None and self._tpeek == self._tsel else None
         force = self._tree_force_set(card, peek)
+        # the sprites a peek sits in are only its way in: drawing them whole showed every
+        # other layer in them (DragonRR, PAD-284)
+        through = self._tree_ancestors(peek) - self._tree_force_set(card) if peek else set()
+        # a picked sprite shows every layer in it, those hidden with their eye too; the eyes
+        # are not changed (DragonRR, PAD-289)
+        unveil = self._tree_inside(peek, self._tree_hidden(card)) if peek else set()
         draws = scene_eval.draw_list(man, frame, pins=pins, worlds=worlds, show=peek,
-                                     force=force)
+                                     force=force, through=through, unveil=unveil)
         self._fit_kept(draws, worlds)
-        if force or peek is not None:
-            plain = {}
-            scene_eval.draw_list(man, frame, pins=pins, worlds=plain)
-        else:
-            plain = worlds
-        self._tstate_off = self._state_off(man, plain)
         # what the eyes show: a layer the eye turned on is on, even though the plain draw has
         # it off (DragonRR, PAD-280: the eyes stayed crossed); a peek is only while selected
         mine = self._tree_force_set(card) if peek is not None else force
         if peek is None:
             lit = worlds
-        elif not mine:
-            lit = plain
         else:
             lit = {}
             scene_eval.draw_list(man, frame, pins=pins, worlds=lit, force=mine)
-        self._teye_off = self._tstate_off - set(lit)
+        # only a look itself has the eye that turns it on; what sits inside it keeps its own
+        # eye (DragonRR, PAD-285: "as Fusion would")
+        self._tstate_off, self._thead = self._state_off(man, lit)
+        self._teye_off = (self._tstate_off & self._thead) - set(lit)
+        self._tpart_off = self._tstate_off - self._thead - set(lit)
+        self._tlit = lit
         self._tdraws, self._tworlds, self._tman = draws, worlds, man
         new_scene = card != self._tshown_card
         state = {"tree": True, "animated": False, "screens": []}
@@ -191,39 +222,71 @@ class TreeEditMixin:
         if start:
             threading.Thread(target=self._tree_worker, daemon=True, name="scene-tree").start()
 
+    def _tree_ancestors(self, nid):
+        """The sprites *nid* sits in, up to the root."""
+        out, p, hops = set(), self._tparents.get(nid), 0
+        while p is not None and hops < 256:
+            out.add(p)
+            p, hops = self._tparents.get(p), hops + 1
+        return out
+
+    def _tree_hidden(self, card):
+        """The nodes hidden with their eye."""
+        return {op.get("node") for op in self._tree_ops(card) if op["op"] == "visible"}
+
+    def _tree_inside(self, nid, nodes):
+        """Those of *nodes* that sit inside *nid*, however deep."""
+        return {n for n in nodes if nid in self._tree_ancestors(n)}
+
+    def _tree_hidden_in(self, man, nid, ops):
+        """The name of the nearest sprite *nid* sits in that is hidden with its eye, or ""."""
+        hidden = {op.get("node") for op in ops if op["op"] == "visible"}
+        p, hops = self._tparents.get(nid), 0
+        while p is not None and hops < 256:
+            if p in hidden:
+                got = [n for n, _par, _d in _walk_man(man) if n["id"] == p]
+                return got[0]["name"] if got else ""
+            p, hops = self._tparents.get(p), hops + 1
+        return ""
+
     def _tree_force_set(self, card, peek=None):
-        """The layers turned on in the preview (and a selected layer that is off only because
-        of a switchable part's pick), with the sprites they sit in: a picture inside a sprite
-        that is off has to have that sprite on to be seen."""
+        """The layers turned on in the preview, and a selected layer that is off only because
+        of a switchable part's pick with the sprites it sits in: a picture inside a sprite that
+        is off has to have that sprite on to be seen while it is selected.  A selected layer
+        inside a sprite hidden with its eye is seen through it too (DragonRR, PAD-286: "it
+        should override and show"; it said the game never draws it).  A layer turned on by its
+        eye does not turn on the part it sits in: it shows when that part is on, as in an
+        editor's layers (DragonRR, PAD-285: "only if the head of that tree is made
+        visible")."""
         hidden = {op.get("node") for op in self._tree_ops(card) if op["op"] == "visible"}
-        want = set(self._tforce.get(card) or ()) - hidden
-        if peek is not None and peek in self._tstate_off:
-            want.add(peek)
-        out = set()
-        for nid in want:
-            p, hops = nid, 0
+        out = set(self._tforce.get(card) or ())
+        veiled = self._tree_ancestors(peek) & hidden if peek is not None else set()
+        if peek is not None and (peek in self._tstate_off or veiled):
+            p, hops = peek, 0
             while p is not None and hops < 256:
                 out.add(p)
                 p, hops = self._tparents.get(p), hops + 1
-        return out - hidden
+        return out - (hidden - veiled)
 
     def _state_off(self, man, worlds):
-        """Layers the game is not drawing at this moment only because a switchable part (a
-        sprite the game's code picks a look of: the energy meter's Level 0..6) shows another
-        of its looks - there at every moment, unlike a layer the timeline has not reached
-        (DragonRR, PAD-276: "PAD is choosing, not the game")."""
+        """``(off, heads)``: the layers the game is not drawing at this moment only because a
+        switchable part (a sprite the game's code picks a look of: the energy meter's Level
+        0..6) shows another of its looks - there at every moment, unlike a layer the timeline
+        has not reached (DragonRR, PAD-276: "PAD is choosing, not the game") - and of those,
+        the looks themselves (the heads); the rest sit inside a look that is off."""
         from ..plugins.stern import scene_eval
         seek = {nid for nid, _p, _l, _f in scene_eval.seekable(man)}
-        out = set()
+        out, heads = set(), set()
         for n, par, _d in _walk_man(man):
             if n["id"] in worlds or par is None:
                 continue
             if par["id"] in worlds:
                 if par["id"] in seek and any(v for _f, v in n["kf"]):
                     out.add(n["id"])
+                    heads.add(n["id"])
             elif par["id"] in out:
                 out.add(n["id"])
-        return out
+        return out, heads
 
     @rpc
     def tree_force(self, node, on):
@@ -497,11 +560,21 @@ class TreeEditMixin:
         drawn = {d["node"] for d in self._tdraws}
         layers = []
         index = scene_edit._man_index(man)
+        have, memo = {}, {}
         for n, _parent, depth in _walk_man(man):
             kind = _kind_of(man, n)
+            pics = []
+            for rel in _pics_of(man, n, memo):
+                if rel not in have:
+                    have[rel] = os.path.isfile(
+                        os.path.join(self.assets_dir, "images", *rel.split("/")))
+                if have[rel]:
+                    pics.append(rel)
             layers.append({"id": n["id"], "name": n["name"], "depth": depth, "kind": kind,
+                           "pics": ["images/" + rel for rel in pics],
                            "drawn": n["id"] in drawn or n["id"] in self._tworlds,
                            "state_off": n["id"] in self._teye_off,
+                           "part_off": n["id"] in self._tpart_off,
                            "shown": n["id"] in (self._tforce.get(card) or ()),
                            "added": bool(n.get("added")),
                            "hidden": any(op["op"] == "visible" and op.get("node") == n["id"]
@@ -521,6 +594,10 @@ class TreeEditMixin:
                           for b in map(self._tree_box, sels) if b] if multi else [],
             "props": self._tree_props(card, man, sel, ops) if sel is not None else None,
             "edits": len(ops), "notes": list(notes), "rev": self._trev,
+            # PAD-290: an eye hide is a card edit; the status line names every one
+            "hidden_names": [l["name"] for l in layers if l["hidden"]],
+            "can_undo": bool(ops or (self._tree_hist(card) or {}).get("undo")),
+            "can_redo": bool((self._tree_hist(card) or {}).get("redo")),
             "all_edits": scene_edit.count(self.assets_dir),
             "built": _built_state(scene_edit.built_ops(self.assets_dir, card), ops)})
 
@@ -554,7 +631,8 @@ class TreeEditMixin:
                 "hidden": any(op["op"] == "visible" and op.get("node") == nid for op in ops),
                 "layer": sibs.index(n) + 1, "layers": len(sibs),
                 "drawn": nid in self._tworlds,
-                "peek": nid == self._tpeek and nid in self._tworlds,
+                "peek": nid == self._tpeek and nid in self._tworlds and nid not in self._tlit,
+                "hid_in": self._tree_hidden_in(man, nid, ops),
                 "pic": self._tree_pic_props(nid)}
 
     def _tree_picture(self, nid):
@@ -642,6 +720,9 @@ class TreeEditMixin:
         return min(xs), min(ys), max(xs), max(ys)
 
     def _tree_refresh(self):
+        card, _man = self._tree_card()
+        if card is not None:
+            self._tree_track(card)                   # the edit just made is one undo step
         self._trev += 1
         self._folder_state_written()
         self._restate_list()
@@ -790,11 +871,12 @@ class TreeEditMixin:
             self._tpeek = node
             self._render_tree_preview(self._sel, quiet=True)
             return True
-        if node is not None and node not in self._tworlds and not any(
-                op["op"] == "visible" and op.get("node") == node
-                for op in self._tree_ops(card)):
+        if node is not None:
+            # whatever it is - on the screen, hidden with its eye, not drawn now - it is drawn
+            # on top while it is picked, and a sprite with every layer in it; no eye changes
+            # (DragonRR, PAD-289)
             self._tpeek = node
-            self._render_tree_preview(self._sel)
+            self._render_tree_preview(self._sel, quiet=node in self._tlit)
             if node in self._tworlds:
                 return True
             self._tpeek = None
@@ -1157,13 +1239,15 @@ class TreeEditMixin:
         root_frames = [frame] + sorted({f for _n, f in man["root"]["labels"]})
         root_frames += list(range(1, frames + 1, max(1, frames // 60)))
         tried = set()
+        # what the user hid with an eye is looked for too: picking it shows it (PAD-289)
+        veiled = self._tree_hidden(card)
 
         def shows(f, pn):
             key = (f, tuple(sorted(pn.items())))
             if key in tried:
                 return False
             tried.add(key)
-            for d in scene_eval.draw_list(man, f, pins=pn):
+            for d in scene_eval.draw_list(man, f, pins=pn, unveil=veiled):
                 if d["mul"][3] <= 0.01:
                     continue
                 q, hops = d["node"], 0            # it, or something inside it, shows
@@ -1193,6 +1277,8 @@ class TreeEditMixin:
         self._tframe[card] = found[0]
         self._tpins[card] = found[1]
         self._tsel = node
+        self._tsels = [node]
+        self._tpeek = node
         self._render_tree_preview(self._sel)
         return True
 
@@ -1247,11 +1333,39 @@ class TreeEditMixin:
 
     @rpc
     def tree_undo(self):
+        """Back one step.  Edits made before the app was started (no steps noted for them)
+        come off the end of the list one at a time."""
         from ..plugins.stern import scene_edit
         card, _man = self._tree_card()
         if card is None:
             return False
-        scene_edit.undo(self.assets_dir, card)
+        h = self._tree_hist(card)
+        was = h["undo"].pop() if h["undo"] else scene_edit.undone(h["now"])
+        if was == h["now"]:
+            return False
+        h["redo"].append(h["now"])
+        return self._tree_put(card, h, was)
+
+    @rpc
+    def tree_redo(self):
+        """Forward again over the last undo (Ctrl+Y, Ctrl+Shift+Z); any new edit ends it."""
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        h = self._tree_hist(card)
+        if not h["redo"]:
+            return False
+        h["undo"].append(h["now"])
+        return self._tree_put(card, h, h["redo"].pop())
+
+    def _tree_put(self, card, h, ops):
+        from ..plugins.stern import scene_edit
+        try:
+            scene_edit.set_ops(self.assets_dir, card, ops)
+        except OSError as e:
+            compat.messagebox.showerror("Scene edit", str(e))
+            return False
+        h["now"] = self._tree_ops(card)
         self._tree_refresh()
         return True
 
@@ -1297,6 +1411,91 @@ class TreeEditMixin:
         self._tsel = None
         self._tree_refresh()
         return True
+
+    @rpc
+    def edits_save(self, which="this"):
+        """Save edits to a file... (PAD-281): this scene's edits (``which`` "this") or every
+        edited scene's ("all"), with the pictures they add, in a zip to keep or to share.
+        Returns the zip's path, or None."""
+        from ..plugins.stern import scene_edit
+        if not self.assets_dir:
+            return None
+        cards = None
+        stem = os.path.basename(os.path.normpath(self.assets_dir)) + " scene edits"
+        if which == "this":
+            card, _man = self._tree_card()
+            if card is None or not self._tree_ops(card):
+                return None
+            cards = [card]
+            stem = (self._scenes.get(self._sel, {}).get("label") or "scene") + " edits"
+        elif not scene_edit.count(self.assets_dir):
+            return None
+        stem = re.sub(r'[\\/:*?"<>|·]+', "_", stem).strip() or "scene edits"
+        path = self.window.ask_save(
+            "scene_edits_file", "Save %s to a file" % (
+                "this scene's edits" if which == "this" else "every scene's edits"),
+            initialfile=stem + ".zip", filetypes=[("PAD scene edits", "*.zip")],
+            defaultextension=".zip")
+        if not path:
+            return None
+        try:
+            n = scene_edit.export_edits(self.assets_dir, path, cards)
+        except (scene_edit.SceneEditError, OSError) as e:
+            compat.messagebox.showerror("Save scene edits", str(e))
+            return None
+        self._set_caption("Saved the edits of %d scene%s to %s"
+                          % (n, "" if n == 1 else "s", os.path.basename(path)))
+        return path
+
+    @rpc
+    def edits_load(self, path=None):
+        """Load edits from a file... (PAD-281): each scene in a file Save edits to a file...
+        wrote takes the file's edits in place of its own, when this card has that scene.
+        Returns the scene paths loaded, or None."""
+        from ..plugins.stern import scene_edit
+        if not self.assets_dir:
+            return None
+        if not path:
+            path = self.window.ask_open(
+                "scene_edits_file", "Load scene edits from a file",
+                filetypes=[("PAD scene edits", "*.zip"), ("All files", "*.*")])
+        if not path:
+            return None
+        try:
+            scenes = scene_edit.read_share(path)
+            got, missing = scene_edit.match_cards(scenes, self._load_trees().keys())
+            mine = scene_edit.load(self.assets_dir)
+            over = [c for c in got if mine.get(c)]
+            if not got:
+                compat.messagebox.showinfo(
+                    "Load scene edits", "None of the %d scene%s in %s %s on this card, so "
+                    "nothing was loaded." % (len(scenes), "" if len(scenes) == 1 else "s",
+                                             os.path.basename(path),
+                                             "is" if len(scenes) == 1 else "are"))
+                return None
+            if over and not compat.messagebox.askyesno(
+                    "Load scene edits", "%d of the scenes in this file %s edits here already. "
+                    "Loading puts the file's edits in their place. Go ahead?"
+                    % (len(over), "has" if len(over) == 1 else "have")):
+                return None
+            got, missing = scene_edit.import_edits(self.assets_dir, path,
+                                                   self._load_trees().keys())
+        except (scene_edit.SceneEditError, OSError) as e:
+            compat.messagebox.showerror("Load scene edits", str(e))
+            return None
+        self._tsel = None
+        self._tree_refresh()
+        words = "Loaded the edits of %d scene%s from %s." % (
+            len(got), "" if len(got) == 1 else "s", os.path.basename(path))
+        if missing:
+            words += (" %d scene%s in the file %s not on this card and %s left out."
+                      % (len(missing), "" if len(missing) == 1 else "s",
+                         "is" if len(missing) == 1 else "are",
+                         "was" if len(missing) == 1 else "were"))
+        self._set_caption(words)
+        if missing:
+            compat.messagebox.showinfo("Load scene edits", words)
+        return sorted(got)
 
     @rpc
     def tree_clear(self):
@@ -1449,6 +1648,32 @@ def _walk_man(man):
 
     run(man["root"]["kids"], None, 0)
     return out
+
+
+def _pics_of(man, n, memo):
+    """The pictures (rels under images/) node *n* draws, itself or through what it holds, in
+    drawing order, each once: the Layers list's button to them on the Images tab (PAD-287).
+    *memo* keeps each object's list for the next node that shows it."""
+    objects = man["objects"]
+    out = []
+    for _s, oid in n["comps"]:
+        if oid not in memo:
+            memo[oid] = []                          # a group that holds itself stops here
+            o = objects.get(str(oid)) or {}
+            k = o.get("kind")
+            if k == "Bitmap":
+                rels = [o.get("image")]
+            elif k == "Shape" and o.get("fill") is not None:
+                rels = [(objects.get(str(o["fill"])) or {}).get("image")]
+            elif k == "StreamingFlipbook":
+                rels = [fr.get("image") for fr in o.get("seq") or () if fr]
+            else:
+                rels = []
+            for kid in o.get("kids") or ():
+                rels += _pics_of(man, kid, memo)
+            memo[oid] = rels
+        out += memo[oid]
+    return list(dict.fromkeys(rel for rel in out if rel))
 
 
 def _kind_of(man, n):

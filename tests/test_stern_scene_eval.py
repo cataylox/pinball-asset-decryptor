@@ -333,3 +333,61 @@ def test_an_entrance_rests_where_it_leads_and_plays_from_its_start():
     assert E.entrance_rest(picker) == (1, 5)
     states = {"labels": [["Locked", 1], ["Completed", 2], ["Tokyo", 3]]}
     assert E.entrance_rest(states) is None                                          # not an entrance
+
+
+def test_a_peeked_layer_in_a_hidden_sprite_is_drawn_alone():
+    """DragonRR (PAD-284): picking the Gigan text box, which sits in a body the game has off
+    at this moment, drew the whole body - its picture and every other layer in it.  The
+    sprites it sits in are only its way in (*through*); peeking the body draws all of it."""
+    body = {"kind": "Sprite", "frames": 1, "labels": [],
+            "kids": [N(20, "Art", [9]), N(21, "Textbox", [9]), N(22, "Glow", [9])]}
+    states = {"kind": "Sprite", "frames": 2, "labels": [["A", 1], ["B", 2]],
+              "kids": [N(10, "BodyA", [9], kf=((1, 1), (2, 0))),
+                       N(11, "BodyB", [3], kf=((1, 0), (2, 1)))]}
+    m = man([N(1, "Select", [2])], {2: states, 3: body, 9: BMP})
+    names = lambda ds: [d["path"][-1] for d in ds]                       # noqa: E731
+    assert names(E.draw_list(m, 1)) == ["BodyA"]
+    worlds = {}
+    got = E.draw_list(m, 1, show=21, force={1, 11, 21}, through={1, 11}, worlds=worlds)
+    assert names(got) == ["BodyA", "Textbox"]
+    assert 21 in worlds and 20 not in worlds and 22 not in worlds
+    assert names(E.draw_list(m, 1, show=11, force={1, 11})) == ["BodyA", "Art", "Textbox", "Glow"]
+    # a sprite the timeline draws anyway is drawn whole, through or not
+    assert names(E.draw_list(m, 1, pins={1: 2}, show=21, force={1, 11, 21},
+                             through={1, 11})) == ["Art", "Glow", "Textbox"]
+
+
+def test_a_peeked_sprite_unveils_the_layers_hidden_with_their_eye():
+    """DragonRR (PAD-289): picking a sprite shows every layer in it, those hidden with their
+    eye too.  The eye keeps the layer's own timeline in ``_kf``; *unveil* draws by that."""
+    art = N(20, "Art", [9], kf=((1, 0),))
+    art["_kf"] = [[1, 1]]                               # hidden with its eye
+    body = {"kind": "Sprite", "frames": 1, "labels": [], "kids": [art, N(21, "Textbox", [9])]}
+    m = man([N(1, "Body", [3]), N(2, "Over", [9])], {3: body, 9: BMP})
+    names = lambda ds: [d["path"][-1] for d in ds]                       # noqa: E731
+    assert names(E.draw_list(m, 1)) == ["Textbox", "Over"]
+    assert names(E.draw_list(m, 1, show=1)) == ["Over", "Textbox"]
+    assert names(E.draw_list(m, 1, show=1, unveil={20})) == ["Over", "Art", "Textbox"]
+
+
+def test_battle_select_peeks_the_gigan_text_box_alone():
+    m = _manifest("cac32730")
+    by = {}
+    parents = {}
+
+    def walk(kids, par):
+        for n in kids:
+            by.setdefault(n["name"], []).append(n["id"])
+            parents[n["id"]] = par
+            for _s, oid in n["comps"]:
+                o = m["objects"].get(str(oid)) or {}
+                walk(o.get("kids") or (), n["id"])
+    walk(m["root"]["kids"], None)
+    box = by["Gigan_Textbox_instance"][0]
+    up, p = set(), parents[box]
+    while p is not None:
+        up.add(p)
+        p = parents[p]
+    got = E.draw_list(m, 45, show=box, force=up | {box}, through=up)
+    plain = E.draw_list(m, 45)
+    assert len(got) == len(plain) + 1 and got[-1]["node"] == box

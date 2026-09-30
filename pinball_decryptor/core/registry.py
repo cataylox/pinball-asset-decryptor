@@ -100,8 +100,14 @@ class Capabilities:
     # expansion LED bus, BoF's BICS board), which the rig answers.  No key,
     # no CPU emulation.  See webui/tabs/emulate_bof.py.
     emulate_bof: bool = False
+    # Emulate tab for Dutch Pinball.  A fifth rig (tools/dp_emu), its own flag
+    # for the same reason: The Big Lebowski is a native x86-64 program that
+    # ships its own P-ROC simulator (`fakepinproc`), so the rig supplies only
+    # what the machine's disk image gave it - no emulation, no key.  See
+    # webui/tabs/emulate_dp.py.
+    emulate_dp: bool = False
     # Emulate tab for Spooky Pinball (PAD-266).  Its own flag for the same
-    # reason: a fifth rig (tools/spooky_emu) - a native x86-64 Unity game in
+    # reason: a sixth rig (tools/spooky_emu) - a native x86-64 Unity game in
     # its own desktop mode, whose one missing piece is Spooky's Warden board
     # on USB serial.  Beetlejuice only so far; the tab says which games it
     # runs.  See webui/tabs/emulate_spooky.py.

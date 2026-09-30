@@ -174,14 +174,28 @@ def drop(assets_dir, card, node, kind):
     save(assets_dir, edits)
 
 
-def undo(assets_dir, card):
-    edits = load(assets_dir)
-    ops = edits.get(card)
+def undone(ops):
+    """*ops* without its last edit (a group's ops go together)."""
+    ops = list(ops or ())
     if ops:
         gid = ops.pop().get("group")
         while gid is not None and ops and ops[-1].get("group") == gid:
             ops.pop()
+    return ops
+
+
+def undo(assets_dir, card):
+    edits = load(assets_dir)
+    if edits.get(card):
+        edits[card] = undone(edits[card])
         save(assets_dir, edits)
+
+
+def set_ops(assets_dir, card, ops):
+    """*card*'s whole list, as an undo or redo puts it back."""
+    edits = load(assets_dir)
+    edits[card] = [dict(op) for op in ops or ()]
+    save(assets_dir, edits)
 
 
 def clear(assets_dir, card=None):
@@ -195,6 +209,133 @@ def clear(assets_dir, card=None):
 
 def count(assets_dir):
     return sum(len(v) for v in load(assets_dir).values())
+
+
+# ---------------------------------------------------------------------------------------------
+# a file of edits to share or keep (PAD-281)
+# ---------------------------------------------------------------------------------------------
+SHARE_MANIFEST = "pad_scene_edits.json"
+SHARE_KIND = "pad-scene-edits"
+
+
+def _safe_rel(rel):
+    """*rel* (``a/b.png``) when it stays inside the folder it names a file in; else None."""
+    rel = (rel or "").replace("\\", "/")
+    parts = rel.split("/")
+    if (not rel or rel.startswith("/") or ":" in parts[0]
+            or any(p in ("", ".", "..") for p in parts)):
+        return None
+    return rel
+
+
+def export_edits(assets_dir, zip_path, cards=None):
+    """Write the edits of *cards* (None: every edited scene) to a zip anyone can load into a
+    project of the same card: the ops, and every picture an ``add_picture`` shows.  Returns
+    the number of scenes written; raises :class:`SceneEditError` when there is nothing."""
+    import zipfile
+    edits = load(assets_dir)
+    if cards is not None:
+        edits = {c: edits[c] for c in cards if edits.get(c)}
+    if not edits:
+        raise SceneEditError("there are no scene edits to save")
+    pictures = sorted({op["image"] for ops in edits.values() for op in ops
+                       if op["op"] == "add_picture" and _safe_rel(op.get("image"))})
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(SHARE_MANIFEST, json.dumps(
+            {"format": 1, "kind": SHARE_KIND, "scenes": edits}, indent=1, sort_keys=True))
+        for rel in pictures:
+            src = os.path.join(assets_dir, "images", *rel.split("/"))
+            if os.path.isfile(src):
+                z.write(src, "images/" + rel)
+    return len(edits)
+
+
+def read_share(zip_path):
+    """``{card: [op, ...]}`` of a file :func:`export_edits` wrote; raises
+    :class:`SceneEditError` for anything else."""
+    import zipfile
+    try:
+        with zipfile.ZipFile(zip_path) as z:
+            data = json.loads(z.read(SHARE_MANIFEST).decode("utf-8"))
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+        raise SceneEditError("%s is not a file of scene edits saved by PAD"
+                             % os.path.basename(zip_path)) from None
+    if not isinstance(data, dict):
+        data = {}
+    scenes = data.get("scenes")
+    if data.get("kind") != SHARE_KIND or not isinstance(scenes, dict):
+        raise SceneEditError("%s is not a file of scene edits saved by PAD"
+                             % os.path.basename(zip_path))
+    if data.get("format", 1) > 1:
+        raise SceneEditError("%s was saved by a newer PAD: update to load it"
+                             % os.path.basename(zip_path))
+    return {c: [op for op in v if isinstance(op, dict) and op.get("op")]
+            for c, v in scenes.items() if isinstance(v, list) and v}
+
+
+def match_cards(scenes, cards_here):
+    """``({card here: ops}, [card of the file with no scene here])``: a card path matches the
+    same path here, else the one path here that differs only in the game folder (``/godzilla_le/``
+    and ``/godzilla_pro/`` share a scene the scene id names)."""
+    if cards_here is None:
+        return dict(scenes), []
+    here = set(cards_here)
+    by_rest = {}
+    for c in here:
+        by_rest.setdefault(c.lstrip("/").split("/", 1)[-1], []).append(c)
+    got, missing = {}, []
+    for card, ops in scenes.items():
+        if card in here:
+            got[card] = ops
+            continue
+        same = by_rest.get(card.lstrip("/").split("/", 1)[-1], [])
+        if len(same) == 1:
+            got[same[0]] = ops
+        else:
+            missing.append(card)
+    return got, missing
+
+
+def import_edits(assets_dir, zip_path, cards_here=None):
+    """Load a file :func:`export_edits` wrote: each scene in it that this project has
+    (*cards_here*, None: take every one) gets the file's edits in place of its own, and the
+    pictures they add are copied in (under a new name when one of the same name is already
+    here and differs).  Returns ``({card: [op, ...]} as loaded, [card of the file not here])``."""
+    import zipfile
+    scenes, missing = match_cards(read_share(zip_path), cards_here)
+    renamed = {}
+    with zipfile.ZipFile(zip_path) as z:
+        members = set(z.namelist())
+        for ops in scenes.values():
+            for op in ops:
+                rel = _safe_rel(op.get("image")) if op["op"] == "add_picture" else None
+                if rel is None or rel in renamed or "images/" + rel not in members:
+                    continue
+                data = z.read("images/" + rel)
+                stem, ext = os.path.splitext(rel)
+                new, n = rel, 2
+                while True:
+                    dest = os.path.join(assets_dir, "images", *new.split("/"))
+                    if not os.path.exists(dest):
+                        break
+                    with open(dest, "rb") as f:
+                        if f.read() == data:
+                            break
+                    new, n = "%s_%d%s" % (stem, n, ext), n + 1
+                if not os.path.exists(dest):
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with open(dest, "wb") as f:
+                        f.write(data)
+                renamed[rel] = new
+    for ops in scenes.values():
+        for op in ops:
+            if op["op"] == "add_picture" and op.get("image") in renamed:
+                op["image"] = renamed[op["image"]]
+    if scenes:
+        edits = load(assets_dir)
+        edits.update(scenes)
+        save(assets_dir, edits)
+    return scenes, missing
 
 
 # ---------------------------------------------------------------------------------------------
@@ -282,7 +423,7 @@ def describe(op):
             return "%d x %d %%" % (round(op["s"] * 100), round(op["sy"] * 100))
         return "%d %%" % round(op["s"] * 100)
     if k == "visible":
-        return "shown" if op["on"] else "hidden"
+        return "shown" if op["on"] else "hidden in game"
     if k == "tint":
         return "tinted #%02x%02x%02x" % tuple(int(round(c * 255)) for c in op["mul"][:3])
     if k == "order":
