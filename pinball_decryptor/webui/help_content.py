@@ -1651,7 +1651,11 @@ HELP_CONTENT = {
          "Hot Wheels and Galactic Tank Force play their pictures and sound "
          "through American Pinball's own player, which only one game at a "
          "time can use. Barry-O's BBQ Challenge does not run here yet. "
-         "Sound follows Mute; the game's own volume is in its service menu."),
+         "Volume and Mute change the game's sound while it plays; the game's "
+         "own volume is in its service menu."),
+        ("Stopping",
+         "Stop ends the game and closes its switch window. So does closing "
+         "any of the game's own windows with its X."),
     ],
     "Emulate": [
         ("What it does",

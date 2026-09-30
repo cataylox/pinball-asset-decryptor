@@ -3,9 +3,9 @@
 // of their own (tools/ap_emu/appf.py), as the other rigs' are; it opens by
 // itself when the game is up, and "Switches window" brings it back.
 
-import { html, PageHead, Card, Button, PathField, Chip, Note, Check, Modal, Table, call } from "../core/ui.js";
+import { html, PageHead, Card, Button, PathField, Chip, Note, Modal, Table, call } from "../core/ui.js";
 import { useNs } from "../core/store.js";
-import { StateChip, introLines } from "./emulate_jjp_shared.js";
+import { VolumeControl, StateChip, introLines } from "./emulate_jjp_shared.js";
 
 export const css = true;
 
@@ -60,7 +60,7 @@ export default function EmulateAP() {
     ${up ? html`<${Button} kind="ghost" title=${s.switches_tip}
       onClick=${() => call("emulate_ap.switches")}>Switches window<//>` : null}
     <span class="emu-sp"></span>
-    <${Check} ns="emulate_ap" k="mute" checked=${!!s.mute} label="Mute" title=${s.sound_tip} />`;
+    <${VolumeControl} ns="emulate_ap" s=${s} title=${s.volume_tip} />`;
   return html`<div class="page emu-page">
     <${PageHead} title="Emulate" sub=${introLines(s.intro)} />
     <div class="cols c75 emu-cols">

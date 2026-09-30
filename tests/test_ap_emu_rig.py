@@ -335,3 +335,39 @@ def test_appf_closes_its_window_when_the_app_closes_the_pipe():
     host2 = Host()
     appf.watch_parent(app, host2, io.StringIO(""))
     assert host2.events == [] and not host2.quit_called
+
+
+SINK_INPUTS = """Sink Input #0
+	Driver: protocol-native.c
+	Mute: no
+	Volume: front-left: 65536 / 100% / 0.00 dB,   front-right: 65536 / 100% / 0.00 dB
+	Properties:
+		application.process.id = "460"
+		application.process.binary = "python2.7"
+Sink Input #3
+	Mute: no
+	Volume: front-left: 65536 / 100% / 0.00 dB,   front-right: 65536 / 100% / 0.00 dB
+	Properties:
+		application.process.id = "999"
+"""
+
+
+def test_apvol_holds_only_this_slots_streams():
+    apvol = _load("apvol", RIG / "apvol.py")
+    inputs = apvol.parse_sink_inputs(SINK_INPUTS)
+    assert [(s["index"], s["pid"], s["volume"], s["muted"]) for s in inputs] == [
+        (0, 460, 65536, False), (3, 999, 65536, False)]
+    vol, mute = apvol.target_volume(0.5, True)
+    assert mute and 0 < vol < 65536
+    # the game (460) is set; somebody else's stream (999) never is
+    assert apvol.plan(inputs, {460}, vol, mute) == [
+        ["set-sink-input-volume", "0", str(vol)], ["set-sink-input-mute", "0", "1"]]
+    # already there: nothing to do
+    there = [dict(inputs[0], volume=vol, muted=True)]
+    assert apvol.plan(there, {460}, vol, mute) == []
+
+
+def test_apquit_wraps_the_one_event_call_apiav_makes():
+    src = (RIG / "apquit.c").read_text()
+    assert "int SDL_PollEvent(SDL_Event *event)" in src
+    assert "SDL_WINDOWEVENT_CLOSE" in src and "SDL_QUIT" in src and "RTLD_NEXT" in src

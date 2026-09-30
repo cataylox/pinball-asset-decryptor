@@ -137,6 +137,27 @@ if sdl2 is not None:
         return win
 
     sdl2.video.SDL_CreateWindow = sdl2.SDL_CreateWindow = _create_window
+
+    # Closing a game window (its X) ends the game.  procgame's desktop quits
+    # only on Esc / Ctrl-C and drops SDL's close events, so the X did nothing
+    # (PAD-292: David wants the X to close every emulator window - the rig
+    # and the app take down the rest once the game is gone).  The desktop
+    # reads events through sdl2.ext.get_events at call time, so this sees
+    # every one of them.
+    import sdl2.ext
+    _orig_ext_get_events = sdl2.ext.get_events
+
+    def _ext_get_events():
+        evs = _orig_ext_get_events()
+        for e in evs:
+            if e.type == sdl2.SDL_QUIT or (
+                    e.type == sdl2.SDL_WINDOWEVENT
+                    and e.window.event == sdl2.SDL_WINDOWEVENT_CLOSE):
+                log("window closed: the game quits")
+                os._exit(0)
+        return evs
+
+    sdl2.ext.get_events = _ext_get_events
 from procgame import fakepinproc
 from procgame.game import game as pgame
 

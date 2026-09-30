@@ -109,6 +109,16 @@ and Dutch Pinball tabs drive theirs, always on slot 0:
   `apiav/`'s.
 * `status.sh` - key=value lines (the app parses them).
 * `stop.sh`, `cancel.sh` - Stop, and Cancel while a start is in flight.
+* Closing any game window ends the run (PAD-292): `py/aprun.py` exits on
+  SDL's close events (procgame's desktop only quits on Esc / Ctrl-C), and
+  `apquit.c` - LD_PRELOADed into apiav, built on first use - does the same
+  for apiav's windows, which ignored their X.  ns.sh stops the game and
+  apiav together whichever ends first.  `closewin.py <display> <name>`
+  presses a window's X for a test.
+* Volume: with `--audio` and `PAD_AUDIO_CTL` (the app's audio_ctl.json),
+  `apvol.py` holds this slot's PulseAudio streams at the app's Volume /
+  Mute, live (jjp_emu/jjpvol.py's level maths); the tab always starts with
+  sound on so unmuting works.
 * `cache.sh --list | --drop <name>...` (root) - the tab's Cache... window:
   every unpacked build (size, last played - `run_game.sh` touches
   `<build>/used` - and the .pkg it came from, `prepare.py`'s `pkg`) and

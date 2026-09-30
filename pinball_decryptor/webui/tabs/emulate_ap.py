@@ -27,7 +27,7 @@ import time
 from pinball_decryptor.webui import rig as _rig
 from .. import compat
 from .. import emulate_ap_core as ap
-from ..emulate_jjp_common import (RigTabMixin, rig_off, load_audio_ctl,
+from ..emulate_jjp_common import (RigTabMixin, rig_off, audio_ctl_file,
                                   windows_python)
 from .base import TabService, rpc
 
@@ -43,8 +43,9 @@ PKG_TIP = ("The game's code file (.pkg), as American Pinball publishes it. It "
            "is only read: the emulator unpacks it once (under a minute) and "
            "keeps it, so the next start is quick.")
 
-SOUND_TIP = ("Play the game's sound on this PC. Applies when the game starts; "
-             "the game's own volume is in its service menu.")
+VOLUME_TIP = ("The game's sound on this PC - Volume and Mute follow at once, "
+              "while the game plays (the same knob every Emulate tab shares). "
+              "The game's own volume is in its service menu.")
 
 SWITCHES_TIP = ("The machine's switches: the game's own playfield picture with "
                 "every switch on it, and a labelled list. Hold a switch with "
@@ -98,7 +99,7 @@ class EmulateAPTab(RigTabMixin, TabService):
                     "is available on Windows only.")
         else:
             note = ""
-        self.set(intro=INTRO, pkg_tip=PKG_TIP, sound_tip=SOUND_TIP,
+        self.set(intro=INTRO, pkg_tip=PKG_TIP, volume_tip=VOLUME_TIP,
                  switches_tip=SWITCHES_TIP, platform=sys.platform, rig_ok=ok,
                  go_label="Start", go_enabled=ok, busy=False, go_busy=False,
                  starting=False,
@@ -458,7 +459,6 @@ class EmulateAPTab(RigTabMixin, TabService):
         self._cancelling = False
         self._started_here = True
         self._set_go("Cancel", True)
-        _vol, muted = load_audio_ctl()
 
         def work():
             try:
@@ -467,8 +467,11 @@ class EmulateAPTab(RigTabMixin, TabService):
                 rc = self._run_streaming(
                     ap.rig_cmd_root(
                         "watch.sh", _rig.wsl_path(pkg),
-                        env=["PAD_VISIBLE=1",
-                             "PAD_AUDIO=%d" % (0 if muted else 1),
+                        # sound always on: Volume / Mute follow live
+                        # through the control file (apvol.py), so unmuting
+                        # a game started muted works
+                        env=["PAD_VISIBLE=1", "PAD_AUDIO=1",
+                             "PAD_AUDIO_CTL=%s" % _rig.wsl_path(audio_ctl_file()),
                              "PAD_LABEL=PAD",
                              "PAD_TITLE=%s" % title]),
                     timeout=3600, on_line=self._footer_line)

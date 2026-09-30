@@ -174,6 +174,10 @@ def test_start_runs_watch_with_the_pkg_and_the_games_name(rig, monkeypatch, tmp_
         assert args[0] == "watch.sh" and args[1].endswith("lov-gamecode_25.08.27.pkg")
         assert "PAD_TITLE=Legends of Valhalla" in kw["env"]
         assert "PAD_VISIBLE=1" in kw["env"]
+        # sound always on, the level following the shared control file
+        assert "PAD_AUDIO=1" in kw["env"]
+        assert any(e.startswith("PAD_AUDIO_CTL=") and e.endswith("audio_ctl.json")
+                   for e in kw["env"])
 
 
 # ------------------------------------------------------------ the poll
