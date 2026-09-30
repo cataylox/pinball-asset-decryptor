@@ -358,7 +358,9 @@ class EmulateAPTab(RigTabMixin, TabService):
         py = windows_python()
         if not table or not py:
             return None
-        cmd = [py, os.path.join(ap.rig_dir(), "appf.py"),
+        # --parent-pipe: the window closes itself when this app closes its
+        # stdin (_close_switches)
+        cmd = [py, os.path.join(ap.rig_dir(), "appf.py"), "--parent-pipe",
                "--slot", info.get("slot") or "0"]
         if ap.title_name(info):
             cmd += ["--title", ap.title_name(info)]
@@ -384,21 +386,41 @@ class EmulateAPTab(RigTabMixin, TabService):
             return False
         try:
             self._sw_proc = subprocess.Popen(
-                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                creationflags=_rig.CREATE_FLAGS)
+                cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, creationflags=_rig.CREATE_FLAGS)
             return True
         except Exception as exc:                           # noqa: BLE001
             self._sw_proc = None
             self._log("AP: could not open the switch window: %s" % exc)
             return False
 
-    def _close_switches(self):
+    #: how long the switch window gets to close itself before it is killed
+    SW_CLOSE_S = 4.0
+
+    def _close_switches(self, wait=False):
+        """Close the switch window.  It is an Edge --app window that appf.py
+        started, so killing appf.py alone left the window up (David: Stop
+        should also close it).  Closing appf.py's stdin asks it to close its
+        window and quit; if it has not within SW_CLOSE_S, its whole process
+        tree goes.  In the background unless *wait* (app quit)."""
         proc, self._sw_proc = self._sw_proc, None
-        if proc is not None and proc.poll() is None:
+        if proc is None or proc.poll() is not None:
+            return
+
+        def work():
             try:
-                proc.terminate()
+                if proc.stdin is not None:
+                    proc.stdin.close()
+                proc.wait(timeout=self.SW_CLOSE_S)
+                return
             except Exception:                              # noqa: BLE001
                 pass
+            _kill_tree(proc)
+        if wait:
+            work()
+        else:
+            threading.Thread(target=work, daemon=True,
+                             name="pad-ap-switches-close").start()
 
     # ------------------------------------------------------------------
     # start / stop
@@ -573,7 +595,7 @@ class EmulateAPTab(RigTabMixin, TabService):
         nothing else - a run it merely saw is somebody else's."""
         self._stopped = True
         self._cancel_poll()
-        self._close_switches()
+        self._close_switches(wait=True)
         if rig_off() or not ap.rig_available() or not ap.platform_ok():
             return
         if not self._started_here or not (self._last_up or self._busy):
@@ -586,6 +608,19 @@ class EmulateAPTab(RigTabMixin, TabService):
             pass
 
     shutdown_sync = emulate_shutdown
+
+
+def _kill_tree(proc):
+    """Kill *proc* and everything it started (the switch window's Edge)."""
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=15, creationflags=_rig.CREATE_FLAGS)
+        else:
+            proc.kill()
+    except Exception:                                      # noqa: BLE001
+        pass
 
 
 TAB = EmulateAPTab

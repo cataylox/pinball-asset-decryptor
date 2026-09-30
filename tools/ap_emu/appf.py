@@ -196,6 +196,33 @@ class App:
             time.sleep(POLL_S)
 
 
+def watch_parent(app, host, stream=None):
+    """--parent-pipe: the Emulate AP tab holds this process's stdin open and
+    closes it on Stop.  EOF = close the window and quit - the window is a
+    separate browser process (pfweb's AppBackend), which a plain kill of
+    this one would leave on screen."""
+    if stream is None:
+        # fd 0 itself: under pythonw sys.stdin can be None even with a pipe
+        try:
+            os.fstat(0)
+        except OSError:
+            return                      # no parent pipe to watch - stay up
+        read = lambda: os.read(0, 4096)                 # noqa: E731
+    else:
+        read = lambda: stream.read(4096)                # noqa: E731
+    try:
+        while read():
+            pass
+    except (OSError, ValueError):
+        pass
+    if app.stopping:
+        return
+    app.stopping = True
+    host.publish("close")
+    time.sleep(0.3)
+    host.quit()
+
+
 def load_geom():
     try:
         with open(GEOM_FILE, encoding="utf-8") as f:
@@ -220,6 +247,8 @@ def main(argv=None):
     ap.add_argument("--distro", default="")
     ap.add_argument("--slot", default=os.environ.get("PAD_SLOT", "0"))
     ap.add_argument("--title", default="")
+    ap.add_argument("--parent-pipe", action="store_true",
+                    help="close the window when stdin closes (the app's Stop)")
     args = ap.parse_args(argv)
     with open(args.table, encoding="utf-8") as f:
         table = json.load(f)
@@ -232,6 +261,9 @@ def main(argv=None):
     app.host = host
     host.start()
     threading.Thread(target=app.poll, daemon=True, name="ap-poll").start()
+    if args.parent_pipe:
+        threading.Thread(target=watch_parent, args=(app, host), daemon=True,
+                         name="ap-parent").start()
     g = load_geom()
     main_spec = {"page": "main", "width": 900, "height": 900,
                  "title": "%s - switches" % title,

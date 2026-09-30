@@ -368,3 +368,47 @@ def test_the_cache_window_lists_selects_and_deletes(rig, monkeypatch, tmp_path):
 def test_the_cache_window_needs_the_rig(tmp_path):
     with web_app(tmp_path, mfr="ap") as w:
         assert not w.call(NS + ".open_cache")
+
+
+def test_stop_asks_the_switch_window_to_close_then_kills_its_tree(rig, monkeypatch, tmp_path):
+    from pinball_decryptor.webui.tabs import emulate_ap as tab
+    killed = []
+    monkeypatch.setattr(tab, "_kill_tree", lambda p: killed.append(p))
+
+    class Proc:
+        def __init__(self, exits):
+            self.exits, self.closed = exits, False
+            self.stdin = self
+
+        def close(self):
+            self.closed = True
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            if not self.exits:
+                import subprocess
+                raise subprocess.TimeoutExpired("appf", timeout)
+            return 0
+    with web_app(tmp_path, mfr="ap") as w:
+        svc = _svc(w)
+        svc.SW_CLOSE_S = 0.01
+        polite = Proc(exits=True)
+        svc._sw_proc = polite
+        svc._close_switches(wait=True)
+        assert polite.closed and killed == [] and svc._sw_proc is None
+        stuck = Proc(exits=False)
+        svc._sw_proc = stuck
+        svc._close_switches(wait=True)
+        assert stuck.closed and killed == [stuck]
+
+
+def test_the_switch_window_is_told_to_watch_its_pipe(rig, monkeypatch, tmp_path):
+    from pinball_decryptor.webui import emulate_ap_core as core
+    from pinball_decryptor.webui.tabs import emulate_ap as tab
+    monkeypatch.setattr(tab, "windows_python", lambda: "pythonw.exe")
+    monkeypatch.setattr(core, "rig_distro", lambda: "PAD-Runtime")
+    with web_app(tmp_path, mfr="ap") as w:
+        cmd = _svc(w)._switch_window_cmd(dict(RUNNING))
+        assert "--parent-pipe" in cmd

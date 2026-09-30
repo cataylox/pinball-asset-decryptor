@@ -307,3 +307,31 @@ def test_prepare_redoes_a_changed_pkg(tmp_path):
     first = prepare.stamp(str(pkg))
     pkg.write_bytes(b"x" * 11)
     assert prepare.stamp(str(pkg)) != first
+
+
+def test_appf_closes_its_window_when_the_app_closes_the_pipe():
+    """Stop closes appf.py's stdin; the window (a separate browser process)
+    must be told to close and the host quit - killing appf.py alone left the
+    window on screen."""
+    import io
+    appf = _load("appf", RIG / "appf.py")
+
+    class Host:
+        def __init__(self):
+            self.events, self.quit_called = [], False
+
+        def publish(self, e, data=None):
+            self.events.append(e)
+
+        def quit(self):
+            self.quit_called = True
+
+    class App:
+        stopping = False
+    app, host = App(), Host()
+    appf.watch_parent(app, host, io.StringIO("anything\n"))   # then EOF
+    assert app.stopping and host.events == ["close"] and host.quit_called
+    # already on its way out: nothing twice
+    host2 = Host()
+    appf.watch_parent(app, host2, io.StringIO(""))
+    assert host2.events == [] and not host2.quit_called
