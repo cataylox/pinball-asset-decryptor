@@ -20,7 +20,9 @@ Elevation prompt per platform:
     prompt).  Note the shipped Windows build already launches the whole app
     elevated via ``launcher.vbs``, so :func:`core.admin.is_admin` is normally
     already True there and this path is the fallback for an unelevated launch.
-  * Linux   — ``pkexec`` (graphical) when present.
+  * Linux   — ``pkexec`` (graphical) when present.  The AppImage re-execs the
+    ``.AppImage`` file, because root cannot enter the user's FUSE mount
+    (:func:`_helper_argv`).
 
 When the process is *already* elevated we skip all of this and flash in-process,
 so nothing changes for an already-root run.
@@ -331,10 +333,44 @@ def _helper_argv(ipc_dir):
     in the PyInstaller entry).  Everything else re-execs ``-m pinball_decryptor``
     — the Windows embeddable interpreter's ``._pth`` lists ``..`` so the package
     imports regardless of the elevated child's working directory.
+
+    THE LINUX APPIMAGE RE-EXECS THE .AppImage FILE, NOT ITS OWN BINARY (PAD-288,
+    GitHub #10).  Inside an AppImage ``sys.executable`` lives on the user's FUSE
+    mount (``/tmp/.mount_XXXX/usr/bin/...``), and a FUSE mount made without
+    ``allow_other`` is closed to every other user, root included.  pkexec is
+    setuid root and stats its program before it asks for anything, so it got
+    EACCES, exited 127 with no password prompt, and the flash reported
+    "Administrator access was declined" to someone who was never asked.  The
+    .AppImage file itself is an ordinary file root can run; its runtime mounts
+    a fresh copy for root and passes ``--flash-helper`` through to AppRun.
     """
     if getattr(sys, "frozen", False):
+        appimage = _appimage_path()
+        if appimage:
+            return [appimage, "--flash-helper", ipc_dir]
         return [sys.executable, "--flash-helper", ipc_dir]
     return [sys.executable, "-m", "pinball_decryptor", "--flash-helper", ipc_dir]
+
+
+def _appimage_path():
+    """The ``.AppImage`` file this process was started from, or ``None``.
+
+    The AppImage runtime exports ``APPIMAGE`` (the file) and ``APPDIR`` (its
+    mount); both must agree with this process before the file is trusted, so a
+    stray ``APPIMAGE`` inherited from some other AppImage that launched us is
+    ignored."""
+    if not sys.platform.startswith("linux"):
+        return None
+    appimage = os.environ.get("APPIMAGE")
+    if not appimage or not os.path.isfile(appimage):
+        return None
+    appdir = os.environ.get("APPDIR")
+    if appdir:
+        exe = os.path.realpath(sys.executable)
+        root = os.path.join(os.path.realpath(appdir), "")
+        if not exe.startswith(root):
+            return None
+    return appimage
 
 
 def _spawn_elevated_helper(ipc_dir):
@@ -428,10 +464,36 @@ class _PkexecRun(_ElevatedRun):
             out, err = self._proc.communicate()
             self._captured = (out or "") + (err or "")
             self.exit_code = rc
-            # pkexec exits 126 (auth dialog dismissed) / 127 (not authorized).
-            self.declined = rc in (126, 127)
-            self.stderr = "" if self.declined else self._captured
+            self.declined = _pkexec_declined(rc, self._captured)
+            self.stderr = ("" if self.declined
+                           else _pkexec_explained(self._captured))
         return rc
+
+
+def _pkexec_declined(rc, text):
+    """True only when a person actually said no to pkexec's prompt.
+
+    126 is the dialog dismissed; 127 with "Not authorized" is a failed or
+    refused authentication.  Every OTHER 127 is pkexec failing before it asked
+    anything - no authentication agent, or a program it could not stat (the
+    AppImage mount, PAD-288) - and calling that "declined" hid the reason from
+    someone who never saw a prompt."""
+    if rc == 126:
+        return True
+    low = (text or "").lower()
+    return (rc == 127 and "not authorized" in low
+            and "authentication agent" not in low)
+
+
+def _pkexec_explained(text):
+    """pkexec's own error text, led by what to do when no prompt could be shown."""
+    text = (text or "").strip()
+    if "authentication agent" in text.lower():
+        return ("No password prompt could be shown: this desktop session has no "
+                "polkit authentication agent running. Start one (your desktop's "
+                "own, or polkit-gnome / lxpolkit) and write the card again."
+                + ("\n\n" + text if text else ""))
+    return text
 
 
 class _NoMechanism(Exception):
