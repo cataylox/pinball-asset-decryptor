@@ -262,6 +262,7 @@ rm -f "$S1_WORK/holdoff"    # a stale holdoff would park the loop before run 1
 # anything" failure.
 : > "$S1_WORK/emu.log"
 setsid bash "$HERE/emu_root.sh" >"$S1_WORK/emu.log" 2>&1 < /dev/null &
+S1_EMU_PID=$!
 log "Game starting under the emulator…"
 
 # 6c. the live switch-map walk, for a title with no curated map.  It waits for
@@ -357,4 +358,11 @@ if [ -n "${S1_WSLG_VIEWER:-}" ]; then
     log "Opened the WSLg switch/LED window (fallback)."
 fi
 log "The DMD and switch windows open in the app."
+# The rig board (PAD-296): one Spike 1 rig; its windows are the app's, so a
+# run started without the app (PAD_HIDDEN=1) is a hidden one.
+if [ -f "$HERE/../rigboard.sh" ]; then
+    . "$HERE/../rigboard.sh"
+    rigboard_post spike1 0 "$S1_EMU_PID" "${_title:-$(basename "$(dirname "$(readlink -f "$S1_WORK/game")")")}" \
+        "${PAD_TITLE:-}" "$([ "${PAD_HIDDEN:-0}" = 1 ] && echo 0 || echo 1)" "${PAD_AUDIO:-0}"
+fi
 log "READY"

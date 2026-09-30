@@ -30,5 +30,5 @@ for f in game.pid prochw.pid; do
         rm -f "$PROC_RIG/$f"
     fi
 done
-[ $left = 0 ] && echo stopped
+[ $left = 0 ] && { rigboard_clear proc "$PROC_SLOT"; echo stopped; }
 exit $left

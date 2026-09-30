@@ -33,6 +33,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 case "$BUILD" in /*) ;; "") ;; *) BUILD=$DP_CACHE/$BUILD ;; esac
+AUDIO=$(rigboard_audio "$VISIBLE" "$AUDIO")
 # Alice's Adventures in Wonderland is a native program on a root of its own.
 if [ "$(cat "$BUILD/kind" 2>/dev/null)" = aaiw ]; then
     ARGS=()
@@ -123,6 +124,7 @@ for p in $(pgrep -f '^\./start fakepinproc'); do
 done > "$DP_RIG/game.pid"
 if dp_game_alive && grep -q '^video:' "$DP_RIG/rig.log"; then
     echo "Ready: $(basename "$BUILD") $VER, slot $DP_SLOT, display $DISP ($(grep '^video:' "$DP_RIG/rig.log" | tail -1 | cut -d' ' -f2))"
+    rigboard_post dp "$DP_SLOT" "$(dp_game_pid)" "$(basename "$BUILD")" "${PAD_TITLE:-}" "$VISIBLE" "$AUDIO"
 else
     echo "run_game.sh: the game did not come up:" >&2
     tail -20 "$DP_RIG/game.out" >&2

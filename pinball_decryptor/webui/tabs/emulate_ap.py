@@ -26,6 +26,7 @@ import time
 
 from pinball_decryptor.webui import rig as _rig
 from .. import compat
+from ...core import rigslot
 from .. import emulate_ap_core as ap
 from ..emulate_jjp_common import (RigTabMixin, rig_off, audio_ctl_file,
                                   windows_python)
@@ -475,7 +476,7 @@ class EmulateAPTab(RigTabMixin, TabService):
                         env=["PAD_VISIBLE=1", "PAD_AUDIO=1",
                              "PAD_AUDIO_CTL=%s" % _rig.wsl_path(audio_ctl_file()),
                              "PAD_LABEL=PAD",
-                             "PAD_TITLE=%s" % title]),
+                             "PAD_TITLE=%s" % title] + rigslot.board_env()),
                     timeout=3600, on_line=self._footer_line)
                 if self._cancelling:
                     self._started_here = False

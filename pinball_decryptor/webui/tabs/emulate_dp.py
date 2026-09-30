@@ -25,6 +25,7 @@ import threading
 
 from pinball_decryptor.webui import rig as _rig
 from .. import compat
+from ...core import rigslot
 from .. import emulate_dp_core as dp
 from ..emulate_jjp_common import (RigTabMixin, rig_off, load_audio_ctl,
                                   windows_python)
@@ -344,7 +345,7 @@ class EmulateDPTab(RigTabMixin, TabService):
                         "watch.sh", *args,
                         env=["PAD_VISIBLE=1",
                              "PAD_AUDIO=%d" % (0 if muted else 1),
-                             "PAD_LABEL=PAD"]),
+                             "PAD_LABEL=PAD"] + rigslot.board_env()),
                     timeout=3600, on_line=self._footer_line)
                 if self._cancelling:
                     self._started_here = False

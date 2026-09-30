@@ -64,4 +64,5 @@ sleep 1
 [ -e "$BF/qemu-arm-pad" ] && echo -1 > "$BF/qemu-arm-pad" 2>/dev/null
 echo 1 > "$BF/qemu-arm" 2>/dev/null
 
+[ -f "$HERE/../rigboard.sh" ] && { . "$HERE/../rigboard.sh"; rigboard_clear spike1 0; }
 echo "Spike 1 emulator stopped; stock qemu-arm binfmt restored."

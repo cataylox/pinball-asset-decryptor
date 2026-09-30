@@ -19,6 +19,14 @@ DP_RIG=$DP_ROOT/rig$DP_SLOT
 DP_DISPLAY=${DP_DISPLAY:-:$((120 + DP_SLOT))}
 DP_SHIM=$DP_ROOT/dpinput.so
 
+# The rig board (PAD-296): tools/rigboard.sh, shared by every emulator, posts
+# this rig's runs where the triage dashboard and the app can see them.
+if [ -f "$DP_TOOLS/../rigboard.sh" ]; then
+    . "$DP_TOOLS/../rigboard.sh"
+else
+    rigboard_post() { :; }; rigboard_clear() { :; }; rigboard_audio() { echo "${2:-0}"; }
+fi
+
 # The first ordinary account (uid 1000..59999): "pad" in PAD-Runtime.
 if [ -z "${DP_USER:-}" ]; then
     DP_USER=$(getent passwd | awk -F: '$3>=1000 && $3<60000 {print $1; exit}')
