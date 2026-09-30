@@ -1,0 +1,4 @@
+# The rig is Linux code run inside WSL - CRLF breaks shebangs and heredocs.
+*.sh text eol=lf
+*.py text eol=lf
+*.yaml text eol=lf
