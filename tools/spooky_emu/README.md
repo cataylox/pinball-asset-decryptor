@@ -25,7 +25,8 @@ images are not needed.
 
 Refused by `prepare.sh` with the reason (exit 4): Ultraman (`code_UM.pkg`),
 the other Pinotaur game - same board, not profiled yet; Rick and Morty,
-Alice Cooper and Total Nuclear Annihilation are P-ROC games (PAD-269).
+Alice Cooper and Total Nuclear Annihilation are P-ROC games: `proc/` runs the
+first two on tools/proc_emu's board (PAD-269, its README).
 
 **In the app** (PAD-266): Spooky Pinball has an **Emulate** tab
 (`webui/tabs/emulate_spooky.py`) built on the American Pinball tab, the

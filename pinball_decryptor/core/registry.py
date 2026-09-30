@@ -118,6 +118,13 @@ class Capabilities:
     # on USB serial.  Beetlejuice only so far; the tab says which games it
     # runs.  See webui/tabs/emulate_spooky.py.
     emulate_spooky: bool = False
+    # Emulate tab for Pinball Brothers (PAD-271).  Its own flag for the same
+    # reason: a seventh rig (tools/pb_emu) - Predator's two native x86-64
+    # programs (pinprog, vidprog), whose one missing piece is the FAST
+    # Neuron and its boards on USB serial.  Predator only so far (Alien,
+    # Queen and ABBA are not FAST machines); the tab says which games it
+    # runs.  See webui/tabs/emulate_pb.py.
+    emulate_pb: bool = False
     # Multi-boot tab (item 90): build ONE SD card that carries several
     # complete game images and a boot-time menu (the code selector in
     # tools/spike2_emu/codeselect) - stock code and a custom build on the

@@ -30,9 +30,23 @@ Control: a unix socket at <dir>/ctl.sock taking one command per line:
   drivers              JSON: every driver not off
   log [n]              JSON: the last n driver changes (default 50)
   leds                 JSON: "<board>:<index>" -> brightness 0..255
+  balls eject=<driver> shooter=<sw> [launch=<driver>]
+                       turn the ball model on (below); `balls` alone reports it
+  drain                a ball from the playfield back into the trough
+  plunge               the ball in the shooter lane goes onto the playfield
   quit
 <sw> is a number, a name from the machine yaml, or a yaml-style address
 (SD12, 3/4, S21 ...).  Replies are one line; errors start with "err".
+
+The ball model (off until `balls` turns it on - the title's runner does,
+from the game's own coil and switch objects, because a PDB coil's driver
+number depends on the order the game configures its driver groups): a pulse
+of the eject driver takes a ball out of the trough and makes the shooter
+switch half a second later; a pulse of the launch driver (or `plunge`)
+empties the shooter lane; `drain` puts a ball back.  The trough's balls sit
+packed from its lowest-numbered switch (trough1: the eject end), as the
+initial seeding has them.  No other physics: everything else is a switch
+you press.
 
 Initial switches: with --yaml, the trough holds PRGame.numBalls balls
 (switches named trough<N>, lowest N first) and every other switch is at
@@ -258,6 +272,8 @@ class Fpga:
         self.timer_seq = 0
         self.log = collections.deque(maxlen=2000)
         self.counts = collections.Counter()
+        self.ball_model = None                   # {"eject", "shooter", "launch"}
+        self.in_play = 0                         # balls out of the trough
 
     # ---- helpers
     def now_ms(self):
@@ -409,8 +425,9 @@ class Fpga:
         d["active"] = d["state"] == 1 or d["patterEnable"] == 1
         d["since"] = self.now_ms()
         self.drivers[num] = d
-        if d["state"] and d["outputDriveTime"] and not d["patterEnable"] \
-                and not d["timeslots"] and not d["futureEnable"]:
+        pulse = d["state"] and d["outputDriveTime"] and not d["patterEnable"] \
+            and not d["timeslots"] and not d["futureEnable"]
+        if pulse:
             heapq.heappush(self.pulse_ends, (self.clock() + d["outputDriveTime"] / 1000.0,
                                              num, self.driver_seq[num]))
             same = False                        # every pulse is news
@@ -418,6 +435,45 @@ class Fpga:
             self.counts["driver_changes"] += 1
             self.log.append({"t": d["since"], "driver": num, "action": describe_driver(d),
                              "by": source})
+        if pulse and self.ball_model:
+            if num == self.ball_model["eject"]:
+                self.eject_ball()
+            elif num == self.ball_model.get("launch"):
+                self.after(0.1, self.plunge)
+
+    # ---- the ball model
+    def trough_balls(self):
+        return sum(1 for n in self.machine.trough() if self.active(n))
+
+    def pack_trough(self, balls):
+        for i, n in enumerate(self.machine.trough()):
+            self.set_active(n, i < balls)
+
+    def eject_ball(self):
+        balls = self.trough_balls()
+        if not balls:
+            self.counts["eject_empty"] += 1
+            return
+        self.pack_trough(balls - 1)
+        self.in_play += 1
+        self.counts["ejects"] += 1
+        self.after(0.5, self.set_active, self.ball_model["shooter"], True)
+
+    def plunge(self):
+        if self.ball_model and self.active(self.ball_model["shooter"]):
+            self.set_active(self.ball_model["shooter"], False)
+            self.counts["launches"] += 1
+            return True
+        return False
+
+    def drain(self):
+        balls = self.trough_balls()
+        if balls >= len(self.machine.trough()):
+            return False
+        self.pack_trough(balls + 1)
+        self.in_play = max(0, self.in_play - 1)
+        self.counts["drains"] += 1
+        return True
 
     def write_rule(self, addr, words):
         index = (addr >> 2) & 0x3ff
@@ -504,6 +560,8 @@ class Fpga:
             "leds": len(self.leds),
             "dmd_frames": self.dmd_frames,
             "counts": dict(self.counts),
+            "balls": None if not self.ball_model else dict(
+                self.ball_model, trough=self.trough_balls(), in_play=self.in_play),
         }
 
     def switches(self):
@@ -591,6 +649,24 @@ class Daemon:
                 return json.dumps(list(f.log)[-n:])
             if cmd == "leds":
                 return json.dumps(f.leds)
+            if cmd == "balls":
+                if args:
+                    kv = dict(a.split("=", 1) for a in args if "=" in a)
+                    if "eject" not in kv or "shooter" not in kv:
+                        return "err balls needs eject=<driver> shooter=<sw>"
+                    model = {"eject": int(kv["eject"]), "shooter": f.machine.resolve(kv["shooter"])}
+                    if "launch" in kv:
+                        model["launch"] = int(kv["launch"])
+                    f.ball_model = model
+                    self.log("ball model: %s" % model)
+                return json.dumps(f.ball_model and dict(
+                    f.ball_model, trough=f.trough_balls(), in_play=f.in_play))
+            if cmd == "drain":
+                return "ok drained" if f.drain() else "err the trough is full"
+            if cmd == "plunge":
+                if not f.ball_model:
+                    return "err no ball model (balls ...)"
+                return "ok plunged" if f.plunge() else "err no ball in the shooter lane"
             if cmd == "quit":
                 self.running = False
                 return "ok bye"

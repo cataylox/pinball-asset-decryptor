@@ -26,6 +26,9 @@ class PBManufacturer(Manufacturer):
         # a loose video clip round-trips like audio does.  The tab self-empties
         # for games that ship none.
         replace_video=True,
+        # Predator (PAD-271): its two programs run in the app's Linux on an
+        # emulated FAST Neuron (tools/pb_emu).  Predator only so far.
+        emulate_pb=True,
     )
     input_spec = InputSpec(
         label="PB game files",

@@ -1692,7 +1692,11 @@ HELP_CONTENT = {
         ("First start is slower",
          "The very first Start sets the emulator up inside the app's Linux: "
          "it downloads the Python the games run on (about 1 GB, a few "
-         "minutes, once). Each new .pkg is then unpacked once (under a "
+         "minutes, once). Until that is done the tab says so, with a \"Set "
+         "up emulator…\" button that does it now; the same button installs "
+         "the app's own Linux when this PC does not have it yet (the game "
+         "would otherwise run in this PC's own WSL distro, which this "
+         "emulator is not built for). Each new .pkg is then unpacked once (under a "
          "minute) and kept, so starting it again is quick; a rebuilt mod is "
          "unpacked fresh. While a game is starting the Start button is "
          "Cancel."),
@@ -1754,6 +1758,61 @@ HELP_CONTENT = {
          "minute or two, as it does on the machine. It draws on this PC's "
          "graphics card (through WSL); on a PC where WSL has no graphics "
          "card it draws on the processor, and the picture is much slower."),
+        ("Settings and high scores",
+         "The game keeps its settings, audits and high scores between runs, "
+         "as a machine does."),
+    ],
+    "Emulate PB": [
+        ("What it does",
+         "Runs the real Pinball Brothers game on this PC, in its own window, "
+         "with its sound. Supported so far: Predator. Alien, Queen and ABBA "
+         "run on different boards and can't be emulated yet. Predator is two "
+         "native Linux programs (the rules and the screen), so nothing is "
+         "emulated but the machine's FAST controller boards: the emulator "
+         "answers the game the way those boards would, with six balls in "
+         "the trough, and gives you a way to press every switch."),
+        ("Which file to pick",
+         "The .upd update file for the version you want to play - the one "
+         "the machine installs from a USB stick. Pinball Brothers ships one "
+         "full update (pbpp_predator_game_1_0.upd) and then smaller "
+         "follow-ups that carry only what changed "
+         "(pbpp_predator_game_1_0_1.upd). Pick the follow-up to play that "
+         "version; the full update must be in the same folder, and the "
+         "emulator uses both. The files are only read."),
+        ("Setting up",
+         "The first time, the emulator downloads the libraries the game "
+         "needs for its sound and video (about 700 MB) into the app's "
+         "Linux. \"Set up emulator...\" does that ahead of time; otherwise "
+         "the first Start does it."),
+        ("Playing",
+         "When the game reaches attract mode its virtual playfield opens "
+         "beside it - the same window as the American Pinball and Stern "
+         "Emulate tabs'. Predator ships no playfield picture, so its "
+         "switches are a list; a green dot is a switch the game sees made, "
+         "and the lights are the LEDs the game has lit. Hold a switch with "
+         "the mouse; hold the right button on one to rip it (a spinner "
+         "spinning). There is no ball physics: Start serves a ball to the "
+         "shooter lane, the Launch button (Space) fires it into play, you "
+         "press the switches it would hit, and Drain sends it back to the "
+         "trough. With that window focused, the arrow keys are the "
+         "flippers, 1 is Start, 5 a coin, Space the Launch button, T tilt, "
+         "the letters beside the playfield switches press them, F plunges, "
+         "D drains, Backspace, -, = and Enter are the coin door's buttons, "
+         "and Pause or F9 freezes the game. Closed the playfield? "
+         "\"Playfield window\" on this tab brings it back."),
+        ("Volume",
+         "Volume and Mute on this tab (and the VOL bar in the playfield "
+         "window) set the game's sound live, as on every Emulate tab. The "
+         "game's own volume is in its service menu."),
+        ("Cancel and Stop",
+         "While a game is starting the Start button is Cancel; it stops the "
+         "start and throws a half-unpacked copy away. Stop ends the game and "
+         "closes its playfield window."),
+        ("Starting takes a while",
+         "The first Start on a file unpacks it (about 5 GB) inside the app's "
+         "Linux, which takes a few minutes; the build is kept, so starting "
+         "the same file again skips that. Cache... beside Browse... shows "
+         "what is kept and deletes it."),
         ("Settings and high scores",
          "The game keeps its settings, audits and high scores between runs, "
          "as a machine does."),
