@@ -51,6 +51,7 @@ PROJECT_FIELDS = (
     ("bof_emulate_fun", "bof_emulate_fun_var", "path", ""),
     ("dp_emulate_img", "dp_emulate_img_var", "path", ""),
     ("dp_emulate_zip", "dp_emulate_zip_var", "path", ""),
+    ("spooky_emulate_file", "spooky_emulate_file_var", "path", ""),
     ("compare_a", "compare_a_var", "path", ""),
     ("compare_b", "compare_b_var", "path", ""),
     ("partition_image", "partition_image_var", "path", ""),
@@ -781,7 +782,7 @@ class App:
         out = {k: settings[k] for k in (
             "emulate_card", "emulate_savestates", "emulate_overrides",
             "jjp_emulate_iso", "spike1_emulate_card",
-            "bof_emulate_fun") if k in settings}
+            "bof_emulate_fun", "spooky_emulate_file") if k in settings}
         mfr = getattr(self, "_current_mfr", None)
         section = (settings.get("manufacturers") or {}).get(
             getattr(mfr, "key", ""), {}) if mfr is not None else {}
@@ -5292,6 +5293,13 @@ class App:
         if bof_var is not None:
             try:
                 self._settings["bof_emulate_fun"] = bof_var.get().strip()
+            except Exception:
+                pass
+        # The Spooky emulator's update file, likewise (PAD-266).
+        spk_var = getattr(self.window, "spooky_emulate_file_var", None)
+        if spk_var is not None:
+            try:
+                self._settings["spooky_emulate_file"] = spk_var.get().strip()
             except Exception:
                 pass
         # Every per-project field, globally: the fallback for having no

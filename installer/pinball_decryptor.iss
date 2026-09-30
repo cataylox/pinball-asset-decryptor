@@ -128,6 +128,14 @@ Source: "{#ProjectDir}\tools\ap_emu\*"; DestDir: "{app}\tools\ap_emu"; \
     Flags: recursesubdirs ignoreversion; \
     Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.pkg,*.zip"
 
+; The Spooky rig (tools/spooky_emu, PAD-266): the Emulate Spooky tab.  Like
+; the BoF rig it carries one BUILT file, spkshim.so, so .so must never join
+; the excludes; its switch window reuses tools/bof_emu's page.  The unpacked
+; game lives under /var/tmp inside WSL, never here.
+Source: "{#ProjectDir}\tools\spooky_emu\*"; DestDir: "{app}\tools\spooky_emu"; \
+    Flags: recursesubdirs ignoreversion; \
+    Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.beetlejuice"
+
 ; --- Entry point + bundled launcher --------------------------------------
 Source: "{#ProjectDir}\Pinball Asset Decryptor.pyw"; DestDir: "{app}"; Flags: ignoreversion
 Source: "launcher.vbs"; DestDir: "{app}"; Flags: ignoreversion

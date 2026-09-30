@@ -1,0 +1,42 @@
+#!/bin/bash
+# spkpath.sh - sourced by every Spooky rig script.  Owns every path the rig
+# uses; nothing else may hard-code one.
+#
+#   SPK_SLOT     rig slot (PAD_SLOT, default 0) - several rigs can run at once
+#   SPK_ROOT     /var/tmp/pad_spooky          everything the rig writes
+#   SPK_CACHE    $SPK_ROOT/cache/<build>      unpacked updates (prepare.sh)
+#   SPK_RIG      $SPK_ROOT/rig<slot>          this run: the /game tree the
+#                                             game sees, logs, pids, FIFO
+#   SPK_USER     the account the game runs as (NEVER root: the game shells
+#                out to bash for its housekeeping)
+#   SPK_DISPLAY  hidden Xvfb display for this slot (:160 + slot; BoF uses
+#                :90+, Dutch Pinball :120+, American Pinball :140+)
+#   SPK_SHIM     the LD_PRELOAD shim that maps /dev/WARDEN onto the rig's
+#                board (build.sh)
+SPK_TOOLS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SPK_SLOT=${PAD_SLOT:-0}
+SPK_ROOT=${SPK_ROOT:-/var/tmp/pad_spooky}
+SPK_CACHE=$SPK_ROOT/cache
+SPK_RIG=$SPK_ROOT/rig$SPK_SLOT
+SPK_DISPLAY=${SPK_DISPLAY:-:$((160 + SPK_SLOT))}
+SPK_SHIM=$SPK_TOOLS/spkshim.so
+
+# The first ordinary account (uid 1000..59999): "pad" in PAD-Runtime.
+if [ -z "${SPK_USER:-}" ]; then
+    SPK_USER=$(getent passwd | awk -F: '$3>=1000 && $3<60000 {print $1; exit}')
+fi
+
+spk_game_pid() { cat "$SPK_RIG/game.pid" 2>/dev/null; }
+spk_game_alive() {
+    local p; p=$(spk_game_pid)
+    [ -n "$p" ] && kill -0 "$p" 2>/dev/null
+}
+# Every process of this slot: the game, its board and anything they started,
+# found by this rig's marker in their environment (the game's cwd is in its
+# own mount namespace, so it does not show which rig it is).
+spk_slot_pids() {
+    local p
+    for p in $(pgrep -f 'main\.x86_64|spkwarden\.py'); do
+        tr '\0' '\n' < "/proc/$p/environ" 2>/dev/null | grep -qx "SPK_MARK=$SPK_RIG" && echo "$p"
+    done
+}

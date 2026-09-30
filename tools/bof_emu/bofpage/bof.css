@@ -47,6 +47,8 @@ button { font: inherit; color: inherit; }
 
 /* the list: fixed width so the playfield only changes size with the window */
 .list { flex: 0 0 330px; overflow-y: auto; border-left: 1px solid var(--line); padding: 6px 0 12px; }
+.list.wide { flex: 1 1 auto; border-left: 0; }
+.pf[hidden] { display: none; }
 .grp { font: 600 11px var(--cond); text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); padding: 10px 12px 4px; }
 .row { display: flex; align-items: center; gap: 8px; padding: 3px 12px; cursor: pointer; }
 .row:hover { background: var(--panel); }

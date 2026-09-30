@@ -1706,6 +1706,43 @@ HELP_CONTENT = {
          "Stop ends the game and closes its switch window. So does closing "
          "any of the game's own windows with its X."),
     ],
+    "Emulate Spooky": [
+        ("What it does",
+         "Runs the real Spooky Pinball game on this PC, in its own window. "
+         "Supported so far: Beetlejuice. The other Spooky games can't be "
+         "emulated yet. Beetlejuice is a native Linux program, so nothing is "
+         "emulated but the machine's controller board: the emulator answers "
+         "the game the way that board would, with a full trough, so it boots "
+         "into attract mode."),
+        ("Which file to pick",
+         "The .beetlejuice update file - the one the machine installs from a "
+         "USB stick. That can be the official file, or one the Write tab "
+         "built from your edits: emulating it first is the quick way to check "
+         "a mod before it goes on a stick. The file is only read."),
+        ("Playing",
+         "When the game reaches attract mode its switch window opens beside "
+         "it: every switch on the machine, by name. Hold a switch with the "
+         "mouse; right-click to latch it until you right-click again. The "
+         "trough serves balls by itself when the game asks for one; Plunge "
+         "puts the ball in the shooter lane into play and Drain sends one "
+         "back to the trough. With that window focused, Z and / (or the "
+         "Shift keys) are the flippers, 1 is Start, 5 a coin, Space Launch, "
+         "A Action, P Plunge and D Drain. Closed it? \"Switches window\" on "
+         "this tab brings it back."),
+        ("Cancel",
+         "While a game is starting the Start button is Cancel. Cancel stops "
+         "the start and throws a half-unpacked copy away."),
+        ("Starting takes a while",
+         "The first Start on a file unpacks it (about 5 GB) inside the app's "
+         "Linux, which takes a few minutes. The last two builds are kept, so "
+         "starting the same file again skips that. Loading the game itself "
+         "then takes a minute or two, as it does on the machine; it draws "
+         "without the graphics card, so it is busy on the processor."),
+        ("Settings and high scores",
+         "The game keeps its settings, audits and high scores between runs, "
+         "as a machine does. Sound follows Mute; the game's own volume is in "
+         "its service menu."),
+    ],
     "Emulate": [
         ("What it does",
          "Runs the real Stern Spike 2 game binary on this PC — in its own "
