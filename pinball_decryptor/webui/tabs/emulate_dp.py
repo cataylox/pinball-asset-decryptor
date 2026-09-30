@@ -28,7 +28,8 @@ from .. import compat
 from ...core import rigslot
 from .. import emulate_dp_core as dp
 from ..emulate_jjp_common import (RigTabMixin, rig_off, load_audio_ctl,
-                                  windows_python)
+                                  windows_python,
+                                  share_distro)
 from .base import TabService, rpc
 
 INTRO = ("Run a Dutch Pinball game on this PC - The Big Lebowski or Alice's "
@@ -256,7 +257,8 @@ class EmulateDPTab(RigTabMixin, TabService):
         cmd = [py, os.path.join(dp.rig_dir(), "dppf.py"),
                "--slot", info.get("slot") or "0",
                "--title", dp.title_name(info) or "Dutch Pinball"]
-        distro = dp.rig_distro()
+        # the default distro's name when the app's runtime is not in use
+        distro = share_distro(dp.rig_distro())
         if distro:
             # the table (and the machine view it names) live in the app's
             # Linux; Windows reads them through the distro's share

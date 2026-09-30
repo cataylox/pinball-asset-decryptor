@@ -26,10 +26,12 @@ import time
 
 from pinball_decryptor.webui import rig as _rig
 from .. import compat
-from ...core import rigslot
+from ...core import rigslot, runtime
 from .. import emulate_ap_core as ap
+from .. import runtime_prompt as _runtime_ui
 from ..emulate_jjp_common import (RigTabMixin, rig_off, audio_ctl_file,
-                                  windows_python)
+                                  windows_python,
+                                  share_distro)
 from .base import TabService, rpc
 
 INTRO = ("Run an American Pinball game on this PC - Houdini, Oktoberfest, "
@@ -90,6 +92,8 @@ class EmulateAPTab(RigTabMixin, TabService):
         self._cache_open = False
         self._cache_entries = {}
         self._cache_sel = []
+        #: Set up emulator… is working
+        self._setting_up = False
         ok = ap.rig_available()
         if not ok:
             note = ("The American Pinball emulator is missing from "
@@ -107,7 +111,9 @@ class EmulateAPTab(RigTabMixin, TabService):
                  state_label="Checking…", state_hint="", tone="",
                  cells=[{"label": lbl, "key": k, "value": "—"}
                         for lbl, k in CELLS],
-                 note=note, up=False, game="", cache=None)
+                 note=note, up=False, game="", cache=None,
+                 setup_msg="", setup_btn=False, setup_label=ap.SETUP_LABEL,
+                 setup_enabled=True)
         self._start_polling()
 
     # ------------------------------------------------------------------
@@ -220,6 +226,85 @@ class EmulateAPTab(RigTabMixin, TabService):
             self._open_switches(info)
         threading.Thread(target=work, daemon=True,
                          name="pad-ap-switches").start()
+        return True
+
+    # ------------------------------------------------------------------
+    # Set up emulator…, as the Stern tab has: the app's own Linux (when it
+    # is missing or out of date) and the Python the games run on, ahead of
+    # the first Start
+    # ------------------------------------------------------------------
+    @rpc
+    def setup(self):
+        """Set up emulator…: install or update the app's own Linux (the
+        shared runtime_prompt ladder, with its consent for a replace), then
+        run the rig's setup.sh there (the one-time envs)."""
+        if self._setting_up or rig_off() or not ap.platform_ok():
+            return False
+        if self._busy or self._last_up:
+            self._log("AP: the game is running - stop it first.")
+            return False
+        rt = (self._info or {}).get("_rt")
+        steps = []
+        if rt in ("absent", "stale") and _runtime_ui.can_install():
+            steps.append("%s the Linux this app runs its emulators in "
+                         "(PAD-Runtime, a one-time download)"
+                         % ("Install" if rt == "absent" else "Update"))
+        steps.append("Download the Python the American Pinball games run on, "
+                     "inside that Linux (about 1 GB, once)")
+        if not compat.messagebox.askyesno(
+                "Set up the emulator",
+                "This will:\n\n" + "\n\n".join("  •  " + x for x in steps)
+                + "\n\nIt takes a few minutes; you can watch it in the log. "
+                  "Nothing on the Windows side is touched, and nothing is "
+                  "removed.\n\nGo ahead?"):
+            return False
+        self._setting_up = True
+        self._busy = True
+        self.set(setup_enabled=False, setup_label=ap.SETUP_BUSY)
+        self._set_go(enabled=False)
+        say = lambda m: self._log("AP: %s" % m)              # noqa: E731
+        pct = {"at": -10}
+
+        def progress(done, total):
+            if total and int(done * 100 / total) >= pct["at"] + 10:
+                pct["at"] = int(done * 100 / total)
+                say("downloading… %d%% of %d MB"
+                    % (pct["at"], total // (1024 * 1024)))
+
+        def ask():
+            return bool(self.ctx.loop.call(_runtime_ui.ask_before_replacing))
+
+        def work():
+            ok = False
+            try:
+                if rt in ("absent", "stale") and _runtime_ui.can_install():
+                    state = _runtime_ui.ensure(say=say, progress=progress,
+                                               ask=ask)
+                    runtime.invalidate()
+                    if state != "ready":
+                        say("the emulator's Linux is not set up, so the "
+                            "Python was not downloaded either.")
+                        return
+                say("downloading the Python the games run on (about 1 GB, "
+                    "a few minutes)…")
+                rc = self._run_streaming(ap.rig_cmd_root("setup.sh"),
+                                         timeout=3600)
+                ok = rc in (0, None)
+                say("the emulator is set up - Start is quick now."
+                    if ok else "setup did not finish (exit %s) - see above."
+                    % rc)
+            except Exception as exc:                       # noqa: BLE001
+                say("setup failed: %s" % exc)
+            finally:
+                self._setting_up = False
+
+                def done():
+                    self.set(setup_enabled=True, setup_label=ap.SETUP_LABEL)
+                self._post(done)
+                self._release()
+
+        threading.Thread(target=work, daemon=True,
+                         name="pad-ap-setup").start()
         return True
 
     # ------------------------------------------------------------------
@@ -378,7 +463,8 @@ class EmulateAPTab(RigTabMixin, TabService):
             cmd += ["--title", ap.title_name(info)]
         # the status bar's VOL / Mute: the same control file as this tab's
         cmd += ["--audio-ctl", audio_ctl_file()]
-        distro = ap.rig_distro()
+        # the default distro's name when the app's runtime is not in use
+        distro = share_distro(ap.rig_distro())
         if distro:
             # the table (and the playfield picture it names) live in the
             # app's Linux; Windows reads them through the distro's share
@@ -591,7 +677,14 @@ class EmulateAPTab(RigTabMixin, TabService):
     # polling
     # ------------------------------------------------------------------
     def _read_status(self):
-        return self._run_status(ap.rig_cmd("status.sh"))
+        info = self._run_status(ap.rig_cmd("status.sh"))
+        # the app's own Linux, for the setup notice: on this worker, since a
+        # cold answer costs wsl.exe calls (cached after that)
+        try:
+            info["_rt"] = runtime.status()[0]
+        except Exception:                                  # noqa: BLE001
+            pass
+        return info
 
     def _footer_from_info(self):
         if self._last_up:
@@ -625,7 +718,13 @@ class EmulateAPTab(RigTabMixin, TabService):
             "uptime": ("%d:%02d" % (secs // 60, secs % 60)) if up and secs
             else "—",
         }
+        msg, btn = ap.setup_notice(info, info.get("_rt"),
+                                   _runtime_ui.can_install())
+        if msg:
+            # the notice says it; the headline need not say it twice
+            hint = "" if not up else hint
         kw = dict(state_label=label, state_hint=hint, tone=tone,
+                  setup_msg=msg, setup_btn=btn,
                   cells=[{"label": lbl, "key": k, "value": values.get(k, "—")}
                          for lbl, k in CELLS],
                   note="" if ap.rig_available() else self.get("note"),

@@ -154,6 +154,40 @@ def state_text(info):
     return "Stopped", ""
 
 
+#: The Set up emulator… button's label, and while it works.
+SETUP_LABEL = "Set up emulator…"
+SETUP_BUSY = "Setting up…"
+
+
+def setup_notice(info, rt_state, can_install=True):
+    """``(text, button)`` for the tab's setup notice: what is not set up as
+    the emulator expects, and whether "Set up emulator…" can fix it.  ``("",
+    False)`` when nothing is wrong (or nothing is known yet).
+
+    UNLIKE THE SPIKE 2 TAB, a missing runtime is flagged, not only a stale
+    one (webui/runtime_prompt.UNPROMPTED says why Spike 2 stays quiet: its
+    rig ran in people's own distros for years).  This rig was only ever
+    proven in the app's own Linux, and a PC without it ran the game in the
+    default distro, where the switch window never opened (PAD-295)."""
+    if rt_state == "foreign":
+        from . import runtime_prompt
+        return runtime_prompt.notice("foreign", ""), False
+    if rt_state in ("absent", "stale") and can_install:
+        what = ("is not on this PC yet" if rt_state == "absent"
+                else "is from an older version of this app")
+        return ("Not set up: the Linux this app installs for its emulators "
+                "%s, so the game would run in this PC's own WSL distro "
+                "instead, which this emulator is not built for. Press "
+                "“Set up emulator…” to install it and the Python "
+                "the games run on (one-time downloads, about 1.5 GB)." % what,
+                True)
+    if (info or {}).get("wsl") == "1" and info.get("ready") == "0":
+        return ("Not set up yet: the emulator still needs the Python the games "
+                "run on (about 1 GB, once). Press “Set up emulator…” "
+                "now, or the first Start does it.", True)
+    return "", False
+
+
 def parse_cache(text):
     """``cache.sh --list`` -> ``(entries, disk)``: entries are dicts with
     name, kind ("build" / "envs"), kb, used (epoch), src; disk is

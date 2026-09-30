@@ -35,7 +35,8 @@ from .. import compat
 from ...core import rigslot
 from .. import emulate_spooky_core as spk
 from ..emulate_jjp_common import (RigTabMixin, rig_off, audio_ctl_file,
-                                  windows_python)
+                                  windows_python,
+                                  share_distro)
 from .base import TabService, rpc
 
 INTRO = ("Run a Spooky Pinball game on this PC. Supported so far: %s - "
@@ -372,7 +373,8 @@ class EmulateSpookyTab(RigTabMixin, TabService):
                "--slot", info.get("slot") or "0",
                # the status bar's VOL / Mute: the same control file as this tab's
                "--audio-ctl", audio_ctl_file()]
-        distro = spk.rig_distro()
+        # the default distro's name when the app's runtime is not in use
+        distro = share_distro(spk.rig_distro())
         if distro:
             # the table lives in the app's Linux; Windows reads it through
             # the distro's share

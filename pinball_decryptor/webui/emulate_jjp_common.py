@@ -54,6 +54,24 @@ def windows_python(console=False):
     return _stern_emulate.windows_python(console=console)
 
 
+def share_distro(distro):
+    """The distro whose ``\\\\wsl.localhost`` share holds a rig's files:
+    *distro* (the app's own Linux), or with none - a PC where the app's
+    runtime is not in use, so the rig ran in the machine's DEFAULT distro -
+    that distro's name.  None off Windows (the path is local there).
+
+    The switch windows used to get the bare Linux path then, which Windows
+    cannot open: the AP playfield window died at once with
+    FileNotFoundError on every start (PAD-295)."""
+    if distro:
+        return distro
+    try:
+        from ..core import wsl_disk
+        return wsl_disk.default_distro_name()
+    except Exception:                                  # noqa: BLE001
+        return None
+
+
 class RigTabMixin:
     """The shared half of the two services.  The host class is a
     :class:`~.tabs.base.TabService` and sets ``LOG_PREFIX``, ``PHASES``,
