@@ -148,13 +148,36 @@ if [ "$ENGINE" = godot ]; then
     # Godot 4.1 will not start without a libXinerama (xinerama_stub.c).
     ldconfig -p | grep -q 'libXinerama\.so\.1 ' || LIBS="LD_LIBRARY_PATH=$SPK_TOOLS/lib"
     # The project asks for Vulkan (Forward+); the compatibility renderer
-    # runs on llvmpipe's OpenGL.  Its log is stdout.
+    # runs on Mesa's OpenGL (the GPU through d3d12, below, or llvmpipe).
+    # Its log is stdout.
     RUN="./main.x86_64 --rendering-method gl_compatibility --rendering-driver opengl3 \\
     --windowed --resolution ${W}x${H} --position 0,0 --max-fps 60 \\
     --audio-driver $GODOT_AUDIO >> $SPK_RIG/player.log 2>&1"
 else
     RUN="./main.x86_64 -logFile $SPK_RIG/player.log -screen-fullscreen 0 \\
     -screen-width $W -screen-height $H -force-glcore"
+fi
+
+# The renderer.  Mesa's llvmpipe (software, on the CPU) was the default and
+# drew the game at a crawl on the desktop.  WSL gives Linux the Windows GPU
+# (/dev/dxg + /usr/lib/wsl/lib/libd3d12.so) and Mesa's d3d12 driver renders
+# OpenGL on it - on WSLg's desktop and on a hidden Xvfb alike.  SPK_GL=
+# llvmpipe forces the CPU (a machine without a usable GPU does that anyway:
+# Mesa falls back).  The frame rate: Mesa's HUD samples it, draws nothing
+# (GALLIUM_HUD_VISIBLE=false) and appends it to $SPK_RIG/hud/fps; status.sh
+# reports the latest.
+GL=${SPK_GL:-auto}
+if [ "$GL" = auto ]; then
+    GL=llvmpipe
+    [ -e /dev/dxg ] && [ -e /usr/lib/wsl/lib/libd3d12.so ] && GL=d3d12
+fi
+echo "$GL" > "$SPK_RIG/gl"
+mkdir -p "$SPK_RIG/hud"; chown "$SPK_USER": "$SPK_RIG/hud"
+GL_ENV="GALLIUM_DRIVER=$GL GALLIUM_HUD=fps GALLIUM_HUD_VISIBLE=false GALLIUM_HUD_PERIOD=1 GALLIUM_HUD_DUMP_DIR=$SPK_RIG/hud"
+# libd3d12 lives in /usr/lib/wsl/lib; it joins $LIBS (a Godot title's
+# libXinerama stub folder may already be there) - one LD_LIBRARY_PATH.
+if [ "$GL" = d3d12 ]; then
+    if [ -n "$LIBS" ]; then LIBS="$LIBS:/usr/lib/wsl/lib"; else LIBS="LD_LIBRARY_PATH=/usr/lib/wsl/lib"; fi
 fi
 
 cat > "$SPK_RIG/ns.sh" <<EOF
@@ -169,7 +192,7 @@ chown "$SPK_USER": /game /game/code /game/vosk
 cd /game/code/uptest || exit 1
 exec runuser -u $SPK_USER -- env -i PATH=$SPK_RIG/bin:/usr/local/bin:/usr/bin:/bin \\
     HOME=$NV/home USER=$SPK_USER LANG=C.UTF-8 DISPLAY=$DISP $AUDIO_ENV \\
-    SPK_MARK=$SPK_RIG LP_NUM_THREADS=${SPK_LP_THREADS:-4} \\
+    SPK_MARK=$SPK_RIG LP_NUM_THREADS=${SPK_LP_THREADS:-4} $GL_ENV \\
     SPK_WARDEN=$TTY LD_PRELOAD=$SPK_SHIM $LIBS \\
     $RUN
 EOF

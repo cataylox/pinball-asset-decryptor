@@ -52,9 +52,10 @@ Every one of these is a native x86-64 Linux program (Unity with the Mono
 backend, or Godot with its pack inside `main.x86_64`) with no licence,
 hardware-ID or activation check, so the update alone runs on PAD-Runtime's
 Ubuntu 24.04. The cabinets run sway or i3; the players are just as happy on
-X, so the rig uses Xvfb and Mesa's llvmpipe (Unity: OpenGL core,
-`-force-glcore`; Godot: the compatibility renderer, because the project
-asks for Vulkan).
+X, so the rig uses WSLg's desktop (or a hidden Xvfb) and OpenGL (Unity:
+OpenGL core, `-force-glcore`; Godot: the compatibility renderer, because the
+project asks for Vulkan), drawn on the Windows GPU by Mesa's d3d12 driver
+where WSL offers one, else by llvmpipe on the CPU (below).
 
 What each game needs around it is in `spktitles.py`, one profile per title
 (switch names, trough, coils, layout, how attract shows), and
@@ -228,7 +229,8 @@ bash $T/bootcheck.sh scooby_v2025.12.01.09        # VERDICT <build> pass|fail ..
 ```
 
 `prepare.sh` and `run_game.sh` are the two halves of `watch.sh`; a build is
-named `<title>_<version.txt>` (`bj_`, `scooby_`, `tcm_`, `ed_`, `looney_`).
+named `<title>_<version.txt>` (`bj_`, `scooby_`, `tcm_`, `ed_`, `looney_`,
+`h78_v118` - Halloween's version is its `uptest/version_118.txt` name).
 The game's log is `$SPK_RIG/player.log` (Unity's log, or Godot's stdout),
 the board's `$SPK_RIG/warden.log`, the no-op'd shell calls
 `$SPK_RIG/shell.log`, the volume keeper's `$SPK_RIG/spkvol.log`.
@@ -243,9 +245,18 @@ the board's `$SPK_RIG/warden.log`, the no-op'd shell calls
   otherwise the rig lets the ball go after 1.5 s as a manual shooter would.
   Its subway, scoops, crossover and lock mechanisms are switches you press
   yourself.
-* **It is heavy.** ~3 GB of memory and, on llvmpipe, every core it is
-  given: `LP_NUM_THREADS` is capped at 4 (`SPK_LP_THREADS`). Frame rates
-  are low, which is why presses should last half a second.
+* **It draws on the GPU.** Mesa's d3d12 driver renders the games' OpenGL
+  on the Windows GPU (WSL's /dev/dxg + libd3d12), on the desktop and on a
+  hidden Xvfb alike (`run_game.sh` picks it whenever WSL offers it). Beetlejuice's
+  attract measured 52-65 fps hidden at 1920x1080 and 66-80 fps in the
+  1280x720 desktop window, ~170% CPU (2026-09-30, an AMD Radeon iGPU);
+  Mesa's llvmpipe (the old default, and the fallback where WSL has no GPU;
+  `SPK_GL=llvmpipe` forces it) managed 5.5-7.8 fps on ~500% CPU. The other
+  five titles were not measured on d3d12 (Halloween was proven on
+  llvmpipe, before the GPU renderer landed). `status.sh` reports `gl=` and
+  `fps=` (Mesa's HUD, sampled once a second into `$SPK_RIG/hud/fps`, drawn
+  nowhere). ~3 GB of memory; on llvmpipe `LP_NUM_THREADS` is capped at 4
+  (`SPK_LP_THREADS`).
 * No physics beyond the trough, the shooter lanes and the mechanisms above:
   scoops, VUKs, locks and ramps are switches you press yourself (the game
   fires their coils into nothing). Evil Dead's lower-playfield launcher and
@@ -254,7 +265,8 @@ the board's `$SPK_RIG/warden.log`, the no-op'd shell calls
 * One build of each title was run. Looney Tunes' 2025.03.01 stable build and
   Beetlejuice's v2026.06.11.13 were not.
 * Sound (`PAD_AUDIO=1`) was run for Beetlejuice only, and the visible
-  (desktop) window for none of them: every run here was hidden.
+  (desktop) window for Beetlejuice only (muted, to measure its frame rate).
+  Rig runs stay muted.
 * No lights in the virtual playfield: the board decodes every LED write
   (`leds`), but the Spooky games ship no map from LED numbers to insert
   positions, so the window's light grid stays empty.
