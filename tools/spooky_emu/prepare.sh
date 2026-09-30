@@ -86,5 +86,7 @@ v=$(tr -d '\r\n ' < "$TMP/version.txt" 2>/dev/null)
 DEST=$SPK_CACHE/bj_${v:-$ver}
 rm -rf "$DEST"
 mv "$TMP" "$DEST"
+# Where it came from, for the Cache window (cache.sh).
+echo "$UPD" > "$DEST/src"
 echo "progress 100"
 echo "build=$(basename "$DEST")"

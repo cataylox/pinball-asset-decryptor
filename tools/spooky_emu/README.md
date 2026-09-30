@@ -12,12 +12,23 @@ shooter lane, auto-launched, pop bumpers/spinner/ramp/sling scoring
 (500,000), a drain to the outlane and the next ball served.
 
 **In the app** (2026-09-30): Spooky Pinball has an **Emulate** tab
-(`webui/tabs/emulate_spooky.py`) that leads with the games it runs -
-Beetlejuice only - takes the `.beetlejuice` update (Spooky's, or one Write
-built), and drives `watch.sh` / `status.sh` / `stop.sh` / `cancel.sh`. When
-the game reaches attract, the switch window (`spkpf.py`) opens: tools/bof_emu's
-switch page pointed at this rig's board, every switch by name. A file that is
-not a Beetlejuice update is refused with that answer (`prepare.sh` exit 4).
+(`webui/tabs/emulate_spooky.py`) built on the American Pinball tab, the
+template every maker's Emulate tab follows: the `.beetlejuice` update
+(Spooky's, or one Write built) with **Cache...**, Start / Cancel / Stop,
+**Switches window**, the live **Volume** / Mute, AP's status grid - plus a
+**Supported games** card (Beetlejuice only; a file that is not a Beetlejuice
+update is refused with that answer, `prepare.sh` exit 4). When the game
+reaches attract, the **virtual playfield** opens: AP's window
+(`tools/ap_emu/appf.py`, the Stern page) pointed at this rig by `spkpf.py`,
+fed `switches.json` (`spkswitches.py`, apswitches.py's format) - the same
+keys, service buttons, BALLS (Plunge, Drain, Reset balls), Pause and VOL bar.
+
+**The board keeps up** (PAD-266, second pass): the game gives each serial
+write 20 ms and after ten late ones resets its board link and ignores
+switches. The board scans with `bytes.find`, reads 64 KB at a time, replies
+from a writer thread, runs at real-time priority, and `spkshim.so` makes a
+write that would get EAGAIN wait for room instead of failing. Proven: boot,
+a played ball, a ball search and a drain with no timeout and no reset.
 
 ## Why this is small
 
@@ -83,18 +94,25 @@ default found" per setting - harmless).
 ## Use
 
 The app runs `watch.sh <update>` as root (`PAD_VISIBLE=1` draws on the
-desktop at 1280x720, `PAD_AUDIO=1` plays sound), polls `status.sh` (key=value)
-and stops with `stop.sh`; the switch window talks to the board through
-`ctl.sh --stream` (requests `sw <n> <0|1>`, `tap <n> [ms]`, `plunge`, `drain`,
-`state` - the BoF boards' protocol). By hand, all in PAD-Runtime as root;
-`PAD_SLOT=N` picks a slot (default 0):
+desktop at 1280x720, `PAD_AUDIO=1` plays sound, `PAD_AUDIO_CTL=<the app's
+audio_ctl.json>` makes the level follow its Volume / Mute live through
+`spkvol.py` - AP's apvol.py, on the game's own libpulse since PAD-Runtime has
+no pactl), polls `status.sh` (key=value, AP's keys) and stops with `stop.sh`;
+`cache.sh --list | --drop` is the Cache window. The virtual playfield talks
+to the board through `ctl.sh --stream`, one JSON reply per request - the
+requests AP's game answers: `state`, `sw <n> <0|1>`, `tap <n> [ms]`,
+`rip <n> <0|1>`, `plunge` (presses Launch: the game fires the ball in),
+`drain`, `reset`, `pause <0|1>` (SIGSTOP/SIGCONT the game). A press is held
+at least 120 ms: the game believes a Start / menu edge only after asking the
+board again. By hand, all in PAD-Runtime as root; `PAD_SLOT=N` picks a slot
+(default 0) - take a riglock slot first:
 
 ```
 T=/mnt/c/.../tools/spooky_emu
 bash $T/build.sh                                  # once, if spkshim.so is missing
 PAD_VISIBLE=0 bash $T/watch.sh /mnt/d/Pinball/images/Spooky/v2026.09.15.11.beetlejuice
 python3 $T/sw.py coin; python3 $T/sw.py start     # sw.py --list, sw.py --state
-python3 $T/sw.py plunge                           # or: sw.py launch (auto-launch)
+python3 $T/sw.py plunge
 python3 $T/sw.py "top pop"; python3 $T/sw.py drain
 bash $T/shot.sh /mnt/c/tmp/bj.png
 bash $T/status.sh
@@ -104,7 +122,7 @@ bash $T/bootcheck.sh bj_v2026.09.15.11            # VERDICT <build> pass|fail ..
 
 `prepare.sh` and `run_game.sh` are the two halves of `watch.sh`. The game's
 Unity log is `$SPK_RIG/player.log`, its own log `$SPK_RIG/logs/*.log`, the
-board's `$SPK_RIG/warden.log`.
+board's `$SPK_RIG/warden.log`, the volume keeper's `$SPK_RIG/spkvol.log`.
 
 ## What is open
 
@@ -118,5 +136,7 @@ board's `$SPK_RIG/warden.log`.
 * Only the one title and build were run. Spooky's other Unity titles
   (Halloween's UnityPlayer is the same 2022.3) ship as encrypted `.pkg`
   updates and are not covered.
-* Sound (`PAD_AUDIO=1`) was run - the game starts and plays on - but not
-  listened to; the visible (desktop) window has not been run on this machine.
+* No lights: the playfield window's light grid waits for LED writes the
+  board does not decode (PAD-267, the real Warden protocol, adds them).
+* The game's own window keeps its built-in keys (Enter, Space, arrows); the
+  playfield window's keys are AP's and work there only.

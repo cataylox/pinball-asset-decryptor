@@ -1708,40 +1708,54 @@ HELP_CONTENT = {
     ],
     "Emulate Spooky": [
         ("What it does",
-         "Runs the real Spooky Pinball game on this PC, in its own window. "
-         "Supported so far: Beetlejuice. The other Spooky games can't be "
-         "emulated yet. Beetlejuice is a native Linux program, so nothing is "
-         "emulated but the machine's controller board: the emulator answers "
-         "the game the way that board would, with a full trough, so it boots "
-         "into attract mode."),
+         "Runs the real Spooky Pinball game on this PC, in its own window, "
+         "with its sound. Supported so far: Beetlejuice. The other Spooky "
+         "games can't be emulated yet. Beetlejuice is a native Linux "
+         "program, so nothing is emulated but the machine's controller "
+         "board: the emulator answers the game the way that board would, "
+         "with a full trough, and gives you a way to press every switch."),
         ("Which file to pick",
          "The .beetlejuice update file - the one the machine installs from a "
          "USB stick. That can be the official file, or one the Write tab "
          "built from your edits: emulating it first is the quick way to check "
          "a mod before it goes on a stick. The file is only read."),
         ("Playing",
-         "When the game reaches attract mode its switch window opens beside "
-         "it: every switch on the machine, by name. Hold a switch with the "
-         "mouse; right-click to latch it until you right-click again. The "
-         "trough serves balls by itself when the game asks for one; Plunge "
-         "puts the ball in the shooter lane into play and Drain sends one "
-         "back to the trough. With that window focused, Z and / (or the "
-         "Shift keys) are the flippers, 1 is Start, 5 a coin, Space Launch, "
-         "A Action, P Plunge and D Drain. Closed it? \"Switches window\" on "
-         "this tab brings it back."),
-        ("Cancel",
-         "While a game is starting the Start button is Cancel. Cancel stops "
-         "the start and throws a half-unpacked copy away."),
+         "When the game reaches attract mode its virtual playfield opens "
+         "beside it - the same window as the American Pinball and Stern "
+         "Emulate tabs'. Beetlejuice ships no playfield picture, so its "
+         "switches are a list; a green dot is a switch the game sees made. "
+         "Hold a switch with the mouse; hold the right button on one to rip "
+         "it (a spinner spinning). There is no ball physics: Start serves a "
+         "ball to the shooter lane, Plunge presses the Launch button and the "
+         "game fires the ball into play (Beetlejuice has no manual plunger), "
+         "you press the switches it would hit, and Drain sends it back to "
+         "the trough, ending the ball - unless the game's ball save is still "
+         "running, when it serves the ball again, as the machine would. With "
+         "that window focused, the arrow keys are the flippers, 1 is Start, "
+         "5 a coin, Space the Launch button, Down the Action button, T tilt, "
+         "the letters beside the playfield switches press them, F plunges, D "
+         "drains, Backspace, -, = and Enter are the service buttons, and "
+         "Pause or F9 freezes the game. The game's own window has its own "
+         "keys: Enter starts, Space launches, the arrows flip. Closed the "
+         "playfield? \"Switches window\" on this tab brings it back."),
+        ("Volume",
+         "Volume and Mute on this tab (and the VOL bar in the playfield "
+         "window) set the game's sound live, as on every Emulate tab. The "
+         "game's own volume is in its service menu."),
+        ("Cancel and Stop",
+         "While a game is starting the Start button is Cancel; it stops the "
+         "start and throws a half-unpacked copy away. Stop ends the game and "
+         "closes its playfield window; so does closing the game's window."),
         ("Starting takes a while",
          "The first Start on a file unpacks it (about 5 GB) inside the app's "
-         "Linux, which takes a few minutes. The last two builds are kept, so "
-         "starting the same file again skips that. Loading the game itself "
-         "then takes a minute or two, as it does on the machine; it draws "
-         "without the graphics card, so it is busy on the processor."),
+         "Linux, which takes a few minutes; the build is kept, so starting "
+         "the same file again skips that. Cache... beside Browse... shows "
+         "what is kept and deletes it. Loading the game itself then takes a "
+         "minute or two, as it does on the machine; it draws without the "
+         "graphics card, so it is busy on the processor."),
         ("Settings and high scores",
          "The game keeps its settings, audits and high scores between runs, "
-         "as a machine does. Sound follows Mute; the game's own volume is in "
-         "its service menu."),
+         "as a machine does."),
     ],
     "Emulate": [
         ("What it does",

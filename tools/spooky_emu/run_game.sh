@@ -10,7 +10,9 @@
 #                display (the default: windows popping up are disruptive;
 #                shot.sh shows a hidden run)
 #   --audio      play sound through WSLg's PulseAudio (default: no audio
-#                device - Unity runs silent)
+#                device - Unity runs silent).  PAD_AUDIO_CTL (the app's
+#                audio_ctl.json, a WSL path) makes its level follow the
+#                app's Volume / Mute, live (spkvol.py)
 #
 # The game sees the machine's /game in a private mount namespace:
 #   /game/code/uptest   the build, hard-linked into $SPK_RIG/game (the game
@@ -56,6 +58,7 @@ mkdir -p "$NV"
 [ -f "$NV/beetlejuice_factory_defaults.json" ] || echo '{}' > "$NV/beetlejuice_factory_defaults.json"
 chown -R "$SPK_USER": "$NV"
 echo "$BUILD" > "$SPK_RIG/build"
+touch "$(realpath "$BUILD")/used"            # the Cache window's "Last played"
 echo "$VISIBLE" > "$SPK_RIG/visible"
 chown -R "$SPK_USER": "$SPK_RIG"
 
@@ -73,6 +76,8 @@ setsid -f env SPK_MARK="$SPK_RIG" $PRIO runuser -u "$SPK_USER" -- \
 for _ in $(seq 1 50); do [ -s "$SPK_RIG/warden.tty" ] && break; sleep 0.1; done
 TTY=$(cat "$SPK_RIG/warden.tty" 2>/dev/null)
 [ -n "$TTY" ] || { echo "run_game.sh: the board did not come up:" >&2; cat "$SPK_RIG/warden.out" >&2; exit 1; }
+# The virtual playfield's table (the AP window's format; spkswitches.py).
+python3 "$SPK_TOOLS/spkswitches.py" "$SPK_RIG" || echo "run_game.sh: no switches.json - the virtual playfield will not open" >&2
 
 # The cabinet's screen is 1920x1080; on the desktop a window that size
 # would cover it, so a visible run draws at 1280x720 (Unity scales).
@@ -88,6 +93,7 @@ else
     pgrep -xf "Xvfb $DISP .*" | head -1 > "$SPK_RIG/xvfb.pid"
 fi
 echo "$DISP" > "$SPK_RIG/display"
+echo "$SIZE" | awk '{print $2 "x" $4}' > "$SPK_RIG/window"
 
 if [ $AUDIO = 1 ] && [ -S /mnt/wslg/PulseServer ]; then
     AUDIO_ENV="PULSE_SERVER=unix:/mnt/wslg/PulseServer"
@@ -115,6 +121,13 @@ EOF
 # wsl.exe that started this (tools/bof_emu learned it).
 setsid -f unshare -m -u --propagation private bash "$SPK_RIG/ns.sh" \
     < /dev/null > "$SPK_RIG/game.out" 2>&1
+# The app's Volume / Mute, live, as on the AP rig: spkvol.py holds this
+# slot's stream at the level in the control file every Emulate tab writes.
+# It waits for the game, and ends with it.
+if [ $AUDIO = 1 ] && [ -n "${PAD_AUDIO_CTL:-}" ] && [ -S /mnt/wslg/PulseServer ]; then
+    setsid -f python3 "$SPK_TOOLS/spkvol.py" --ctl "$PAD_AUDIO_CTL" --rig "$SPK_RIG" \
+        < /dev/null >> "$SPK_RIG/spkvol.log" 2>&1
+fi
 for _ in $(seq 1 50); do
     p=$(spk_slot_pids | while read -r q; do grep -q main.x86_64 /proc/$q/cmdline 2>/dev/null && echo $q; done | head -1)
     [ -n "$p" ] && { echo "$p" > "$SPK_RIG/game.pid"; break; }

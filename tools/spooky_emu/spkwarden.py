@@ -34,14 +34,19 @@ coil (54) clears the shooter lane.  `drain` puts a ball back in the
 trough.
 
 Switch input comes over the control socket <rig>/ctl.sock, one line per
-request, one line per reply - the same protocol as tools/bof_emu's boards,
-so the app's switch window (spkpf.py, on tools/bof_emu/bofpf.py) drives it:
-    sw <n> <0|1>        hold / release a switch          -> ok
-    tap <n> [ms]        press and release (150 ms)       -> ok
-    plunge              the Launch button: the game fires the ball into play -> ok
-    drain               one ball in play back to the trough          -> ok
-    state               {"switches": {n: 0|1}, "balls": {...},
-                         "connected": bool, "leds_lit": 0}
+request, one JSON line per reply - the requests tools/ap_emu's game answers,
+so the virtual playfield (spkpf.py, on tools/ap_emu/appf.py and the Stern
+window's page) drives this board exactly as it drives an AP game:
+    state               {"up": true, "switches": {n: 1 for each one made},
+                         "balls": {"trough", "shooter", "in_play"},
+                         "lights": {}, "paused": bool, "connected": bool}
+    sw <n> <0|1>        hold / release a switch
+    tap <n> [ms]        press and release (150 ms)
+    rip <n> <0|1>       flip a switch while held (a spinner spinning)
+    plunge              the Launch button: the game fires the ball into play
+    drain               a ball in play (or in the shooter lane) to the trough
+    reset               every ball back in the trough
+    pause <0|1>         freeze / thaw the game (SIGSTOP / SIGCONT)
 ctl.sh / spkctl.py and sw.py are its clients.
 Everything the board does is logged to <rig>/warden.log.
 """
@@ -49,6 +54,7 @@ import json
 import os
 import queue
 import select
+import signal
 import socket
 import sys
 import threading
@@ -58,6 +64,11 @@ TROUGH = [7, 6, 5, 4, 3, 1, 0]       # TROUGH 1..7 (Switches.TroughSwitches)
 BALLS = int(os.environ.get("SPK_BALLS", "6"))
 SHOOTER = 8
 LAUNCH_BUTTON = 85
+#: The shortest press the board passes on (see set_switch).
+MIN_PRESS_S = 0.12
+# Linux's numbers (the tests import this on Windows, which has neither)
+SIGSTOP = getattr(signal, "SIGSTOP", 19)
+SIGCONT = getattr(signal, "SIGCONT", 18)
 EJECT_COIL = 51
 LAUNCH_COIL = 54
 # Opcodes whose first argument is a coil number (fire / hold a coil).
@@ -83,6 +94,9 @@ class Board:
             self.slave_path = os.ttyname(slave)
             self.slave = slave      # keep one handle open: no EIO on reopen
         self.connected = False
+        self.paused = False
+        self.ripping = set()
+        self.on_at = {}
         self.outq = queue.Queue()
         self._set_trough()
 
@@ -109,12 +123,28 @@ class Board:
             except OSError as e:
                 self.say("write failed", e)
 
-    def set_switch(self, sw, on):
+    def set_switch(self, sw, on, now=False):
+        """A press is held at least MIN_PRESS_S unless *now*: the game
+        believes a Start / menu / tilt edge only after asking the board for
+        that switch again, so a click or key tap shorter than that (a
+        browser's key press is 0 ms) would be dropped - a real button is
+        closed for tens of milliseconds at the least."""
+        wait = 0.0
         with self.lock:
             on = 1 if on else 0
             if self.state.get(sw, 0) == on:
                 return
+            if not on and not now:
+                wait = MIN_PRESS_S - (time.monotonic() - self.on_at.get(sw, 0.0))
+        if wait > 0:
+            self.later(wait, self.set_switch, sw, 0, True)
+            return
+        with self.lock:
+            if self.state.get(sw, 0) == on:
+                return
             self.state[sw] = on
+            if on:
+                self.on_at[sw] = time.monotonic()
             self.send([0x3C, on, sw])
         self.say("switch", sw, "on" if on else "off")
 
@@ -193,35 +223,78 @@ class Board:
                 "in_play": max(0, BALLS - self.balls - shooter)}
 
     def command(self, line):
-        """One control request -> its one-line reply."""
+        """One control request -> its one-line JSON reply."""
         p = line.split()
         if not p:
-            return "err empty"
+            return json.dumps({"err": "empty"})
         if p[0] == "state":
             with self.lock:
-                sw = {str(k): v for k, v in sorted(self.state.items())}
-            return json.dumps({"switches": sw, "balls": self.balls_state(),
-                               "connected": self.connected, "leds_lit": 0})
+                sw = {str(k): 1 for k, v in sorted(self.state.items()) if v}
+            return json.dumps({"up": True, "switches": sw,
+                               "balls": self.balls_state(), "lights": {},
+                               "paused": self.paused, "connected": self.connected})
         if p[0] == "drain":
-            if self.balls_state()["in_play"] <= 0:
-                return "err no ball in play"
+            b = self.balls_state()
+            if b["in_play"] <= 0 and not b["shooter"]:
+                return json.dumps({"err": "no ball in play"})
+            if b["in_play"] <= 0:
+                self.set_switch(SHOOTER, 0)
             self.drain()
-            return "ok"
-        if p[0] == "plunge":
+        elif p[0] == "plunge":
             if not self.state.get(SHOOTER):
-                return "err no ball in the shooter lane"
+                return json.dumps({"err": "no ball in the shooter lane"})
             self.plunge()
-            return "ok"
-        if p[0] in ("sw", "tap") and len(p) >= 2 and p[1].isdigit():
+        elif p[0] == "reset":
+            self.set_switch(SHOOTER, 0)
+            self.balls = BALLS
+            self.trough_changed()
+        elif p[0] == "pause":
+            self.set_pause(len(p) > 1 and p[1] == "1")
+            return json.dumps({"paused": self.paused})
+        elif p[0] in ("sw", "tap", "rip") and len(p) >= 2 and p[1].isdigit():
             n = int(p[1])
+            on = len(p) < 3 or p[2] not in ("0", "off")
             if p[0] == "sw":
-                self.set_switch(n, len(p) < 3 or p[2] not in ("0", "off"))
+                self.set_switch(n, on)
+            elif p[0] == "rip":
+                self.rip(n, on)
             else:
                 ms = int(p[2]) if len(p) > 2 and p[2].isdigit() else 150
                 self.set_switch(n, 1)
                 self.later(ms / 1000.0, self.set_switch, n, 0)
-            return "ok"
-        return "err unknown request: " + line.strip()
+        else:
+            return json.dumps({"err": "unknown request: " + line.strip()})
+        return json.dumps({"ok": True})
+
+    def rip(self, n, on):
+        """Right-held on the playfield: the switch flips every 60 ms until
+        released, as a spinning spinner does."""
+        if not on:
+            self.ripping.discard(n)
+            return
+        if n in self.ripping:
+            return
+        self.ripping.add(n)
+
+        def spin():
+            state = 0
+            while n in self.ripping:
+                state ^= 1
+                self.set_switch(n, state, now=True)
+                time.sleep(0.06)
+            self.set_switch(n, 0, now=True)
+        threading.Thread(target=spin, daemon=True).start()
+
+    def set_pause(self, on):
+        """Freeze the game itself: its pid is the rig's game.pid."""
+        try:
+            with open(os.path.join(self.rig, "game.pid")) as f:
+                pid = int(f.read().strip())
+            os.kill(pid, SIGSTOP if on else SIGCONT)
+            self.paused = on
+            self.say("paused" if on else "resumed")
+        except (OSError, ValueError) as e:
+            self.say("pause failed", e)
 
     def client(self, conn):
         buf = b""

@@ -66,30 +66,57 @@ def test_a_message_split_across_reads_is_kept(board):
     assert board.sent == [bytes([0x3C, 152, 87, 0])]
 
 
+def _ask(board, line):
+    return json.loads(board.command(line))
+
+
 def test_control_requests(board):
-    assert board.command("sw 87 1") == "ok"
+    """The requests tools/ap_emu's game answers (appf.py's), in JSON."""
+    assert _ask(board, "sw 87 1") == {"ok": True}
     assert board.sent == [bytes([0x3C, 1, 87])]
     board.command("sw 87 1")                                # no change, no report
     board.command("sw 87 0")
     assert board.sent[-1] == bytes([0x3C, 0, 87])
-    assert board.command("tap 25 50") == "ok"
+    assert _ask(board, "tap 25 50") == {"ok": True}
     assert board.sent[-2:] == [bytes([0x3C, 1, 25]), bytes([0x3C, 0, 25])]
-    assert board.command("nonsense").startswith("err")
+    assert "err" in _ask(board, "nonsense")
 
 
-def test_state_plunge_and_drain(board):
-    st = json.loads(board.command("state"))
+def test_state_plunge_drain_and_reset(board):
+    st = _ask(board, "state")
+    assert st["up"] and st["lights"] == {} and not st["paused"]
+    # only the switches that are made (appf.py reads the keys)
+    assert st["switches"] == {"1": 1, "3": 1, "4": 1, "5": 1, "6": 1, "7": 1}
     assert st["balls"] == {"trough": 6, "shooter": 0, "in_play": 0}
-    assert st["switches"]["7"] == 1 and not st["connected"]
-    assert board.command("drain").startswith("err")          # nothing in play
-    assert board.command("plunge").startswith("err")         # lane empty
+    assert "err" in _ask(board, "drain")                     # nothing in play
+    assert "err" in _ask(board, "plunge")                    # lane empty
     board.host_bytes(bytes([0x3E, 133, 51]))                 # serve
-    assert json.loads(board.command("state"))["balls"]["shooter"] == 1
-    assert board.command("plunge") == "ok"
-    assert json.loads(board.command("state"))["balls"] == {
-        "trough": 5, "shooter": 0, "in_play": 1}
-    assert board.command("drain") == "ok"
-    assert json.loads(board.command("state"))["balls"]["trough"] == 6
+    assert _ask(board, "state")["balls"]["shooter"] == 1
+    # Plunge presses the Launch button (Beetlejuice has no manual plunger);
+    # the lane empties either way
+    assert _ask(board, "plunge") == {"ok": True}
+    assert bytes([0x3C, 1, 85]) in board.sent
+    assert _ask(board, "state")["balls"] == {"trough": 5, "shooter": 0, "in_play": 1}
+    assert _ask(board, "drain") == {"ok": True}
+    assert _ask(board, "state")["balls"]["trough"] == 6
+    board.host_bytes(bytes([0x3E, 133, 51]))                 # serve again
+    assert _ask(board, "reset") == {"ok": True}
+    assert _ask(board, "state")["balls"] == {"trough": 6, "shooter": 0, "in_play": 0}
+
+
+def test_a_ball_left_in_the_lane_can_be_drained(board):
+    board.host_bytes(bytes([0x3E, 133, 51]))
+    assert _ask(board, "drain") == {"ok": True}
+    assert _ask(board, "state")["balls"] == {"trough": 6, "shooter": 0, "in_play": 0}
+
+
+def test_pause_freezes_the_game_by_its_pid(board, monkeypatch, tmp_path):
+    (tmp_path / "game.pid").write_text("4242\n")
+    sent = []
+    monkeypatch.setattr(warden.os, "kill", lambda pid, sig: sent.append((pid, sig)))
+    assert _ask(board, "pause 1") == {"paused": True}
+    assert _ask(board, "pause 0") == {"paused": False}
+    assert sent == [(4242, warden.SIGSTOP), (4242, warden.SIGCONT)]
 
 
 def test_sw_names_the_switches():
@@ -109,22 +136,84 @@ def test_sw_and_board_agree_on_the_trough():
     assert sw.SWITCHES[warden.SHOOTER] == "SHOOTER LANE"
 
 
-def test_switch_window_model_groups_beetlejuice_switches():
-    """spkpf.py hands bofpf's page a profile built from sw.py's table."""
+def _import_rig(name):
+    import importlib
     import sys
-    sys.path.insert(0, str(RIG))
-    sys.path.insert(0, str(RIG.parent / "bof_emu"))
-    sys.path.insert(0, str(RIG.parent / "spike2_emu"))
-    try:
-        spkpf = _load("pf", RIG / "spkpf.py")
-        bofpf = sys.modules["bofpf"]
-    finally:
-        for p in (str(RIG), str(RIG.parent / "bof_emu"), str(RIG.parent / "spike2_emu")):
-            sys.path.remove(p)
-    model = bofpf.page_model(spkpf.profile())
-    assert len(model["switches"]) == len(sw.SWITCHES)
-    keys = {r["n"]: r["key"] for r in model["switches"] if r["key"]}
-    assert keys == {87: "1", 90: "5", 86: "Z", 80: "/", 85: "Space", 81: "A"}
-    assert not any(r["placed"] for r in model["switches"])   # list only
-    assert spkpf.group(7) == "Trough" and spkpf.group(87) == "Cabinet"
-    assert spkpf.group(25) == "Playfield"
+    for p in (RIG, RIG.parent / "ap_emu", RIG.parent / "jjp_emu", RIG.parent / "spike2_emu"):
+        if str(p) not in sys.path:
+            sys.path.insert(0, str(p))
+    return importlib.import_module(name)
+
+
+def test_the_table_is_in_the_ap_windows_format():
+    t = _import_rig("spkswitches").table()
+    assert t["balls"] == 6 and t["shooter"] == 8 and t["art"] == "" and t["size"] is None
+    assert len(t["switches"]) == len(sw.SWITCHES)
+    names = [s["name"] for s in t["switches"]]
+    assert len(set(names)) == len(names)
+    # the AP window finds the service buttons, the trough and the shooter by name
+    for n in ("exit", "down", "up", "enter", "shooter", "trough1", "trough7"):
+        assert n in names
+    keys = {r["keys"]: r["ns"] for r in t["rows"] if r["keys"]}
+    assert keys["1"] == [87] and keys["5"] == [90] and keys["Space"] == [85]
+    assert keys["Left"] == [86, 83] and keys["Right"] == [80, 82]
+    assert keys["T"] == [84] and keys["Down"] == [81]
+    actions = {k["action"]: k["codes"] for k in t["keymap"] if k["action"]}
+    assert actions["plunge"] == ["KeyF"] and actions["drain"] == ["KeyD"]
+    # every switch can be pressed: a key row, a service button, or the list
+    in_rows = {n for r in t["rows"] for n in r["ns"]}
+    for s in t["switches"]:
+        assert (s["n"] in in_rows or s["name"] in ("exit", "down", "up", "enter")
+                or s["group"] == "Trough"), s
+
+
+def test_the_ap_window_serves_beetlejuice():
+    """spkpf.py hands tools/ap_emu/appf.py the table and this rig's pipe."""
+    appf = _import_rig("appf")
+    t = _import_rig("spkswitches").table()
+
+    class Pipe:
+        def ask(self, line):
+            return {"up": True, "switches": {"1": 1, "3": 1, "8": 1}, "lights": {},
+                    "paused": False}
+    app = appf.App(t, Pipe(), "", "Beetlejuice")
+    st = app.state("main")
+    assert st["kind"] == "schematic"
+    assert [b["label"] for b in st["panel"]["spec"]["svc"]] == [
+        "Service Back", "Service Minus", "Service Plus", "Service Select"]
+    assert st["panel"]["spec"]["balls"] == {"pos": ["1", "2", "3", "4", "5", "6"]}
+    assert len(st["view"]["entries"]) == len(sw.SWITCHES)
+    rig = _import_rig("spkpf").Rig("PAD-Runtime", "1")
+    assert rig.cmd[-2].endswith("tools/spooky_emu/ctl.sh")
+
+
+def test_a_zero_length_press_is_held_long_enough_to_count(board, monkeypatch):
+    """A browser key press is 0 ms; the game re-asks the board about Start
+    before it believes it, so the release waits out MIN_PRESS_S."""
+    waits = []
+    monkeypatch.setattr(board, "later", lambda secs, fn, *a: waits.append((secs, fn, a)))
+    board.command("sw 87 1")
+    board.command("sw 87 0")
+    assert board.state[87] == 1                    # still held
+    secs, fn, a = waits[-1]
+    assert 0 < secs <= warden.MIN_PRESS_S
+    fn(*a)                                          # the timer fires
+    assert board.state[87] == 0
+    assert board.sent[-1] == bytes([0x3C, 0, 87])
+
+
+def test_the_window_says_its_keys_are_its_own():
+    appf = _import_rig("appf")
+    spkpf = _import_rig("spkpf")
+    t = _import_rig("spkswitches").table()
+
+    class Pipe:
+        def ask(self, line):
+            return None
+    spec = spkpf.App(t, Pipe(), "", "Beetlejuice").state("main")["panel"]["spec"]
+    assert spec["where"] == "works in this window"
+    # the AP window itself keeps the page's default
+    assert "where" not in appf.App(t, Pipe(), "", "x").state("main")["panel"]["spec"]
+    # the flippers' end-of-stroke switches take no letter
+    keyed = {n for r in t["rows"] if r["keys"] for n in r["ns"]}
+    assert not keyed & {13, 21, 35}
