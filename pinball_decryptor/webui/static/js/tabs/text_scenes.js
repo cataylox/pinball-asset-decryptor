@@ -2,7 +2,7 @@
 // own now, the Scenes tab (tabs/scenes.js hosts ScenesPage); it was a floating window.
 // Python: webui/text_scenes.py (ns "text_scenes").
 
-import { html, useState, useEffect, useRef, Button, Field, Select, Seg, Table, Modal, openMenu, InfoBadge,
+import { html, useState, useEffect, useLayoutEffect, useRef, Button, Field, Select, Seg, Table, Modal, openMenu, InfoBadge,
          Icon, Progress, Spinner, tip, call, mediaUrl, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 
@@ -59,6 +59,98 @@ const clampSplit = (k, v) => Math.round(Math.max(SPLIT_LIMITS[k][0], Math.min(SP
 
 // One divider.  *measure(event)* turns the pointer into the size it sets (unzoomed px);
 // *dir* is the sign an arrow key moves it by.
+// The preview's magnifier (PAD-282): 1 = the whole screen fits the room, more = bigger, and the
+// stage scrolls.  Ctrl or Shift + the wheel zooms about the pointer; the buttons about the middle.
+const ZOOM_MAX = 8;
+const ZOOM_STEPS = [1, 1.25, 1.5, 2, 3, 4, 6, 8];
+const clampZoom = (z) => Math.max(1, Math.min(ZOOM_MAX, z));
+function useStageZoom() {
+  const [zoom, setZoom] = useState(1);
+  const ref = useRef(null);                     // the .scenes-stage (the part that scrolls)
+  const zoomRef = useRef(1);
+  zoomRef.current = zoom;
+  const anchor = useRef(null);                  // where the zoom holds still: {fx, fy, px, py}
+  // zoom to *z*, keeping the point under (clientX, clientY) (the middle without) where it is
+  const zoomTo = (z, at) => {
+    const el = ref.current;
+    const c = el && el.firstElementChild;
+    z = clampZoom(Math.round(z * 100) / 100);
+    if (!el || !c || z === zoomRef.current) return;
+    const r = el.getBoundingClientRect(), cr = c.getBoundingClientRect();
+    const x = at ? at[0] : r.left + r.width / 2, y = at ? at[1] : r.top + r.height / 2;
+    const frac = (v, lo, len) => (len ? Math.max(0, Math.min(1, (v - lo) / len)) : 0.5);
+    anchor.current = { fx: frac(x, cr.left, cr.width), fy: frac(y, cr.top, cr.height), px: x - r.left, py: y - r.top };
+    setZoom(z);
+  };
+  const step = (dir) => {
+    const z = zoomRef.current;
+    zoomTo(dir > 0 ? ZOOM_STEPS.find((v) => v > z + 0.01) || ZOOM_MAX
+      : [...ZOOM_STEPS].reverse().find((v) => v < z - 0.01) || 1);
+  };
+  useLayoutEffect(() => {
+    const el = ref.current, a = anchor.current;
+    anchor.current = null;
+    const c = el && el.firstElementChild;
+    if (!a || !c) return;
+    const r = el.getBoundingClientRect(), cr = c.getBoundingClientRect();
+    const k = r.width ? el.offsetWidth / r.width : 1;     // screen px -> page px (the app can be zoomed)
+    el.scrollLeft += (cr.left + a.fx * cr.width - (r.left + a.px)) * k;
+    el.scrollTop += (cr.top + a.fy * cr.height - (r.top + a.py)) * k;
+  }, [zoom]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const wheel = (e) => {
+      if (!e.ctrlKey && !e.shiftKey && !e.metaKey) return;
+      e.preventDefault();
+      // (Shift + the wheel comes in sideways on Windows)
+      const d = e.deltaY || e.deltaX;
+      if (d) zoomTo(zoomRef.current * Math.exp(-d * (e.deltaMode === 1 ? 0.05 : 0.0015)), [e.clientX, e.clientY]);
+    };
+    // the middle button drags the view about when it is zoomed
+    let pan = null;
+    const down = (e) => {
+      if (e.button !== 1 || zoomRef.current <= 1) return;
+      e.preventDefault();
+      pan = { x: e.clientX, y: e.clientY, l: el.scrollLeft, t: el.scrollTop };
+      el.setPointerCapture(e.pointerId);
+    };
+    const move = (e) => {
+      if (!pan) return;
+      const r = el.getBoundingClientRect(), k = r.width ? el.offsetWidth / r.width : 1;
+      el.scrollLeft = pan.l - (e.clientX - pan.x) * k;
+      el.scrollTop = pan.t - (e.clientY - pan.y) * k;
+    };
+    const up = () => { pan = null; };
+    el.addEventListener("wheel", wheel, { passive: false });
+    el.addEventListener("pointerdown", down);
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+    return () => {
+      el.removeEventListener("wheel", wheel);
+      el.removeEventListener("pointerdown", down);
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+    };
+  }, []);
+  return { zoom, ref, zoomTo, step };
+}
+
+function ZoomControls({ z }) {
+  const pct = Math.round(z.zoom * 100);
+  return html`<div class="row scenes-zoom" role="group" aria-label="Zoom">
+    <${Button} size="xs" kind="ghost" icon="zoomout" disabled=${z.zoom <= 1} title="Zoom out (or Ctrl + the mouse wheel)"
+      onClick=${() => z.step(-1)} />
+    <span class="small muted scenes-zoom-pct" title="How big the preview is drawn: 100% = the whole screen fits">${pct}%</span>
+    <${Button} size="xs" kind="ghost" icon="zoomin" disabled=${z.zoom >= ZOOM_MAX} title="Zoom in (or Ctrl + the mouse wheel over the spot to look at)"
+      onClick=${() => z.step(1)} />
+    <${Button} size="xs" kind="ghost" icon="fit" disabled=${z.zoom <= 1} title="Back to the whole screen"
+      onClick=${() => z.zoomTo(1)} />
+  </div>`;
+}
+
 function Divider({ k, horizontal, measure, split, setSplit, save, dir = 1, label }) {
   const drag = useRef(false);
   const down = (e) => {
@@ -114,6 +206,7 @@ export function ScenesPage() {
   const [playFrame, setPlayFrame] = useState(0); // the frame a playback is on
   useEffect(() => { if (!s.tree_play) setPlayFrame(0); }, [s.tree_play]);
   const [split, setSplit] = useState(loadSplit);
+  const zoom = useStageZoom();
   const splitRef = useRef(split);
   splitRef.current = split;
   const saveSplit = () => { try { localStorage.setItem(SPLIT_KEY, JSON.stringify(splitRef.current)); } catch (e) {} };
@@ -226,7 +319,8 @@ export function ScenesPage() {
       <div class="scenes-center">
         ${[s.card_note, editor && s.pic_note].filter(Boolean).map((t, i) => html`<div key=${"w" + i}
           class="note warn scenes-warn" role="status"><${Icon} name="warn" /><div class="body-text small">${t}</div></div>`)}
-        <div class="scenes-stage" style=${`--ar:${stage[0] / stage[1]}`}>
+        <div class=${cx("scenes-stage", zoom.zoom > 1 && "zoomed")} ref=${zoom.ref}
+          style=${`--ar:${stage[0] / stage[1]};--z:${zoom.zoom}`}>
           ${s.preparing ? html`<${Preparing} p=${s.preparing} />`
             : editor && s.tree_play ? html`<${TreePlayer} s=${s} onFrame=${setPlayFrame} />`
             : editor ? html`<${TreeCanvas} s=${s} />` : html`<${Preview} s=${s} tip=${tips.preview} />`}
@@ -234,6 +328,7 @@ export function ScenesPage() {
         <div class="scenes-stagebar">
           <${Button} size="sm" kind="ghost" icon=${wide ? "right" : "left"} label=${wide ? "Show the scene list" : "Hide the scene list"}
             title=${wide ? "Show the scene list" : "Hide the scene list: more room for the preview"} onClick=${() => setWide(!wide)} />
+          <${ZoomControls} z=${zoom} />
           ${s.preparing ? html`<span class="grow"></span>`
             : editor ? html`<${TreeActions} t=${s.tree_view} /><span class="grow"></span>
               ${s.tree_live ? html`<span class=${cx("chip sm tree-live-chip", s.tree_live.kind === "live" ? "ok" : "warn")}
