@@ -698,6 +698,57 @@ def test_a_part_the_game_picks_is_turned_on_in_the_preview_not_greyed(tmp_path):
         w.call("text_scenes.close")
 
 
+def _body_scene():
+    """Godzilla's battle select in small (PAD-284): the picker shows one body per state; the
+    body it does not show is a sprite with a picture and a text box in it."""
+    from tests.test_stern_scene_tree import (FLAG, bitmap, cls, mat, node, sprite, texture,
+                                             u8, u32, u64, fs)
+    lib = [
+        u32(3) + cls(1, "Bitmap") + u32(FLAG | 10) + bitmap(3, 8, 4, texture(20)),
+        u32(5) + cls(2, "Sprite") + u32(FLAG | 12) + sprite(5, "", 1, [
+            node(60, "Body_Art", [u32(1) + cls(1) + u32(10)]),
+            node(61, "Body_Textbox", [u32(1) + cls(1) + u32(10)], tracks=((1, mat(1, 30, 0)),))]),
+        u32(4) + cls(2) + u32(FLAG | 11) + sprite(4, "", 2, [
+            node(40, "BodyA", [u32(1) + cls(1) + u32(10)], kf=((1, 1), (2, 0))),
+            node(41, "BodyB", [u32(1) + cls(2) + u32(12)], kf=((1, 0), (2, 1)))],
+            labels=[("A", 1), ("B", 2)]),
+    ]
+    root = sprite(2, "", 20, [node(50, "Select", [u32(1) + cls(2) + u32(11)])],
+                  labels=[("Start", 1)])
+    return (u8(1) + u64(len(lib)) + b"".join(lib) + u64(0)
+            + u32(1360) + u32(768) + fs(30.0) + fs(0.2, 0.2, 0.2, 1.0) + root)
+
+
+def test_a_hidden_layer_in_a_sprite_is_shown_alone_and_the_sprite_whole(tmp_path):
+    """DragonRR (PAD-284): picking the text box of a body the game is not showing drew the
+    whole body; picking the body after it then did nothing.  The text box is drawn alone; the
+    body, picked next, is drawn with everything in it."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder, _body_scene())
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        assert w.call("text_scenes.tree_moment", "f:1")
+        assert _wait(w, lambda: _tv(w)["frame"] == 1)
+        ly = {l["name"]: l for l in _tv(w)["layers"]}
+        body = ly["BodyA"] if not ly["BodyA"]["drawn"] else ly["BodyB"]
+        assert body["name"] == "BodyB", "the picker rests on A"
+        assert w.call("text_scenes.tree_select", ly["Body_Textbox"]["id"])
+        tv = _tv(w)
+        assert tv["props"]["peek"]
+        hits = [h["id"] for h in tv["hits"]]
+        assert ly["Body_Textbox"]["id"] in hits and ly["Body_Art"]["id"] not in hits
+        assert w.call("text_scenes.tree_select", body["id"])
+        tv = _tv(w)
+        assert tv["props"]["peek"] and tv["sel"] == body["id"]
+        hits = [h["id"] for h in tv["hits"]]
+        assert ly["Body_Textbox"]["id"] in hits and ly["Body_Art"]["id"] in hits
+        assert w.call("text_scenes.tree_select", None)
+        hits = [h["id"] for h in _tv(w)["hits"]]
+        assert ly["Body_Textbox"]["id"] not in hits and ly["Body_Art"]["id"] not in hits
+        w.call("text_scenes.close")
+
+
 def test_play_draws_each_different_frame_once_and_stops(tmp_path):
     """DragonRR: "play the animation as well as step through it". Play draws the scene's
     frames in the background (a held stretch once) and hands them to the page with a map

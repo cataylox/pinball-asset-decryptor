@@ -52,6 +52,7 @@ class TreeEditMixin:
         self._teye_off = set()       # ... and not turned on in the preview by their eye
         self._tdraws = []            # the draw list of the last render
         self._tworlds = {}
+        self._tlit = {}              # what is drawn without a peek (the game's + the eyes')
         self._tparents = {}
         self._tman = None
         self._tonce = []             # notes for the next picture only (tree_show)
@@ -168,8 +169,11 @@ class TreeEditMixin:
                           for n, par, _d in _walk_man(man)}
         peek = self._tpeek if self._tpeek is not None and self._tpeek == self._tsel else None
         force = self._tree_force_set(card, peek)
+        # the sprites a peek sits in are only its way in: drawing them whole showed every
+        # other layer in them (DragonRR, PAD-284)
+        through = self._tree_ancestors(peek) - self._tree_force_set(card) if peek else set()
         draws = scene_eval.draw_list(man, frame, pins=pins, worlds=worlds, show=peek,
-                                     force=force)
+                                     force=force, through=through)
         self._fit_kept(draws, worlds)
         if force or peek is not None:
             plain = {}
@@ -188,6 +192,7 @@ class TreeEditMixin:
             lit = {}
             scene_eval.draw_list(man, frame, pins=pins, worlds=lit, force=mine)
         self._teye_off = self._tstate_off - set(lit)
+        self._tlit = lit
         self._tdraws, self._tworlds, self._tman = draws, worlds, man
         new_scene = card != self._tshown_card
         state = {"tree": True, "animated": False, "screens": []}
@@ -215,6 +220,14 @@ class TreeEditMixin:
             self._trunning = True
         if start:
             threading.Thread(target=self._tree_worker, daemon=True, name="scene-tree").start()
+
+    def _tree_ancestors(self, nid):
+        """The sprites *nid* sits in, up to the root."""
+        out, p, hops = set(), self._tparents.get(nid), 0
+        while p is not None and hops < 256:
+            out.add(p)
+            p, hops = self._tparents.get(p), hops + 1
+        return out
 
     def _tree_force_set(self, card, peek=None):
         """The layers turned on in the preview (and a selected layer that is off only because
@@ -820,7 +833,7 @@ class TreeEditMixin:
             self._tpeek = node
             self._render_tree_preview(self._sel, quiet=True)
             return True
-        if node is not None and node not in self._tworlds and not any(
+        if node is not None and node not in self._tlit and not any(
                 op["op"] == "visible" and op.get("node") == node
                 for op in self._tree_ops(card)):
             self._tpeek = node
