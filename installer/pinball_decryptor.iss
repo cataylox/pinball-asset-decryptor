@@ -135,6 +135,15 @@ Source: "{#ProjectDir}\tools\ap_emu\*"; DestDir: "{app}\tools\ap_emu"; \
 Source: "{#ProjectDir}\tools\spooky_emu\*"; DestDir: "{app}\tools\spooky_emu"; \
     Flags: recursesubdirs ignoreversion; \
     Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.beetlejuice"
+; The Pinball Brothers rig (tools/pb_emu, PAD-271): the Emulate PB tab.  Like
+; the BoF rig it carries one BUILT file, pbshim.so, so .so must never join
+; the excludes.  Its switch window is tools/ap_emu's virtual playfield and
+; its volume holder tools/spooky_emu's.  The libraries are installed inside
+; WSL on the first Start (setup.sh), and the unpacked game lives under
+; /var/tmp there, never here.
+Source: "{#ProjectDir}\tools\pb_emu\*"; DestDir: "{app}\tools\pb_emu"; \
+    Flags: recursesubdirs ignoreversion; \
+    Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.upd"
 ; The rig board helper every rig above sources from its parent folder
 ; (PAD-296): each run posts itself where the triage dashboard can see it.
 Source: "{#ProjectDir}\tools\rigboard.sh"; DestDir: "{app}\tools"; Flags: ignoreversion

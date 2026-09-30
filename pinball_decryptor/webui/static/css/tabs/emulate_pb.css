@@ -1,0 +1,6 @@
+/* Emulate (Pinball Brothers): the American Pinball tab's layout (the shared
+   Emulate layout and its Cache window), plus the supported-games card.  The
+   virtual playfield lives in its own window (tools/pb_emu/pbpf.py). */
+@import url("./emulate_ap.css");
+
+.pb-games { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }

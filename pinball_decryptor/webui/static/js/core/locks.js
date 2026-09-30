@@ -30,6 +30,7 @@ export const WHAT = {
   emulate_bof: "Run the game on this computer.",
   emulate_dp: "Run the game on this computer.",
   emulate_spooky: "Run the game on this computer from its update file (Beetlejuice so far).",
+  emulate_pb: "Run the game on this computer from its update file (Predator so far).",
   emulate_spike1: "Run the game on this computer.",
   multiboot: "Put it on one card with other games behind a boot menu.",
   defaults: "Change the game's factory settings.",

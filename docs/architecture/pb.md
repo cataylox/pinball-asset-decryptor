@@ -25,7 +25,7 @@ All four are marked supported (the `Game` objects are built without `supported=F
 
 The four games sit on two different platforms, which matters for anything that talks to the machine (emulation above all) but not for this plugin, which only handles files:
 
-- **Predator (2025)** — custom C++ on FAST Pinball hardware; PB's first FAST machine ([Kineticist](https://www.kineticist.com/news/pinball-brothers-launch-predator-pinball), [Retro Refurbs](https://www.retrorefurbs.com/pinball-brothers-predator-revealed/)).
+- **Predator (2025)** — custom C++ on FAST Pinball hardware; PB's first FAST machine ([Kineticist](https://www.kineticist.com/news/pinball-brothers-launch-predator-pinball), [Retro Refurbs](https://www.retrorefurbs.com/pinball-brothers-predator-revealed/)). Its `/opt/game` is two programs: `pinprog` (rules, FreeWPC-derived C from Heighway's `hp-freewpc`, driving a FAST Neuron + 4 I/O nodes + 3 expansion boards) and `vidprog` (SDL2 + GStreamer screens, pinprog's TCP client). It runs on a PC under the rig in [`tools/pb_emu`](../../tools/pb_emu/README.md) (PAD-271; [plan](../plans/pb_emulator.md)).
 - **Alien, Queen, ABBA** — PB's own electronics inherited from Heighway Pinball: a PC motherboard running Linux, custom I/O boards (PIC32 per Pinside; the `.uf2` firmware files on current boards suggest RP2040), and a custom driver board ([PinWiki: Heighway Pinball Repair](https://pinwiki.com/wiki/index.php?title=Heighway_Pinball_Repair)).
 
 `GAME_DB`'s `platform` field says the same per game.
