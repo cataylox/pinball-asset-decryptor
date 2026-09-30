@@ -214,9 +214,12 @@ def test_stopped_before_the_first_setup_warns_of_the_download(rig, tmp_path):
         _svc(w)._apply({"wsl": "1", "running": "0", "ready": "0"})
         s = w.state(NS)
         assert not s["up"] and s["state_label"] == "Stopped"
-        assert "downloads" in s["state_hint"] and s["go_label"] == "Start"
+        # said once, in the Set up emulator… notice, not also in the headline
+        assert "1 GB" in s["setup_msg"] and s["setup_btn"]
+        assert s["state_hint"] == "" and s["go_label"] == "Start"
         _svc(w)._apply({"wsl": "1", "running": "0", "ready": "1"})
         assert w.state(NS)["state_hint"] == ""
+        assert w.state(NS)["setup_msg"] == "" and not w.state(NS)["setup_btn"]
 
 
 # ------------------------------------------------------- the switch window
@@ -237,6 +240,30 @@ def test_the_switch_window_command(rig, monkeypatch, tmp_path):
             "\\\\wsl.localhost\\PAD-Runtime\\var\\tmp\\pad_ap\\rig0\\switches.json"
         # no table (no game), no window
         assert _svc(w)._switch_window_cmd({"running": "0"}) is None
+
+
+def test_the_switch_window_reads_the_default_distros_share(rig, monkeypatch,
+                                                          tmp_path):
+    """PAD-295: with the app's runtime not in use the rig runs in the
+    machine's default distro; the window got the bare Linux path, which
+    Windows cannot open, and died at once on every start.  Now it gets that
+    distro's share."""
+    from pinball_decryptor.core import wsl_disk
+    from pinball_decryptor.webui import emulate_ap_core as core
+    from pinball_decryptor.webui.tabs import emulate_ap as tab
+    monkeypatch.setattr(tab, "windows_python", lambda: "pythonw.exe")
+    monkeypatch.setattr(core, "rig_distro", lambda: None)
+    monkeypatch.setattr(wsl_disk, "default_distro_name", lambda: "Ubuntu")
+    with web_app(tmp_path, mfr="ap") as w:
+        cmd = _svc(w)._switch_window_cmd(dict(RUNNING))
+        assert cmd[cmd.index("--distro") + 1] == "Ubuntu"
+        assert cmd[cmd.index("--table") + 1] == \
+            "\\\\wsl.localhost\\Ubuntu\\var\\tmp\\pad_ap\\rig0\\switches.json"
+        # no distro at all (off Windows): the path is local
+        monkeypatch.setattr(wsl_disk, "default_distro_name", lambda: None)
+        cmd = _svc(w)._switch_window_cmd(dict(RUNNING))
+        assert "--distro" not in cmd
+        assert cmd[cmd.index("--table") + 1] == "/var/tmp/pad_ap/rig0/switches.json"
 
 
 def test_switches_button_needs_a_running_game(rig, tmp_path):
@@ -447,6 +474,67 @@ def test_the_cache_window_lists_selects_and_deletes(rig, monkeypatch, tmp_path):
 def test_the_cache_window_needs_the_rig(tmp_path):
     with web_app(tmp_path, mfr="ap") as w:
         assert not w.call(NS + ".open_cache")
+
+
+# ------------------------------------------------------- Set up emulator…
+def test_setup_notice_rules():
+    """PAD-295: a missing runtime IS flagged here (the default distro is not
+    what this rig runs on), as is a stale one; with the runtime fine, only
+    the one-time Python; a distro of our name that is not ours gets the
+    shared words and no button."""
+    from pinball_decryptor.webui import emulate_ap_core as core
+    ok = {"wsl": "1", "ready": "1", "running": "0"}
+    fresh = dict(ok, ready="0")
+    msg, btn = core.setup_notice(ok, "absent")
+    assert btn and "not on this PC yet" in msg and "Set up emulator" in msg
+    msg, btn = core.setup_notice(ok, "stale")
+    assert btn and "older version" in msg
+    assert core.setup_notice(ok, "absent", can_install=False) == ("", False)
+    msg, btn = core.setup_notice(fresh, "ready")
+    assert btn and "1 GB" in msg
+    assert core.setup_notice(ok, "ready") == ("", False)
+    assert core.setup_notice(ok, "unknown") == ("", False)
+    msg, btn = core.setup_notice(ok, "foreign")
+    assert msg and not btn
+
+
+def test_setup_installs_the_runtime_then_the_python(rig, monkeypatch, tmp_path):
+    from pinball_decryptor.webui import compat, emulate_ap_core as core
+    from pinball_decryptor.webui import runtime_prompt
+    from pinball_decryptor.webui.tabs import emulate_ap as tab
+    monkeypatch.setattr(tab, "rig_off", lambda: False)
+    monkeypatch.setattr(runtime_prompt, "can_install", lambda: True)
+    monkeypatch.setattr(core, "rig_cmd_root", lambda *a, **k: ["bash"] + list(a))
+    order, asked = [], []
+    monkeypatch.setattr(runtime_prompt, "ensure",
+                        lambda **k: order.append("runtime") or "ready")
+    monkeypatch.setattr(compat.messagebox, "askyesno",
+                        lambda title, msg, **k: asked.append(msg) or True)
+    with web_app(tmp_path, mfr="ap") as w:
+        svc = _svc(w)
+        monkeypatch.setattr(svc, "_run_streaming",
+                            lambda cmd, **k: order.append(cmd[1]) or 0)
+        svc._apply({"wsl": "1", "ready": "0", "running": "0", "_rt": "absent"})
+        s = w.state(NS)
+        assert s["setup_btn"] and "not on this PC yet" in s["setup_msg"]
+        assert w.call(NS + ".setup")
+        assert "PAD-Runtime" in asked[0] and "1 GB" in asked[0]
+        end = time.time() + 5
+        while len(order) < 2 and time.time() < end:
+            time.sleep(0.02)
+        assert order == ["runtime", "setup.sh"]
+
+
+def test_setup_waits_for_a_running_game(rig, monkeypatch, tmp_path):
+    from pinball_decryptor.webui import compat
+    from pinball_decryptor.webui.tabs import emulate_ap as tab
+    monkeypatch.setattr(tab, "rig_off", lambda: False)
+    asked = []
+    monkeypatch.setattr(compat.messagebox, "askyesno",
+                        lambda *a, **k: asked.append(a) or True)
+    with web_app(tmp_path, mfr="ap") as w:
+        _svc(w)._apply(dict(RUNNING, _rt="absent"))
+        assert not w.call(NS + ".setup") and not asked
 
 
 def test_stop_asks_the_switch_window_to_close_then_kills_its_tree(rig, monkeypatch, tmp_path):

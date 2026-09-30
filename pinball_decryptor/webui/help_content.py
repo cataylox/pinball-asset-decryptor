@@ -1692,7 +1692,11 @@ HELP_CONTENT = {
         ("First start is slower",
          "The very first Start sets the emulator up inside the app's Linux: "
          "it downloads the Python the games run on (about 1 GB, a few "
-         "minutes, once). Each new .pkg is then unpacked once (under a "
+         "minutes, once). Until that is done the tab says so, with a \"Set "
+         "up emulator…\" button that does it now; the same button installs "
+         "the app's own Linux when this PC does not have it yet (the game "
+         "would otherwise run in this PC's own WSL distro, which this "
+         "emulator is not built for). Each new .pkg is then unpacked once (under a "
          "minute) and kept, so starting it again is quick; a rebuilt mod is "
          "unpacked fresh. While a game is starting the Start button is "
          "Cancel."),

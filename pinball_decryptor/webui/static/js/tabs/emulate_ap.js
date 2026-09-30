@@ -67,6 +67,9 @@ export default function EmulateAP() {
     <${VolumeControl} ns="emulate_ap" s=${s} title=${s.volume_tip} />`;
   return html`<div class="page emu-page">
     <${PageHead} title="Emulate" sub=${introLines(s.intro)} />
+    ${s.setup_msg ? html`<div class="stack emu-notices"><${Note} kind="warn"
+      action=${s.setup_btn ? html`<${Button} kind="primary" size="sm" disabled=${!s.setup_enabled}
+        busy=${!s.setup_enabled} onClick=${() => call("emulate_ap.setup")}>${s.setup_label}<//>` : null}>${s.setup_msg}<//></div>` : null}
     <div class="cols c75 emu-cols">
       <div class="stack emu-col">
         <${Card} title="Game" cls="emu-src"
