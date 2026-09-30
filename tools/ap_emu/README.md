@@ -109,6 +109,11 @@ and Dutch Pinball tabs drive theirs, always on slot 0:
   `apiav/`'s.
 * `status.sh` - key=value lines (the app parses them).
 * `stop.sh`, `cancel.sh` - Stop, and Cancel while a start is in flight.
+* `cache.sh --list | --drop <name>...` (root) - the tab's Cache... window:
+  every unpacked build (size, last played - `run_game.sh` touches
+  `<build>/used` - and the .pkg it came from, `prepare.py`'s `pkg`) and
+  `envs`, what `setup.sh` downloaded.  A running game's build, and `envs`
+  while any game runs, are refused.
 
 The switch window is `appf.py` on the app's Windows Python (a pfweb page,
 `appage/`), talking to `apctl.py` through one `ctl.sh --stream` pipe.  Its

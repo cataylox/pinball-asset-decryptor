@@ -308,3 +308,63 @@ def test_game_info_names_the_game_from_the_plugin():
     assert core.game_info(r"D:\x\lov-gamecode_25.08.27.pkg") == ("legends_of_valhalla", "Legends of Valhalla")
     assert core.game_info(r"D:\x\bbq-gamecode_24.07.04.pkg")[0] in core.NOT_HERE
     assert core.game_info(r"D:\x\notes.txt") == ("", "")
+
+
+# ------------------------------------------------------------ the cache
+CACHE_LIST = (
+    "entry=lov_25.08.27 kind=build kb=1072236 used=1790727544 src=/mnt/d/Pinball/images/AP/lov-gamecode_25.08.27.pkg\n"
+    "entry=tank_26.07.27B kind=build kb=7001248 used=1790720000 src=/mnt/c/My Games/tank-gamecode_26.07.27B.pkg\n"
+    "entry=envs kind=envs kb=3876740 used=1790700000 src=\n"
+    "disk=24759708 102101944\n")
+
+
+def test_parse_cache_reads_entries_and_the_disk():
+    from pinball_decryptor.webui import emulate_ap_core as core
+    entries, disk = core.parse_cache(CACHE_LIST + "junk line\n")
+    assert [e["name"] for e in entries] == ["lov_25.08.27", "tank_26.07.27B", "envs"]
+    assert entries[1]["src"] == "/mnt/c/My Games/tank-gamecode_26.07.27B.pkg"   # spaces kept
+    assert entries[0]["kb"] == 1072236 and entries[2]["kind"] == "envs"
+    assert disk == (24759708, 102101944)
+    assert core.cache_label(entries[2]).startswith("Emulator setup")
+    assert core.parse_cache("") == ([], None)
+
+
+def test_the_cache_window_lists_selects_and_deletes(rig, monkeypatch, tmp_path):
+    import subprocess
+    from pinball_decryptor.webui import compat
+    from pinball_decryptor.webui import emulate_ap_core as core
+    from pinball_decryptor.webui.tabs import emulate_ap as tab
+    ran = []
+
+    def fake_run(cmd, **k):
+        ran.append(cmd)
+        out = CACHE_LIST if "--list" in cmd else "dropped lov_25.08.27\nrefused=envs in use\ndropped=1\n"
+        return subprocess.CompletedProcess(cmd, 0, out.encode(), b"")
+    monkeypatch.setattr(core, "rig_cmd_root", lambda *a, **k: ["bash"] + list(a))
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(tab, "rig_off", lambda: False)
+    asked = []
+    monkeypatch.setattr(compat.messagebox, "askyesno",
+                        lambda title, msg, **k: asked.append(msg) or True)
+    with web_app(tmp_path, mfr="ap") as w:
+        assert w.call(NS + ".open_cache")
+        end = time.time() + 5
+        while (w.state(NS).get("cache") or {}).get("busy") and time.time() < end:
+            time.sleep(0.02)
+        c = w.state(NS)["cache"]
+        assert [r["name"] for r in c["rows"]] == ["lov_25.08.27", "tank_26.07.27B", "envs"]
+        assert c["rows"][1]["size"] == "6.7 GB" and "free of" in c["head"]
+        assert w.call(NS + ".cache_select", ["lov_25.08.27", "envs", "nope"]) == 2
+        assert w.call(NS + ".cache_delete")
+        assert "downloads again" in asked[-1]                # envs warned about
+        end = time.time() + 5
+        while not any("--drop" in x for x in ran) and time.time() < end:
+            time.sleep(0.02)
+        drop = next(x for x in ran if "--drop" in x)
+        assert drop[1:] == ["cache.sh", "--drop", "lov_25.08.27", "envs"]
+        assert w.call(NS + ".cache_close") and w.state(NS)["cache"] is None
+
+
+def test_the_cache_window_needs_the_rig(tmp_path):
+    with web_app(tmp_path, mfr="ap") as w:
+        assert not w.call(NS + ".open_cache")

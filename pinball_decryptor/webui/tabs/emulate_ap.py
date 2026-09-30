@@ -22,6 +22,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 
 from pinball_decryptor.webui import rig as _rig
 from .. import compat
@@ -83,6 +84,10 @@ class EmulateAPTab(RigTabMixin, TabService):
         self._cancelling = False
         #: the switch window (appf.py), when this app opened one
         self._sw_proc = None
+        #: the Cache window: open?, its entries by name, the selection
+        self._cache_open = False
+        self._cache_entries = {}
+        self._cache_sel = []
         ok = ap.rig_available()
         if not ok:
             note = ("The American Pinball emulator is missing from "
@@ -100,7 +105,7 @@ class EmulateAPTab(RigTabMixin, TabService):
                  state_label="Checking…", state_hint="", tone="",
                  cells=[{"label": lbl, "key": k, "value": "—"}
                         for lbl, k in CELLS],
-                 note=note, up=False, game="")
+                 note=note, up=False, game="", cache=None)
         self._start_polling()
 
     # ------------------------------------------------------------------
@@ -203,6 +208,136 @@ class EmulateAPTab(RigTabMixin, TabService):
             self._open_switches(info)
         threading.Thread(target=work, daemon=True,
                          name="pad-ap-switches").start()
+        return True
+
+    # ------------------------------------------------------------------
+    # the Cache window (as Stern's Emulate tab has): the unpacked builds and
+    # the one-time setup, and deleting them (tools/ap_emu/cache.sh)
+    # ------------------------------------------------------------------
+    CACHE_HINT = ("Deleting frees the space now: a build is unpacked again on "
+                  "its next Start, the setup downloaded again - nothing is "
+                  "lost.")
+
+    @rpc
+    def open_cache(self):
+        if not ap.rig_available() or not ap.platform_ok():
+            return False
+        if self._cache_open:
+            return True
+        self._cache_open = True
+        self._cache_sel = []
+        self.set(cache={"head": "Reading the cache…", "rows": [], "sel": [],
+                        "busy": True, "hint": self.CACHE_HINT})
+        self.cache_refresh()
+        return True
+
+    def _cache_patch(self, **kw):
+        cur = self.get("cache")
+        if not cur or not self._cache_open:
+            return
+        cur = dict(cur)
+        cur.update(kw)
+        self.set(cache=cur)
+
+    @rpc
+    def cache_close(self):
+        self._cache_open = False
+        self.set(cache=None)
+        return True
+
+    @rpc
+    def cache_refresh(self):
+        if not self._cache_open:
+            return False
+        self._cache_sel = []
+        self._cache_patch(head="Reading the cache…", busy=True, sel=[])
+        if rig_off():
+            self._post(self._cache_show, ([], None))
+            return True
+
+        def work():
+            try:
+                out = subprocess.run(
+                    ap.rig_cmd_root("cache.sh", "--list"),
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    timeout=120, creationflags=_rig.CREATE_FLAGS)
+                text = out.stdout.decode("utf-8", "replace")
+            except Exception:                              # noqa: BLE001
+                text = ""
+            self._post(self._cache_show, ap.parse_cache(text))
+
+        threading.Thread(target=work, daemon=True,
+                         name="pad-ap-cache").start()
+        return True
+
+    def _cache_show(self, result):
+        if not self._cache_open:
+            return
+        from ..emulate_core import human_size
+        entries, disk = result
+        self._cache_entries = {e["name"]: e for e in entries}
+        running = (self._info.get("build") or "") if self._last_up else ""
+        rows = [{"name": e["name"], "label": ap.cache_label(e),
+                 "size": human_size(e["kb"]),
+                 "used": time.strftime("%Y-%m-%d %H:%M",
+                                       time.localtime(e["used"]))
+                 if e["used"] else "—",
+                 "src": ("running now" if e["name"] == running else e["src"])}
+                for e in entries]
+        total = sum(e["kb"] for e in entries)
+        if not entries:
+            head = ("Nothing is cached - the first Start sets the emulator up "
+                    "and unpacks the game.")
+        else:
+            head = "%d item%s — %s" % (len(entries),
+                                       "" if len(entries) == 1 else "s",
+                                       human_size(total))
+            if disk:
+                head += " · %s free of %s (the app's Linux)" % (
+                    human_size(disk[0]), human_size(disk[1]))
+        self._cache_patch(head=head, rows=rows, busy=False, sel=[],
+                          hint=self.CACHE_HINT)
+
+    @rpc
+    def cache_select(self, names):
+        self._cache_sel = [n for n in (names or []) if n in self._cache_entries]
+        self._cache_patch(sel=list(self._cache_sel))
+        return len(self._cache_sel)
+
+    @rpc
+    def cache_delete(self):
+        names = list(self._cache_sel)
+        if not self._cache_open or not names or rig_off():
+            return False
+        from ..emulate_core import human_size
+        freed = sum(self._cache_entries.get(n, {}).get("kb", 0) for n in names)
+        extra = ("\n\nThe emulator setup downloads again (about 1 GB) on the "
+                 "next Start." if "envs" in names else "")
+        if not compat.messagebox.askyesno(
+                "Delete cached items",
+                "Delete %d item%s, freeing about %s?\n\nA running game's "
+                "build is kept.%s" % (len(names), "" if len(names) == 1 else "s",
+                                      human_size(freed), extra)):
+            return False
+        self._cache_patch(busy=True, hint="Deleting…")
+
+        def work():
+            try:
+                out = subprocess.run(
+                    ap.rig_cmd_root("cache.sh", "--drop", *names),
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    timeout=600, creationflags=_rig.CREATE_FLAGS)
+                for line in out.stdout.decode("utf-8", "replace").splitlines():
+                    if line.startswith("refused="):
+                        self._log("AP: cache: kept %s" % line[8:])
+                    elif line.startswith("dropped "):
+                        self._log("AP: cache: deleted %s" % line[8:])
+            except Exception as exc:                       # noqa: BLE001
+                self._log("AP: cache delete failed: %s" % exc)
+            self._post(self.cache_refresh)
+
+        threading.Thread(target=work, daemon=True,
+                         name="pad-ap-cache-drop").start()
         return True
 
     def launch_pkg(self, path):

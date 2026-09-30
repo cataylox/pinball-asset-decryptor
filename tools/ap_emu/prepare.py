@@ -161,6 +161,9 @@ def main():
         f.write(mdir + "\n")
     with open(os.path.join(dest, "source"), "w") as f:
         f.write(stamp(a.pkg) + "\n")
+    # which .pkg it came from, for the Emulate AP tab's Cache window
+    with open(os.path.join(dest, "pkg"), "w") as f:
+        f.write(os.path.abspath(a.pkg) + "\n")
     # `launcher` last: it is what marks the build finished.
     with open(os.path.join(dest, "launcher"), "w") as f:
         f.write(launcher + "\n")

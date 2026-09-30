@@ -44,7 +44,7 @@ def ws_path(p):
     return "/mnt/" + p[0].lower() + p[2:] if len(p) > 1 and p[1] == ":" else p
 
 
-def tab_shot(out, prefix, width, height):
+def tab_shot(out, prefix, width, height, cache=False):
     scratch = tempfile.mkdtemp(prefix="padshot292-")
     proc, url = ws.start_server("", scratch, extra_env={"PAD_UI_NO_RIG": "0"})
     from playwright.sync_api import sync_playwright
@@ -73,6 +73,18 @@ def tab_shot(out, prefix, width, height):
                     time.sleep(1)
             time.sleep(3)
             page.screenshot(path=os.path.join(out, prefix + "emulate.png"))
+            if has and cache:
+                # the Cache window, against the real rig's cache.sh --list
+                ws.api(url, NS + ".open_cache")
+                for _ in range(120):
+                    c = (ws.state(url).get(NS) or {}).get("cache") or {}
+                    if c and not c.get("busy"):
+                        break
+                    time.sleep(0.5)
+                ws.api(url, NS + ".cache_select", ["lov_26.08.22"])
+                time.sleep(1.5)
+                page.screenshot(path=os.path.join(out, prefix + "cache.png"))
+                print("cache:", ws.state(url)[NS]["cache"].get("head"))
             if has:
                 st = ws.state(url)[NS]
                 print("state:", st.get("state_label"), st.get("state_hint"))
@@ -143,6 +155,8 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--prefix", default="after_")
     ap.add_argument("--tab-only", action="store_true")
+    ap.add_argument("--cache", action="store_true",
+                    help="also shoot the Cache window (<prefix>cache.png)")
     ap.add_argument("--slot", default="0")
     ap.add_argument("--switch", default="LeftOrbit",
                     help="the playfield switch's label to press")
@@ -150,7 +164,7 @@ def main():
     ap.add_argument("--height", type=int, default=900)
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
-    errors = tab_shot(args.out, args.prefix, args.width, args.height)
+    errors = tab_shot(args.out, args.prefix, args.width, args.height, args.cache)
     if not args.tab_only:
         errors += switch_shots(args.out, args.prefix, args.slot, args.switch)
     print("errors:", errors or "none")

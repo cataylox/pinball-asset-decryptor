@@ -3,11 +3,47 @@
 // of their own (tools/ap_emu/appf.py), as the other rigs' are; it opens by
 // itself when the game is up, and "Switches window" brings it back.
 
-import { html, PageHead, Card, Button, PathField, Chip, Note, Check, call } from "../core/ui.js";
+import { html, PageHead, Card, Button, PathField, Chip, Note, Check, Modal, Table, call } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { StateChip, introLines } from "./emulate_jjp_shared.js";
 
 export const css = true;
+
+// The Cache window, as the Stern tab's: what the rig keeps in the app's
+// Linux (each unpacked .pkg, and the one-time setup), and deleting it.
+const CACHE_COLS = [
+  { key: "label", label: "Item", width: "minmax(160px,1.1fr)", cls: "mono", titleOf: (r) => r.label },
+  { key: "size", label: "On disk", width: "90px", num: true },
+  { key: "used", label: "Last played", width: "140px" },
+  { key: "src", label: "From", width: "minmax(0,1.6fr)", cls: "mono dim", titleOf: (r) => r.src || undefined },
+];
+
+function CacheModal({ c }) {
+  const rows = c.rows || [];
+  const sel = new Set(c.sel || []);
+  // a click picks one row; Ctrl/Cmd-click adds or removes one
+  const pick = (r, _i, e) => {
+    if (!r) return;
+    let next;
+    if (e && (e.ctrlKey || e.metaKey)) {
+      next = new Set(sel);
+      if (next.has(r.name)) next.delete(r.name); else next.add(r.name);
+    } else next = new Set([r.name]);
+    call("emulate_ap.cache_select", [...next]);
+  };
+  const close = () => call("emulate_ap.cache_close");
+  return html`<${Modal} title="Cache — American Pinball emulator" icon="disk" xwide onClose=${close} cls="emu-cache"
+    footer=${html`<span class="small muted grow emu-cache-hint">${c.hint}</span>
+      <${Button} kind="danger" disabled=${c.busy || !sel.size} onClick=${() => call("emulate_ap.cache_delete")}>Delete selected<//>
+      <${Button} disabled=${c.busy} onClick=${() => call("emulate_ap.cache_refresh")}>Refresh<//>
+      <${Button} onClick=${close}>Close<//>`}>
+    <div class="row">${c.busy ? html`<span class="spin"></span>` : null}<span>${c.head}</span></div>
+    <div class="emu-cache-tbl">
+      <${Table} columns=${CACHE_COLS} rows=${rows} rowKey=${(r) => r.name} selected=${sel}
+        onSelect=${pick} style="height:300px" />
+    </div>
+  <//>`;
+}
 
 export default function EmulateAP() {
   const s = useNs("emulate_ap");
@@ -26,7 +62,10 @@ export default function EmulateAP() {
     <span class="emu-sp"></span>
     <${Check} ns="emulate_ap" k="mute" checked=${!!s.mute} label="Mute" title=${s.sound_tip} />`;
   return html`<div class="page emu-page">
-    <${PageHead} title="Emulate" sub=${introLines(s.intro)} />
+    <${PageHead} title="Emulate" sub=${introLines(s.intro)}>
+      <${Button} kind="ghost" disabled=${!s.rig_ok} onClick=${() => call("emulate_ap.open_cache")}
+        title="Shows and manages what the emulator keeps in the app's Linux: each game unpacked from its .pkg, and the one-time setup. Deleting frees the space now; it is unpacked (or downloaded) again on the next Start.">Cache…<//>
+    <//>
     <div class="cols c75 emu-cols">
       <div class="stack emu-col">
         <${Card} title="Game" cls="emu-src"
@@ -47,5 +86,6 @@ export default function EmulateAP() {
         <//>
       </div>
     </div>
+    ${s.cache ? html`<${CacheModal} c=${s.cache} />` : null}
   </div>`;
 }

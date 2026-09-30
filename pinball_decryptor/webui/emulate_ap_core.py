@@ -73,7 +73,7 @@ def rig_available():
     d = rig_dir()
     return all(os.path.isfile(os.path.join(d, s))
                for s in ("watch.sh", "stop.sh", "status.sh", "ctl.sh",
-                         "setup.sh", "appf.py"))
+                         "setup.sh", "appf.py", "cache.sh"))
 
 
 def platform_ok():
@@ -152,3 +152,38 @@ def state_text(info):
                 "The first Start sets the emulator up: it downloads its "
                 "Python (about 1 GB, a few minutes, once).")
     return "Stopped", ""
+
+
+def parse_cache(text):
+    """``cache.sh --list`` -> ``(entries, disk)``: entries are dicts with
+    name, kind ("build" / "envs"), kb, used (epoch), src; disk is
+    ``(free_kb, total_kb)`` or None."""
+    entries, disk = [], None
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if line.startswith("disk="):
+            try:
+                free, total = line[5:].split()
+                disk = (int(free), int(total))
+            except ValueError:
+                pass
+            continue
+        if not line.startswith("entry="):
+            continue
+        # src= is last and may hold spaces (a Windows folder name)
+        head, _, src = line.partition(" src=")
+        kv = dict(w.split("=", 1) for w in head.split() if "=" in w)
+        try:
+            entries.append({"name": kv["entry"], "kind": kv.get("kind", "build"),
+                            "kb": int(kv.get("kb") or 0),
+                            "used": int(kv.get("used") or 0), "src": src.strip()})
+        except (KeyError, ValueError):
+            continue
+    return entries, disk
+
+
+def cache_label(entry):
+    """What the Cache window calls an entry."""
+    if entry["kind"] == "envs":
+        return "Emulator setup (Python, GStreamer)"
+    return entry["name"]
