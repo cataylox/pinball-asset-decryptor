@@ -296,6 +296,11 @@ input[type=range] { accent-color: var(--accent); }
 .banner.warn { background: var(--warn-soft); }
 .banner .body-text { flex: 1 1 300px; min-width: 0; }
 .tip { position: fixed; z-index: 80; background: var(--panel-3); color: var(--ink); border: 1px solid var(--line-2); border-radius: 6px; padding: 7px 10px; font-size: 12.5px; max-width: 420px; white-space: pre-line; pointer-events: none; box-shadow: var(--shadow); }
+/* tip({head, lines}): a heading, then a line each, a click or shortcut in its own column */
+.tip .tip-h { font-weight: 600; margin-bottom: 4px; }
+.tip .tip-l { color: var(--ink-2); margin-top: 2px; }
+.tip .tip-row { display: grid; grid-template-columns: max-content 1fr; gap: 10px; margin-top: 3px; }
+.tip .tip-k { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; color: var(--accent); padding-top: 1px; }
 .badge-i { display: inline-flex; width: 18px; height: 18px; border-radius: 50%; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; font-family: var(--cond); color: var(--info); background: var(--info-soft); border: 0; cursor: help; flex: 0 0 18px; }
 
 /* picker */

@@ -98,13 +98,38 @@ let tipSrc = null;       // the element whose tip is current (shown, or dismisse
 let tipLifted = null;    // {el, text}: a title="" held off its element while hovered
 let tipShown = false;
 let tipFollow = false;   // shown for the pointer (follows it), not for keyboard focus
-function tipBox(text) {
+function tipBox(text, rich) {
   if (!tipEl) {
     tipEl = document.createElement("div");
     tipEl.className = "tip";
     document.body.appendChild(tipEl);
   }
-  tipEl.textContent = text;
+  tipEl.textContent = "";
+  let spec = null;
+  try { spec = rich ? JSON.parse(rich) : null; } catch (e) { spec = null; }
+  if (spec) {
+    // a heading, then one line each; a [key, what] line puts the key in its own column
+    const add = (cls, txt) => {
+      const d = document.createElement("div");
+      d.className = cls;
+      if (txt != null) d.textContent = txt;
+      tipEl.appendChild(d);
+      return d;
+    };
+    if (spec.head) add("tip-h", spec.head);
+    for (const ln of spec.lines || []) {
+      if (!Array.isArray(ln)) { add("tip-l", ln); continue; }
+      const row = add("tip-row");
+      const k = document.createElement("span");
+      k.className = "tip-k";
+      k.textContent = ln[0];
+      const v = document.createElement("span");
+      v.textContent = ln[1];
+      row.append(k, v);
+    }
+  } else {
+    tipEl.textContent = text;
+  }
   tipEl.style.display = "block";
   tipShown = true;
 }
@@ -167,7 +192,7 @@ document.addEventListener("mouseover", (e) => {
     src.removeAttribute("title");
   }
   tipSrc = src;
-  tipBox(text);
+  tipBox(text, src.getAttribute("data-tip-rich"));
   tipFollow = true;
   tipAtPointer(e.clientX, e.clientY);
 }, true);
@@ -183,14 +208,23 @@ setInterval(() => { if (tipSrc && !tipSrc.isConnected) dropTip(); }, 500);
 // The page's zoom (CSS zoom on <html>): rectangles are measured in screen
 // pixels, styles are laid out in page pixels.
 export function pageZoom() { return Number(document.documentElement.style.zoom) || 1; }
-// Long help text: <span ...${tip("text")}> shows it on hover.
+// Long help text: <span ...${tip("text")}> shows it on hover.  tip({head, lines}) lays it out:
+// a bold heading, then a line each; a line given as [key, what] shows the key (a click or a
+// shortcut) in its own column.
 export function tip(text) {
   if (!text) return {};
+  let rich = null;
+  if (typeof text === "object") {
+    rich = JSON.stringify(text);
+    text = [text.head, ...(text.lines || []).map((l) => (Array.isArray(l) ? l.join(": ") : l))]
+      .filter(Boolean).join("\n");
+  }
   return {
     "data-tip": text,
+    ...(rich ? { "data-tip-rich": rich } : {}),
     onFocus: (e) => {
       if (!e.currentTarget.matches(":focus-visible")) return;   // a click's focus, not the keyboard's
-      tipBox(text);
+      tipBox(text, rich);
       tipFollow = false;
       tipUnder(e.currentTarget);
     },
