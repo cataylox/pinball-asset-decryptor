@@ -453,7 +453,7 @@ HELP_CONTENT = {
          "stays up and a small \"Updating\" tag shows while the change is drawn. Drag the "
          "dividers between the scene list, the preview and the panel on the right (and the one "
          "above Layers) to share the room the way you like; the app remembers them, and a "
-         "double-click puts one back. There is nothing to save: every edit is kept the "
+         "double-click puts one back. To look closer, hold Ctrl (or Shift, or Cmd on a Mac) and turn the mouse wheel over the preview, or use the zoom buttons in the bar above it; the fit button goes back to 100%, and while zoomed you can drag the view with the middle mouse button. There is nothing to save: every edit is kept the "
          "moment you make it, and Write puts it on the card (\"Export picture…\" only makes a "
          "picture for you). Reset, under the preview, puts a scene back the way the last Write "
          "left it or the way the game shipped it, or every scene at once. With the Emulate "
