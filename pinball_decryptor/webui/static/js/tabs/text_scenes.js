@@ -546,16 +546,40 @@ const pickHow = (e, range) => (range && e.shiftKey ? "range" : e.ctrlKey || e.me
 // PAD-293 (DragonRR): as in Photoshop or Fusion, a layer's eye is the preview only - it never
 // changes the card - and Alt+click on it shows that layer alone.  Hiding a layer in the game
 // is its own mark (the card at the row's end, like Fusion's Suppress): the row is struck
-// through and reads "hidden in game", and the preview is not changed.
-const EYE_KEYS = "H hides or shows the selected layers here. Alt+click shows this layer alone; Alt+click again brings the others back.";
-const eyeTip = (l, solo) => solo === l.id ? `Shown alone. Alt+click to bring the other layers back. ${EYE_KEYS}`
-  : l.view_off ? `Hidden in the preview only. Click to show it here again; the game is not changed. ${EYE_KEYS}`
-  : l.state_off ? `Off in the preview: the part it sits in shows another of its looks. Click to turn it on here; the game is not changed. ${EYE_KEYS}`
-  : l.shown ? `Turned on in the preview. Click to turn it back off; the game is not changed. ${EYE_KEYS}`
-  : `Shown in the preview. Click to hide it here, to see or reach what is under it; the game is not changed. ${EYE_KEYS}`;
-const gameTip = (l) => l.hidden
-  ? "Hidden in the game: Write leaves it out of the card, so the machine never draws it. The preview still shows it. Click to put it back in the game."
-  : `In the game. Click to hide it in the game: Write leaves it out of the card${l.part_off ? " (it shows only when the look it sits in is on)" : ""}. The preview is not changed; use the eye to hide it here. Delete in the preview hides it in both.`;
+// through and reads "hidden in game", and the preview is not changed.  Every tooltip in a row
+// is the page's own (tip()), never a title="": the browser's would come up late beside it.
+const eyeTip = (l, solo) => ({
+  head: solo === l.id ? "Preview: shown alone" : l.view_off ? "Preview: hidden"
+    : l.state_off ? "Preview: off (its part shows another look)" : l.shown ? "Preview: turned on here" : "Preview: shown",
+  lines: [
+    ["Click", l.view_off ? "show it here again" : l.state_off ? "turn it on here" : l.shown ? "turn it back off"
+      : "hide it here, to see or reach what is under it"],
+    ["Alt+click", solo === l.id ? "bring the other layers back" : "show only this layer"],
+    ["H", "hide or show the selected layers"],
+    "The game is not changed.",
+  ] });
+const gameTip = (l) => ({
+  head: l.hidden ? "Game: hidden" : "Game: shown",
+  lines: l.hidden ? [
+    "Write leaves it out of the card, so the machine never draws it. The preview still shows it.",
+    ["Click", "put it back in the game"],
+  ] : [
+    ["Click", "hide it in the game (Write leaves it out of the card)"],
+    ["Delete", "hide it in the game and the preview (with the preview focused)"],
+    `The preview is not changed; the eye hides it here.${l.part_off ? " It shows only when the look it sits in is on." : ""}`,
+  ] });
+const rowTip = (l) => ({
+  head: `${l.name}${l.added ? " (added)" : ""}`,
+  lines: [
+    l.edits || l.kind,
+    l.state_off ? "Off in the preview: the part it sits in shows another of its looks. Its eye turns it on here."
+      : l.part_off && !l.view_off ? "The look it sits in is off in the preview: it shows when that look is on."
+      : !l.drawn && !l.view_off ? "Not on the screen at this moment." : null,
+    ["Click", "select it (shown on top while selected)"],
+    ["Ctrl+click", "add it to the selection or take it out"],
+    ["Shift+click", "select a run of layers"],
+    ["Right-click", "hide, show alone, hide in the game"],
+  ].filter(Boolean) });
 
 function eyeClick(l, e) {
   e.stopPropagation();
@@ -576,10 +600,10 @@ function layerMenu(t, l, e) {
   const what = many ? `the ${ids.length} selected layers` : "it";
   openMenu({ x: e.clientX, y: e.clientY }, [
     { label: allOff ? "Show in the preview" : "Hide in the preview", icon: allOff ? "eye" : "eye-off", kbd: "H",
-      title: `${allOff ? "Show" : "Hide"} ${what} here only; the game is not changed (H with them selected)`,
+      title: `${allOff ? "Show" : "Hide"} ${what} here only; the game is not changed`,
       onClick: () => call("text_scenes.tree_view_many", ids, allOff) },
     many ? null : { label: t.solo === l.id ? "Show every layer again" : "Show only this layer", icon: "eye", kbd: "Alt+click eye",
-      title: "The preview shows this layer alone, and back again (Alt+click its eye)",
+      title: "The preview shows this layer alone, and back again",
       onClick: () => call("text_scenes.tree_view_solo", l.id) },
     { sep: true },
     { label: allGone ? "Put back in the game" : "Hide in the game", icon: "sd",
@@ -617,23 +641,20 @@ function TreeLayers({ t }) {
   }, []);
   return html`<div class="scenes-contents tree-layers" ref=${listRef} role="tree" aria-label="Layers">
     <div class="sc-head"><span class="eyebrow">Layers — last drawn on top</span>
-      ${t.solo != null ? html`<button type="button" class="ly-solo small" ...${tip("One layer is shown alone. Click (or Alt+click its eye) to bring the other layers back.")}
+      ${t.solo != null ? html`<button type="button" class="ly-solo small"
+        ...${tip({ head: "One layer is shown alone", lines: [["Click", "bring the other layers back"], ["Alt+click", "its eye does the same"]] })}
         onClick=${() => call("text_scenes.tree_view_solo", t.solo)}>Showing one layer · show all</button>` : null}</div>
     ${(t.layers || []).map((l) => html`<div key=${l.id} data-node=${l.id}
         class=${cx("sc-item", "ly-item", (t.sel === l.id || sels.includes(l.id)) && "sel", !l.drawn && !l.state_off && "ly-off", l.hidden && "not-in-game")}
-        style=${`padding-left:${10 + l.depth * 14}px`}
-        title=${(l.state_off ? "Off in the preview: the part it sits in shows another of its looks. Click to see it on top while it is selected, or click its eye to turn it on here. "
-          : l.part_off && !l.view_off ? "The look it sits in is off in the preview: it shows when that look is on. Click to see it on top while it is selected. "
-          : !l.drawn && !l.view_off ? "Not on the screen at this moment: click to see it on top while it is selected, and edit it. " : "")
-          + "Ctrl+click adds it to the selection or takes it out, Shift+click selects a run. Right-click for more."}
+        style=${`padding-left:${10 + l.depth * 14}px`} ...${tip(rowTip(l))}
         onMouseDown=${(e) => { if (e.shiftKey) e.preventDefault(); }}
         onContextMenu=${(e) => layerMenu(t, l, e)}
         onClick=${(e) => call("text_scenes.tree_select", l.id, pickHow(e, true))}>
       <button type="button" class=${cx("ly-eye", (l.view_off || l.state_off) && "shut", t.solo === l.id && "solo")}
         aria-label="Shown in the preview" ...${tip(eyeTip(l, t.solo))} onClick=${(e) => eyeClick(l, e)}>
         <${Icon} name=${l.view_off || l.state_off ? "eye-off" : "eye"} /></button>
-      <span class="sc-t ellip" title=${l.name}>${l.name}${l.added ? " (added)" : ""}</span>
-      <span class=${cx("sc-i small ellip", l.hidden ? "in-game" : "muted")} title=${l.edits || l.kind}>${l.edits || l.kind}</span>
+      <span class="sc-t ellip">${l.name}${l.added ? " (added)" : ""}</span>
+      <span class=${cx("sc-i small ellip", l.hidden ? "in-game" : "muted")}>${l.edits || l.kind}</span>
       <button type="button" class=${cx("ly-game", l.hidden && "on")} aria-label="Hidden in the game"
         aria-pressed=${l.hidden ? "true" : "false"} ...${tip(gameTip(l))}
         onClick=${(e) => { e.stopPropagation(); call("text_scenes.tree_visible", l.id, l.hidden); }}>

@@ -88,6 +88,22 @@ def main():
                 notes.append("control %d tip: %s" % (
                     i, eye.get_attribute("data-tip") or eye.get_attribute("title")))
             notes.append("row tip: %s" % row.get_attribute("title"))
+            # hovering the eye and the card mark: one tooltip each (no title="" anywhere up the
+            # row, or the browser's own comes up late beside it)
+            for name, sel in (("tip_eye", ".ly-eye"), ("tip_game", ".ly-game")):
+                ctl = row.locator(sel)
+                if not ctl.count():
+                    continue
+                ctl.hover()
+                time.sleep(0.6)
+                titled = ctl.evaluate("el => { const o = []; for (let e = el; e; e = e.parentElement)"
+                                      " if (e.getAttribute && e.getAttribute('title')) o.push(e.className);"
+                                      " return o; }")
+                notes.append("%s: native titles up the chain: %s" % (name, titled))
+                box = row.bounding_box()
+                page.screenshot(path=os.path.join(out, "%s_%s.png" % (prefix, name)),
+                                clip={"x": box["x"] - 330, "y": box["y"] - 190,
+                                      "width": 660, "height": 330})
             # right-click on the row: the layer's menu
             row.click(button="right")
             time.sleep(0.8)
