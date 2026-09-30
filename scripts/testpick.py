@@ -112,6 +112,8 @@ ZONES = [
                  "pinball_decryptor/webui/tabs/emulate_pb.py"],
      ["test_pb_*.py", "test_webui_emulate_pb.py", "test_plugins.py",
       "test_rig_leaf_imports.py"]),
+    ("cgc",     ["tools/cgc_emu/"],
+     ["test_cgc_*.py", "test_rigboard.py"]),
     ("pinmame", ["pinball_decryptor/plugins/pinmame_classic/"],
      ["test_pinmame_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
     # -- The web UI: the shell, every tab, the page ------------------------
