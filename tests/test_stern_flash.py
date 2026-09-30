@@ -1243,7 +1243,7 @@ def _pkexec_run(monkeypatch, rc, err):
     (126, "Error executing command as another user: Request dismissed\n", True),
     (127, "Error executing command as another user: Not authorized\n\n"
           "This incident has been reported.\n", True),
-    (127, "Error getting information about /tmp/.mount_Pinbal/usr/bin/pinball-decryptor: "
+    (127, "Error accessing /tmp/.mount_Pinbal/usr/bin/pinball-decryptor: "
           "Permission denied\n", False),
     (127, "Error executing command as another user: No authentication agent found.\n", False),
 ])
@@ -1256,7 +1256,7 @@ def test_only_a_real_no_to_pkexec_reads_as_declined(monkeypatch, rc, err, declin
 
 def test_a_pkexec_that_never_prompted_says_why(tmp_path, monkeypatch):
     """The report's case: the flash names pkexec's own error, never "declined"."""
-    err = ("Error getting information about /tmp/.mount_Pinbal/usr/bin/pinball-decryptor: "
+    err = ("Error accessing /tmp/.mount_Pinbal/usr/bin/pinball-decryptor: "
            "Permission denied\n")
     ef, run = _pkexec_run(monkeypatch, 127, err)
     with pytest.raises(ef.FlashError) as exc:

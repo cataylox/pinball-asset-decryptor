@@ -475,7 +475,7 @@ def _pkexec_declined(rc, text):
 
     126 is the dialog dismissed; 127 with "Not authorized" is a failed or
     refused authentication.  Every OTHER 127 is pkexec failing before it asked
-    anything - no authentication agent, or a program it could not stat (the
+    anything - no authentication agent, or a program it could not open (the
     AppImage mount, PAD-288) - and calling that "declined" hid the reason from
     someone who never saw a prompt."""
     if rc == 126:
