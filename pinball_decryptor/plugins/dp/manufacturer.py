@@ -26,6 +26,9 @@ class DutchPinballManufacturer(Manufacturer):
         # Direct-SSD write repacks in place.  TBL's videos are .cdmd with no
         # inverse encoder, so video_slot_dirs() hides its decoded derivatives.
         replace_video=True,
+        # Emulate tab: The Big Lebowski off a machine's disk image, on the
+        # game's own FakePinPROC (tools/dp_emu).
+        emulate_dp=True,
     )
     # Direct-SSD: read/write the game's physical SSD without an .img/.zip.
     direct_ssd_extract_phases = ("Copy from SSD", "Checksums")

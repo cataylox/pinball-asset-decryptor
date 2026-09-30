@@ -16,16 +16,22 @@ be laid over), so each version folder on a machine holds files that no zip
 does (1.10 on one image: 173 of them), and ~1,400 base assets are in no zip
 at all.  So a build always starts from a machine's disk image:
 
-    prepare.py image <disk.img> [--name N] [--all]
+    prepare.py image <disk.img> [--name N] [--all] [--keep K]
         the current <version>/ folder (--all: every one) and the base
-        assets off the image's /home/dp/game (read-only loop mount, as root)
+        assets off the image's /home/dp/game (read-only loop mount, as root).
+        Cached: an image already prepared (same size and time) is reused.
+        --keep K prunes older image builds (and their zip builds) to K.
 
     prepare.py zip <update.zip> [...] --base <prepared image build> [--name N]
         the base build's current version folder with the updates laid over
         it in version order, as the machine installs them; each must list
         the version it lands on.  The base assets are the base build's.
 
-Run as root in PAD-Runtime.  Prints the prepared folder.
+Run as root in PAD-Runtime.  Prints `progress N` lines while it copies and
+the prepared folder last.  A build is made in <name>.partial and renamed
+when whole, so a cancelled one is never mistaken for a build.
+Exit: 2 bad input, 3 not enough free space, 4 no Dutch Pinball game on
+the image, 5 an update that does not install onto the build.
 """
 import argparse
 import os
@@ -40,9 +46,39 @@ ROOT = os.environ.get("DP_ROOT", "/var/tmp/pad_dp")
 CACHE = os.path.join(ROOT, "cache")
 
 
-def die(msg):
+def die(msg, code=2):
     print("prepare.py: " + msg, file=sys.stderr)
-    sys.exit(2)
+    sys.exit(code)
+
+
+def stamp_of(path):
+    st = os.stat(path)
+    return "%s %d %d" % (os.path.realpath(path), st.st_size, int(st.st_mtime))
+
+
+def tree_size(top):
+    total = 0
+    for d, _dirs, files in os.walk(top):
+        for n in files:
+            try:
+                total += os.lstat(os.path.join(d, n)).st_size
+            except OSError:
+                pass
+    return total
+
+
+class Progress:
+    """`progress N` on stdout each whole percent of `total` bytes copied."""
+
+    def __init__(self, total):
+        self.total, self.done, self.last = max(total, 1), 0, -1
+
+    def add(self, n):
+        self.done += n
+        pct = min(100, self.done * 100 // self.total)
+        if pct != self.last:
+            self.last = pct
+            print("progress %d" % pct, flush=True)
 
 
 def partitions(img):
@@ -80,19 +116,66 @@ def version_dirs(game):
                   if os.path.isfile(os.path.join(game, d, "start")))
 
 
-def copy_clean(src, dst):
+def copy_clean(src, dst, progress=None):
     """Copy a tree, leaving out macOS AppleDouble '._*' files (junk some
     images carry; the game's loaders trip over them)."""
-    shutil.copytree(src, dst, symlinks=True,
+    def copy(a, b):
+        shutil.copy2(a, b)
+        if progress is not None:
+            progress.add(os.path.getsize(a))
+    shutil.copytree(src, dst, symlinks=True, copy_function=copy,
                     ignore=lambda d, names: [n for n in names if n.startswith("._")])
 
 
-def from_image(img, name, every):
+def running_builds():
+    out = set()
+    for d in os.listdir(ROOT) if os.path.isdir(ROOT) else ():
+        try:
+            with open(os.path.join(ROOT, d, "build")) as f:
+                out.add(os.path.realpath(f.read().strip()))
+        except OSError:
+            pass
+    return out
+
+
+def prune(keep, spare):
+    """Keep the `keep` newest image builds (and the zip builds laid over
+    them); never `spare`, the one just made, or one a rig is running."""
+    running = running_builds()
+    images = []
+    for n in os.listdir(CACHE):
+        path = os.path.join(CACHE, n)
+        if os.path.isfile(os.path.join(path, "source")) and not n.endswith(".partial"):
+            images.append((os.path.getmtime(os.path.join(path, "source")), path))
+    images.sort(reverse=True)
+    for _t, path in images[keep:]:
+        if path == spare or path in running:
+            continue
+        for n in os.listdir(CACHE):          # its zip builds point into it
+            z = os.path.join(CACHE, n)
+            if (z != path and z not in running and os.path.realpath(
+                    os.path.join(z, "assets")) == os.path.join(path, "assets")):
+                shutil.rmtree(z, ignore_errors=True)
+        shutil.rmtree(path, ignore_errors=True)
+        print("pruned %s" % os.path.basename(path), file=sys.stderr)
+
+
+def from_image(img, name, every, keep=0):
     if os.geteuid() != 0:
         die("run as root (it loop-mounts the image)")
     out = os.path.join(CACHE, name)
+    stamp = stamp_of(img)
+    try:
+        with open(os.path.join(out, "source")) as f:
+            if f.read().strip() == stamp:
+                print("cached %s" % name, file=sys.stderr)
+                os.utime(os.path.join(out, "source"))
+                return out
+    except OSError:
+        pass
+    part = out + ".partial"
     for start, size in partitions(img):
-        mnt = tempfile.mkdtemp(prefix="dpimg")
+        mnt = tempfile.mkdtemp(prefix="mnt-", dir=ROOT)
         r = subprocess.run(["mount", "-o", "ro,noload,loop,offset=%d,sizelimit=%d"
                             % (start, size), img, mnt],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -104,23 +187,62 @@ def from_image(img, name, every):
             if not game:
                 continue
             vers = version_dirs(game)
-            cur = open(os.path.join(game, "version")).read().strip()
+            if not vers:
+                continue
+            with open(os.path.join(game, "version")) as f:
+                cur = f.read().strip()
             if cur not in vers:
                 cur = vers[-1]
+            srcs = ["assets"] + (vers if every else [cur])
+            need = sum(tree_size(os.path.join(game, d)) for d in srcs)
+            shutil.rmtree(part, ignore_errors=True)
+            if os.path.exists(out) and out not in running_builds():
+                shutil.rmtree(out)
+            free = shutil.disk_usage(CACHE).free
+            if free < need + (1 << 30):
+                die("the build needs %.1f GB; %.1f GB free in the app's Linux"
+                    % (need / 1e9, free / 1e9), 3)
+            os.makedirs(part)
+            prog = Progress(need)
+            for d in srcs:
+                copy_clean(os.path.join(game, d), os.path.join(part, d), prog)
+            with open(os.path.join(part, "version"), "w") as f:
+                f.write(cur)
+            with open(os.path.join(part, "title"), "w") as f:
+                f.write(machine_title(os.path.join(part, cur)))
+            with open(os.path.join(part, "source"), "w") as f:
+                f.write(stamp)
             if os.path.exists(out):
                 shutil.rmtree(out)
-            os.makedirs(out)
-            copy_clean(os.path.join(game, "assets"), os.path.join(out, "assets"))
-            for v in (vers if every else [cur]):
-                copy_clean(os.path.join(game, v), os.path.join(out, v))
-            with open(os.path.join(out, "version"), "w") as f:
-                f.write(cur)
+            os.rename(part, out)
             print("versions %s, current %s" % (" ".join(vers), cur), file=sys.stderr)
+            if keep:
+                prune(keep, out)
             return out
         finally:
             subprocess.run(["umount", mnt])
             os.rmdir(mnt)
-    die("no /home/dp/game on any partition of " + img)
+    die("no Dutch Pinball game (/home/dp/game) on any partition of " + img, 4)
+
+
+def machine_title(vdir):
+    """The game's name from its machine.yaml's first comment line ("# The
+    Big Lebowski Pinball machine configuration"), else the folder's."""
+    try:
+        with open(os.path.join(vdir, "config", "machine.yaml"), encoding="utf-8-sig") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("#") and len(line) > 2:
+                    t = line.lstrip("# ").strip()
+                    for tail in (" machine configuration", " configuration"):
+                        if t.lower().endswith(tail):
+                            t = t[:-len(tail)]
+                    return t.strip() or os.path.basename(vdir)
+                if line:
+                    break
+    except OSError:
+        pass
+    return os.path.basename(os.path.dirname(vdir))
 
 
 def vkey(v):
@@ -169,15 +291,15 @@ def from_zips(zips, base, name):
     chain = sorted((zip_version(z) + (z,) for z in zips), key=lambda t: vkey(t[0]))
     for zv, compat, z in chain:
         if compat and cur not in compat:
-            die("%s installs onto %s, not %s" % (os.path.basename(z), ",".join(compat), cur))
+            die("%s installs onto %s, not %s" % (os.path.basename(z), ",".join(compat), cur), 5)
         cur = zv
     cur = open(os.path.join(base, "version")).read().strip()
     top = chain[-1][0]
     out = os.path.join(CACHE, name)
-    if os.path.exists(out):
-        shutil.rmtree(out)
-    os.makedirs(out)
-    vdir = os.path.join(out, top)
+    part = out + ".partial"
+    shutil.rmtree(part, ignore_errors=True)
+    os.makedirs(part)
+    vdir = os.path.join(part, top)
     # Hard-linked copy of the installed folder; extract_into unlinks before
     # it writes, so the base build is never changed through a shared inode.
     subprocess.run(["cp", "-al", os.path.join(base, cur), vdir], check=True)
@@ -186,9 +308,14 @@ def from_zips(zips, base, name):
         print("laid %s over %s" % (zv, cur), file=sys.stderr)
         cur = zv
     os.chmod(os.path.join(vdir, "start"), 0o755)
-    os.symlink(os.path.join(base, "assets"), os.path.join(out, "assets"))
-    with open(os.path.join(out, "version"), "w") as f:
+    os.symlink(os.path.join(base, "assets"), os.path.join(part, "assets"))
+    with open(os.path.join(part, "version"), "w") as f:
         f.write(top)
+    with open(os.path.join(part, "title"), "w") as f:
+        f.write(machine_title(vdir))
+    if os.path.exists(out):
+        shutil.rmtree(out)
+    os.rename(part, out)
     return out
 
 
@@ -199,6 +326,7 @@ def main():
     a.add_argument("img")
     a.add_argument("--name")
     a.add_argument("--all", action="store_true", help="every version folder, not just the current one")
+    a.add_argument("--keep", type=int, default=0, help="prune older image builds to this many")
     b = sub.add_parser("zip")
     b.add_argument("zips", nargs="+")
     b.add_argument("--base", required=True,
@@ -208,7 +336,9 @@ def main():
     os.makedirs(CACHE, exist_ok=True)
     if args.cmd == "image":
         name = args.name or os.path.splitext(os.path.basename(args.img))[0]
-        out = from_image(args.img, name, args.all)
+        if not os.path.isfile(args.img):
+            die("no such image: " + args.img)
+        out = from_image(args.img, name, args.all, args.keep)
     else:
         base = args.base if os.path.isabs(args.base) else os.path.join(CACHE, args.base)
         if not os.path.isdir(os.path.join(base, "assets")):

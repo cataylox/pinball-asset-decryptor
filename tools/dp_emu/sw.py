@@ -2,17 +2,20 @@
 """Press a switch in this slot's running Dutch Pinball game.
 
     sw.py <switch> [tap|down|up] [ms]      e.g.  sw.py startButton
-    sw.py --list                           the switches that have a key
+    sw.py --list                           every switch, and its key if any
 
 The game runs on its own FakePinPROC, which maps KEYS to switches through
-the running build's config/keyboard.yaml (1 = startButton, n = flipperLwL,
-3 = credit1, 7..0 = menu1..4, ...).  This looks the switch up there and
-writes the key to the game's input FIFO, where dpinput.so pushes it onto
-SDL's event queue.  A key name (a single character, or an SDL keysym
+the running build's config/keyboard.yaml.  The rig's copy of that file
+gives every switch in machine.yaml a key of its own (dpswitches.py writes
+them, with the table in the rig's switches.json); this looks the switch up
+there - or in the build's own map (1 = startButton, n = flipperLwL ...) -
+and writes the key to the game's input FIFO, where dpinput.so pushes it
+onto SDL's event queue.  A key name (a single character, or an SDL keysym
 number like 274) is accepted in place of a switch name.
 
 Uses the slot in PAD_SLOT, as every rig script does.
 """
+import json
 import os
 import sys
 
@@ -38,24 +41,40 @@ def keymap():
             continue
         key, names = (p.strip() for p in line.split(":", 1))
         sym = int(key) if key.isdigit() and len(key) > 1 else ord(key)
+        if sym >= 1000:          # the rig's own per-switch keys (table())
+            continue
         for n in names.split(","):
             out.setdefault(n.strip(), sym)
     return out
+
+
+def table():
+    """{switch name: (keysym, title)} from the rig's switches.json, or {}."""
+    try:
+        with open(os.path.join(RIG, "switches.json"), encoding="utf-8") as f:
+            return {s["name"]: (s["sym"], s["title"]) for s in json.load(f)["switches"]}
+    except (OSError, ValueError, KeyError):
+        return {}
 
 
 def main(argv):
     if not os.path.exists(os.path.join(RIG, "input")):
         sys.exit("sw.py: rig %s is not running (run_game.sh)" % RIG)
     km = keymap()
+    tb = table()
     if not argv or argv[0] in ("-h", "--help"):
         sys.exit(__doc__)
     if argv[0] == "--list":
-        for name, sym in sorted(km.items()):
-            print("%-14s key %s" % (name, chr(sym) if sym < 128 else sym))
+        for name in sorted(set(km) | set(tb)):
+            key = km.get(name)
+            print("%-22s %-28s %s" % (name, tb.get(name, ("", ""))[1],
+                                     ("key " + (chr(key) if key < 128 else str(key))) if key else ""))
         return
     name, action = argv[0], (argv[1] if len(argv) > 1 else "tap")
     if name in km:
         sym = km[name]
+    elif name in tb:
+        sym = tb[name][0]
     elif len(name) == 1:
         sym = ord(name)
     elif name.isdigit():
@@ -70,7 +89,7 @@ def main(argv):
     # Non-blocking: with no game holding the FIFO open, a plain open() would
     # wait for one forever.
     try:
-        fd = os.open(os.path.join(RIG, "input"), os.O_WRONLY | os.O_NONBLOCK)
+        fd = os.open(os.path.join(RIG, "input"), os.O_WRONLY | getattr(os, "O_NONBLOCK", 0))
     except OSError:
         sys.exit("sw.py: the game in %s is not reading its input (stopped?)" % RIG)
     try:

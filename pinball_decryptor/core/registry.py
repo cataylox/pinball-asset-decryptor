@@ -100,6 +100,12 @@ class Capabilities:
     # expansion LED bus, BoF's BICS board), which the rig answers.  No key,
     # no CPU emulation.  See webui/tabs/emulate_bof.py.
     emulate_bof: bool = False
+    # Emulate tab for Dutch Pinball.  A fifth rig (tools/dp_emu), its own flag
+    # for the same reason: The Big Lebowski is a native x86-64 program that
+    # ships its own P-ROC simulator (`fakepinproc`), so the rig supplies only
+    # what the machine's disk image gave it - no emulation, no key.  See
+    # webui/tabs/emulate_dp.py.
+    emulate_dp: bool = False
     # Multi-boot tab (item 90): build ONE SD card that carries several
     # complete game images and a boot-time menu (the code selector in
     # tools/spike2_emu/codeselect) - stock code and a custom build on the

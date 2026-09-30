@@ -17,7 +17,8 @@
 # The game runs in $DP_RIG/game, a hard-linked copy of the build laid out
 # as on the machine (assets/, <version>/, version, serial, temp/): it writes
 # its database, run.log and restart marker there, never into the cache.
-# Switches: sw.sh.  Picture: shot.sh.  Stop: killgame.sh.
+# Switches: sw.py / dpctl.py.  Picture: shot.sh.  Stop: killgame.sh.
+# The app runs watch.sh, which prepares the build and calls this.
 set -u
 . "$(dirname "$0")/dppath.sh"
 BUILD=${1:-}; shift 2>/dev/null || true
@@ -62,6 +63,11 @@ find "$G" -name '*.wav' -size 0 | while read -r f; do
 done
 : > "$G/serial"
 echo "$VER" > "$G/version"
+# Every switch gets a key (the shipped map has a dozen): the rig's
+# keyboard.yaml gains one line per machine.yaml switch; switches.json is
+# the table sw.py, dpctl.py and the switch window read.
+python3 "$DP_TOOLS/dpswitches.py" "$G/$VER" "$DP_RIG/switches.json" >> "$DP_RIG/rig.log" \
+    || { echo "run_game.sh: could not read the build's switch table" >&2; exit 3; }
 mkfifo "$DP_RIG/input"
 echo "$BUILD" > "$DP_RIG/build"
 echo "$VER" > "$DP_RIG/ver"
@@ -70,7 +76,10 @@ chown -R "$DP_USER": "$DP_RIG"
 
 if [ $VISIBLE = 1 ]; then
     DISP=${DISPLAY:-:0}
+    # a frame to drag it by, near the top left (dpinput.c)
+    WIN_ENV="DPEMU_FRAME=1 SDL_VIDEO_WINDOW_POS=40,40"
 else
+    WIN_ENV=""
     DISP=$DP_DISPLAY
     setsid -f Xvfb "$DISP" -screen 0 1920x1080x24 -nolisten tcp \
         < /dev/null > "$DP_RIG/xvfb.log" 2>&1
@@ -91,7 +100,7 @@ cd "$G/$VER" || exit 3
 # shellcheck disable=SC2086
 setsid -f runuser -u "$DP_USER" -- env -i \
     PATH=/usr/local/bin:/usr/bin:/bin HOME="$DP_RIG" USER="$DP_USER" LANG=C.UTF-8 \
-    DISPLAY="$DISP" $AUDIO_ENV \
+    DISPLAY="$DISP" $AUDIO_ENV $WIN_ENV DPEMU_LABEL="${PAD_LABEL:-PAD}" \
     DPEMU_FIFO="$DP_RIG/input" DPEMU_LOG="$DP_RIG/rig.log" LD_PRELOAD="$DP_SHIM" \
     ./start fakepinproc dev < /dev/null > "$DP_RIG/game.out" 2>&1
 

@@ -17,7 +17,8 @@
  *     tap <keysym> [ms]    press, hold ms (default 150), release
  *
  * It also writes the video mode the game sets (SDL_SetVideoMode) to
- * $DPEMU_LOG, so the rig knows the window size without X tools.
+ * $DPEMU_LOG, so the rig knows the window size without X tools, and for a
+ * run on the desktop frames the window and labels its title (below).
  *
  * Build: gcc -shared -fPIC -O2 -o dpinput.so dpinput.c -ldl -lpthread
  */
@@ -175,13 +176,37 @@ static void start_reader(void)
     pthread_detach(t);
 }
 
-/* The window: log every mode the game sets. */
+/* The window: log every mode the game sets.  On a desktop ($DPEMU_FRAME)
+ * give it a frame: the game asks for a borderless one (SDL_NOFRAME, a
+ * cabinet LCD has nothing else on it), which on a PC is a slab with no title
+ * bar to drag.  SDL 1.2 places it at $SDL_VIDEO_WINDOW_POS. */
+#define DP_SDL_NOFRAME 0x00000020u
 void *SDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
 {
     static void *(*real)(int, int, int, uint32_t);
     if (!real)
         real = (void *(*)(int, int, int, uint32_t))sdl_sym("SDL_SetVideoMode");
+    if (getenv("DPEMU_FRAME"))
+        flags &= ~DP_SDL_NOFRAME;
     logf_("video: %dx%d bpp %d flags 0x%x\n", w, h, bpp, flags);
     start_reader();
     return real ? real(w, h, bpp, flags) : NULL;
+}
+
+/* The title: "<$DPEMU_LABEL> - <the game's>", so a window on the desktop
+ * says which ticket or app run it belongs to (every rig window does). */
+void SDL_WM_SetCaption(const char *title, const char *icon)
+{
+    static void (*real)(const char *, const char *);
+    const char *label = getenv("DPEMU_LABEL");
+    char buf[256];
+    if (!real)
+        real = (void (*)(const char *, const char *))sdl_sym("SDL_WM_SetCaption");
+    if (!real)
+        return;
+    if (label && *label && title) {
+        snprintf(buf, sizeof buf, "%s - %s", label, title);
+        real(buf, icon);
+    } else
+        real(title, icon);
 }

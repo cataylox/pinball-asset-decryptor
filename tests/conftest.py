@@ -82,6 +82,7 @@ def _isolate_rig_dirs(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("PAD_EMU_DIR", str(d))
     monkeypatch.setenv("PAD_JJP_EMU_DIR", str(d))
     monkeypatch.setenv("PAD_BOF_EMU_DIR", str(d))
+    monkeypatch.setenv("PAD_DP_EMU_DIR", str(d))
 
 
 @pytest.fixture(autouse=True)

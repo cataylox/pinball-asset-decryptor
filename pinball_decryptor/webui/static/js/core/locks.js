@@ -27,6 +27,7 @@ export const WHAT = {
   emulate: "Run the game on this computer.",
   emulate_jjp: "Run the game on this computer.",
   emulate_bof: "Run the game on this computer.",
+  emulate_dp: "Run the game on this computer.",
   emulate_spike1: "Run the game on this computer.",
   multiboot: "Put it on one card with other games behind a boot menu.",
   defaults: "Change the game's factory settings.",
