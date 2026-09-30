@@ -93,6 +93,9 @@ def test_mkconfig_takes_the_titles_config_and_runs_it_on_the_fake_proc(tmp_path)
     assert cfg["dmd_path"] == "./x/"                 # the title's own wins
     assert cfg["hdfont_dir"] == "./assets/dmd/fonts/"
     assert cfg["default_modes"]["osc_input"] is False
+    # no ball search: its coil fire ends in a free ball save, and Drain after
+    # an idle spell never ended the ball (PAD-292)
+    assert cfg["default_modes"]["ball_search"] is False
     assert cfg["dmd_framerate"] == 30
     assert cfg["dmd_dot_filter"] is False            # no dmdgrid*.png shipped
     assert "dmd" not in cfg["default_modes"]

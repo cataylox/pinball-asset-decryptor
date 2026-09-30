@@ -122,7 +122,7 @@ function build() {
   }
   const drain = el("button", "btn", "Drain");
   drain.append(el("span", "k", "D"));
-  drain.title = "A ball on the playfield drains into the trough (the game ends the ball, or serves another)";
+  drain.title = "A ball on the playfield drains into the trough: the game ends the ball - or, while its ball save runs (the first seconds of play), serves it again";
   drain.onclick = () => api("drain");
   bar.append(drain);
   if (M.coin_door != null) {

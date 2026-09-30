@@ -349,11 +349,23 @@ def _name(x):
     return x if isinstance(x, basestring) else getattr(x, "name", None)
 
 
+def _num(sw):
+    digits = "".join(c for c in sw.name if c.isdigit())
+    return int(digits) if digits else 0
+
+
 def _trough_parts(g):
-    """(eject coil name, position switches from the eject end, shooter switch)
+    """(eject coil name, position switches in the order balls sit - from
+    the eject end to the ENTRY, where a drained ball lands - shooter switch)
     of the game's trough - SkeletonGame's Trough / Houdini's TroughHoudini
     (names) or ApiLib's TroughController (Hot Wheels on: objects, positions
-    listed from the eject end)."""
+    listed from the eject end).
+
+    The entry matters: SkeletonGame only checks for a drain once a ball has
+    come in there (its sw_trough6_active - trough7 on Houdini - sets
+    ball_entered_trough); a count going up anywhere else is ignored.  It is
+    the position the trough class has its own `sw_<name>_active` for (else
+    the highest-numbered); the rest sit by their numbers, eject end first."""
     t = getattr(g, "trough", None)
     if t is None:
         return None, [], None
@@ -361,17 +373,24 @@ def _trough_parts(g):
         coil = _name(getattr(t, "release_coil", None) or getattr(t.trough_device, "release_coil", None))
         pos = [g.switches[_name(s)] for s in (t.trough_device.position_switches or [])
                if _name(s) in g.switches]
+        entry = _name(getattr(t.trough_device, "entry_switch", None))
         shooter = _name(getattr(t, "shooter_switch", None))
     else:
         coil = getattr(t, "eject_coilname", None)
         pos = [g.switches[n] for n in (getattr(t, "position_switchnames", None) or [])
                if n in g.switches]
         eject = getattr(t, "eject_switchname", None)
+        pos.sort(key=_num)
         if eject in g.switches and g.switches[eject] in pos:
             pos.remove(g.switches[eject])
             pos.insert(0, g.switches[eject])        # balls sit from the eject end
+        entry = next((s.name for s in pos if hasattr(type(t), "sw_%s_active" % s.name)), None)
+        if entry is None and pos:
+            entry = max(pos[1:] or pos, key=_num).name
         shooter = getattr(t, "shooter_lane_switchname", None)
     pos = [s for s in pos if "jam" not in (getattr(s, "label", "") or s.name).lower()]
+    if entry in [s.name for s in pos]:
+        pos = [s for s in pos if s.name != entry] + [g.switches[entry]]
     return coil, pos, (g.switches[shooter] if shooter in g.switches else None)
 
 
@@ -390,8 +409,10 @@ def _trough_eject(g, pos, shooter):
 
 
 def _trough_drain(g):
-    """A ball drains: it lands on the next free trough position (they fill
-    from the eject end)."""
+    """A ball drains the way a real one does: it lands on the trough's entry
+    switch (the far end) and rolls down to the next free position (they fill
+    from the eject end) - the entry is what makes the game look for a drain
+    (_trough_parts)."""
     if g is None:
         return
     coil, pos, shooter = _trough_parts(g)
@@ -399,8 +420,17 @@ def _trough_drain(g):
     if balls >= len(pos):
         log("trough: drain with the trough full")
         return
-    _set_active(pos[balls], True)
-    log("trough: drained a ball, %d in the trough" % (balls + 1))
+    entry = pos[-1]
+    if not entry.is_active():
+        _set_active(entry, True)
+    for i, s in enumerate(pos):
+        want = i <= balls
+        if s is entry:
+            if not want:
+                _set_active(entry, False, 0.3)          # rolled on down
+        elif s.is_active() != want:
+            _set_active(s, want, 0.3)
+    log("trough: drained a ball in at %s, %d in the trough" % (entry.name, balls + 1))
 
 
 def _coil_fired(driver):

@@ -65,6 +65,11 @@ if not (grid and os.path.isdir(os.path.join(here, grid))):
 # fixed port (9000), so a second slot's game dies on it.  sw.py is the input.
 cfg.setdefault("default_modes", {})
 cfg["default_modes"]["osc_input"] = False
+# Ball search: with no ball rolling, ~18 s without a switch hit is normal on
+# the rig, and the search it starts fires coils that end in a free ball save
+# (Legends of Valhalla's ship release grants 5 s) - so the Drain that follows
+# never ends the ball (PAD-292).  Nothing on the rig is ever lost to find.
+cfg["default_modes"]["ball_search"] = False
 # An A/V-controller title (AP_AVC=1: its launcher sets USING_AVCONTROLLER)
 # hands the screen and sound to apiav: SkeletonGame does that when its own HD
 # display is off.

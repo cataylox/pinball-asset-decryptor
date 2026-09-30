@@ -119,7 +119,17 @@ switch's spot on it), and `apswitches.py` copies the best-matching one into
 layout (Legends of Valhalla 26.08.22 ships none, nor a playfield picture):
 the first one seen for a title is kept in `$AP_ROOT/layouts/<machine dir>/`
 and stands in, as does another cached build of the title; with neither, the
-window is the list alone.  `py/aprun.py` writes the
+window is the list alone.
+
+Drain (`!drain`) drops the ball on the trough's ENTRY switch, then rolls it
+down to the next free position: SkeletonGame only looks for a drain once
+its entry switch fires (`sw_trough6_active` sets `ball_entered_trough`;
+trough7 on Houdini), so a count going up anywhere else was ignored and
+Drain never ended a ball.  The rig config also turns ball search off: with
+no ball rolling, 18 s without a switch hit is normal here, and the search's
+coil fire hands out a free ball save (Legends of Valhalla's ship release,
+5 s) that swallowed the next Drain.  Proven on all five titles: Drain after
+the ball save ends Ball 1 and the game serves Ball 2.  `py/aprun.py` writes the
 switches the game has active to `$AP_RIG/active` (the window lights them)
 and takes `!drain` (a ball back into the trough).
 
