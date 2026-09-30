@@ -51,6 +51,23 @@ for key, subs in (("dmd_path", ("assets/dmd", "assets/screen")),
     if key not in cfg and first(*subs):
         cfg[key] = first(*subs)
 
+# The sound folders under sound_path: SkeletonGame looks for fx/, voice/ and
+# music/ unless told.  Legends of Valhalla keeps its effects in sfx/, and its
+# machine config said so; without it all 172 effects failed to register and
+# the game played voices and music but no effects (PAD-295).
+sound = cfg.get("sound_path")
+if sound:
+    for key, default, alts in (("sfx_dir", "fx", ("sfx", "effects")),
+                               ("voice_dir", "voice", ("voices",)),
+                               ("music_dir", "music", ("songs",))):
+        base = os.path.join(here, sound)
+        if key in cfg or os.path.isdir(os.path.join(base, default)):
+            continue
+        for alt in alts:
+            if os.path.isdir(os.path.join(base, alt)):
+                cfg[key] = alt + "/"
+                break
+
 # The dot-grid picture the desktop draws the DMD through: on the machine
 # config it points at assets/dmd/ (LoV ships none and dies on "./").
 grid = cfg.get("dmd_grid_path")
@@ -70,6 +87,17 @@ cfg["default_modes"]["osc_input"] = False
 # (Legends of Valhalla's ship release grants 5 s) - so the Drain that follows
 # never ends the ball (PAD-292).  Nothing on the rig is ever lost to find.
 cfg["default_modes"]["ball_search"] = False
+# A title with its own attract mode beside its launcher (Legends of Valhalla's
+# attractLegend, Houdini's attract) turns SkeletonGame's stock one off, as
+# Houdini's shipped config does: with it on, SkeletonGame's reset() puts the
+# stock Attract back over the title's, and the stock one gives every high
+# score page the whole list's time - 28 x 2 s, so attract sat about a minute
+# on Grand Champion and each score after it (PAD-295).
+own_attract = any(
+    f.lower().startswith("attract") and f.endswith((".py", ".pyc"))
+    for d in {sys.argv[1], here} if os.path.isdir(d) for f in os.listdir(d))
+if own_attract:
+    cfg["default_modes"].setdefault("attract", False)
 # An A/V-controller title (AP_AVC=1: its launcher sets USING_AVCONTROLLER)
 # hands the screen and sound to apiav: SkeletonGame does that when its own HD
 # display is off.

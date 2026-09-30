@@ -59,6 +59,14 @@ did.
   answers en_US's number rules over C.UTF-8. Tank's Python 3 code still calls
   `locale.format` (removed in 3.12): `format_string` stands in.
 * **OpenCV 2.4's `cv2.cv`** names (procgame's movie code) on 4.2.
+* **What the machine's config.yaml said** (PAD-295). Legends of Valhalla
+  ships none, so `py/mkconfig.py` supplies two of its settings: `sfx_dir:
+  sfx/` (SkeletonGame looks in `fx/`; all 172 effects failed to register,
+  leaving voices and music only), and `default_modes.attract: false` for any
+  title with its own attract module beside its launcher (attractLegend.pyc;
+  Houdini's config already says it). Otherwise SkeletonGame's `reset()`
+  puts the stock Attract back, which holds each high score page for the
+  whole list's time (28 x 2 s): a minute on Grand Champion.
 * **Houdini's fonts.** Every title's framework falls back to
   `/game/houdini/assets/dmd/fonts/Courier.ttf` (AP built its OS image on a
   Houdini). Other titles get their own Courier/Impact, or DejaVu Sans.

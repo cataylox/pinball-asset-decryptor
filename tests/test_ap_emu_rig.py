@@ -122,6 +122,40 @@ def test_mkconfig_points_the_dot_grid_at_assets_dmd(tmp_path):
     assert cfg["dmd_grid_path"] == "./assets/dmd/"
 
 
+def test_mkconfig_legends_effects_folder_and_own_attract(tmp_path):
+    """PAD-295: Legends of Valhalla keeps its effects in sfx/ (SkeletonGame
+    looks in fx/: all 172 failed to register, no effects played), and ships
+    its own attract mode, which the stock one replaced (a minute on every
+    high score page)."""
+    game = tmp_path / "legends"
+    for sub in ("sfx", "voice", "music"):
+        (game / "assets" / "sound" / sub).mkdir(parents=True)
+    (game / "attractLegend.pyc").write_bytes(b"")
+    cfg = _mkconfig(tmp_path, game)
+    assert cfg["sound_path"] == "./assets/sound/"
+    assert cfg["sfx_dir"] == "sfx/"
+    assert "voice_dir" not in cfg and "music_dir" not in cfg   # the defaults
+    assert cfg["default_modes"]["attract"] is False
+
+
+def test_mkconfig_leaves_standard_folders_and_stock_attract(tmp_path):
+    game = tmp_path / "okto"
+    (game / "assets" / "sound" / "fx").mkdir(parents=True)
+    (game / "ApiLib").mkdir()
+    (game / "ApiLib" / "attract.pyc").write_bytes(b"")   # not beside the launcher
+    cfg = _mkconfig(tmp_path, game)
+    assert "sfx_dir" not in cfg
+    assert "attract" not in cfg["default_modes"]
+
+
+def test_mkconfig_keeps_the_titles_own_attract_setting(tmp_path):
+    game = tmp_path / "houdini"
+    game.mkdir()
+    (game / "attract.pyc").write_bytes(b"")
+    (game / "config.yaml").write_text("default_modes:\n  attract: true\n")
+    assert _mkconfig(tmp_path, game)["default_modes"]["attract"] is True
+
+
 def test_sw_reads_the_switch_list(tmp_path, monkeypatch):
     (tmp_path / "switches").write_text(
         "trough1 54 NC TROUGH JAM\nstartButton 60 NO Start Button\nplain 3 NO\n")
