@@ -1787,6 +1787,18 @@ def test_the_identity_locator_says_nothing_rather_than_guessing(mk):
     assert mk.game_identity(elf, "turtles_pro") is None
 
 
+def test_a_grown_game_program_keeps_its_version_however_big_it_is(mk, monkeypatch):
+    """PAD-305: a color-profiled (grown) game program carries a read-only segment of the app's
+    own whose header comes AFTER the data segment's.  "The last PT_LOAD" then read that segment
+    alone, and a game too big for the whole-file fallback (rush_le is 190 MB) lost its
+    version.  The data segment is found by its flags (read-write, not executable)."""
+    monkeypatch.setattr(mk, "IDENT_FULL_SCAN_MAX", -1)          # no whole-file fallback
+    for grown in (False, True):
+        rec = mk.game_identity(mk.synth_game_elf("turtles_pro", "1.59.0", grown=grown),
+                               "turtles_pro")
+        assert rec and rec["version"] == "1.59", grown
+
+
 def test_sidx_and_node_firmware_names_carry_the_versions(mk):
     m = mk.SIDX_NAME_RE.match("turtles_pro-1_59_0.sidx")
     assert (m.group("pkg"), mk.version_text(m.group("ver"))) == ("turtles_pro", "1.59.0")

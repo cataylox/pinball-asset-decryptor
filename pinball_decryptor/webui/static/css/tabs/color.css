@@ -1,0 +1,66 @@
+/* Color profile tab (PAD-305).  Design-system tokens and classes only (css/app.css). */
+
+.cp-page > * { flex-shrink: 0; }
+.cp-page .h3 { font-family: var(--cond); font-weight: 600; font-size: 14px; color: var(--ink); }
+
+.cp-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr); gap: 14px; align-items: start; }
+.cp-main, .cp-side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+html.bp-1020 .cp-grid { grid-template-columns: minmax(0, 1fr); }
+
+/* the before / after wipe */
+.cp-stage { display: flex; flex-direction: column; gap: 10px; }
+.cp-wipe { position: relative; align-self: center; max-width: 100%; line-height: 0; border-radius: 8px; overflow: hidden;
+  background: repeating-conic-gradient(var(--panel-2) 0 25%, var(--panel-3) 0 50%) 0 0 / 16px 16px;
+  border: 1px solid var(--line); cursor: ew-resize; touch-action: none; user-select: none; outline: none; }
+.cp-wipe:focus-visible { box-shadow: 0 0 0 2px var(--accent-line); }
+.cp-wipe canvas { display: block; max-width: 100%; height: auto; }
+.cp-wipe .cp-before { position: absolute; inset: 0; width: 100%; height: 100%; }
+.cp-handle { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--accent);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.35); pointer-events: none; }
+.cp-knob { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; align-items: center;
+  justify-content: center; width: 34px; height: 34px; border-radius: 50%; background: var(--accent); color: var(--accent-ink);
+  box-shadow: var(--shadow); }
+.cp-knob .i { width: 13px; height: 13px; margin: 0 -2px; stroke-width: 2.4; }
+.cp-tag { position: absolute; top: 10px; line-height: 1.2; font-family: var(--cond); font-size: 12px; font-weight: 600;
+  letter-spacing: .03em; padding: 4px 9px; border-radius: 999px; background: rgba(0,0,0,.62); color: #fff; pointer-events: none; }
+.cp-tag-l { left: 10px; }
+.cp-tag-r { right: 10px; }
+.cp-why { margin: 0; }
+
+/* the controls */
+.cp-controls .bd { gap: 14px; }
+.cp-row { display: flex; flex-direction: column; gap: 6px; }
+.cp-curves { margin: 0; display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 12px; align-items: center; }
+.cp-curves svg { width: 112px; height: 112px; overflow: visible; }
+.cp-curves .cp-grid { fill: var(--panel-2); stroke: var(--line-2); stroke-width: 1; }
+.cp-curves .cp-grid-line { stroke: var(--line); stroke-width: .8; fill: none; }
+.cp-curves .cp-diag { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 3 3; fill: none; }
+.cp-curve { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; mix-blend-mode: normal; }
+.cp-curve.r { stroke: #e5534b; }
+.cp-curve.g { stroke: #57ab5a; }
+.cp-curve.b { stroke: #539bf5; }
+
+.cp-group { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.cp-group-hd { display: flex; flex-direction: column; gap: 2px; }
+.cp-slider { display: flex; flex-direction: column; gap: 3px; }
+.cp-sl-hd { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.cp-sl-name { font-size: 13px; color: var(--ink); display: inline-flex; align-items: center; gap: 7px; }
+.cp-slider.r .cp-sl-name::before, .cp-slider.g .cp-sl-name::before, .cp-slider.b .cp-sl-name::before {
+  content: ""; width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.cp-slider.r .cp-sl-name::before { background: #e5534b; }
+.cp-slider.g .cp-sl-name::before { background: #57ab5a; }
+.cp-slider.b .cp-sl-name::before { background: #539bf5; }
+.cp-slider.r input[type=range] { accent-color: #e5534b; }
+.cp-slider.g input[type=range] { accent-color: #57ab5a; }
+.cp-slider.b input[type=range] { accent-color: #539bf5; }
+.cp-sl-val { color: var(--ink-2); font-size: 12px; }
+.cp-slider input[type=range] { width: 100%; margin: 0; }
+.cp-sl-ends { display: flex; justify-content: space-between; font-size: 11px; margin-top: -2px; }
+
+.cp-file { gap: 8px; }
+
+/* the explainer */
+.cp-explain p { margin: 0; color: var(--ink-2); line-height: 1.5; }
+.cp-facts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.cp-facts li { display: flex; gap: 9px; align-items: flex-start; color: var(--ink-2); line-height: 1.45; }
+.cp-facts .i { flex: 0 0 auto; margin-top: 2px; color: var(--ok); }

@@ -6420,6 +6420,24 @@ def version_text(ver):
     return ver.replace("_", ".") if ver else None
 
 
+def _data_segment(elf):
+    """(file start, file end) of the LAST read-write, non-executable PT_LOAD - the game's .data
+    - or None.  A read-only text extension (flags R) or an RWX cave is never it."""
+    if len(elf) < 0x34 or elf[:4] != b"\x7fELF" or elf[4] != 1 or elf[5] != 1:
+        return None
+    phoff = struct.unpack_from("<I", elf, 0x1c)[0]
+    phentsize, phnum = struct.unpack_from("<HH", elf, 0x2a)
+    found = None
+    for i in range(phnum):
+        at = phoff + i * phentsize
+        if at + 32 > len(elf):
+            break
+        p_type, off, _va, _pa, filesz, _memsz, flags = struct.unpack_from("<7I", elf, at)
+        if p_type == 1 and flags & 7 == 6 and filesz:          # PT_LOAD, PF_R|PF_W, no PF_X
+            found = (off, min(len(elf), off + filesz))
+    return found
+
+
 def game_identity(elf, title_dir=None):
     """The game ELF's per-build identity record -> {"version", "raw", "strings", "date",
     "name", "title_dir", "offset"} or None.  Reads bytes only; nothing is written.
@@ -6453,9 +6471,17 @@ def game_identity(elf, title_dir=None):
         s = elf[o:end]
         return None if any(c < 0x20 or c > 0x7E for c in s) else s
 
-    # the record lives in the last PT_LOAD (the writable data segment) on every card measured;
-    # a build that put it elsewhere falls back to the whole file rather than going unread
-    scopes = [(segs[-1][0], segs[-1][0] + segs[-1][2])] if len(segs) > 1 else []
+    # the record lives in the writable data segment (the last PT_LOAD on every stock card
+    # measured); a build that put it elsewhere falls back to the whole file rather than going
+    # unread.  The segment is found by its FLAGS, not its place: a game program the app has
+    # grown (a color profile, edited text, the custom-mode cave - PAD-305) carries a segment
+    # of its own whose header comes after the data segment's, and a game too big for the
+    # whole-file fallback then read only that and its version went unknown.
+    data = _data_segment(elf)
+    if data is not None:
+        scopes = [data]
+    else:
+        scopes = [(segs[-1][0], segs[-1][0] + segs[-1][2])] if len(segs) > 1 else []
     if not scopes or len(elf) <= IDENT_FULL_SCAN_MAX:
         scopes.append((0, len(elf)))
     best = None
@@ -7653,14 +7679,16 @@ def make_synthetic_card(path, tag, seed, with_fs=False, title=None, version=None
 
 
 def synth_game_elf(title_dir="turtles_pro", version="1.59.0", model="TMNT PRO", code="TMT",
-                   date="AUGUST 25, 2019", extra_names=(), with_title=True, hi=0):
+                   date="AUGUST 25, 2019", extra_names=(), with_title=True, hi=0, grown=False):
     """A tiny 32-bit little-endian ARM ELF carrying ONE build-identity record, exactly the shape
     :func:`game_identity` reads off a real card: a .rodata segment of C strings and a .data
     segment holding [code][model...][date][title dir] pointers followed by the uint16 version.
 
     with_title=False builds the godzilla shape (no title-directory pointer in the record); `hi`
     puts junk in the version word's high half (the james_bond shape, where the version really is
-    a uint16 and the word above it is another field).  Pure python - no card, no WSL."""
+    a uint16 and the word above it is another field).  grown=True adds the read-only segment
+    the app's grow appends (a color profile's shaders), its header AFTER the data segment's.
+    Pure python - no card, no WSL."""
     major, minor = (int(x) for x in version.split(".")[:2])
     names = [code, model] + list(extra_names) + [date] + ([title_dir] if with_title else [])
     ro, offs = bytearray(), []
@@ -7670,7 +7698,8 @@ def synth_game_elf(title_dir="turtles_pro", version="1.59.0", model="TMNT PRO", 
         ro += b"\x00" * (-len(ro) % 4)
     ehsize, phentsize, shentsize = 0x34, 32, 40
     text = b"\x00" * 16                                # empty enough that no locator matches it
-    text_off = ehsize + 2 * phentsize
+    nph = 3 if grown else 2
+    text_off = ehsize + nph * phentsize
     ro_off = text_off + len(text)
     ro_va = 0x8000 + ro_off
     data = bytearray(b"\x00" * 16)                     # a run of non-pointers before the record
@@ -7685,13 +7714,18 @@ def synth_game_elf(title_dir="turtles_pro", version="1.59.0", model="TMNT PRO", 
     sh_off = shstr_off + len(shstr)
     elf = bytearray(b"\x7fELF\x01\x01\x01" + b"\x00" * 9)
     elf += struct.pack("<HHIIIIIHHHHHH", 2, 40, 1, ro_va, ehsize, sh_off, 0,
-                       ehsize, phentsize, 2, shentsize, 3, 2)
+                       ehsize, phentsize, nph, shentsize, 3, 2)
     for off, va, blob in ((ro_off, ro_va, ro), (data_off, data_va, data)):
         elf += struct.pack("<IIIIIIII", 1, off, va, va, len(blob), len(blob), 6, 4)
+    ext_off = sh_off + 3 * shentsize
+    if grown:
+        elf += struct.pack("<IIIIIIII", 1, ext_off, 0x200000, 0x200000, 16, 16, 4, 4)
     elf += text + ro + data + shstr
     elf += struct.pack("<10I", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)                       # SHT_NULL
     elf += struct.pack("<10I", 1, 1, 6, 0x8000, text_off, len(text), 0, 0, 4, 0)    # .text
     elf += struct.pack("<10I", 7, 3, 0, 0, shstr_off, len(shstr), 0, 0, 1, 0)       # .shstrtab
+    if grown:
+        elf += b"\x00" * 16                                                        # its bytes
     return bytes(elf)
 
 

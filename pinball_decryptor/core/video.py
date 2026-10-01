@@ -1265,7 +1265,7 @@ def _rate_str(bps):
 
 def transcode_video_to(src_path, dst_path, original_info,
                        match_length=False, cancel_cb=None, max_bytes=None,
-                       match_bitrate=None, best_quality=False):
+                       match_bitrate=None, best_quality=False, colour=None):
     """Transcode *src_path* into *dst_path*, whose extension selects the
     output container / codec.
 
@@ -1311,6 +1311,9 @@ def transcode_video_to(src_path, dst_path, original_info,
     comes out as good as its source allows rather than as big as the stock
     clip was.  A VP8/VP9 slot gets the same idea at libvpx's scale.
 
+    *colour*, a :class:`core.colour_profile.Profile`, is applied to every
+    frame after the scale (PAD-305).
+
     Requires ffmpeg.
     """
     ffmpeg = find_ffmpeg()
@@ -1346,6 +1349,9 @@ def transcode_video_to(src_path, dst_path, original_info,
             f":(ow-iw)/2:(oh-ih)/2"
             + (":color=#00000000" if alpha else ""))
         actions.append(f"→{original_info.width}x{original_info.height}")
+    if colour is not None:
+        vf.extend(colour.ffmpeg_filters())
+        actions.append(colour.label())
 
     # Length matching: trim a longer source, pad a shorter one.  enc_dur is
     # how many seconds of video the encode will actually produce — it drives

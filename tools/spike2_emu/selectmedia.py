@@ -1126,15 +1126,23 @@ def video_stream(src):
     raise Refused(undecodable_video(src, tracks))
 
 
-def scale_png(src, out, size, seek=None):
+def colour_vf(colour):
+    """',<filters>' that put a color profile (core.colour_profile.Profile) on a picture, to
+    append to a filter chain - '' for None."""
+    return "".join("," + f for f in (colour.ffmpeg_filters() if colour is not None else []))
+
+
+def scale_png(src, out, size, seek=None, colour=None):
     """Aspect-fit *src* (any image ffmpeg/PIL reads) into an RGBA WxH PNG, letterboxed
     with transparency.  ffmpeg (lanczos) when present, PIL otherwise.  seek=T grabs
-    the frame T seconds into a video (ffmpeg only; refused past the end)."""
+    the frame T seconds into a video (ffmpeg only; refused past the end).  *colour*,
+    a color profile, is applied after the scale - where the game's shader applies it."""
     w, h = size
     ff = find_ffmpeg()
     if ff:
         vf = ("scale=%d:%d:force_original_aspect_ratio=decrease:flags=lanczos,"
-              "pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=#00000000,format=rgba" % (w, h, w, h))
+              "pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=#00000000,format=rgba%s"
+              % (w, h, w, h, colour_vf(colour)))
         cmd = [ff, "-y", "-v", "error"]
         if seek is not None:
             cmd += ["-ss", "%.3f" % float(seek)]
@@ -1161,13 +1169,16 @@ def scale_png(src, out, size, seek=None):
     im.thumbnail((w, h), Image.LANCZOS)
     canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     canvas.paste(im, ((w - im.width) // 2, (h - im.height) // 2))
+    if colour is not None:
+        canvas = colour.apply_image(canvas)
     canvas.save(out, "PNG", optimize=True)
     return out
 
 
-def make_gif(src, out, plan, start=0.0, workdir=None):
+def make_gif(src, out, plan, start=0.0, workdir=None, colour=None):
     """Two-pass palette GIF (palettegen stats_mode=diff, paletteuse bayer 5,
-    diff_mode rectangle, -loop 0) of *plan* seconds from *start*."""
+    diff_mode rectangle, -loop 0) of *plan* seconds from *start*.  *colour*, a color
+    profile, goes into both passes, so the palette is cut from the corrected frames."""
     ff = find_ffmpeg()
     if not ff:
         raise Refused("ffmpeg is required to build a GIF")
@@ -1176,7 +1187,8 @@ def make_gif(src, out, plan, start=0.0, workdir=None):
     if start:
         pre += ["-ss", "%.3f" % start]
     pre += ["-t", "%.3f" % plan.seconds, "-i", src]
-    fps_scale = "fps=%d,scale=%d:%d:flags=lanczos" % (plan.fps, plan.w, plan.h)
+    fps_scale = "fps=%d,scale=%d:%d:flags=lanczos%s" % (plan.fps, plan.w, plan.h,
+                                                         colour_vf(colour))
     # Both passes are pinned to the track the picture is in (see video_stream):
     # the first as a mapping, the second as the filtergraph's own input label,
     # because a -lavfi graph picks its unlabelled input the same way ffmpeg does.
@@ -1197,13 +1209,13 @@ def make_gif(src, out, plan, start=0.0, workdir=None):
     return out
 
 
-def gif_fit(src, out, plan, start=0.0, workdir=None, log=say):
+def gif_fit(src, out, plan, start=0.0, workdir=None, log=say, colour=None):
     """Encode along gif_ladder(plan) until the result meets the contract.  Returns
     (gif_info, plan_used, attempts).  Says so when it had to shrink."""
     attempts = 0
     for p in gif_ladder(plan):
         attempts += 1
-        make_gif(src, out, p, start, workdir)
+        make_gif(src, out, p, start, workdir, colour=colour)
         with open(out, "rb") as f:
             info = gif_info(f.read())
         why = gif_fits(info)
@@ -1424,6 +1436,66 @@ def logo_bytes(ci, part, title):
         return trim_png(data), path
     raise Refused("%s: no logo under /%s/assets/lcd/ (tried %s)"
                   % (ci.path, title, ", ".join(LOGO_CANDIDATES)))
+
+
+# ============================================================================ the color profile
+#: In the cache key of every picture taken off a card: it is drawn with the color profile that
+#: card's game draws everything through (PAD-305).  One cached before carries no such key and
+#: is rendered again, once; after that the card's own stamp says when it changed.
+COLOUR_KEY = "game-profile"
+#: The biggest game program in the library is rush_le's 190 MB.
+GAME_MAX = 512 << 20
+_profiles = {}
+
+
+def card_profile(path, card, log=say):
+    """The color profile *path*'s GAME draws everything through (PAD-305), read back out of
+    its game program's shaders - a core.colour_profile.Profile - or None: a stock game, or one
+    built with No change.
+
+    A Spike 2 profile lives in the game's shaders, not in its pictures, so a black-and-white
+    edition's logo and attract clip are still in colour ON THE CARD.  The menu puts the same
+    maths on what it takes off the card, or that edition's menu card would be the one thing on
+    the machine still in colour.  A base card + edits folder reads the folder's own game
+    program when the edits rebuilt it.  Never raises: a game this cannot read keeps its own
+    colours, and says so."""
+    if path in _profiles:
+        return _profiles[path]
+    prof = None
+    try:
+        from pinball_decryptor.plugins.stern import shader_profile
+        ci, part, title = card(path)
+        raw = None
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import editsource
+        sp = editsource.split(path)
+        own = os.path.join(sp[1], title, "game") if sp else None
+        if own and os.path.isfile(own):
+            with open(own, "rb") as f:
+                raw = f.read()
+        else:
+            raw = ci.preview(part, "/%s/game" % title, cap=GAME_MAX)
+        prof = shader_profile.profile_in(raw) if raw else None
+    except Exception as e:                                # noqa: BLE001
+        log("  %s: its color profile could not be read (%s), so its pictures keep the "
+            "card's own colours" % (os.path.basename(path), e))
+    _profiles[path] = prof
+    return prof
+
+
+def _with_colour(prof):
+    """``colour=`` for an encoder call when there is a profile, nothing when there is not:
+    a picture with no profile is made by exactly the call it always was."""
+    return {"colour": prof} if prof is not None else {}
+
+
+def profile_words(prof):
+    """' with its <name> color profile' for a log line, '' for none."""
+    if prof is None:
+        return ""
+    return " with its %s color profile" % (prof.name or "own")
 
 
 def find_clip(reader, name):
@@ -1982,6 +2054,7 @@ def _prepare_art(i, img, spec, size, out, work, card, log=say):
         src = img
         if not os.path.isfile(src):
             raise Refused("card image %s does not exist" % src)
+        params["colour"] = COLOUR_KEY
     else:
         src = spec["source"]
         if not os.path.isfile(src):
@@ -2003,8 +2076,10 @@ def _prepare_art(i, img, spec, size, out, work, card, log=say):
         tmp = os.path.join(work, "logo%d.png" % i)
         with open(tmp, "wb") as f:
             f.write(data)
-        scale_png(tmp, target, size)
-        log("  %s: %s of %s (%s)" % (name, path, os.path.basename(img), fmt_bytes(len(data))))
+        prof = card_profile(img, card, log)
+        scale_png(tmp, target, size, **_with_colour(prof))
+        log("  %s: %s of %s (%s)%s" % (name, path, os.path.basename(img), fmt_bytes(len(data)),
+                                       profile_words(prof)))
     elif spec["kind"] == "video":
         scale_png(src, target, size, seek=spec["at"])
         log("  %s: the frame %.2f s into %s" % (name, spec["at"], src))
@@ -2015,10 +2090,11 @@ def _prepare_art(i, img, spec, size, out, work, card, log=say):
     return name
 
 
-def _prepare_anim(i, img, spec, size, out, work, log=say):
+def _prepare_anim(i, img, spec, size, out, work, log=say, card=None):
     """anim<i>.gif from a parsed --anim spec (or None for 'none'): the card's attract
     clip, a video file, or a clip off another card, START seconds in, SECONDS long at
-    FPS, down the GIF budget ladder; kept when the sidecar cache matches."""
+    FPS, down the GIF budget ladder; kept when the sidecar cache matches.  The card's
+    own clip ('auto') is drawn with that card's color profile (:func:`card_profile`)."""
     if spec["kind"] == "none":
         return None
     target = os.path.join(out, "anim%d.gif" % i)
@@ -2038,11 +2114,14 @@ def _prepare_anim(i, img, spec, size, out, work, log=say):
     stamp = source_stamp(src_path)
     params = {"kind": spec["kind"], "clip": clip, "size": list(size),
               "start": float(spec["start"]), "seconds": secs_key, "fps": fps_key}
+    if spec["kind"] == "auto":
+        params["colour"] = COLOUR_KEY
     if is_cached(target, stamp, params):
         log("  %s: cached (%s)" % (name, spec["spec"] if spec["kind"] != "auto"
                                    else "%s, the attract clip of %s" % (spec["spec"], os.path.basename(img))))
         return name
     drop_sidecar(target)
+    prof = None
     if clip:
         mov = os.path.join(work, "clip%d.mov" % i)
         try:
@@ -2062,7 +2141,9 @@ def _prepare_anim(i, img, spec, size, out, work, log=say):
                     % (name, os.path.basename(src_path), exc))
                 return None
             raise
-        log("  %s: %s of %s (%s)" % (name, path, os.path.basename(src_path), fmt_bytes(nbytes)))
+        prof = card_profile(src_path, card, log) if (spec["kind"] == "auto" and card) else None
+        log("  %s: %s of %s (%s)%s" % (name, path, os.path.basename(src_path), fmt_bytes(nbytes),
+                                       profile_words(prof)))
         src = mov
     else:
         src = src_path
@@ -2078,7 +2159,7 @@ def _prepare_anim(i, img, spec, size, out, work, log=say):
         plan = gif_native_plan(size, native, spec["seconds"])
         log("  %s: the source's own %.3g fps, a %.3g s loop (%d frames)"
             % (name, plan.fps, plan.seconds, plan.frames))
-    gif_fit(src, target, plan, spec["start"], work, log)
+    gif_fit(src, target, plan, spec["start"], work, log, **_with_colour(prof))
     write_sidecar(target, stamp, params)
     return name
 
@@ -2420,15 +2501,17 @@ def _rgba(colour):
     return bytes(c)
 
 
-def panel_from_file(src, size):
+def panel_from_file(src, size, colour=None):
     """*src* (any image ffmpeg reads) scaled to FIT *size*, centred, the rest
-    transparent -> a Panel.  ffmpeg does the decode and the lanczos."""
+    transparent -> a Panel.  ffmpeg does the decode and the lanczos, and puts
+    *colour* (a color profile) on it after the scale."""
     ff = find_ffmpeg()
     if not ff:
         raise Refused("ffmpeg is required to read %s" % src)
     w, h = int(size[0]), int(size[1])
     vf = ("scale=%d:%d:force_original_aspect_ratio=decrease:flags=lanczos,"
-          "pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=#00000000,format=rgba" % (w, h, w, h))
+          "pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=#00000000,format=rgba%s"
+          % (w, h, w, h, colour_vf(colour)))
     r = run([ff, "-v", "error", "-i", src, "-frames:v", "1", "-vf", vf,
              "-pix_fmt", "rgba", "-f", "rawvideo", "-"], "ffmpeg decode")
     return Panel(w, h, px=r.stdout)
@@ -2699,8 +2782,11 @@ def _prepare_group(g, members, art_style, anim_style, images, size, out, work,
                 f.write(data)
             # THE LOGO KEEPS ITS ALPHA all the way here: see Panel.blit - what
             # is stored under it is anything at all, and painting it was how the
-            # first real card came out as a coloured box.
-            out_logos.append(panel_from_file(tmp, size))
+            # first real card came out as a coloured box.  Each member's logo
+            # carries ITS game's color profile: a random card over a colour and
+            # a black-and-white edition shows one of each.
+            out_logos.append(panel_from_file(
+                tmp, size, colour=card_profile(images[m], card, log)))
         return out_logos
 
     if art_style and art_style != "none":
@@ -2716,6 +2802,8 @@ def _prepare_group(g, members, art_style, anim_style, images, size, out, work,
         art_stamp = source_stamp(art_style) if own_file else stamp
         params = {"style": art_style, "size": list(size),
                   "members": list(members), "sources": sources}
+        if not own_file:
+            params["colour"] = COLOUR_KEY
         if is_cached(target, art_stamp, params):
             log("  %s: cached (%s)" % (name, art_style))
         elif own_file:
@@ -2732,7 +2820,7 @@ def _prepare_group(g, members, art_style, anim_style, images, size, out, work,
         target = os.path.join(out, "ganim%d.gif" % g)
         name = os.path.basename(target)
         params = {"style": anim_style, "size": list(size),
-                  "members": list(members), "sources": sources}
+                  "members": list(members), "sources": sources, "colour": COLOUR_KEY}
         if is_cached(target, stamp, params):
             log("  %s: cached (%s)" % (name, anim_style))
         else:
@@ -2826,7 +2914,7 @@ def cmd_prepare(a):
                 sources=sources)
         for i, img in enumerate(images):
             art = _prepare_art(i, img, arts[i], size, out, work, card)
-            anim = _prepare_anim(i, img, anims[i], size, out, work)
+            anim = _prepare_anim(i, img, anims[i], size, out, work, card=card)
             music = _prepare_music(i, musics[i], out)
             rows.append([art, anim, music, None])
             specs.append((arts[i]["spec"], anims[i]["spec"], confirm_each[i],

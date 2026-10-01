@@ -129,6 +129,10 @@ class EmulateTab(TabService):
         self.emulate_overrides_var = self.var("overrides", "bool", False)
         # PAD-251 (DragonRR): the Scenes tab's edits have their own on/off under the opt-in
         self.emulate_scene_edits_var = self.var("scene_edits", "bool", True)
+        # PAD-305: run with the stock colours, skipping the Color profile tab's
+        # correction (the profile is made for the machine's screen, and the
+        # emulator is watched on the PC's).  Not remembered: off each session.
+        self.emulate_colour_stock_var = self.var("colour_stock", "bool", False)
         self.emulate_country_var = self.var("country", "str",
                                             rig.COUNTRY_GAME)
         self.emulate_power_var = self.var("power", "str",
@@ -148,6 +152,13 @@ class EmulateTab(TabService):
         # PAD-251: the override set the running game was started with ({"assets", "out"}), so
         # a scene edited on the Scenes tab can be handed to it live (push_live_scene)
         self._live_ovr = None
+        # PAD-305: the set the game runs ({"assets", "out"}) and the (card,
+        # run card) it was built from, for the color switch's status line
+        self._live_set = None
+        self._colour_src = None
+        # the Color profile tab's "Try it in the emulator": Start again once
+        # the running game has stopped (a count of polls left to wait)
+        self._restart_wait = 0
         self._launch_accepted = False
         self._launch_serial = 0
         self._loading = False
@@ -222,6 +233,8 @@ class EmulateTab(TabService):
             "write", lambda *_a: self._overrides_paint())
         self.emulate_scene_edits_var.trace_add(
             "write", lambda *_a: self._overrides_paint())
+        self.emulate_colour_stock_var.trace_add(
+            "write", lambda *_a: self._on_colour_stock())
         self._volume_var.trace_add("write", self._on_volume_change)
         self._mute_var.trace_add("write", self._on_volume_change)
 
@@ -720,6 +733,18 @@ class EmulateTab(TabService):
         # hover (must survive #4).
         self.set(assets=assets, ovr_hint=text, ovr_refused=False,
                  scene_edits_offer=bool(assets) and self._project_has_scene_edits(assets))
+        self._refresh_colour_note()
+
+    def _refresh_colour_note(self):
+        """PAD-305: offer "stock colours" only while the project has a color
+        profile staged (the Color profile tab)."""
+        from ...core import colour_profile
+        assets = self._assets()
+        try:
+            on = bool(assets) and colour_profile.for_project(assets) is not None
+        except Exception:                                # noqa: BLE001
+            on = False
+        self.set(colour_offer=on)
 
     def _project_has_scene_edits(self, assets):
         try:
@@ -1688,6 +1713,23 @@ class EmulateTab(TabService):
         return env
 
     def _prepare_overrides(self, card, assets, selector=False):
+        """The override set (see :meth:`_prepare_overrides_inner`), with the
+        color profile held off for its staging and build when the "stock
+        colours" tick asks (PAD-305)."""
+        from ...core import colour_profile
+        stock = False
+        try:
+            stock = bool(self.emulate_colour_stock_var.get())
+        except Exception:                                # noqa: BLE001
+            pass
+        if stock and colour_profile.for_project(assets) is not None:
+            self._log("[emulate] stock colors: your color profile is left "
+                      "out of this run")
+        with colour_profile.forced(False if stock else None):
+            return self._prepare_overrides_inner(card, assets,
+                                                 selector=selector)
+
+    def _prepare_overrides_inner(self, card, assets, selector=False):
         from ...core.checksums import read_checksums
         from ...plugins.stern import engine as stern_engine
         if not os.path.isdir(assets):
@@ -1710,6 +1752,7 @@ class EmulateTab(TabService):
                                             stern_engine.card_title_index)
         if note:
             self._log("[emulate] " + note)
+        self._colour_src = (card, picked)
         out = rig.overrides_dir()
         fp = rig.assets_fingerprint(assets)
         manifest = stern_engine.read_override_manifest(out)
@@ -1763,7 +1806,37 @@ class EmulateTab(TabService):
     def _live_ready(self, assets, out, env):
         self._live_ovr = ({"assets": os.path.normcase(os.path.abspath(assets)), "out": out}
                           if env is not None and self._scene_edits_on() else None)
+        # PAD-305: the set the game runs, whatever the Scenes tick, for the
+        # colour switch's live swap
+        self._live_set = ({"assets": assets, "out": out} if env is not None
+                          else None)
         return env
+
+    # -- PAD-305: the colour switch reaching the running game ("on the fly") --
+    def _on_colour_stock(self):
+        self._refresh_colour_note()
+        self.colour_live()
+
+    def colour_live(self):
+        """The color switch (Stock colors, the Color profile tab's On/Off)
+        flipped while a game runs.  On Spike 2 the profile is in the game
+        program's drawing shaders (PAD-305 shader_profile), which the game
+        compiled at boot, so the change can only take at the next Start: the
+        status line under the tick says so.  False when no game runs on this
+        project's edits."""
+        o = self._live_set
+        if (not o or not self._last_up or self._starting or self._stopping
+                or not self._colour_src):
+            return False
+        try:
+            if not self.emulate_overrides_var.get():
+                return False
+        except Exception:                                # noqa: BLE001
+            return False
+        self.set(colour_live="Takes effect when you Start the game again: "
+                 "the colors are in the game program, which a running game "
+                 "can't swap.")
+        return True
 
     def _scene_edits_on(self):
         try:
@@ -2184,6 +2257,12 @@ class EmulateTab(TabService):
                     if prepare is not None:
                         over()
                     return
+            if not no_rig() and not self._rig_layer_up():
+                self._starting = False
+                self._post(down)
+                if prepare is not None:
+                    over()
+                return
             if ovr_request is not None:
                 extra = self._prepare_overrides(*ovr_request,
                                                 selector=ovr_selector)
@@ -2381,12 +2460,76 @@ class EmulateTab(TabService):
             from ...core import rigslot
             rigslot.release_claimed()
             self._stopping = False
+            if self._restart_wait:
+                self._post(self._restart_when_down)
             if needs_restart and sys.platform == "win32":
                 self._post(self._offer_wsl_restart)
             # the next poll re-reads the status (Stop is VERIFIED)
             self._post(self._poll_soon)
 
         self._thread(run)
+
+    # -- PAD-305: the Color profile tab's "Try it in the emulator" ----------
+    def try_colour(self):
+        """Run this project's edits with its color profile: the opt-in on,
+        Stock colors off, and the game started, or stopped and started again
+        when one is running (the profile is in the game program's shaders,
+        which the game compiles at boot, so only a fresh Start shows it).
+        Returns the sentence the Color profile tab shows."""
+        if not self._card():
+            return ("Pick a card image on the Emulate tab first (the one you "
+                    "extracted, or any card of this game).")
+        if self._starting or self._stopping or self._preparing is not None:
+            return "The emulator is busy starting or stopping; try again in a moment."
+        self.emulate_overrides_var.set(True)
+        self.emulate_colour_stock_var.set(False)
+        self.set(colour_live="")
+        if self._last_up or self._launched():
+            self._restart_wait = 40
+            self.stop()
+            return "Restarting the game with your color profile..."
+        self.start()
+        return "Starting the game with your color profile..."
+
+    def _restart_when_down(self):
+        """After a Try-it Stop: Start once the rig says nothing is up."""
+        if not self._restart_wait:
+            return
+        if self._stopping or self._last_up or self._launched():
+            self._restart_wait -= 1
+            if self._restart_wait > 0:
+                self._after(500, self._restart_when_down)
+            return
+        self._restart_wait = 0
+        self.start()
+
+    def _rig_layer_up(self):
+        """Every rig the same (PAD-305): rig N >= 1 is the ordinary rig seen
+        through its own layer (padpath.sh RIG SLOTS), and that layer is
+        mounted by the run itself, AFTER the preparation - so a mode install
+        (this project's modes, a Modes tab Try it) found no rootfs on a rig
+        that had never run, and after a WSL restart wrote into the bare
+        mount point, which the run's mount then hid.  The layer goes up here,
+        before anything is prepared (``slot.sh up N``, root, a no-op when it
+        is up).  True when it is up or there is nothing to mount."""
+        n = rig.slot_up_cmd()
+        if n is None:
+            return True
+        try:
+            r = self._run(n, capture_output=True, timeout=120)
+        except (OSError, subprocess.SubprocessError) as exc:
+            self._log("[emulate] the rig's own layer could not be mounted: %s"
+                      % exc)
+            return False
+        said = ((r.stdout or b"") + (r.stderr or b"")).decode(
+            "utf8", "replace").strip()
+        if r.returncode != 0:
+            self._overrides_refuse("This rig could not be set up for the run: "
+                                   "%s" % (said[-400:] or "exit %d" % r.returncode))
+            return False
+        if "mounted:" in said:
+            self._log("[emulate] " + said.splitlines()[-1])
+        return True
 
     def _poll_soon(self):
         if self._poll_job is not None:

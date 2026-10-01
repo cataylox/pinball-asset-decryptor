@@ -43,7 +43,7 @@ EXPORT_TIP = (
     "staged for the build — as a CSV.\n\nFor comparing two projects "
     "that disagree about how many changes they hold.")
 TEXT_GROW_LABEL = ("Advanced: grow the game program / a scene for longer text "
-                   "(default on; a machine has not booted such a build yet)")
+                   "(default on)")
 TEXT_GROW_TIP = (
     "On: a Replace Text edit longer than its original slot (a row "
     "whose Max reads \"96 (grows)\") is placed in a new read-only "
@@ -52,8 +52,9 @@ TEXT_GROW_TIP = (
     "length; either needs the card built as an image, not a "
     "Direct-SD write. Off: every row keeps its original budget and "
     "over-long edits are skipped with a named reason in the build "
-    "log. Proven in the PC emulator only; keep the stock card to "
-    "hand. Mirrored to PAD_STERN_TEXT_GROW for the build.")
+    "log. A game program grown this way has been booted on a "
+    "machine; a scene rewritten at a new length is proven in the PC "
+    "emulator only. Mirrored to PAD_STERN_TEXT_GROW for the build.")
 #: Stern Spike 2: the SD card class a build is for (plugins/stern/card_size.py;
 #: the engine's no-space failure points at this control by its label).
 CARD_SIZE_LABEL = "SD card size"
@@ -702,6 +703,18 @@ class WriteTab(TabService):
         hidden = len(drives) - len(shown)
         self._drives_cache = list(shown)
         self.set(drives=[d.display for d in shown], drive_text="")
+        if prefer == "sd_card" and len(shown) > 1 and (
+                best is None or confidence != "high"):
+            # PAD-305: a guess is not a pick (a size guess erased a USB
+            # stick beside the card); only a drive that IS the card - its
+            # Stern boot partition says so - is pre-selected.
+            text = "(pick the SD card yourself)"
+            self.set(drive_text=text)
+            self.write_drive_display_var.set(text)
+            self.log("PAD could not tell which drive is the SD card%s: pick "
+                     "it from the list." % (" (%s)" % reason if reason else ""),
+                     "warning")
+            return
         if best is not None:
             self.write_drive_display_var.set(best.display)
             self.log("Selected SSD: %s" % best.display,

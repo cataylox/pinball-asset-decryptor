@@ -3398,7 +3398,7 @@ def _compute_patches_or_restore(restore_ok, log, *args, **kwargs):
 
 
 def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
-                         grow=None):
+                         grow=None, shader=None):
     """Resolve game-program (ELF) display-text edits for one firmware file.
 
     Three composition modes, mirroring how the firmware itself reaches the
@@ -3436,6 +3436,15 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
     # Only an edit longer than its original can need new space (a longer
     # standalone name grows its host line too, and is itself longer).
     over = [o for o, n in edits.items() if len(n) > len(o)]
+    if shader is not None and not (grow is not None and grow.get("ok")):
+        log("Color profile: not applied to this card (%s); the game draws in "
+            "its own colors."
+            % ((grow or {}).get("why") or "the game program can't grow on "
+               "this write"), "warning")
+        shader = None
+    if shader is not None and not over:
+        # the profile alone: the census below needs the extension segment
+        over = [None]
     reloc = None
     # Why longer text has nowhere to go, carried into plan_writes so each
     # skipped line names the WRITE's limit instead of blaming itself.
@@ -3457,6 +3466,24 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
                 % (len(over), no_grow_why), "warning")
     file_writes, n, blob = progtext.plan_writes(raw, edits, log, reloc=reloc,
                                                 no_grow_why=no_grow_why)
+    if shader is not None and reloc is not None:
+        # PAD-305: the drawing shaders, corrected, after any longer text in
+        # the same segment (word-aligned, as the copies' readers expect)
+        from . import shader_profile
+        blob = bytes(blob) + bytes(-len(blob) % 4)
+        s_writes, s_blob, s_report = shader_profile.plan(
+            raw, shader, reloc["base_va"] + reloc["used"] + len(blob))
+        if s_blob and (reloc["used"] + len(blob) + len(s_blob)
+                       <= reloc["capacity"]):
+            file_writes = list(file_writes) + s_writes
+            blob += s_blob
+            log("Color profile (%s): %s." % (shader.label(),
+                                             shader_profile.describe(s_report)),
+                "info")
+        else:
+            log("Color profile: the corrected shaders don't fit the space the "
+                "game program can grow into; the colors are left as they are.",
+                "warning")
     if blob:
         try:
             grown = _grow_program_text(raw, file_writes, blob, reloc,
@@ -3543,11 +3570,10 @@ def _grow_program_text(raw, file_writes, blob, reloc, patched_fw, grow_dir,
     os.chmod(_lp(staged), 0o755)
     log("Program text: %d byte(s) of longer text placed in the game program's "
         "extension segment at 0x%x (%s, file+0x%x, read-only); the game "
-        "program grows %d -> %d bytes and is written whole. No card built "
-        "this way has been booted on a machine yet — it is proven in the PC "
-        "emulator only."
+        "program grows %d -> %d bytes and is written whole (a game program "
+        "grown this way has been booted on a machine)."
         % (len(blob), va + used, how, off + used, stock_len, len(buf)),
-        "warning")
+        "info")
     return {"node": node, "path": staged, "valpatch_mode": vmode,
             "new": patched_fw is None}
 
@@ -3727,8 +3753,38 @@ def _classify_audio_edits(byidx, audio_edits, assets_dir):
     return fits, grows
 
 
+def _shader_colour_profile(assets_dir):
+    """The color profile a Spike 2 build of *assets_dir* applies to
+    everything the game draws (PAD-305), or ``None``: no profile staged on
+    the Color profile tab, an Emulate run's "Stock colors" hold
+    (core/colour_profile.forced) and a profile that changes nothing all
+    answer ``None``.  Never raises."""
+    try:
+        from ...core import colour_profile
+        return colour_profile.active(assets_dir)
+    except Exception:                                   # noqa: BLE001
+        return None
+
+
+def _game_program_path(reader, cancel):
+    """``(card_path, node)`` of the card's game ELF (``game_real`` or ``game``
+    beside ``image.bin``), or ``(None, None)``."""
+    try:
+        _img, fw_ino = reader.find_spike_assets()
+    except Exception:                                   # noqa: BLE001
+        return None, None
+    if not fw_ino:
+        return None, None
+    for path, ino, node in reader.iter_regular_files(min_size=1):
+        if cancel():
+            break
+        if ino == fw_ino:
+            return path, node
+    return None, None
+
+
 def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
-                        grow_dir=None, dest_is_device=False):
+                        grow_dir=None, dest_is_device=False, shader=None):
     """Resolve the user's display-text edits to a flat list of in-place writes
     ``[(disk_offset, bytes), ...]`` (same form ``_compute_patches`` collects).
 
@@ -3767,14 +3823,28 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
 
     grown = {"fw": None, "radium": {}}
     edits = _changed_radium_text(assets_dir)
+    # PAD-305: *shader* (a color profile) is a game-program edit of its own;
+    # the program joins the edits even when no line of its text changed.
+    fw_path = None
+    if shader is not None:
+        fw_path, _fw_node = _game_program_path(reader, cancel)
+        if fw_path is None:
+            log("Color profile: the game program wasn't found on the card; "
+                "the colors are left as they are.", "warning")
+            shader = None
+        else:
+            edits = dict(edits)
+            edits.setdefault(fw_path, [])
     if not edits:
         return [], 0, {}, {}, grown
     nodes = _resolve_card_nodes(reader, list(edits.keys()), cancel)
 
     # The growth gate is asked once, and only when some edit is longer than
     # its original (the ext4 probe reaches for WSL; a write of same-length
-    # edits never pays for it).
-    over_any = any(len(n) > len(o) for prs in edits.values() for o, n in prs)
+    # edits never pays for it).  The color profile always needs it: the
+    # corrected shaders are longer than the game's own.
+    over_any = (shader is not None) or any(
+        len(n) > len(o) for prs in edits.values() for o, n in prs)
     if over_any and grow_dir:
         g_ok, g_why = _text_grow_gate(dest_is_device)
     else:
@@ -3800,7 +3870,8 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
             is_fw = False
         if is_fw:
             pw, pn, pov, pgrown = _program_text_writes(
-                reader, node, card_path, pairs, patched_fw, log, grow=grow)
+                reader, node, card_path, pairs, patched_fw, log, grow=grow,
+                shader=shader if card_path == fw_path else None)
             writes += pw
             n_strings += pn
             _merge_radium_overlays(overlays, pov)
@@ -6098,6 +6169,10 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     # Edited LCD display strings (text/strings.tsv rows where replacement !=
     # original) — patched size-neutral, in place, into their .radium scenes.
     text_edits = _changed_radium_text(assets_dir)
+    # PAD-305: the color profile, applied to everything the game draws by
+    # patching its drawing shaders (plugins/stern/shader_profile.py) - a game
+    # program edit with no file of the project behind it
+    shader_prof = _shader_colour_profile(assets_dir)
     # Recoloured display text (text/colors.tsv) — the colour lives in the scene,
     # not in the font, so this is a radium patch too.
     color_edits = _changed_radium_text_colors(assets_dir)
@@ -6249,7 +6324,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             and not text_edits and not color_edits and not layout_edits
             and not tree_edits
             and not boot_edits and not mode_list and not code_list
-            and not stock_mode_edits):
+            and not stock_mode_edits and shader_prof is None):
         raise NothingToWrite(
             "Nothing to write: " + _modes_left_out_clause(_modes_left_out)
             + "every sound (idxNNNN.wav / music_catNN_*.wav) "
@@ -6392,6 +6467,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             radimg_edits=radimg_edits,
             # and the small ones (_SPACE_MARGIN)
             margin=(_SPACE_MARGIN if (text_edits or radimg_edits or _modes_on
+                                      or shader_prof is not None
                                       or (audio_edits and _pathA_enabled()))
                     else 0),
             cancel=cancel)
@@ -7053,14 +7129,15 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # the grow scratch dir and copied onto the card by the grow job, like
         # the cave's firmware.
         grown_text = None
-        if text_edits:
+        if text_edits or shader_prof is not None:
             if progress:
                 progress(90, 100, "Preparing display text...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             (text_writes, n_text, _t_ov, fw_text_overlay,
              grown_text) = _radium_text_writes(
                 reader, assets_dir, log, cancel, patched_fw=patched_gr,
-                grow_dir=grow_work, dest_is_device=dest_is_device)
+                grow_dir=grow_work, dest_is_device=dest_is_device,
+                shader=shader_prof)
             _merge_radium_overlays(radium_overlays, _t_ov)
             if cancel():
                 return None, None, None, None, None
@@ -7071,6 +7148,24 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     fw_node = gfw["node"]
                 if gfw.get("valpatch_mode") is not None:
                     valpatch_mode = gfw["valpatch_mode"]
+                if gfw.get("new") and grow_places is not None:
+                    # PAD-305: a grown sound bank (a mode's new end sound) has
+                    # records the sound engine's own count has no word for.
+                    # The cave bakes that count's patch into ITS rebuilt
+                    # program and an in-place build writes it on the card, but
+                    # a program grown here (longer text, the colour profile's
+                    # shaders) is copied whole and the in-place write below is
+                    # skipped for it, so the patch goes into this file, before
+                    # its .sidx record is computed from it.
+                    from . import valpatch as _vp
+                    with open(_lp(patched_gr), "rb") as _f:
+                        _gbuf = bytearray(_f.read())
+                    for _o, _b in _vp.sound_count_overlay(bytes(_gbuf),
+                                                          log).items():
+                        _gbuf[_o:_o + len(_b)] = _b
+                    with open(_lp(patched_gr), "wb") as _f:
+                        _f.write(bytes(_gbuf))
+                    del _gbuf
 
         # The game's own modes (item 145): staged word edits in the game ELF,
         # after the display text so a grown text ELF (or the cave's) takes
@@ -7337,19 +7432,24 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             if cancel():
                 return None, None, None, None, None
 
+        # Every kind of write below counts, the Scenes window's in-place ones
+        # included: PAD-251 added tree_writes to the list but not to this
+        # check, so a project whose only change was a size-neutral scene edit
+        # (a move, a resize, a hide) was refused here, by Write and Emulate.
         if (not audio_patches and not music_patches and not video_patches
                 and not video_grow_jobs and not image_patches
                 and not texture_patches and not radimg_writes
                 and not text_writes and not color_writes
-                and not layout_writes and not radium_grow_jobs
+                and not layout_writes and not tree_writes
+                and not radium_grow_jobs
                 and not boot_writes and boot_grow is None
                 and patched_gr is None and mode_plan is None
                 and not stock_mode_edits):
             raise RuntimeError(
                 "Nothing could be written: no sound re-encoded, no replaced "
                 "video or image could be fit to its original slot, and no "
-                "display-text edit fit its original string (the card image was "
-                "not modified).")
+                "display-text or scene edit fit its original bytes (the card "
+                "image was not modified).")
 
         # Flatten every patch to absolute (disk_offset, bytes) writes via the
         # ext4 file->disk map.  The offsets are relative to the start of the
@@ -8865,6 +8965,11 @@ def card_title_index(path):
         return ()
 
 
+def _colour_signature(assets_dir):
+    from ...core import colour_profile
+    return colour_profile.signature(assets_dir)
+
+
 def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                     cancel=None, label=None, run_card=None, sound_ok=None, scene_edits=True):
     """Build an OVERRIDE SET: the card files the user's edits touch, patched,
@@ -9185,6 +9290,8 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         "removed": removed,
         # PAD-251: whether the Scenes tab's edits are in this set (the Emulate tab's tick)
         "scene_edits": bool(scene_edits),
+        # PAD-305: the color profile the set's pictures and clips carry
+        "colour_profile": _colour_signature(assets_dir),
     }
     if modes_out:
         manifest["modes"] = modes_out

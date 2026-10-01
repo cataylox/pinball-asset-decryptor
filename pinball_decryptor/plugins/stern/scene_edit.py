@@ -649,7 +649,8 @@ def _max_id(scene):
 
 def _texture_from_png(path, premultiply=True):
     """``(w, h, fmt, BC3 blob)`` of the PNG at *path*, padded to the block grid, premultiplied
-    as the card's own art is."""
+    as the card's own art is.  (The color profile reaches it on the machine through the
+    game's drawing shaders, PAD-305, like everything else it draws.)"""
     import numpy as np
     from PIL import Image
     from . import dds as _dds

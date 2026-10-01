@@ -23,6 +23,9 @@ TABS = (
     ("text", "text", "Replace Text", "Text", "Replace", "text"),
     # PAD-251: the scene editor, a page of its own (it was a floating window)
     ("scenes", "scenes", "Scenes", "Scenes", "Replace", "scenes"),
+    # PAD-305: the colour correction a build applies for the machine's display
+    ("color", "color", "Color Profile", "Color profile", "Replace",
+     "palette"),
     ("modes", "modes", "Modes", "Modes", "Make", "modes"),
     ("defaults", "defaults", "Default Settings", "Defaults", "Make",
      "defaults"),

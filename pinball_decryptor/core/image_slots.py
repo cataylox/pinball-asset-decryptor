@@ -111,7 +111,8 @@ def scan_image_slots(assets_dir: str, roots=None, exts=None,
 
 def stage_replacement(slot: ImageSlot, replacement_path: str,
                       keep_size: bool = False,
-                      original_info: Optional[ImageInfo] = None):
+                      original_info: Optional[ImageInfo] = None,
+                      colour=None):
     """Stage a single replacement over *slot*.
 
     The replacement is scaled to the slot's pixel dimensions (unless
@@ -132,7 +133,7 @@ def stage_replacement(slot: ImageSlot, replacement_path: str,
         info = (original_info or slot.info
                 or detect_image_info(slot.abs_path))
         ok, detail = transcode_image_to(replacement_path, tmp, info,
-                                        keep_size=keep_size)
+                                        keep_size=keep_size, colour=colour)
         if ok and keep_size:
             detail = ", ".join(d for d in (detail, "own size kept") if d)
         if not ok:
@@ -170,6 +171,9 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
     from .checksums import read_baseline_any
     from . import staged_originals
 
+    from . import colour_profile
+    # the project's colour profile (PAD-305), read once for the whole pass
+    colour = colour_profile.active(assets_dir) if assets_dir else None
     items = [(rel, rep) for rel, rep in assignments.items()
              if rep and rel in slots_by_rel]
     total = len(items)
@@ -196,7 +200,7 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
             if snap:
                 original = detect_image_info(snap)
         ok, detail = stage_replacement(slot, rep, keep_size=rel in keep_size,
-                                       original_info=original)
+                                       original_info=original, colour=colour)
         if ok:
             staged += 1
             if log_cb:

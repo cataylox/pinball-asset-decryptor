@@ -139,6 +139,41 @@ def test_a_same_size_edit_is_patched_in_place(tmp_path):
     assert sorted(patch) == sorted(off for off, _b in writes)
 
 
+def test_a_project_whose_only_change_is_a_same_size_scene_edit_is_written(
+        tmp_path, monkeypatch):
+    """_compute_patches refused a project whose ONLY change was a same-size Scenes edit
+    ("Nothing could be written"): its last check counted every kind of write but the Scenes
+    window's in-place ones, so neither Write nor Emulate could run it.  Found on the real
+    Godzilla LE 1.16 card (PAD-305: five edits planned, then refused)."""
+    from tests._ext4_fake import FakeExt4Reader, materialize_files
+    from pinball_decryptor.plugins.stern import valpatch
+
+    class _Card(FakeExt4Reader):
+        base = 0
+
+    data = scene()
+    tree = {"godzilla_le": {"assets": {"lcd": {"demand_loaded": {"abc": {
+        "scene.radium": data}}}}}}
+    reader = _Card(tree)
+    img = tmp_path / "card.raw"
+    img.write_bytes(bytes(4096))
+    materialize_files(str(img), tree)
+    monkeypatch.setattr(engine, "_locate", lambda f, p: (reader, None, None))
+    monkeypatch.setattr(engine, "_linux_partitions", lambda p: [(0, 1 << 30)])
+    monkeypatch.setattr(engine, "_compute_sidx_writes", lambda *a, **k: [])
+    monkeypatch.setattr(valpatch, "compute_writes", lambda *a, **k: ([], None))
+    proj = tmp_path / "project"
+    proj.mkdir()
+    a = _project(proj, [{"op": "move", "node": 50, "dx": 5, "dy": 5}])
+    out = tmp_path / "ovr"
+    _counts, _mode, _val, files = engine.write_overrides(str(img), a, str(out))
+    assert [p for p, _n in files] == [CARD]
+    shipped = (out / CARD.lstrip("/")).read_bytes()
+    assert len(shipped) == len(data) and shipped != data      # in place, same size
+    art = [d for d in E.draw_list(E.manifest(T.parse(shipped)), 1) if d["path"][-1] == "Art"][0]
+    assert art["m"][4] == pytest.approx(105.0)
+
+
 @pytest.mark.parametrize("device", [False, True])
 def test_a_scene_that_grows_goes_whole_and_not_to_a_card_directly(tmp_path, device):
     a = _project(tmp_path, [{"op": "add_text", "parent": None, "index": 0,

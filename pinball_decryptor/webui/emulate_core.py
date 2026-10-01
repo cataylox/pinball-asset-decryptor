@@ -454,6 +454,10 @@ def overrides_reason(manifest, card_path, assets_dir, fingerprint,
     if bool(manifest.get("scene_edits", True)) != bool(scene_edits):
         return ("the Scenes tab's edits were switched %s since it was built"
                 % ("on" if scene_edits else "off"))
+    from ..core import colour_profile
+    if str(manifest.get("colour_profile") or "") != colour_profile.signature(
+            assets_dir):
+        return "the color profile was changed or switched since it was built"
     return ""
 
 
@@ -1021,6 +1025,20 @@ def parse_multiboot(text):
         if state in ("yes", "no", "unknown"):
             return state, why.strip()
     return "unknown", ""
+
+
+def slot_up_cmd():
+    """``slot.sh up N`` as root for the rig this app's run is on, or ``None``
+    when there is nothing to mount: rig 0 (the ordinary rig, no layer), or a
+    platform with no passwordless root (Linux: the rig's own scripts mount it
+    when they run as root, and say how otherwise; macOS: the container is
+    root, so tryit.sh mounts it itself).  PAD-305: mode installs need it up
+    BEFORE the run mounts it."""
+    from ..core import rigslot
+    n = rigslot.slot()
+    if n < 1 or sys.platform != "win32":
+        return None
+    return rig_cmd_root("slot.sh", "up", str(n))
 
 
 def rig_cmd_root(script, *args):
