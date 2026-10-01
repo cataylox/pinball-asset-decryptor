@@ -163,12 +163,48 @@ static unsigned long long now_us(void)
     return (unsigned long long)t.sec * 1000000ULL + (unsigned long long)t.usec;
 }
 
+/* PAD-301: HOW LONG A SWAP TAKES, IN 60 Hz REFRESHES. The machine's GPU does not finish every frame
+ * inside one refresh: a Godzilla Premium 1.16 traced on David's machine (2026-10-01) built its layered
+ * display ~29 times a second while its 60 Hz tick ran, where this rig built all 60. The game skips a
+ * frame build while the renderer is still busy (display +0xb0/b1/b2/b5), so a swap that takes two
+ * refreshes is what makes the game here draw at the machine's cadence - and what showed a mode's
+ * full-screen clip losing whole frames to the HUD, which a 60 Hz swap hides. PAD_SWAP_VBLANKS=N
+ * (1..4); 1 is the old 60 Hz.
+ * PAD_REFRESH_HZ=<hz, one decimal> is the panel's own refresh. The game's tick runs on its own 60 Hz
+ * timer and a real panel's refresh is not locked to it, so the two drift and the moment the renderer
+ * finishes walks across the game's loop - which is why the HUD burst through a clip a few times a
+ * second on the machine, not on every frame. Locked at exactly 60.0 the race never comes round. */
+static unsigned long long swap_frame_us(void)
+{
+    static unsigned long long us;
+    if (!us) {
+        const char *e = getenv("PAD_SWAP_VBLANKS"), *h = getenv("PAD_REFRESH_HZ");
+        int n = (e && *e >= '1' && *e <= '4') ? *e - '0' : 1;
+        unsigned long dhz = 0;                       /* tenths of a Hz */
+        int frac = -1;
+        char b[120];
+        for (; h && ((*h >= '0' && *h <= '9') || *h == '.'); h++) {
+            if (*h == '.') { if (frac >= 0) break; frac = 0; continue; }
+            if (frac >= 1) continue;                 /* one decimal is plenty */
+            dhz = dhz * 10 + (unsigned long)(*h - '0');
+            if (frac == 0) frac = 1;
+        }
+        if (frac < 1) dhz *= 10;
+        if (dhz < 300 || dhz > 1200) dhz = 600;      /* 30..120 Hz, else the old 60 */
+        us = 10000000ULL * (unsigned long long)n / dhz;
+        snprintf(b, sizeof b, "[eglshim] a swap takes %d refresh(es) of a %lu.%lu Hz panel: %lu.%lu fps at most\n",
+                 n, dhz / 10, dhz % 10, dhz / (unsigned long)n / 10, dhz / (unsigned long)n % 10);
+        say(b);
+    }
+    return us;
+}
+
 int eglSwapBuffers(void *dpy, void *surf)
 {
     static unsigned long long next_us;
     static int policy_said, suppressed;
     unsigned long long now = now_us();
-    const unsigned long long frame_us = 16667;   /* 60 Hz */
+    const unsigned long long frame_us = swap_frame_us();
     unsigned long s = (unsigned long)surf;
     int slot = ((s & ~0xfful) == 0x4000ul) ? (int)(s & 0xff) : 0;
     int present = 1;

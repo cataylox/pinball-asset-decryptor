@@ -400,6 +400,51 @@ def bl_callers(elf, address):
     return elf.bl_index().get(address, [])
 
 
+def frame_chain(elf, tick_va):
+    """PAD-301: ``(frame_end, frame_kick, None)`` or ``(None, None, why)``, followed from the tick:
+
+        main loop:  bl tick ; bl frame_begin ; mov <r>, r0 ; ...the game's processes... ; mov r0, <r> ; bl frame_end
+        frame_end:  cmp r0, #0 ; ... ; b kick          (both of its paths end in the kick)
+
+    The tick's one caller is the main loop; frame end is the first call fed the register the begin's
+    answer was kept in; the kick is frame end's first unconditional jump out of its own body."""
+    calls = bl_callers(elf, tick_va)
+    if len(calls) != 1:
+        return None, None, "the tick has %d callers, not 1" % len(calls)
+    i = calls[0]
+    if bl_dest(elf, i + 1) is None:
+        return None, None, "no bl (frame begin) right after the tick's call at 0x%x" % elf.va(i)
+    saved = None
+    for k in range(i + 2, min(i + 6, len(elf.words))):
+        w = elf.words[k]
+        if (w & 0xFFFF0FFF) == 0xE1A00000 and (w >> 12) & 0xF:        # mov <r>, r0
+            saved = (w >> 12) & 0xF
+            break
+    if saved is None:
+        return None, None, "the frame begin's answer is not kept in a register"
+    end = None
+    for k in range(i + 2, min(i + 80, len(elf.words) - 1)):
+        if elf.words[k] == 0xE1A00000 | saved and (elf.words[k + 1] >> 24) == 0xEB:   # mov r0, <r> ; bl
+            end = bl_dest(elf, k + 1)
+            break
+    if end is None or elf.word(end) is None:
+        return None, None, "no `mov r0, r%d ; bl` (frame end) in the loop" % saved
+    if elf.word(end) != 0xE3500000:
+        return None, None, "frame end 0x%x does not start with cmp r0, #0" % end
+    for k in range(40):
+        w = elf.word(end + 4 * k)
+        if w is None:
+            break
+        if (w >> 24) == 0xEA:                                           # b, always
+            off = w & 0xFFFFFF
+            if off & 0x800000:
+                off -= 0x1000000
+            kick = end + 4 * k + 8 + off * 4
+            if not end <= kick < end + 160:
+                return end, kick, None
+    return None, None, "no tail jump (the kick) out of frame end 0x%x" % end
+
+
 def hook_id_before(elf, k):
     """The n of the `mov r1, #n` just before index k, or None."""
     for m in range(k - 1, max(k - 9, 0), -1):
@@ -1301,6 +1346,13 @@ def apply_recipe(recipe, port_text, target, game=None, version=None, port_name=N
                     how = how4 if tva else "%s; %s" % (how, how4)
             else:
                 tva, how = None, "not in the reference text"
+            if tva is None and name in ("frame_end", "frame_kick") and ("site", "tick") in placed:
+                # PAD-301: frame end's body differs between builds (its update calls), the chain does not
+                fend, fkick, why = frame_chain(tgt, placed[("site", "tick")])
+                if fend is not None:
+                    tva, how = (fend if name == "frame_end" else fkick), "followed from the tick (the main loop's frame end and its kick)"
+                else:
+                    how = "%s; from the tick: %s" % (how, why)
             if tva is None:
                 out.append("# site %-16s NOT PLACED: %s" % (name, how))
                 for hc in hook_cands:

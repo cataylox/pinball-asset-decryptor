@@ -265,6 +265,8 @@ value layered_waiter_call    0x00052dac
 value effect_waiter_call     0x00052c08
 value layered_fg_at          0x58
 value layered_fg_flags_at    0x60
+# PAD-301: the foreground ELEMENT (+0x58 is its display id): the manager calls its virtuals here and clears it with the id
+value layered_fg_elem_at     0x68
 
 # ---- the backdrop (hud-layers): a mode's clip BEHIND the HUD, in the main-play background's place --------
 # BDLBackground::v[8] (slot 8 of BDLMainplayBG's vtable) and the scene_show it calls, read off this program by
@@ -276,6 +278,12 @@ data backdrop_city_vtable    0x00628cb0
 value backdrop_video_at      0x54
 value backdrop_scene_at      0x18
 text backdrop_crop           ScoreFrame
+
+# ---- the frame hand-over (PAD-301): a full-screen clip drawn into every frame the game builds ------------
+# Found by frame_sites.py from the tick site (the main loop: tick, frame begin, processes, frame end -> kick);
+# the same code as Premium 1.16's, where a tick-drawn clip lost whole frames to the HUD on a machine.
+site frame_end           0x0035e3f4 0xe3500000 0xe92d40f8
+site frame_kick          0x004d5c8c 0xe92d4070 0xe2906008
 value lamp_slot_size        40
 value lamp_slot_level       2
 value lamp_slot_alpha       3

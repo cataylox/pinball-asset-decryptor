@@ -256,6 +256,8 @@ value layered_waiter_call    0x00052efc
 value effect_waiter_call     0x00052d58
 value layered_fg_at          0x58
 value layered_fg_flags_at    0x60
+# PAD-301: the foreground ELEMENT (+0x58 is its display id): the manager calls its virtuals here and clears it with the id
+value layered_fg_elem_at     0x68
 
 # ---- the backdrop (hud-layers): a mode's clip BEHIND the HUD, in the main-play background's place --------
 # BDLBackground::v[8] draws the layered display's background element each frame: the video bank's player when
@@ -268,6 +270,13 @@ data backdrop_city_vtable    0x00632ff0
 value backdrop_video_at      0x54
 value backdrop_scene_at      0x18
 text backdrop_crop           ScoreFrame
+
+# ---- the frame hand-over (PAD-301): a full-screen clip drawn into every frame the game builds ------------
+# The main loop (0x3f2aac): tick, frame begin (renderer idle?), the game's processes, frame end (r0 = 0 when it
+# builds the frame), which ends in the kick that wakes the renderer. A full-screen clip drawn at the kick is the
+# last thing in the frame; drawn from the tick it lost whole frames to the HUD on a machine (traced 2026-10-01).
+site frame_end           0x00405f34 0xe3500000 0xe92d40f8
+site frame_kick          0x002a5530 0xe92d4070 0xe2906008
 
 # ---- named inserts (item mode-leds): MODE_SDK.md "Lights: named inserts" ----------------------------
 # The game's lamp LAYERS (lamp groups): the active list's head is the word after the free list's at

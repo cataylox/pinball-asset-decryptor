@@ -429,6 +429,18 @@ fi
 GAME=${GAME:-godzilla_pro}
 export PAD_GAME="$GAME"
 
+# PAD-301: THE MACHINE'S FRAME CADENCE. A Godzilla Premium 1.16 traced on David's machine built its
+# display ~29 frames a second (its GPU needs two refreshes a frame; the game skips a build while the
+# renderer is busy), and its frames change every other swap here too (eglshim.c, item 27's `0x60 1x60`).
+# At this rig's old 60 Hz swap the game built every frame and a mode's full-screen clip that lost whole
+# frames to the HUD on the machine looked clean here. So a Godzilla run swaps at the machine's cadence
+# (eglshim.c PAD_SWAP_VBLANKS). Other titles keep 60 Hz until a machine of theirs is measured; the
+# mode runtime logs a machine's rate once a minute ("frames: the game built ...").
+if [ -z "${PAD_SWAP_VBLANKS:-}" ]; then
+    case "$GAME" in godzilla_*) export PAD_SWAP_VBLANKS=2 ;; esac
+fi
+[ -n "${PAD_SWAP_VBLANKS:-}" ] && echo "[watch] a swap takes ${PAD_SWAP_VBLANKS} refresh(es) (the machine's frame cadence)"
+
 # ★ THE BOARD'S RUN RECORD: "a run is up in slot N" for everyone who is not
 # this process - riglock.sh list, the app's Emulate tab, the triage dashboard,
 # the next session deciding whether a slot is free. The main loop touches it
