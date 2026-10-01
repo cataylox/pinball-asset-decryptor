@@ -380,6 +380,12 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
     rep_ext = os.path.splitext(replacement_path)[1].lower()
     tmp = slot.abs_path + ".stage" + slot.ext
     has_backend = backend_for(slot.abs_path) is not None
+    # The colour profile (PAD-305) changes every frame, so a clip that would
+    # otherwise be copied through or repackaged is re-encoded instead.  A
+    # clip the user forced "as-is" stays as-is, and a custom-backend format
+    # is not ffmpeg's to filter.
+    from . import colour_profile
+    colour = colour_profile.active() if find_ffmpeg() else None
 
     try:
         if no_conversion:
@@ -407,8 +413,8 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
                     except OSError:
                         pass
                 return False, detail
-        elif _already_matches(slot, replacement_path, rep_ext,
-                              match_length=trim_to_length):
+        elif colour is None and _already_matches(
+                slot, replacement_path, rep_ext, match_length=trim_to_length):
             # No conversion needed — the clip already matches the slot's
             # container/codec/resolution/fps/alpha, so copy it through verbatim
             # (no quality loss, and far faster than a re-encode).  Tried before
@@ -421,8 +427,11 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
             # .mp4 for a QuickTime slot).  Repackaging keeps every coded frame
             # bit-for-bit; only a real mismatch is worth a re-encode.
             repacked = False
-            can_remux, why = _remux_verdict(slot, replacement_path,
-                                            match_length=trim_to_length)
+            if colour is not None:
+                can_remux, why = False, None
+            else:
+                can_remux, why = _remux_verdict(slot, replacement_path,
+                                                match_length=trim_to_length)
             if can_remux:
                 ok, detail = remux_video_to(replacement_path, tmp, slot.info,
                                             cancel_cb=cancel_cb)
@@ -440,7 +449,7 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
                     match_length=trim_to_length, cancel_cb=cancel_cb,
                     max_bytes=byte_budget,
                     match_bitrate=match_bitrate,
-                    best_quality=best_quality)
+                    best_quality=best_quality, colour=colour)
                 if not ok:
                     _remove(tmp)
                     return False, detail

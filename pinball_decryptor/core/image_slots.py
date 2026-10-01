@@ -131,8 +131,10 @@ def stage_replacement(slot: ImageSlot, replacement_path: str,
     try:
         info = (original_info or slot.info
                 or detect_image_info(slot.abs_path))
+        from . import colour_profile
         ok, detail = transcode_image_to(replacement_path, tmp, info,
-                                        keep_size=keep_size)
+                                        keep_size=keep_size,
+                                        colour=colour_profile.active())
         if ok and keep_size:
             detail = ", ".join(d for d in (detail, "own size kept") if d)
         if not ok:

@@ -649,11 +649,16 @@ def _max_id(scene):
 
 def _texture_from_png(path, premultiply=True):
     """``(w, h, fmt, BC3 blob)`` of the PNG at *path*, padded to the block grid, premultiplied
-    as the card's own art is."""
+    as the card's own art is.  The colour profile, when on, is applied here: the project
+    folder keeps the user's own picture (PAD-305)."""
     import numpy as np
     from PIL import Image
     from . import dds as _dds
+    from ...core import colour_profile
     img = Image.open(path).convert("RGBA")
+    colour = colour_profile.active()
+    if colour is not None:
+        img = colour.apply_image(img)
     w, h = img.size
     pw, ph = (w + 3) // 4 * 4, (h + 3) // 4 * 4
     arr = np.zeros((ph, pw, 4), np.uint8)

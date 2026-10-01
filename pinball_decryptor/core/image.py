@@ -236,13 +236,17 @@ def _prep_mode(im, fmt, alpha):
     return im.convert("RGBA" if _has_alpha(im) else "RGB")
 
 
-def transcode_image_to(src_path, dst_path, original_info, keep_size=False):
+def transcode_image_to(src_path, dst_path, original_info, keep_size=False,
+                       colour=None):
     """Scale *src_path* to *original_info*'s pixel dimensions and save it into
     *dst_path*, whose extension selects the output format.  Preserves alpha
     where the target format supports it.  Returns ``(ok, detail)``.
 
     *keep_size* skips the scaling: the picture keeps its own dimensions (a
-    slot whose Write can re-size it, PAD-154)."""
+    slot whose Write can re-size it, PAD-154).
+
+    *colour*, a :class:`core.colour_profile.Profile`, is applied to the
+    picture on its way out (PAD-305)."""
     if not _PIL_OK:
         return False, "need Pillow to convert images"
     ext = os.path.splitext(dst_path)[1].lower()
@@ -261,6 +265,9 @@ def transcode_image_to(src_path, dst_path, original_info, keep_size=False):
                 im = im.resize((original_info.width, original_info.height),
                                Image.LANCZOS)
                 actions.append(f"→{original_info.width}x{original_info.height}")
+            if colour is not None:
+                im = colour.apply_image(im)
+                actions.append(colour.label())
             im = _prep_mode(im, fmt, alpha)
             save_kw = {}
             if fmt == "PNG":

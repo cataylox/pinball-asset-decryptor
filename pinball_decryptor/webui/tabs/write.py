@@ -54,6 +54,14 @@ TEXT_GROW_TIP = (
     "over-long edits are skipped with a named reason in the build "
     "log. Proven in the PC emulator only; keep the stock card to "
     "hand. Mirrored to PAD_STERN_TEXT_GROW for the build.")
+COLOUR_LABEL = "Apply colour profile to my replaced pictures and videos"
+COLOUR_TIP = (
+    "Corrects the colours of every replacement picture, video and added "
+    "scene picture as the build writes it, so the machine's display shows "
+    "them the way your PC does. Your own files are never changed, stock "
+    "art is never touched, and it applies once per build: untick it and "
+    "build again for the uncorrected card. The profile is a plain text "
+    "file; Edit profile opens it. It starts from Stern Godzilla.")
 #: Stern Spike 2: the SD card class a build is for (plugins/stern/card_size.py;
 #: the engine's no-space failure points at this control by its label).
 CARD_SIZE_LABEL = "SD card size"
@@ -357,6 +365,7 @@ class WriteTab(TabService):
         "write_version_date_var", "write_card_size_var",
         "write_version_override", "write_version_validation_error",
         "_target_write_path", "text_grow_enabled", "card_size_choice",
+        "colour_profile_enabled",
         "card_size_problem", "set_flash_running",
         "begin_revert_view", "_remember_flashed_image", "_image_was_flashed",
         "_open_flash_dialog", "_has_pending_write_changes",
@@ -378,6 +387,8 @@ class WriteTab(TabService):
         tg = cb.get("initial_text_grow")
         self.write_text_grow_var = self.var(
             "text_grow", "bool", True if tg is None else bool(tg))
+        self.write_colour_var = self.var(
+            "colour_profile", "bool", bool(cb.get("initial_colour_profile")))
         self.write_card_size_var = self.var(
             "card_size", "str", _norm_card_size(cb.get("initial_card_size")))
         self.write_version_auto_var = self.var("version_auto", "bool", True)
@@ -437,6 +448,8 @@ class WriteTab(TabService):
             "write", lambda *_a: self._on_drive_selected())
         self.write_text_grow_var.trace_add(
             "write", lambda *_a: self._on_text_grow_toggle())
+        self.write_colour_var.trace_add(
+            "write", lambda *_a: self._on_colour_toggle())
         self.write_card_size_var.trace_add(
             "write", lambda *_a: self._on_card_size_change())
         self.write_version_auto_var.trace_add(
@@ -556,6 +569,9 @@ class WriteTab(TabService):
             editable_hint=(EDITABLE_HINT if mfr.key == "bof" and g("write")
                            else ""),
             text_grow_cap=bool(g("replace_text") and g("write")),
+            colour_cap=bool((g("replace_image") or g("replace_video"))
+                            and g("write")),
+            colour_label=COLOUR_LABEL, colour_tip=COLOUR_TIP,
             version_cap=bool(g("write_version_date") and g("write")),
             delta_cap=g("apply_delta"),
             delta_text=DELTA_TEXT,
@@ -596,6 +612,7 @@ class WriteTab(TabService):
         self._update_write_filename()
         self._refresh_prebuild_notes()
         self._refresh_card_size()
+        self._refresh_colour_note()
         self._sync_buttons()
 
     @staticmethod
@@ -1187,6 +1204,70 @@ class WriteTab(TabService):
             except Exception:                           # noqa: BLE001
                 log.exception("text grow change")
         self._refresh_pending_text_rows()
+
+    # ------------------------------------------------------------------
+    # colour profile (PAD-305)
+    # ------------------------------------------------------------------
+    def colour_profile_enabled(self):
+        try:
+            return bool(self.write_colour_var.get())
+        except Exception:                               # noqa: BLE001
+            return False
+
+    def _on_colour_toggle(self):
+        fn = self.window.cb.get("on_colour_profile_change")
+        if fn is not None:
+            try:
+                fn(self.colour_profile_enabled())
+            except Exception:                           # noqa: BLE001
+                log.exception("colour profile change")
+        self._refresh_colour_note()
+
+    def _refresh_colour_note(self):
+        """The line under the tick: which profile a build would apply, and
+        any line of the file it had to skip."""
+        from ...core import colour_profile
+        if not self.colour_profile_enabled():
+            self.set(colour_note="", colour_note_kind="")
+            return
+        try:
+            prof, problems = colour_profile.load()
+        except Exception as e:                          # noqa: BLE001
+            self.set(colour_note="The profile could not be read: %s" % e,
+                     colour_note_kind="err")
+            return
+        if problems:
+            self.set(colour_note="%s; skipped %s" % (
+                prof.label(), "; ".join(problems[:3])),
+                colour_note_kind="err")
+        elif prof.is_identity():
+            self.set(colour_note="%s changes nothing as it stands"
+                     % prof.label(), colour_note_kind="")
+        else:
+            self.set(colour_note="Profile: %s" % prof.label(),
+                     colour_note_kind="")
+
+    @rpc
+    def edit_colour_profile(self):
+        """Open the profile file in the OS's text editor (created from the
+        Godzilla starting point the first time)."""
+        from ...core import colour_profile
+        from ..shellx_common import open_in_text_viewer
+        try:
+            path = colour_profile.ensure_file()
+        except OSError as e:
+            compat.messagebox.showerror(
+                "Colour profile",
+                "The profile file could not be made:\n%s" % e)
+            return False
+        open_in_text_viewer(path)
+        self._refresh_colour_note()
+        return True
+
+    @rpc
+    def refresh_colour_profile(self):
+        self._refresh_colour_note()
+        return True
 
     def _refresh_pending_text_rows(self):
         """Re-list the strings.tsv rows in place (their status names the

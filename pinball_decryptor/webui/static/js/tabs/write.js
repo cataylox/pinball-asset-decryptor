@@ -216,8 +216,24 @@ function Destination({ s }) {
     </div>` : null}
     ${s.text_grow_cap ? html`<${Check} ns="write" k="text_grow" checked=${s.text_grow} wrap
         label=${s.text_grow_label} title=${s.text_grow_tip} disabled=${s.running} />` : null}
+    ${s.colour_cap ? html`<${ColourProfile} s=${s} />` : null}
     ${s.card_size_cap && !direct ? html`<${CardSize} s=${s} />` : null}
   <//>`;
+}
+
+// PAD-305: the colour profile a build applies to the user's replaced
+// pictures and videos (never to their files, never to stock art).  The
+// profile itself is a text file; Edit profile opens it.
+function ColourProfile({ s }) {
+  return html`<div class="stack wr-build">
+    <div class="row">
+      <${Check} ns="write" k="colour_profile" checked=${s.colour_profile} wrap
+        label=${s.colour_label} title=${s.colour_tip} disabled=${s.running} />
+      <${Button} kind="ghost" size="xs" onClick=${() => call("write.edit_colour_profile")}
+        title="Open the profile in your text editor; save it and build again">Edit profile...<//>
+    </div>
+    ${s.colour_note ? html`<span class=${cx("small", s.colour_note_kind === "err" ? "err-ink" : "muted")}>${s.colour_note}</span>` : null}
+  </div>`;
 }
 
 // Stern Spike 2: the SD card class the build is for (the games partition
