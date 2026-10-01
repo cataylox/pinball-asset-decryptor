@@ -114,6 +114,16 @@ export default function TextTab() {
         icon=${s.scanning ? "x" : "refresh"}>${s.scanning ? "Cancel scan" : "Scan"}<//>
       <${Button} kind="ghost" title=${TIP_REPLACE} onClick=${() => openReplace(null)}>Replace everywhere…<//>
       <${Button} kind="ghost" title=${TIP_SCENES} onClick=${() => call("text.show_in_scene", null)}>Show in Scenes…<//>
+      <${Button} kind="ghost" iconRight="down" disabled=${!total}
+        title="Save your text edits to a file, to keep as a backup or send to someone, and load a file of text edits into this project"
+        onClick=${(e) => openMenu(e.currentTarget, [
+          { label: "Save text edits to a file…", icon: "download", disabled: !s.edited,
+            title: "Every string you changed, with its new text, in one small file",
+            onClick: () => call("text.settings_save") },
+          { label: "Load text edits from a file…", icon: "upload",
+            title: "Put the edits in a file saved here or by someone else onto the same strings of this card. A string this card does not have, or new text too long for it, is left out.",
+            onClick: () => call("text.settings_load") },
+        ])}>Save / load<//>
       <${Button} kind="ghost" onClick=${() => call("text.clear_all")}>Clear all edits<//>
     <//>
 

@@ -698,11 +698,17 @@ export default function VideoTab() {
       <${Button} icon="folder" onClick=${() => call("video.replace_from_folder")} disabled=${running} title=${T.folder}>Replace from folder…<//>
       ${s.best_supported ? html`<${Button} kind="ghost" icon="star" onClick=${() => call("video.best_open")} title=${T.best}>Best quality…<//>` : null}
       <${Button} kind="ghost" icon="more" label="More"
-        title=${s.quality_report ? "More: Export CSV, Clear replacements…, Check card…" : "More: Export CSV, Clear replacements…"}
+        title=${s.quality_report ? "More: Export CSV, Clear replacements…, Save / load settings, Check card…" : "More: Export CSV, Clear replacements…, Save / load settings"}
         onClick=${(e) => openMenu(e.currentTarget, [
           { label: "Export CSV", icon: "download", title: T.csv, onClick: () => call("video.export_csv") },
           { label: "Clear replacements…", icon: "trash", title: T.clear, disabled: !s.can_clear || running,
             onClick: () => call("video.clear_all") },
+          { sep: true },
+          { label: "Save settings to a file…", icon: "download", title: "Which file replaces which slot, and this tab's ticks and options, in one small file to keep or to send. The clips themselves are not in it.",
+            onClick: () => call("video.settings_save") },
+          { label: "Load settings from a file…", icon: "upload", disabled: running,
+            title: "Put the settings in a file saved here or by someone else onto the same slots of this card. A slot this card does not have is left out.",
+            onClick: () => call("video.settings_load") },
           s.quality_report ? { sep: true } : null,
           s.quality_report ? { label: "Check card…", icon: "check", title: T.check,
             onClick: () => call("video.quality_open") } : null,
