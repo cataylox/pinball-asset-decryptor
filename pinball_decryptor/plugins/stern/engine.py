@@ -451,6 +451,17 @@ _SCENE_BASES = threading.local()
 # PAD-251: the Emulate tab can run a set WITHOUT the Scenes tab's edits (its own tick); set only
 # around write_overrides' patch computation.
 _SKIP_SCENE_EDITS = threading.local()
+# PAD-306: why this thread's last patch computation left the project's modes out (``.why``),
+# so write_overrides can put it in the set's manifest and Try it can say it, rather than
+# "the log says why" over a nine-minute log.
+_MODES_LEFT_OUT = threading.local()
+
+
+def _override_needs_no_mount():
+    """The ext4 verdict for an OVERRIDE SET (PAD-306): its files are written into a folder,
+    never copied into the card through a loop mount, so the modes' ext4 probe (``sudo
+    losetup`` on native Linux, which a GUI without a terminal fails) is not asked."""
+    return True, "override set: no card mount"
 
 
 class keep_card_extracts:
@@ -6217,6 +6228,10 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     mode_sound = None
     mode_own = []              # the start / shot sounds and music on carriers (item 150)
     _modes_left_out = None     # (names, why) when a closed gate took the modes out
+    _MODES_LEFT_OUT.why = ""
+    # PAD-306: an override set (boot_screen=False) is written into a folder, not mounted
+    _mode_gate_kw = ({} if boot_screen
+                     else {"ext4_available": _override_needs_no_mount})
     if not _family:
         _off = _MW.preview_left_out(assets_dir)
         if _off:
@@ -6231,7 +6246,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             raise RuntimeError("Modes: %s. Fix or delete it in the Modes tab, then "
                                "Write again." % e) from None
     if mode_list:
-        _mok, _mwhy = _MW.gate(dest_is_device)
+        _mok, _mwhy = _MW.gate(dest_is_device, **_mode_gate_kw)
         if not _mok:
             log("Modes: the project's %d mode(s) are left out of this build: %s."
                 % (len(mode_list), _mwhy), "warning")
@@ -6274,7 +6289,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             raise RuntimeError("Modes: %s. Fix or delete it in the Modes tab, then "
                                "Write again." % e) from None
     if code_list:
-        _cok, _cwhy = _MW.gate(dest_is_device)
+        _cok, _cwhy = _MW.gate(dest_is_device, **_mode_gate_kw)
         if not _cok:
             log("Modes: the project's %d code mode(s) are left out of this build: %s."
                 % (len(code_list), _cwhy), "warning")
@@ -6315,6 +6330,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     # Item 160: the counts-as table (modes/stock.json -> stock.cfg) rides with the modes'
     # runtime, which goes on the card only with a mode; with none, say so rather than
     # dropping the rows without a word.
+    if _modes_left_out:
+        _MODES_LEFT_OUT.why = (_MW.PREVIEW_REFUSAL if _modes_left_out[0] == "preview"
+                               else str(_modes_left_out[1] or ""))
     if _family and not mode_list and not code_list:
         for _line in _MW.stock_lines(assets_dir, carried=False):
             log("Modes: %s." % _line, "warning")
@@ -9055,6 +9073,7 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         _KEEP_EXTRACTS.on = bool(getattr(_KEEP_EXTRACTS, "wanted", False))
         _SCENE_BASES.store = scene_bases = {}
         _SKIP_SCENE_EDITS.on = not scene_edits
+        _MODES_LEFT_OUT.why = ""
         try:
             writes, counts, grow_plan, audio_mode, valpatch_mode = _compute_patches(
                 disk_f, parts, assets_dir, log, progress, cancel, label=label,
@@ -9067,6 +9086,8 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
             _KEEP_EXTRACTS.on = False
             _SCENE_BASES.store = None
             _SKIP_SCENE_EDITS.on = False
+            modes_left_out = getattr(_MODES_LEFT_OUT, "why", "") or ""
+            _MODES_LEFT_OUT.why = ""
         if writes is None:                  # cancelled mid-compute
             _rmtree_grow_plan(grow_plan)
             return None, None, None, None
@@ -9295,6 +9316,9 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
     }
     if modes_out:
         manifest["modes"] = modes_out
+    elif modes_left_out:
+        # PAD-306: the reason a gate gave, for Try it to say in its own words
+        manifest["modes_left_out"] = modes_left_out
     # A project that HOLDS modes: which way the preview switch stood, so the
     # Emulate tab rebuilds this set when it changes (emulate_tab.
     # preview_modes_reason).  Nothing for a project without modes.
