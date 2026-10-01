@@ -44,6 +44,7 @@ left alone: a function needs a default float precision in a fragment
 shader, and that one is never on a player's screen.
 """
 
+import dataclasses
 import re
 
 from . import progreloc
@@ -284,6 +285,52 @@ def plan(raw, prof, base_va):
             blob += b"\x00"
         report.append((off, len(head), len(refs) - len(head), "corrected"))
     return writes, bytes(blob), report
+
+
+_NUM = r"(-?\d+(?:\.\d+)?)"
+_V3 = r"vec3\(%s,%s,%s\)" % (_NUM, _NUM, _NUM)
+_FUNC_RE = re.compile(rb"vec4 " + _FUNC.encode() + rb"\((?:highp )?vec4 f\)\{([^}]*)\}")
+_SAT_RE = re.compile(r"c=mix\(vec3\(dot\(c,vec3\(0\.299,0\.587,0\.114\)\)\),c,%s\);" % _NUM)
+_POW_RE = re.compile(r"c=pow\(clamp\(c\*%s,0\.0,1\.0\),%s\);" % (_V3, _V3))
+_LIFT_RE = re.compile(r"c=%s\+\(vec3\(1\.0\)-" % _V3)
+
+
+def profile_in(raw):
+    """The color profile the game program *raw* applies to everything it
+    draws, read back out of the ``pad_cp`` its patched shaders carry - or
+    ``None`` for a game with none (stock, or built with No change).
+
+    What a built card IS is the only record of the profile it was built
+    with: the project that made it may be gone, or set to something else
+    since.  The Multi-boot menu reads it to show a black-and-white edition's
+    logo and attract clip the way that edition's game shows them.  The name
+    is a starting point's when the numbers are one's, else empty."""
+    from ...core import colour_profile
+    m = _FUNC_RE.search(raw)
+    if not m:
+        return None
+    body = m.group(1).decode("ascii", "replace")
+    p = _POW_RE.search(body)
+    if not p:
+        return None
+    vals = tuple(float(x) for x in p.groups())
+    s = _SAT_RE.search(body)
+    lift = _LIFT_RE.search(body)
+    prof = colour_profile.Profile(
+        gain=vals[:3], gamma=vals[3:],
+        lift=tuple(float(x) for x in lift.groups()) if lift else (0.0, 0.0, 0.0),
+        saturation=float(s.group(1)) if s else 1.0)
+    key = _numbers(prof)
+    for _k, preset in colour_profile.PRESETS:
+        if _numbers(preset) == key:
+            return dataclasses.replace(prof, name=preset.name)
+    return prof
+
+
+def _numbers(prof):
+    """A profile's numbers as the shader text spells them (``%.6f``)."""
+    return tuple(_f(x) for x in prof.gamma + prof.gain + prof.lift
+                 + (prof.saturation,))
 
 
 def describe(report):

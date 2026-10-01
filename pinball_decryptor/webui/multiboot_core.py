@@ -5842,11 +5842,13 @@ CLIP_NOTE = ("Shown as a loop of the first 5 seconds, at the video's own "
 #: to be either a note standing under the list for ever or a sentence nobody
 #: could see until they had picked the option it described.
 MEDIA_NOTES = {
-    "logo": "The game's own logo, taken off its card when the menu is built.",
+    "logo": ("The game's own logo, taken off its card when the menu is built, "
+             "in the colors that game shows (its color profile, if it has one)."),
     "picture": ("Your own picture, fitted to the card's panel: never "
                 "stretched, never cropped."),
     "attract": ("The game's own attract video plays while the image is "
-                "highlighted, and its own logo is the still. " + CLIP_NOTE),
+                "highlighted, and its own logo is the still, both in the "
+                "colors that game shows. " + CLIP_NOTE),
     "video": ("A video is the still too: the frame it starts on shows while "
               "the image is not highlighted. " + CLIP_NOTE),
     "none": ("Text only: the card shows its title and subtitle on the menu's "

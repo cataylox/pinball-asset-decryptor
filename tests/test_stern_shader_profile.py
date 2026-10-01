@@ -93,6 +93,27 @@ def test_black_and_white_and_lift_reach_the_glsl():
     assert "mix(" not in plain                    # strength 100%: no mix
 
 
+def test_a_built_games_profile_reads_back_out_of_its_shaders():
+    """The Multi-boot menu needs the profile a built card's game draws with, and the card
+    is the only record of it.  Every starting point, a custom profile (lift, gain, more
+    colour) and an ES3 shader read back to the same numbers; a stock game reads None."""
+    custom = cp.Profile(name="mine", gamma=(1.0, 0.9, 1.2), gain=(1.05, 1.0, 0.95),
+                        lift=(0.02, 0.0, 0.01), saturation=1.15)
+    es3 = "#version 300 es\nprecision highp float;\nout lowp vec4 color;\nvoid main(){color = vec4(1.0);}"
+    for prof in [p for _k, p in cp.PRESETS if not p.is_identity()] + [custom]:
+        for shader in (SPRITE, OVERLAY, es3):
+            raw, _o, _p = _card_elf([sp.patch_source(shader, prof)])
+            back = sp.profile_in(raw)
+            assert (back.gamma, back.gain, back.lift, back.saturation) == (
+                prof.gamma, prof.gain, prof.lift, prof.saturation), (prof, shader)
+            # a starting point is named; a profile of the user's own is not guessed at
+            assert back.name == ("" if prof is custom else prof.name)
+    assert sp.profile_in(_card_elf([SPRITE, VIDEO, OVERLAY, DEBUG])[0]) is None
+    # ...and what the build really writes - the plan's blob - carries it
+    _w, blob, _r = sp.plan(_card_elf([SPRITE])[0], PROF, 0x40000)
+    assert sp.profile_in(blob).name == "Recommended"
+
+
 def test_plan_moves_each_referenced_shader_and_repoints_it():
     raw, offs, ptrs = _card_elf([SPRITE, VIDEO, OVERLAY, DEBUG],
                                 unreferenced=())

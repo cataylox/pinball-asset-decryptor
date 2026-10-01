@@ -1679,3 +1679,131 @@ def test_a_logos_transparent_background_is_never_painted(sm):
     for im in panels:
         n = sum(c for col, c in im.colours().items() if col[:3] == hidden)
         assert n == 0, "%d pixels of the hidden background were painted" % n
+
+
+# ============================================================================ PAD-305: the game's color profile
+def _game_with(preset):
+    """A game program built with a starting point's color profile.  What the menu reads is
+    the pad_cp() its patched shaders carry, so one shader patched the way the build patches
+    them stands in for the 8 MB program; None = a stock game."""
+    from pinball_decryptor.core import colour_profile as cp
+    from pinball_decryptor.plugins.stern import shader_profile as S
+    shader = "precision mediump float;\nvoid main(){gl_FragColor = vec4(1.0);}"
+    if preset is not None:
+        shader = S.patch_source(shader, dict(cp.PRESETS)[preset])
+    return b"\x7fELF" + b"\x00" * 60 + shader.encode("ascii") + b"\x00"
+
+
+class _GameCard(object):
+    """A card image whose games partition holds /title/game."""
+
+    def __init__(self, game):
+        self.game, self.reads = game, 0
+
+    def preview(self, part, path, cap=None):
+        assert path == "/title/game"
+        self.reads += 1
+        return self.game
+
+
+def _cards(sm, tmp_path, monkeypatch, presets):
+    """One card file per preset (a starting point's key, None = stock), each with the same
+    green logo on a transparent background, and the card() the prepare loop hands round."""
+    paths, games = [], {}
+    for i, preset in enumerate(presets):
+        p = tmp_path / ("card%d.raw" % i)
+        p.write_bytes(bytes(8 + i))
+        paths.append(str(p))
+        games[str(p)] = _GameCard(_game_with(preset))
+    logo = _rgba_png(64, 36, HIDDEN + (0,), block=((20, 10, 44, 26), (20, 200, 20, 255)))
+    monkeypatch.setattr(sm, "logo_bytes", lambda ci, part, title: (logo, "/x/GameLogo.png"))
+    monkeypatch.setattr(sm, "_profiles", {})
+    return paths, games, (lambda path: (games[path], 3, "title"))
+
+
+def _opaque(png_path, sm, size=(64, 36)):
+    return [c for c in sm.panel_from_file(png_path, size).colours() if c[3] > 200]
+
+
+def test_a_cards_color_profile_is_read_off_its_game_once(sm, tmp_path, monkeypatch):
+    """card_profile reads the profile the GAME draws with (a Spike 2 profile lives in its
+    shaders, not its pictures), once per card; a stock game has none; a card it cannot read
+    keeps its own colours and says so rather than failing the menu."""
+    paths, games, card = _cards(sm, tmp_path, monkeypatch, ["bw", None, "recommended"])
+    said = []
+    assert sm.card_profile(paths[0], card, said.append).name == "Black and white"
+    assert sm.card_profile(paths[0], card, said.append).saturation == 0.0
+    assert games[paths[0]].reads == 1, "read once, then remembered"
+    assert sm.card_profile(paths[1], card, said.append) is None
+    assert sm.card_profile(paths[2], card, said.append).name == "Recommended"
+    assert said == []
+
+    def broken(path):
+        raise OSError("no games partition")
+    assert sm.card_profile(str(tmp_path / "odd.raw"), broken, said.append) is None
+    assert len(said) == 1 and "keep the card's own colours" in said[0]
+    assert sm.profile_words(None) == ""
+    assert sm.profile_words(sm.card_profile(paths[0], card)) == \
+        " with its Black and white color profile"
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="no ffmpeg")
+def test_a_black_and_white_editions_menu_picture_is_black_and_white(sm, tmp_path, monkeypatch):
+    """The menu card of an edition built with Black and white shows its logo the way its
+    game does - grey - and the colour edition's beside it stays green.  The logo keeps its
+    transparency.  A picture cached before this was cut in the card's own colours, so the
+    cache key changed: it is rendered again, once."""
+    paths, _g, card = _cards(sm, tmp_path, monkeypatch, ["bw", None])
+    out, work = str(tmp_path / "out"), str(tmp_path / "work")
+    os.makedirs(out)
+    os.makedirs(work)
+    said = []
+    for i in (0, 1):
+        assert sm._prepare_art(i, paths[i], sm.parse_art_spec("auto"), (64, 36), out, work,
+                               card, log=said.append) == "art%d.png" % i
+    grey = _opaque(os.path.join(out, "art0.png"), sm)
+    green = _opaque(os.path.join(out, "art1.png"), sm)
+    assert grey and all(max(c[:3]) - min(c[:3]) <= 2 for c in grey), grey[:5]
+    assert all(abs(c[0] - 126) <= 3 for c in grey)          # luma of (20, 200, 20)
+    assert green and all(c[1] - c[0] > 150 for c in green)
+    assert "with its Black and white color profile" in said[0]
+    assert "color profile" not in said[1]
+    # transparent around the logo, as it was
+    back = sm.panel_from_file(os.path.join(out, "art0.png"), (64, 36)).colours()
+    assert sum(n for c, n in back.items() if c[3] == 0) > 64 * 36 // 2
+    # a sidecar from before (no colour key) misses; a second run is cached
+    side = sm.read_sidecar(os.path.join(out, "art0.png"))
+    assert side["params"]["colour"] == sm.COLOUR_KEY
+    said[:] = []
+    sm._prepare_art(0, paths[0], sm.parse_art_spec("auto"), (64, 36), out, work, card,
+                    log=said.append)
+    assert "cached" in said[0]
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="no ffmpeg")
+def test_the_attract_clip_and_a_random_card_carry_each_games_profile(sm, tmp_path, monkeypatch):
+    """The clip goes through ffmpeg with the profile in BOTH passes, so even the GIF's
+    palette is grey; a random card over a colour and a black-and-white edition shows each
+    member's logo in its own game's colours."""
+    from pinball_decryptor.core import colour_profile as cp
+    import subprocess
+    src = str(tmp_path / "attract.mp4")
+    subprocess.run([shutil.which("ffmpeg"), "-y", "-v", "error", "-f", "lavfi", "-i",
+                    "testsrc=duration=1:size=128x72:rate=10", "-pix_fmt", "yuv420p", src],
+                   check=True)
+    plan = sm.gif_first_plan((96, 54), 1, 10)
+    for colour, want_grey in ((dict(cp.PRESETS)["bw"], True), (None, False)):
+        gif = str(tmp_path / ("a%s.gif" % want_grey))
+        sm.gif_fit(src, gif, plan, log=lambda s: None, **sm._with_colour(colour))
+        spread = max(max(c[:3]) - min(c[:3]) for c in _opaque(gif, sm, (96, 54)))
+        assert (spread <= 2) == want_grey, spread
+
+    paths, _g, card = _cards(sm, tmp_path, monkeypatch, ["bw", None])
+    out, work = str(tmp_path / "gout"), str(tmp_path / "gwork")
+    os.makedirs(out)
+    os.makedirs(work)
+    sm._prepare_group(0, [0, 1], "mosaic", None, paths, (128, 72), out, work, card,
+                      log=lambda s: None)
+    px = _opaque(os.path.join(out, "gart0.png"), sm, (128, 72))
+    assert any(max(c[:3]) - min(c[:3]) <= 2 and c[0] > 60 for c in px), "the B&W member"
+    assert any(c[1] - c[0] > 150 for c in px), "the colour member"
