@@ -198,6 +198,42 @@ def test_copy_image_onto_cancels_mid_stream(tmp_path):
     assert card.read_bytes()[:512] == _pattern(4096)[:512]
 
 
+# ---- progress tracks the card, not the page cache (PAD-302) --------------
+
+@pytest.mark.parametrize("platform,device,want_flushes", [
+    ("linux", True, True),     # /dev/sdX: page cache must be drained
+    ("linux", False, False),   # a plain file: nothing to drain
+    ("darwin", True, False),   # rdisk is already unbuffered
+])
+def test_copy_image_onto_drains_linux_cache_before_progress(
+        tmp_path, monkeypatch, platform, device, want_flushes):
+    img = tmp_path / "g.img"
+    img.write_bytes(_pattern(8192))
+    card = tmp_path / "h.dev"
+    card.write_bytes(b"\x00" * 8192)
+    events = []
+    with RawDeviceFile(str(card), writable=True, sector=512) as dev:
+        monkeypatch.setattr(rd.sys, "platform", platform)
+        monkeypatch.setattr(rd, "is_device_path", lambda p: device)
+        monkeypatch.setattr(rd, "_FLASH_DRAIN", 2048)
+        real_fsync = dev._io.fsync
+        monkeypatch.setattr(dev._io, "fsync",
+                            lambda: (events.append("fsync"), real_fsync()))
+        with open(img, "rb") as src:
+            dev.copy_image_onto(
+                src, 8192, chunk=1024,
+                progress=lambda d, t, desc: events.append(d))
+        monkeypatch.undo()
+    assert card.read_bytes() == _pattern(8192)
+    if want_flushes:
+        # A flush every 2048 bytes, each one BEFORE that point is reported,
+        # so the percentage never runs ahead of what reached the card.
+        assert events == [1024, "fsync", 2048, 3072, "fsync", 4096,
+                          5120, "fsync", 6144, 7168, "fsync", 8192]
+    else:
+        assert "fsync" not in events
+
+
 def test_flash_cancel_immediately_writes_nothing(tmp_path):
     img = tmp_path / "e.img"
     img.write_bytes(_pattern(4096))

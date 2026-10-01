@@ -583,6 +583,34 @@ _pad_binfmt_advice() {
     fi
 }
 
+#: What is refusing the namespace ON THIS MACHINE, and the line that lifts it.
+#: Ubuntu 24.04 and later ship kernel.unprivileged_userns_clone=1 and block
+#: the namespace in AppArmor instead (kernel.apparmor_restrict_unprivileged_userns),
+#: so naming only the Debian knob sent a GitHub #9 user on 26.04 to a switch
+#: that was already on. Printed only, never run: it is a system setting.
+#: PAD_PROC_SYS lets the tests point it at a fake /proc/sys.
+_pad_userns_advice() {
+    local sys=${PAD_PROC_SYS:-/proc/sys} n
+    if grep -qs '^1' "$sys/kernel/apparmor_restrict_unprivileged_userns"; then
+        echo "AppArmor is blocking it (Ubuntu 24.04 and later). To allow it:"
+        echo "  sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"
+        echo "and to keep it after a reboot:"
+        echo "  echo kernel.apparmor_restrict_unprivileged_userns=0 | sudo tee /etc/sysctl.d/60-pad-userns.conf"
+    elif grep -qs '^0' "$sys/kernel/unprivileged_userns_clone"; then
+        echo "The kernel has it switched off. To allow it:"
+        echo "  sudo sysctl -w kernel.unprivileged_userns_clone=1"
+    elif n=$(cat "$sys/user/max_user_namespaces" 2>/dev/null) &&
+         [ "$n" = 0 ]; then
+        echo "user.max_user_namespaces is 0. To allow it:"
+        echo "  sudo sysctl -w user.max_user_namespaces=15000"
+    elif pad_is_wsl; then
+        echo "On WSL, wsl --shutdown and start again."
+    else
+        echo "Check kernel.apparmor_restrict_unprivileged_userns (Ubuntu)"
+        echo "or kernel.unprivileged_userns_clone (Debian)."
+    fi
+}
+
 pad_ensure_guest_exec() {
     local out missing entry interp flags card
 
@@ -598,8 +626,8 @@ pad_ensure_guest_exec() {
         *unshare*)
             echo "[guest] That is the sandbox, not the game: this kernel will" >&2
             echo "[guest] not let an ordinary user make a namespace, and the" >&2
-            echo "[guest] run needs one. On WSL, wsl --shutdown and start" >&2
-            echo "[guest] again; on Linux, check kernel.unprivileged_userns_clone." >&2
+            echo "[guest] run needs one." >&2
+            _pad_userns_advice | sed 's/^/[guest] /' >&2
             return 1 ;;
     esac
 

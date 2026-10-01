@@ -77,7 +77,9 @@ jobs:
           # a flake that passes on a retry never turns the run red and
           # never yanks a release (David, 2026-09-23).  The retried tests
           # are listed by the "Flaky tests" step below: delete them.
-          pip install pytest pytest-xdist pytest-rerunfailures pycryptodome
+          # pyyaml: the P-ROC and American Pinball rigs read their machine
+          # yaml (tools/proc_emu, tools/ap_emu), and their tests with them.
+          pip install pytest pytest-xdist pytest-rerunfailures pycryptodome pyyaml
           # Pillow is in requirements.txt — Williams' DMD render
           # path (dmd_render.py, capture_pipeline.py) imports it at
           # module load, so missing it causes the Williams plugin

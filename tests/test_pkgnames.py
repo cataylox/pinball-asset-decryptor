@@ -197,3 +197,44 @@ def test_the_binfmt_advice_knows_archs_file_and_package():
     # Ubuntu 26.04 qemu-user-static is a virtual name apt refuses (PAD-139).
     assert fn.rstrip().endswith(
         'echo "sudo apt install $(pad_apt_name qemu-user-static)"\n    fi')
+
+
+def _userns_advice(sysctl, wsl=False):
+    """Runs ensurebuild.sh's _pad_userns_advice against a fake /proc/sys
+    holding ``sysctl`` ({"kernel/x": "1"}), the function text fed on stdin."""
+    eb = (RIG / "ensurebuild.sh").read_text(encoding="utf-8")
+    fn = eb[eb.index("_pad_userns_advice() {"):]
+    fn = fn[:fn.index("\n}") + 2]
+    # its WSL answer asks padpath's pad_is_wsl, the rig's one definition
+    pp = (RIG / "padpath.sh").read_text(encoding="utf-8")
+    wsl_fn = pp[pp.index("pad_is_wsl() {"):]
+    fn = wsl_fn[:wsl_fn.index("\n}") + 2] + "\n" + fn
+    harness = 'T=$(mktemp -d); mkdir -p "$T/kernel" "$T/user"\n'
+    for k, v in sysctl.items():
+        harness += 'echo %s > "$T/%s"\n' % (v, k)
+    harness += ("unset WSL_DISTRO_NAME\n" if not wsl else
+                "WSL_DISTRO_NAME=x\n")
+    harness += 'PAD_PROC_SYS=$T\n' + fn.replace("\r", "") + \
+        "\n_pad_userns_advice\nrm -rf \"$T\"\n"
+    r = subprocess.run(["bash", "-s"], input=harness.encode("utf-8"),
+                       capture_output=True, timeout=60)
+    return r.stdout.decode("utf-8", "replace")
+
+
+@pytest.mark.skipif(not HAS_BASH4, reason="no bash 4+ to run the probe with")
+def test_the_userns_advice_names_ubuntus_apparmor_switch():
+    """GitHub #9: Ubuntu 26.04 has unprivileged_userns_clone=1 already and
+    blocks the namespace in AppArmor, so the old hint named a switch that was
+    on.  The AppArmor knob wins when it is set, and each answer is the
+    command that lifts it."""
+    out = _userns_advice({"kernel/apparmor_restrict_unprivileged_userns": 1,
+                          "kernel/unprivileged_userns_clone": 1})
+    assert "sysctl -w kernel.apparmor_restrict_unprivileged_userns=0" in out
+    assert "/etc/sysctl.d/" in out
+    assert "unprivileged_userns_clone" not in out
+    out = _userns_advice({"kernel/apparmor_restrict_unprivileged_userns": 0,
+                          "kernel/unprivileged_userns_clone": 0})
+    assert "sysctl -w kernel.unprivileged_userns_clone=1" in out
+    out = _userns_advice({"user/max_user_namespaces": 0})
+    assert "user.max_user_namespaces=15000" in out
+    assert "wsl --shutdown" in _userns_advice({}, wsl=True)
