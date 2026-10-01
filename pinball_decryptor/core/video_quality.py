@@ -256,6 +256,72 @@ def _sample_count(read_at, tstart, tend):
     return struct.unpack_from(">I", body, 8)[0]
 
 
+def _keyframe_gap(read_at, tstart, tend, frames):
+    """The most frames a decoder has to get through from one key frame to
+    the next in a track (the tail after the last key frame included), from
+    ``stss``.  No ``stss`` means every sample is a sync sample: 1.  ``0``
+    when the box is unreadable."""
+    box = _find_box(read_at, tstart, tend,
+                    [b"mdia", b"minf", b"stbl", b"stss"])
+    if not box:
+        return 1 if frames else 0
+    body, end = box
+    head = read_at(body, 8)
+    if len(head) < 8:
+        return 0
+    count = struct.unpack_from(">I", head, 4)[0]
+    if count <= 0 or body + 8 + 4 * count > end:
+        return 0
+    data = read_at(body + 8, 4 * count)
+    if len(data) < 4 * count:
+        return 0
+    syncs = struct.unpack_from(">%dI" % count, data, 0)
+    gap = max((b - a for a, b in zip(syncs, syncs[1:])), default=0)
+    if frames and frames >= syncs[-1]:
+        gap = max(gap, frames - syncs[-1] + 1)
+    return gap
+
+
+def keyframe_interval(path):
+    """:func:`_keyframe_gap` for the video track of the MP4/QuickTime clip
+    at *path*; ``0`` when it isn't one or can't be read.
+
+    Read from the ``moov`` box alone, so it costs no ffprobe.  It matters
+    because a slot can need short key-frame spacing: every song video on a
+    Spike 2 Metallica card has a key frame every 4 frames (Stern's own x264
+    line says ``keyint=4``), and a full-length replacement with one every 60
+    played stuttering and slowed the whole machine down (PAD-298)."""
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            def read_at(off, n):
+                f.seek(off)
+                return f.read(n)
+            head = read_at(0, 8)
+            if len(head) < 8 or head[4:8] not in _FIRST_BOXES:
+                return 0
+            moov = next(((b, e) for t, _o, b, e in _iter_boxes(read_at, 0, size)
+                         if t == b"moov"), None)
+            if moov is None or moov[1] - moov[0] > _MAX_MOOV:
+                return 0
+            mstart, mend = moov
+            blob = read_at(mstart, mend - mstart)
+            if len(blob) < mend - mstart:
+                return 0
+
+            def mem_at(off, n):
+                i = off - mstart
+                return blob[i:i + n] if (i >= 0 and n > 0) else b""
+
+            for typ, _o, tstart, tend in _iter_boxes(mem_at, mstart, mend):
+                if typ == b"trak" and _handler(mem_at, tstart, tend) == b"vide":
+                    return _keyframe_gap(mem_at, tstart, tend,
+                                         _sample_count(mem_at, tstart, tend))
+    except (OSError, struct.error):
+        pass
+    return 0
+
+
 def _handler(read_at, tstart, tend):
     """A track's handler type (``b"vide"`` / ``b"soun"`` / …)."""
     box = _find_box(read_at, tstart, tend, [b"mdia", b"hdlr"])

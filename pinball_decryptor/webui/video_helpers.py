@@ -100,6 +100,12 @@ def playability_conflict(slot, path, stock_path=None):
         return ("%s is H.264 %s profile and %s is %s — above "
                 "what the slot proves the machine decodes"
                 % (name, info.profile, whose, sinfo.profile))
+    why = _video.keyint_conflict(info, sinfo)
+    if why:
+        # The game skips around in these clips; key frames far apart make
+        # it decode its way there every time and stall (PAD-298).
+        return "%s: %s, so it would stutter and slow the game down" % (
+            name, why.replace("this slot's clip", whose))
     return None
 
 

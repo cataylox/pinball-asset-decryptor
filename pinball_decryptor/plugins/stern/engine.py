@@ -3016,6 +3016,12 @@ def _intact_verdict(src, staged):
         return False, ("it's H.264 %s profile and this slot's clip is %s — "
                        "above what the slot proves the machine decodes"
                        % (info.profile, slot.profile))
+    # Song videos carry a key frame every 4 frames; one with them 60 apart
+    # stuttered and slowed the whole game down (PAD-298).  *staged* was
+    # converted with the slot's spacing, so it is the yardstick here too.
+    why = _video.keyint_conflict(info, slot)
+    if why:
+        return False, why + " — it would stutter and slow the game down"
     return True, None
 
 
