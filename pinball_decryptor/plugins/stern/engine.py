@@ -7432,19 +7432,24 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             if cancel():
                 return None, None, None, None, None
 
+        # Every kind of write below counts, the Scenes window's in-place ones
+        # included: PAD-251 added tree_writes to the list but not to this
+        # check, so a project whose only change was a size-neutral scene edit
+        # (a move, a resize, a hide) was refused here, by Write and Emulate.
         if (not audio_patches and not music_patches and not video_patches
                 and not video_grow_jobs and not image_patches
                 and not texture_patches and not radimg_writes
                 and not text_writes and not color_writes
-                and not layout_writes and not radium_grow_jobs
+                and not layout_writes and not tree_writes
+                and not radium_grow_jobs
                 and not boot_writes and boot_grow is None
                 and patched_gr is None and mode_plan is None
                 and not stock_mode_edits):
             raise RuntimeError(
                 "Nothing could be written: no sound re-encoded, no replaced "
                 "video or image could be fit to its original slot, and no "
-                "display-text edit fit its original string (the card image was "
-                "not modified).")
+                "display-text or scene edit fit its original bytes (the card "
+                "image was not modified).")
 
         # Flatten every patch to absolute (disk_offset, bytes) writes via the
         # ext4 file->disk map.  The offsets are relative to the start of the
