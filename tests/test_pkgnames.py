@@ -205,6 +205,10 @@ def _userns_advice(sysctl, wsl=False):
     eb = (RIG / "ensurebuild.sh").read_text(encoding="utf-8")
     fn = eb[eb.index("_pad_userns_advice() {"):]
     fn = fn[:fn.index("\n}") + 2]
+    # its WSL answer asks padpath's pad_is_wsl, the rig's one definition
+    pp = (RIG / "padpath.sh").read_text(encoding="utf-8")
+    wsl_fn = pp[pp.index("pad_is_wsl() {"):]
+    fn = wsl_fn[:wsl_fn.index("\n}") + 2] + "\n" + fn
     harness = 'T=$(mktemp -d); mkdir -p "$T/kernel" "$T/user"\n'
     for k, v in sysctl.items():
         harness += 'echo %s > "$T/%s"\n' % (v, k)

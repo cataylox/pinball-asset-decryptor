@@ -603,7 +603,7 @@ _pad_userns_advice() {
          [ "$n" = 0 ]; then
         echo "user.max_user_namespaces is 0. To allow it:"
         echo "  sudo sysctl -w user.max_user_namespaces=15000"
-    elif [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qsi microsoft /proc/version; then
+    elif pad_is_wsl; then
         echo "On WSL, wsl --shutdown and start again."
     else
         echo "Check kernel.apparmor_restrict_unprivileged_userns (Ubuntu)"
