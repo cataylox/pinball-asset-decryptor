@@ -205,7 +205,7 @@ function Controls({ s, p, update }) {
     <div class="cp-row">
       <span class="lbl">Start from</span>
       <div class="row wrap">
-        ${presets.map((pr) => html`<${Button} size="sm" onClick=${() => call("color.preset", pr.key)}>${pr.label}<//>`)}
+        ${presets.map((pr) => html`<${Button} size="sm" title=${pr.tip} onClick=${() => call("color.preset", pr.key)}>${pr.label}<//>`)}
       </div>
     </div>
     <div class="cp-row">

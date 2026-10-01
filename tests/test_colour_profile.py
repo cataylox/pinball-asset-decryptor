@@ -34,7 +34,7 @@ def _ramp(mode="RGB"):
 def test_default_text_parses_clean_and_changes_something():
     prof, problems = cp.parse(cp.DEFAULT_TEXT)
     assert problems == []
-    assert "Godzilla" in prof.name
+    assert prof.name == "Recommended"
     assert not prof.is_identity()
     # mids come down (the machine shows them too bright), ends stay put
     for ch in range(3):
@@ -112,7 +112,7 @@ def test_image_staging_applies_it_once_from_the_source(tmp_path, profile_on):
     for _ in range(2):                  # a second build must not stack it
         ok, detail = stage_replacement(slot, str(rep))
         assert ok, detail
-        assert "Godzilla" in detail
+        assert "Recommended" in detail
         assert PIL.open(slot_file).convert("RGB").tobytes() == want
     # the user's own file is untouched
     assert PIL.open(rep).convert("RGB").tobytes() == _ramp().tobytes()
@@ -194,7 +194,7 @@ def test_video_filter_chain_carries_the_profile(tmp_path, profile_on,
         str(src), str(out), video.detect_video_info(str(src)),
         colour=cp.active())
     assert ok, detail
-    assert "Godzilla" in detail
+    assert "Recommended" in detail
     assert out.stat().st_size > 0
 
 
@@ -331,3 +331,8 @@ def test_stock_colors_tick_swaps_a_running_game_live(tmp_path, monkeypatch):
                                   "/g/assets/auto_loaded/s.radium"]
         note = w.state("emulate").get("colour_live", "")
         assert "2 file(s) handed" in note and "next Start" in note
+
+
+def test_every_starting_point_says_how_it_was_made():
+    assert set(cp.PRESET_TIPS) == {k for k, _p in cp.PRESETS}
+    assert "photos of a display test card" in cp.PRESET_TIPS["recommended"]

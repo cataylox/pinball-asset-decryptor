@@ -157,7 +157,9 @@ class ColorTab(TabService):
             name=p.name, gamma=list(p.gamma), gain=list(p.gain),
             lift=max(p.lift), saturation=p.saturation, rev=self._rev,
             path=cp.profile_path(),
-            presets=[{"key": k, "label": v.name} for k, v in cp.PRESETS],
+            presets=[{"key": k, "label": v.name,
+                      "tip": cp.PRESET_TIPS.get(k, "")}
+                     for k, v in cp.PRESETS],
             limits={k: list(v) for k, v in LIMITS.items()})
         if problems is not None:
             values["problems"] = list(problems)

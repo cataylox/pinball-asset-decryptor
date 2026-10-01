@@ -80,10 +80,10 @@ DEFAULT_TEXT = """\
 #   lift        raises the darkest values (0.05 = black becomes 13 of 255)
 #   saturation  1 = unchanged, below 1 = less colour, above 1 = more
 #
-# Starting point: Stern Godzilla, from photos of a display test card on the
-# machine (its mids show too bright and too blue).
+# "Recommended": made from photos of a display test card on a Stern Spike 2
+# machine (a Godzilla), whose middle shades show too bright and too blue.
 
-name = Godzilla (Stern Spike 2)
+name = Recommended
 gamma = 1.10 1.20 1.35
 gain = 1.00 1.00 1.00
 lift = 0.00 0.00 0.00
@@ -324,11 +324,30 @@ def read_file(path):
         return parse(f.read())
 
 
-#: Starting points the Color profile tab offers.
+#: Starting points the Color profile tab offers.  The first is the default
+#: profile, named "Recommended" in the tab (it was measured on a Godzilla,
+#: but nothing in it is Godzilla's own: it is the display that it corrects).
 PRESETS = (
-    ("godzilla", parse(DEFAULT_TEXT)[0]),
+    ("recommended", parse(DEFAULT_TEXT)[0]),
     ("none", Profile(name="No change")),
     # Black-and-white playfield editions (EHoH, Godzilla): every picture as
     # its own grey (Rec.601 luma), nothing else changed.
     ("bw", Profile(name="Black and white", saturation=0.0)),
 )
+
+#: The tab's tooltip for each starting point: how it was made.
+PRESET_TIPS = {
+    "recommended": (
+        "Made from photos of a display test card on a real Stern Spike 2 "
+        "machine (a Godzilla). The card's grey steps and color patches "
+        "were measured in the photos: a mid grey (128, 128, 128) came out "
+        "around (164, 187, 226), far too bright and most of all in blue, "
+        "then green, while white stayed white. This profile darkens each "
+        "color's middle shades to pull that back (red 10%, green 20%, blue "
+        "35% darker) and calms colors a little (90% strength). A phone "
+        "photo is not a color meter, so treat it as a starting point and "
+        "tune it against your own machine."),
+    "none": "Leaves every color as you made it.",
+    "bw": ("Every picture and video in greys, for a black-and-white "
+           "playfield edition. Nothing else is changed."),
+}
