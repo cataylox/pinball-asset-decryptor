@@ -1740,13 +1740,23 @@ def build_tryit_set(project, card, base, log=None, progress=None, cancel=None, l
     return result
 
 
+def no_modes_in_set_words(why=""):
+    """Try it's sentence for a set built without the project's modes (PAD-306): the reason
+    the build gave when the set's manifest kept it, so it is not left to a long log."""
+    why = str(why or "").strip().rstrip(".")
+    if why:
+        return ("the project's modes were left out of the set: %s. So there is nothing of "
+                "them to try" % why)
+    return ("the set was built without the project's modes (the warning that starts "
+            "\"Modes:\" in the log says why), so there is nothing of them to try")
+
+
 def _tryit_set_from_manifest(project, modes, code, set_dir, listed, counts, E, reused=False):
     """The :class:`TryItSet` a set's manifest describes - read the same way after a build and
     for a set handed back unbuilt, so the tab sees one shape either way."""
     carried = listed.get("modes") or {}
     if not carried:
-        raise ModeWriteError("the set was built without the project's modes (the log says "
-                             "why), so there is nothing of them to try")
+        raise ModeWriteError(no_modes_in_set_words(listed.get("modes_left_out")))
     stage = carried.get("dir") or (set_dir.rstrip("\\/") + E.OVERRIDE_MODES_SUFFIX)
     port = os.path.join(stage, "game.port")
     if modes:

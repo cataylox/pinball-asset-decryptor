@@ -856,6 +856,56 @@ def test_try_it_says_why_it_cannot_build(monkeypatch, tmp_path):
         MW.build_tryit_set(str(project), str(original), base, log=lambda m: None)
 
 
+def test_try_it_carries_the_modes_where_no_card_can_be_mounted(monkeypatch, tmp_path):
+    """PAD-306: native Ubuntu's loop probe runs through sudo, which a GUI without a terminal
+    fails. A Try it set is written into a folder and never mounted, so it keeps the modes; a
+    Write to an image still asks the probe."""
+    _card, _staged, project, _enc, _h = _mode_card(monkeypatch, tmp_path)
+    from pinball_decryptor.core import ext4_grow as EG
+    monkeypatch.setattr(EG, "available", lambda: (False, "sudo: a terminal is required"))
+    original = tmp_path / "original.raw"
+    original.write_bytes(b"x" * 4096)
+    ts = MW.build_tryit_set(str(project), str(original), str(tmp_path / "tryit"),
+                            log=lambda m: None)
+    assert [n for _s, _g, n in ts.slots] == ["ATOMIC BREATH", "KAIJU RUSH"]
+    msgs, log = _capture()
+    with pytest.raises(FileNotFoundError, match="Nothing to write"):
+        _compute(project, log)
+    assert _said(msgs, "sudo: a terminal is required")
+
+
+def test_try_it_names_the_reason_a_set_left_the_modes_out(monkeypatch, tmp_path):
+    """PAD-306: the build keeps the gate's reason, the set's manifest carries it, and Try it
+    says that reason instead of "the log says why"."""
+    _card, _staged, project, _enc, _h = _mode_card(monkeypatch, tmp_path)
+    real_refusal = MW.card_refusal
+    monkeypatch.setattr(MW, "card_refusal",
+                        lambda project, probe=True, real_card=False: "no port for this build")
+    with pytest.raises(FileNotFoundError, match="Nothing to write"):
+        _compute(project, lambda *a, **k: None)
+    assert engine._MODES_LEFT_OUT.why == "no port for this build"
+    monkeypatch.setattr(MW, "card_refusal", real_refusal)
+    # a set whose build left the modes out (the rest of its edits written)
+    real = engine._compute_patches
+
+    def left_out(*a, **k):
+        got = real(*a, **k)
+        got[2]["modes"] = None
+        engine._MODES_LEFT_OUT.why = "no port for this build"
+        return got
+    monkeypatch.setattr(engine, "_compute_patches", left_out)
+    original = tmp_path / "original.raw"
+    original.write_bytes(b"x" * 4096)
+    with pytest.raises(MW.ModeWriteError) as got:
+        MW.build_tryit_set(str(project), str(original), str(tmp_path / "tryit"),
+                           log=lambda m: None)
+    assert str(got.value) == ("the project's modes were left out of the set: no port for this "
+                              "build. So there is nothing of them to try")
+    listed = engine.read_override_manifest(os.path.join(str(tmp_path / "tryit"), "set"))
+    assert listed["modes_left_out"] == "no port for this build" and "modes" not in listed
+    assert "warning that starts" in MW.no_modes_in_set_words("")
+
+
 # ---- item 150's own sounds through Write (start, shot, music on carriers) ---------------------
 def _own_sounds_card(monkeypatch, tmp_path, **kw):
     """_mode_card, with ATOMIC BREATH given a 0.5 s start sound and a 0.6 s music, and each
