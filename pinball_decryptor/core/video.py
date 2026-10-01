@@ -124,7 +124,8 @@ class VideoInfo:
     def __init__(self, path, vcodec="", width=0, height=0, fps=0.0,
                  duration=0.0, has_audio=False, has_alpha=False,
                  pix_fmt="", container="", nframes=0,
-                 audio_rate=0, audio_channels=0, profile="", level=0):
+                 audio_rate=0, audio_channels=0, profile="", level=0,
+                 keyint=0):
         self.path = path
         self.vcodec = vcodec          # "h264", "vp9", "theora", "prores", …
         self.width = width
@@ -140,6 +141,7 @@ class VideoInfo:
         self.pix_fmt = pix_fmt
         self.container = container     # extension without the dot ("mp4")
         self.nframes = nframes         # frame count (custom backends; 0=unknown)
+        self.keyint = keyint           # most frames between key frames (0=unknown)
 
     def audio_summary(self):
         """Human audio-track summary — "44.1 kHz Stereo" — or "" for a silent
@@ -193,6 +195,17 @@ def detect_video_info(path):
 
     if not path or not os.path.isfile(path):
         return None
+    info = _probe_video_info(path)
+    if info is not None and not getattr(info, "keyint", 0):
+        # Neither ffprobe's stream summary nor the banner says how far apart
+        # the key frames are; the MP4 sample table does, for free.
+        from .video_quality import keyframe_interval
+        info.keyint = keyframe_interval(path)
+    return info
+
+
+def _probe_video_info(path):
+    """:func:`detect_video_info`'s ffprobe (or ffmpeg banner) half."""
     ffprobe = find_ffprobe()
     if not ffprobe:
         # ffmpeg-only install (the frozen macOS/Linux apps bundle ffmpeg via
@@ -903,6 +916,44 @@ def _h264_profile_args(info, scaled_to_slot):
     return args
 
 
+# A slot whose clip puts its key frames at most this many frames apart needs
+# that spacing kept.  Every song video on a Spike 2 Metallica card is x264
+# ``keyint=4`` -- all 27 clips over a minute long, while the short callouts run
+# 30 to 250 -- and a full-length replacement with a key frame every 60 frames
+# played stuttering and slowed the whole machine down until it missed
+# switches (PAD-298).  The game evidently jumps around inside those clips and
+# pays for every frame between key frames each time.  Above this the slot's
+# spacing is just whatever its encoder defaulted to and proves nothing.
+SHORT_KEYINT = 8
+
+
+def short_keyint(info):
+    """The slot's key-frame spacing when it is one a replacement has to keep
+    (see :data:`SHORT_KEYINT`), else 0."""
+    k = getattr(info, "keyint", 0) or 0
+    return k if 0 < k <= SHORT_KEYINT else 0
+
+
+def keyint_conflict(info, slot_info):
+    """Why *info*'s key frames are too far apart for the slot *slot_info*
+    describes, or ``None``.  Like the profile, the slot's spacing is a
+    ceiling: closer is fine, and either side unknown is no opinion."""
+    need = short_keyint(slot_info)
+    have = getattr(info, "keyint", 0) or 0
+    if not need or not have or have <= need:
+        return None
+    return ("it has a key frame every %d frames and this slot's clip has one "
+            "every %d" % (have, need))
+
+
+def _keyint_args(info):
+    """``-g`` for an encode into a slot whose key-frame spacing has to be
+    kept (:func:`short_keyint`); nothing otherwise, which leaves the
+    encoder's own default exactly as it always was."""
+    k = short_keyint(info)
+    return ["-g", str(k)] if k else []
+
+
 # How each container is named on the "What this slot needs" panel.  Every
 # extension used to render as "MP4 (<ext>)", so a Spooky .ogv and a JJP .webm
 # both read as MP4 — which is exactly the assumption that put an H.264 recipe
@@ -944,6 +995,9 @@ def dropin_spec(info, ext):
         out.append(("Frame size", "%d x %d" % (info.width, info.height)))
     if info.fps:
         out.append(("Frame rate", "%.6g fps" % info.fps))
+    if short_keyint(info):
+        out.append(("Key frames", "every %d frames or closer"
+                    % short_keyint(info)))
     if info.duration:
         out.append(("Length", "%.2f s" % info.duration))
     # Worth stating outright: most Spike 2 clips carry no audio track, and a
@@ -961,9 +1015,9 @@ def dropin_ffmpeg_command(info, ext, src="input.mov", dst="output"):
     For users who would rather encode their own files than let the app do it —
     a tester tunes his own key-frame interval so long clips play smoothly on
     the machine, and without knowing the target he was guessing.  Everything
-    that isn't dictated by the slot (bitrate, key-frame interval, preset) is
-    deliberately left out, so it can be tuned without fighting the parts that
-    have to match.
+    that isn't dictated by the slot (bitrate, preset, and the key-frame
+    interval unless the slot needs a short one) is deliberately left out, so
+    it can be tuned without fighting the parts that have to match.
     """
     if info is None or not info.width or not info.height:
         return None
@@ -983,6 +1037,7 @@ def dropin_ffmpeg_command(info, ext, src="input.mov", dst="output"):
              "-vf", "scale=%d:%d" % (info.width, info.height)]
     if info.fps:
         args += ["-r", "%.6g" % info.fps]
+    args += _keyint_args(info)
     args += ["-an", dst + (ext or ".mov")]
     return " ".join(args)
 
@@ -1374,6 +1429,7 @@ def transcode_video_to(src_path, dst_path, original_info,
                 cmd += vargs
                 if "libx264" in vargs:
                     cmd += _h264_profile_args(original_info, scaled_to_slot)
+                cmd += _keyint_args(original_info)
                 if budget:
                     cmd += ["-b:v", str(_vbps)]
                     if pass_no != 1:               # stats pass needs no cap
@@ -1574,6 +1630,7 @@ def shrink_video_to_size(src_path, dst_path, max_bytes, original_info=None,
                 cmd += vargs
                 if "libx264" in vargs:
                     cmd += _h264_profile_args(info, scaled_to_slot=bool(vf))
+                cmd += _keyint_args(info)
                 cmd += ["-b:v", str(_vbps)]
                 # The analysis pass only collects statistics, so it is given
                 # neither the rate cap nor the audio track: both cost time and

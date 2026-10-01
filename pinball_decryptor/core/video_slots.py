@@ -35,8 +35,8 @@ from .audio_slots import replace_with_retry
 from .checksums import NON_ASSET_DIRS, is_other_extract
 from .video import (VIDEO_EXTS, VideoInfo, backend_for, detect_video_info,
                     encode_replacement, find_ffmpeg, isobmff_brand,
-                    profile_rank, remux_video_to, same_pix_fmt,
-                    transcode_video_to)
+                    keyint_conflict, profile_rank, remux_video_to,
+                    same_pix_fmt, short_keyint, transcode_video_to)
 
 
 @dataclass
@@ -185,6 +185,16 @@ def _clip_bitrate(path: str) -> Optional[float]:
     return q.bitrate
 
 
+def _slot_keyint(path: Optional[str]) -> int:
+    """The short key-frame spacing the clip at *path* holds a replacement
+    to (:func:`core.video.short_keyint`), else 0.  A moov read, no
+    ffprobe, so the staging cache can afford it for every clip."""
+    if not path or not os.path.isfile(path):
+        return 0
+    from .video_quality import keyframe_interval
+    return short_keyint(VideoInfo(path, keyint=keyframe_interval(path)))
+
+
 def _remove(path: str) -> None:
     """Delete *path* if it's there, ignoring an OS that says otherwise."""
     if os.path.exists(path):
@@ -215,7 +225,8 @@ def _stream_mismatch(slot: VideoSlot, ri: Optional[VideoInfo],
     player: hand it 10-bit, 4:2:2, or a profile above the one the slot's clip
     proves it accepts, and the demuxer still finds the sound (which plays)
     while the picture stays **black**.  A profile BELOW the slot's is fine —
-    the ceiling is what matters.
+    the ceiling is what matters.  Key frames further apart than a short-GOP
+    slot's are a ceiling the same way (:func:`core.video.keyint_conflict`).
     """
     si = slot.info
     if si is None or not si.width or not si.height:
@@ -245,6 +256,11 @@ def _stream_mismatch(slot: VideoSlot, ri: Optional[VideoInfo],
     if rank is not None and slot_rank is not None and rank > slot_rank:
         return ("it's H.264 %s profile and this slot's clip is %s"
                 % (ri.profile, si.profile))
+    # Key-frame spacing, where the slot needs a short one (song videos): a
+    # stream copy keeps the spacing, so this blocks a remux as well.
+    why = keyint_conflict(ri, si)
+    if why:
+        return why
     if match_length and si.duration > 0 and abs(ri.duration - si.duration) > 0.05:
         return ("it runs %.3g s and this slot's clip is %.3g s (lengths are "
                 "being matched)" % (ri.duration, si.duration))
@@ -735,10 +751,18 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
         rate = None
         if not pin_byte_size:
             rate = _clip_bitrate(orig or slot.abs_path)
+        # A short-GOP slot's recipe names its spacing, so a conversion made
+        # before conversions kept it (PAD-298) is made again; every other
+        # slot's recipe is exactly what it was.
+        gop = {}
+        k = _slot_keyint(orig or slot.abs_path)
+        if k:
+            gop = {"keyint": k}
         recipe = cache.recipe(slot, rep, orig, trim=slot_trim,
                               length=seconds or 0,
                               noconv=slot_noconv, budget=budget,
-                              rate=round(rate or 0), best=bool(best_quality))
+                              rate=round(rate or 0), best=bool(best_quality),
+                              **gop)
         if cache.fresh(slot, recipe):
             staged += 1
             kept += 1

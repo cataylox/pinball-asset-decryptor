@@ -521,15 +521,17 @@ HELP_CONTENT = {
          "clip or the wrong size and it plays the sound over a black "
          "picture. Anything that isn't a drop-in is converted first (still "
          "at full size, no byte budget) and the build log says which clip "
-         "and why."),
+         "and why. The song videos also need a key frame every few frames, "
+         "the way Stern encodes them: one with key frames far apart plays "
+         "stuttering and slows the whole game down, so it is converted too."),
         ("Encoding your own clips",
          "Right-click a slot and pick \"What this slot needs…\" to see exactly "
          "what a replacement has to be to go on the card untouched: container, "
-         "codec, H.264 profile and level, frame size, frame rate and whether "
-         "the clip has an audio track. It also gives you an ffmpeg command "
-         "that produces one, with only the flags that have to match, so you "
-         "can add your own bitrate, key-frame interval and preset around "
-         "them. Every value is read off the clip already in that slot, which "
+         "codec, H.264 profile and level, frame size, frame rate, key-frame "
+         "spacing where the slot needs a short one, and whether the clip has "
+         "an audio track. It also gives you an ffmpeg command that produces "
+         "one, with only the flags that have to match, so you can add your "
+         "own bitrate and preset around them. Every value is read off the clip already in that slot, which "
          "is the only real authority on what the machine will play — Spike 2 "
          "decodes H.264 in hardware and nothing else, so a ProRes or HEVC "
          "file plays its sound over a black picture no matter how good it "
