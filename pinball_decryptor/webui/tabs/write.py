@@ -43,7 +43,7 @@ EXPORT_TIP = (
     "staged for the build — as a CSV.\n\nFor comparing two projects "
     "that disagree about how many changes they hold.")
 TEXT_GROW_LABEL = ("Advanced: grow the game program / a scene for longer text "
-                   "(default on; a machine has not booted such a build yet)")
+                   "(default on)")
 TEXT_GROW_TIP = (
     "On: a Replace Text edit longer than its original slot (a row "
     "whose Max reads \"96 (grows)\") is placed in a new read-only "
@@ -52,8 +52,9 @@ TEXT_GROW_TIP = (
     "length; either needs the card built as an image, not a "
     "Direct-SD write. Off: every row keeps its original budget and "
     "over-long edits are skipped with a named reason in the build "
-    "log. Proven in the PC emulator only; keep the stock card to "
-    "hand. Mirrored to PAD_STERN_TEXT_GROW for the build.")
+    "log. A game program grown this way has been booted on a "
+    "machine; a scene rewritten at a new length is proven in the PC "
+    "emulator only. Mirrored to PAD_STERN_TEXT_GROW for the build.")
 #: Stern Spike 2: the SD card class a build is for (plugins/stern/card_size.py;
 #: the engine's no-space failure points at this control by its label).
 CARD_SIZE_LABEL = "SD card size"
@@ -1215,8 +1216,13 @@ class WriteTab(TabService):
             self.set(colour_note="%s changes nothing as it stands"
                      % prof.label(), colour_note_kind="")
         else:
-            self.set(colour_note="Color profile on: %s is applied to your "
-                     "replaced pictures and videos" % prof.label(),
+            try:
+                wide = bool(self.mfr.colour_profile_on_display())
+            except Exception:                           # noqa: BLE001
+                wide = False
+            self.set(colour_note="Color profile on: %s is applied to %s"
+                     % (prof.label(), "everything the game draws" if wide
+                        else "your replaced pictures and videos"),
                      colour_note_kind="")
 
     def _refresh_pending_text_rows(self):

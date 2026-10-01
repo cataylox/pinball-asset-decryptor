@@ -331,6 +331,11 @@ class ColorTab(TabService):
         self._publish_sample()
 
     def on_manufacturer(self, mfr):
+        try:
+            on_display = bool(mfr.colour_profile_on_display())
+        except Exception:                               # noqa: BLE001
+            on_display = False
+        self.set(on_display=on_display)
         self._publish()
 
 

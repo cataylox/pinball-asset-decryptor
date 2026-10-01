@@ -250,13 +250,18 @@ function Controls({ s, p, update }) {
 function Explainer({ s }) {
   return html`<${Card} title="What this does" cls="cp-explain">
     <p>A pinball machine's screen doesn't show colors the way your PC monitor does. On a Stern Godzilla, for example, middle greys come out too bright and too blue, and the darkest shades all sink into the same black.</p>
-    <p>A color profile corrects for that. When you build, PAD shifts the colors of your replacement pictures and videos the opposite way, so the machine's screen shifts them back to what you made.</p>
+    ${s.on_display ? html`<p>A color profile corrects for that. When you build, PAD teaches the game to shift every color it draws the opposite way, so the machine's screen shifts them back to what you made. It covers everything on the screen: the game's own art, videos, mode screens, text, and your replacements.</p>
     <ul class="cp-facts">
-      <li><${Icon} name="check" />Your own files are never changed. The correction is made fresh from them every time you build, so it can never be applied twice.</li>
-      <li><${Icon} name="check" />The game's own art is left alone: it was made for the machine already.</li>
+      <li><${Icon} name="check" />No picture or video file is changed, yours or the game's. The correction lives in the game program itself, so it can never be applied twice.</li>
+      <li><${Icon} name="check" />Switch it off and build again for the game's own colors.</li>
       <li><${Icon} name="check" />Different machines need different profiles. Save a copy for each one and load the one you're building for.</li>
       <li><${Icon} name="check" />The Emulate tab can show the stock colors instead, since you're watching it on your PC.</li>
-    </ul>
+    </ul>` : html`<p>A color profile corrects for that. When you build, PAD shifts the colors of your replacement pictures and videos the opposite way, so the machine's screen shifts them back to what you made.</p>
+    <ul class="cp-facts">
+      <li><${Icon} name="check" />Your own files are never changed. The correction is made fresh from them every time you build, so it can never be applied twice.</li>
+      <li><${Icon} name="check" />The game's own art is left alone on this machine: PAD can only correct what you replace.</li>
+      <li><${Icon} name="check" />Different machines need different profiles. Save a copy for each one and load the one you're building for.</li>
+    </ul>`}
     <p class="small muted">Best way to tune it: put the test card on the machine, photograph the screen, and nudge the sliders until the photo matches what you see here on the left.</p>
   <//>`;
 }
@@ -287,11 +292,15 @@ export default function ColorTab() {
   const samples = [...(s.samples || []), { value: "browse", label: "Another picture..." }];
   return html`<div class="page cp-page">
     <${PageHead} title="Color profile" sub=${INTRO}>
-      <span class="lbl nw" ...${tip("On: every build corrects your replaced pictures and videos with this profile. Off: they go onto the card exactly as they are.")}>Use when building</span>
+      <span class="lbl nw" ...${tip(s.on_display
+        ? "On: every build corrects everything the game draws with this profile. Off: the game draws in its own colors."
+        : "On: every build corrects your replaced pictures and videos with this profile. Off: they go onto the card exactly as they are.")}>Use when building</span>
       <${Seg} value=${s.enabled ? "on" : "off"} options=${[{ value: "off", label: "Off" }, { value: "on", label: "On" }]}
         onChange=${(v) => call("color.set_enabled", v === "on")} />
     <//>
-    ${!s.enabled ? html`<${Note} kind="info">The profile is off: builds put your pictures and videos on the card exactly as they are. You can still try it out here.<//>` : null}
+    ${!s.enabled ? html`<${Note} kind="info">${s.on_display
+      ? "The profile is off: the game draws in its own colors. You can still try it out here."
+      : "The profile is off: builds put your pictures and videos on the card exactly as they are. You can still try it out here."}<//>` : null}
     <div class="cp-grid">
       <div class="cp-main">
         <${Card} title="Preview" cls="cp-preview" extra=${html`<div class="row">

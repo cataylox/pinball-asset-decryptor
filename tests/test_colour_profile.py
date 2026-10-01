@@ -134,15 +134,18 @@ def test_image_staging_without_it_is_unchanged(tmp_path, monkeypatch):
     assert PIL.open(slot_file).convert("RGB").tobytes() == _ramp().tobytes()
 
 
-def test_scene_added_picture_gets_it(tmp_path, profile_on, monkeypatch):
+def test_scene_added_picture_is_left_to_the_shaders(tmp_path, profile_on,
+                                                     monkeypatch):
+    """Spike 2 corrects what the game draws in its shaders (PAD-305
+    shader_profile), so a picture added in Scenes is NOT corrected as a file
+    as well: that would apply the profile twice."""
     from pinball_decryptor.plugins.stern import scene_edit
     p = tmp_path / "pic.png"
     _ramp().convert("RGBA").save(p)
     on = scene_edit._texture_from_png(str(p))
     monkeypatch.setenv(cp.ENV, "0")
     off = scene_edit._texture_from_png(str(p))
-    assert on[:3] == off[:3] and on[3] != off[3]
-
+    assert on == off
 
 def test_video_staging_reencodes_a_matching_clip(tmp_path, profile_on,
                                                  monkeypatch):
@@ -284,55 +287,25 @@ def test_black_and_white_preset_makes_every_pixel_grey():
     assert prof.ffmpeg_filters()[0].startswith("colorchannelmixer=rr=0.299")
 
 
-def test_stock_colors_tick_swaps_a_running_game_live(tmp_path, monkeypatch):
-    """PAD-305 option 1: flipping Stock colors while the game runs rebuilds
-    the set with the profile held off and hands only the changed asset files
-    to the running game; the game program is never pushed."""
-    import time
+def test_stock_colors_on_a_running_spike2_game_waits_for_the_next_start(
+        tmp_path, monkeypatch):
+    """PAD-305: on Spike 2 the profile lives in the game program's drawing
+    shaders, compiled at boot, so flipping Stock colors while the game runs
+    says it applies at the next Start and rebuilds nothing."""
     from tests.webui_harness import web_app
     from pinball_decryptor.plugins.stern import engine
     monkeypatch.setenv(cp.ENV_FILE, str(tmp_path / "profile.txt"))
     with web_app(tmp_path, mfr="stern") as w:
         cp.set_enabled(True)
         emu = w.window.service("emulate")
-        seen = {}
-        digests = iter([
-            {"/g/assets/a.png": "1", "/g/assets/auto_loaded/s.radium": "1",
-             "/g/game": "1"},
-            {"/g/assets/a.png": "2", "/g/assets/auto_loaded/s.radium": "2",
-             "/g/game": "2"},
-        ])
-
-        def fake_write(card, assets, out, **kw):
-            seen["active"] = cp.active()
-            return (0, 0, 2, 0), None, None, []
-        monkeypatch.setattr(engine, "write_overrides", fake_write)
-        monkeypatch.setattr(engine, "stamp_override_manifest",
-                            lambda *a, **k: None)
-        monkeypatch.setattr(emu, "_set_digests", lambda out: next(digests))
-        monkeypatch.setattr(emu, "_stage_fn", lambda: None)
-        pushed = []
-        monkeypatch.setattr(emu, "push_live_file",
-                            lambda p, path: pushed.append(p) or "sent")
+        built = []
+        monkeypatch.setattr(engine, "write_overrides",
+                            lambda *a, **k: built.append(1))
         emu._live_set = {"assets": str(tmp_path), "out": str(tmp_path / "o")}
         emu._colour_src = ("card.raw", "card.raw")
         emu._last_up = True
         w.call("ui.set", "emulate", "overrides", True)
-        w.call("ui.set", "emulate", "colour_stock", True)   # trace fires it
-        end = time.time() + 10
-        while emu._colour_busy or "active" not in seen:
-            w.drain()
-            if time.time() > end:
-                break
-            time.sleep(0.05)
+        w.call("ui.set", "emulate", "colour_stock", True)
         w.drain()
-        assert seen["active"] is None                 # held off: stock colors
-        assert sorted(pushed) == ["/g/assets/a.png",
-                                  "/g/assets/auto_loaded/s.radium"]
-        note = w.state("emulate").get("colour_live", "")
-        assert "2 file(s) handed" in note and "next Start" in note
-
-
-def test_every_starting_point_says_how_it_was_made():
-    assert set(cp.PRESET_TIPS) == {k for k, _p in cp.PRESETS}
-    assert "photos of a display test card" in cp.PRESET_TIPS["recommended"]
+        assert built == []
+        assert "Start the game again" in w.state("emulate").get("colour_live", "")

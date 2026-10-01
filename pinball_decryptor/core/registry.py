@@ -634,6 +634,14 @@ class Manufacturer(ABC):
         game's display name."""
         return game.display
 
+    def colour_profile_on_display(self):
+        """PAD-305: does this machine's Write apply the color profile to
+        everything the game draws (its drawing shaders), so the user's
+        replacement files must NOT be corrected as well?  ``False``: the
+        profile corrects the replacement pictures and videos as they are
+        staged, the only place it can reach."""
+        return False
+
     def identify_card(self, path):
         r"""Which game the card at *path* is — a short caption like
         ``"Godzilla Pro"``, or ``""`` when this plugin can't tell.

@@ -4152,12 +4152,13 @@ class App:
             except Exception:
                 pin_size = False
         try:
-            staged, failures = stage_replacements(
-                slots_by_rel, assignments, trim_to_length=trim,
-                no_conversion=no_conversion, log_cb=log_cb,
-                assets_dir=assets_dir, cancel_cb=cancel_cb,
-                pin_byte_size=pin_size, asis_overrides=asis,
-                best_quality=best, length_overrides=lengths)
+            with self._colour_assets_scope():
+                staged, failures = stage_replacements(
+                    slots_by_rel, assignments, trim_to_length=trim,
+                    no_conversion=no_conversion, log_cb=log_cb,
+                    assets_dir=assets_dir, cancel_cb=cancel_cb,
+                    pin_byte_size=pin_size, asis_overrides=asis,
+                    best_quality=best, length_overrides=lengths)
             self.msg_queue.put(LogMsg(
                 f"Applied {staged} video replacement(s)."
                 + (f"  {len(failures)} could not be converted (see above)."
@@ -4194,9 +4195,10 @@ class App:
             f"Applying {len(assignments)} image replacement(s) to the "
             f"assets folder...", "info"))
         try:
-            staged, failures = stage_replacements(
-                slots_by_rel, assignments, log_cb=log_cb, assets_dir=assets_dir,
-                keep_size=keep_size)
+            with self._colour_assets_scope():
+                staged, failures = stage_replacements(
+                    slots_by_rel, assignments, log_cb=log_cb,
+                    assets_dir=assets_dir, keep_size=keep_size)
             self.msg_queue.put(LogMsg(
                 f"Applied {staged} image replacement(s)."
                 + (f"  {len(failures)} could not be converted (see above)."
@@ -4213,6 +4215,22 @@ class App:
             self.msg_queue.put(LogMsg(
                 f"Image replacement failed: {e}", "error"))
             return (len(assignments), 0, [("image replacements", str(e))])
+
+    def _colour_assets_scope(self):
+        """PAD-305: staging corrects the replacement files with the color
+        profile only where the Write cannot correct the whole display; on
+        Spike 2 the game's shaders carry it (correcting the files too would
+        apply it twice), so staging runs with it held off."""
+        import contextlib
+        from .core import colour_profile
+        mfr = self._current_mfr
+        try:
+            on_display = bool(mfr is not None
+                              and mfr.colour_profile_on_display())
+        except Exception:                               # noqa: BLE001
+            on_display = False
+        return (colour_profile.forced(False) if on_display
+                else contextlib.nullcontext())
 
     def stage_pending_replacements(self, assets_dir, cancel_cb=None):
         """Apply every assigned Replace-tab replacement into *assets_dir* now.

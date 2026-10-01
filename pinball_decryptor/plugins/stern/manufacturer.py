@@ -474,6 +474,12 @@ class SternManufacturer(Manufacturer):
     def current_era(self):
         return self._era
 
+    def colour_profile_on_display(self):
+        """Spike 2: the Write patches the game's drawing shaders
+        (shader_profile.py), which reach every picture, clip and line of
+        text, the user's replacements included."""
+        return self._era == "spike2"
+
     @property
     def capabilities(self):
         if self._era == "whitestar":
