@@ -20,7 +20,7 @@ const SOURCE_TIP = "Show only images from one store: plain files on the card, sc
 const SHOW_TIP = "Narrow the list by what you've already done to it. Changed = the slots with a pending replacement or already changed on disk by a previous build. Unchanged = everything you haven't touched yet, so a part-finished pass is what's left in front of you instead of something to scroll past.";
 const GROUP_TIP = "Group the images under the scene / animation they belong to (in play order), so a whole animation can be reviewed — or bulk-replaced via right-click — as one unit.";
 const FONTS_TIP = "Preview any game font (type your own text, rendered from the real glyphs) and import a desktop font into it — letters are auto-fitted into the space each character has. Stern Spike 2.";
-const MORE_TIP = "More: Export CSV, Clear replacements…";
+const MORE_TIP = "More: Export CSV, Clear replacements…, Save / load settings";
 const CSV_TIP = "Save every row of the list as a spreadsheet (CSV), exactly as it reads here.";
 const FOLDER_TIP = "Pick a folder of your own files and each one becomes the replacement for the slot with the same name — for a whole set you reworked outside the app, like every clip made black and white. The file type and capital letters don't have to match (Intro.mp4 is used for Intro.mov and converted to suit it), and subfolders are fine. Nothing changes until you confirm, and every file left out is named in the log.\n\nKeep the extract's own files where they are: files dropped into the project folder only count under the card's exact name.";
 const CLEAR_TIP = "Drop every replacement picked on this tab in one go — for starting a project over without clearing 48 rows one at a time. It only drops the picks: your own files are untouched, and a slot already built into the project folder keeps the bytes it has (use “Revert all changes…” on the Write tab for those). To clear only some, select the rows — click, then Shift-click or Ctrl-click — and right-click the selection.";
@@ -408,6 +408,12 @@ export default function ImagesTab() {
           { label: "Export CSV", icon: "download", title: CSV_TIP, onClick: () => call("images.export_csv") },
           { label: "Clear replacements…", icon: "trash", title: CLEAR_TIP, disabled: !s.can_clear,
             onClick: () => call("images.clear_all") },
+          { sep: true },
+          { label: "Save settings to a file…", icon: "download", title: "Which file replaces which slot, and this tab's ticks and options, in one small file to keep or to send. The pictures themselves are not in it.",
+            onClick: () => call("images.settings_save") },
+          { label: "Load settings from a file…", icon: "upload", disabled: running,
+            title: "Put the settings in a file saved here or by someone else onto the same slots of this card. A slot this card does not have is left out.",
+            onClick: () => call("images.settings_load") },
         ], { align: "right" })} />
     <//>
 

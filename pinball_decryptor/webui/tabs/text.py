@@ -25,6 +25,7 @@ apply_all, change_filter, scene_filter.
 """
 
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -643,6 +644,95 @@ class TextTab(TabService):
             self.set(sel_edited=False)
         self._update_budget()
         return True
+
+    # ------------------------------------------------------------------
+    # Save edits to a file / Load edits from a file (PAD-300)
+    # ------------------------------------------------------------------
+    @rpc
+    def settings_save(self):
+        """Every text edit (the new text, not the scene files) in one small
+        file.  Returns its path, or None."""
+        from ...core import tab_settings as TS
+        n = sum(1 for r in self._text_rows if R.is_edited(r))
+        if not n:
+            compat.messagebox.showinfo("Save text edits",
+                                       "There are no text edits to save yet.")
+            return None
+        stem = re.sub(r'[\\/:*?"<>|]+', "_", "%s text edits" % (
+            os.path.basename(os.path.normpath(self._text_scan_dir))
+            or "project"))
+        path = self.window.ask_save(
+            "text_settings_file", "Save text edits to a file",
+            initialfile=stem + ".json",
+            filetypes=[("PAD text settings", "*.json")],
+            defaultextension=".json")
+        if not path:
+            return None
+        try:
+            n = TS.export_text(self._text_rows, path)
+        except OSError as e:
+            compat.messagebox.showerror("Save text edits", str(e))
+            return None
+        self.log("Replace Text: saved %d edit(s) to %s" % (n, path), "info")
+        return path
+
+    @rpc
+    def settings_load(self, path=None):
+        """Put the edits in a saved file onto the same strings of this card
+        (a string the file changes takes the file's text).  Returns the
+        count loaded, or None."""
+        from ...core import tab_settings as TS
+        title = "Load text edits"
+        if not self._text_rows:
+            compat.messagebox.showinfo(title,
+                                       "Scan a project folder on this tab "
+                                       "first.")
+            return None
+        if not path:
+            path = self.window.ask_open(
+                "text_settings_file", "Load text edits from a file",
+                filetypes=[("PAD text settings", "*.json"),
+                           ("All files", "*.*")])
+        if not path:
+            return None
+        name = os.path.basename(path)
+        try:
+            pairs, missing = TS.match_text(TS.read(path, "text"),
+                                           self._text_rows)
+        except (TS.TabSettingsError, OSError) as e:
+            compat.messagebox.showinfo(title, str(e))
+            return None
+        fits = [(r, new) for r, new in pairs
+                if R.row_len(r, new) <= R.row_budget(r)]
+        long_ = len(pairs) - len(fits)
+        if not fits:
+            compat.messagebox.showinfo(
+                title, "None of the edits in %s fit a string on this card, "
+                "so nothing was loaded." % name)
+            return None
+        clash = [r for r, new in fits
+                 if R.is_edited(r) and r["replacement"] != new]
+        if clash and not compat.messagebox.askyesno(
+                title, "%d of the strings in this file %s a different edit "
+                "here already. Loading puts the file's text in their place. "
+                "Go ahead?" % (len(clash),
+                               "has" if len(clash) == 1 else "have")):
+            return None
+        self._set_replacements(
+            [(r, "" if new == r["original"] else new) for r, new in fits])
+        words = "Loaded %d text edit%s from %s." % (
+            len(fits), "" if len(fits) == 1 else "s", name)
+        if missing:
+            words += (" %d of them %s not on this card and %s left out."
+                      % (len(missing), "is" if len(missing) == 1 else "are",
+                         "was" if len(missing) == 1 else "were"))
+        if long_:
+            words += (" %d of them %s too long for this card's string and %s left "
+                      "out." % (long_, "is" if long_ == 1 else "are",
+                                "was" if long_ == 1 else "were"))
+        self.log("Replace Text: " + words, "info")
+        compat.messagebox.showinfo(title, words)
+        return len(fits)
 
     def _save_text_manifest(self):
         """Persist the full row set to text/strings.tsv (the manifest is the

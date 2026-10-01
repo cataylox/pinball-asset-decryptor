@@ -638,11 +638,17 @@ export default function AudioTab() {
       <${Button} icon="folder" disabled=${s.running} title=${T.fromFolder} onClick=${() => call("audio.replace_from_folder")}>Replace from folder…<//>
       ${s.adv_cap ? html`<${Button} kind="ghost" icon="gear" title=${T.adv} onClick=${openAdv}>${s.adv_marker ? "Advanced…*" : "Advanced…"}<//>` : null}
       <${Button} kind="ghost" icon="more" label="More" busy=${s.profile_busy}
-        title=${s.adv_cap ? "More: Export CSV, Clear replacements…, Profile vs stock" : "More: Export CSV, Clear replacements…"}
+        title=${s.adv_cap ? "More: Export CSV, Clear replacements…, Save / load settings, Profile vs stock" : "More: Export CSV, Clear replacements…, Save / load settings"}
         onClick=${(e) => openMenu(e.currentTarget, [
           { label: "Export CSV", icon: "download", title: T.csv, onClick: () => call("audio.export_csv") },
           { label: "Clear replacements…", icon: "trash", title: T.clear, disabled: !s.can_clear || s.running,
             onClick: () => call("audio.clear_all") },
+          { sep: true },
+          { label: "Save settings to a file…", icon: "download", title: "Which file replaces which slot, and this tab's ticks and options, in one small file to keep or to send. The sounds themselves are not in it.",
+            onClick: () => call("audio.settings_save") },
+          { label: "Load settings from a file…", icon: "upload", disabled: s.running,
+            title: "Put the settings in a file saved here or by someone else onto the same slots of this card. A slot this card does not have is left out.",
+            onClick: () => call("audio.settings_load") },
           s.adv_cap ? { sep: true } : null,
           s.adv_cap ? { label: s.profile_busy ? "Profiling…" : "Profile vs stock", icon: "wave", title: T.profile,
             disabled: s.profile_busy, onClick: () => call("audio.profile") } : null,

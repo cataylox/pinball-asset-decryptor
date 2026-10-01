@@ -1639,6 +1639,34 @@ class ImagesTab(TabService):
         return n
 
     # ------------------------------------------------------------------
+    # Save settings to a file / Load settings from a file (PAD-300)
+    # ------------------------------------------------------------------
+    def _settings_dir(self):
+        folder = self._assets_dir()
+        if self._scan_dir and folder and _norm(self._scan_dir) == _norm(folder):
+            return self._scan_dir
+        return ""
+
+    @rpc
+    def settings_save(self):
+        """More > Save settings to a file...: this tab's picks and options
+        (not the files) in one small file.  Returns its path, or None."""
+        from .. import tab_settings_ui
+        folder = self._settings_dir()
+        return tab_settings_ui.save_media(self, "images", folder, bool(folder),
+                                          self._save_staged_changes)
+
+    @rpc
+    def settings_load(self, path=None):
+        """More > Load settings from a file...: merge a saved settings file
+        into this project and re-scan."""
+        from .. import tab_settings_ui
+        return tab_settings_ui.load_media(
+            self, "images", self._settings_dir(), set(self._by_rel),
+            self._is_running(), self._save_staged_changes,
+            self._scan_image_slots_async, path)
+
+    # ------------------------------------------------------------------
     # Export CSV (the Audio / Video tabs' export, for this table)
     # ------------------------------------------------------------------
     @rpc
