@@ -91,6 +91,22 @@
  *                            (item 120; the build's own VOLUME_CEILING, 100,
  *                            is the most it can be; the JJP build's 100 plays
  *                            at 10% of the samples, VOLUME_FULL_PCT, PAD-219)
+ *   color_profile=<image>|<gamma r g b>|<gain r g b>|<lift r g b>|<saturation>[|<name>]
+ *                            image N's game draws through a colour profile in
+ *                            the one shape the menu can adjust (PAD-307), and
+ *                            these are the numbers it was BUILT with: the
+ *                            starting point of Settings > Color correction and
+ *                            what "Back to as built" puts back.  A line whose
+ *                            image is not on the card, or whose numbers are
+ *                            out of range, is warned about and dropped - that
+ *                            image is then simply not adjustable.  (Not one of
+ *                            the color_<role>= theme keys: it is matched
+ *                            first.)
+ *   settings=<on|off>        the SETTINGS tile at the end of the menu (PAD-307):
+ *                            'on' (the default) offers it whenever it has
+ *                            something to set - today, any color_profile=
+ *                            line; 'off' never does.  An unknown word is
+ *                            warned about and read as 'on'
  *   key_left=<byte>.<bit>    JJP only (--input jjpio): where the LEFT flipper
  *   key_right=<byte>.<bit>   / RIGHT flipper / START / Volume+ / Volume- sit
  *   key_start=<byte>.<bit>   in the I/O board's 64-byte frame, active low.
@@ -124,6 +140,7 @@
 #define CODESELECT_CONF_H
 
 #include "theme.h"
+#include "colour.h"
 
 /* THREE limits, because a group card makes images and cards different things.
  *
@@ -148,6 +165,11 @@
 #ifndef CONF_MAX_GROUPS
 #define CONF_MAX_GROUPS 8
 #endif
+/* ...and the SETTINGS TILE (PAD-307) rides on top of them: it is a card the
+ * menu draws and the player scrolls to, but not one of the conf's, so a menu
+ * of CONF_MAX_CARDS still has room for it.  Every per-card array that the
+ * menu walks is sized off this. */
+#define CONF_MAX_MENU (CONF_MAX_CARDS + 1)
 #define CONF_STR 200
 
 /* dropped members, dropped groups and the like: never fatal, so they are
@@ -206,10 +228,19 @@ struct conf_group {
 };
 
 /* ONE ENTRY PER THING THE MENU DRAWS, in conf-file line order.  Exactly one
- * of the two is >= 0. */
+ * of the two is >= 0 - except the SETTINGS tile, which boots nothing and is
+ * neither (conf_card_is_settings). */
 struct conf_card {
     int image;    /* a plain card: the image it boots */
     int group;    /* a group card: the group it draws and rolls from */
+};
+
+/* THE COLOUR PROFILE AN IMAGE'S GAME WAS BUILT WITH, from its color_profile=
+ * line (PAD-307); set = 0 for an image the menu cannot adjust */
+struct conf_colour {
+    int set;
+    struct colour built;
+    char name[64];
 };
 
 struct conf {
@@ -217,8 +248,13 @@ struct conf {
     int n;
     struct conf_group grp[CONF_MAX_GROUPS];
     int ngroups;
-    struct conf_card cards[CONF_MAX_CARDS];
-    int ncards;
+    struct conf_card cards[CONF_MAX_MENU];
+    int ncards;                      /* the settings tile included, when there is one */
+    struct conf_colour colour[CONF_MAX_IMAGES];
+    int ncolour;                     /* images with a usable color_profile= line */
+    int settings;                    /* settings=: 1 = offer the tile when it has something to set */
+    int settings_card;               /* the tile's card index (always the last), or -1 */
+    struct conf_image settings_face; /* what the tile draws */
     short card_of[CONF_MAX_IMAGES];  /* the card each image belongs to */
     char warn[CONF_MAX_WARN][CONF_WARN_STR];
     int nwarn;                       /* may exceed CONF_MAX_WARN: the count is honest, the text is capped */
@@ -278,8 +314,11 @@ const struct conf_image *conf_card_face(const struct conf *c, int k);
  * the jukebox card. */
 int conf_card_of_image(const struct conf *c, int i);
 
-/* the image card `k` boots, or -1 when it is a group and the caller must roll */
+/* the image card `k` boots, or -1 when it is a group and the caller must roll
+ * (or the settings tile, which boots nothing: ask conf_card_is_settings first) */
 int conf_card_boots(const struct conf *c, int k);
+/* is card `k` the SETTINGS tile (PAD-307)? */
+int conf_card_is_settings(const struct conf *c, int k);
 
 /* how many images card `k` can boot (1 for a plain card), and the m'th of
  * them (-1 when out of range) */

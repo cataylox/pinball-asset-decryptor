@@ -1834,7 +1834,8 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
                        media=None, sound_move=None, sound_confirm=None, volume=None, mixer_volume=None,
                        media_dir=None, theme=None, colors=None, machine_volume=None, debug_log=False,
                        groups=None, default_card=None, heading=None, text_size=None,
-                       counter=None, countdown_word=None, footer=None, scores=None):
+                       counter=None, countdown_word=None, footer=None, scores=None,
+                       colours=None, settings=None):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
@@ -1849,7 +1850,10 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
     `footer` is the INSTRUCTIONS line under the cards, the one naming the buttons (None = the
     selector's own wording, which follows the buttons the machine has; '' = no such line at all).
     `debug_log` writes `log=CARD_LOG` (the selector's diagnostics on the card - a development build
-    only)."""
+    only).  `colours` is {image index: {"name", "gamma", "gain", "lift", "saturation"}}, the colour
+    profile each image's game was BUILT with in the shape the menu can adjust (PAD-307,
+    :func:`tree_colour`): one `color_profile=` line each, which is what puts the SETTINGS tile in
+    the menu; `settings` ('on' / 'off', None = no key) is the tile's own switch."""
     devices = list(devices)
     if not devices:
         raise Refused("images.conf: no images")
@@ -1970,6 +1974,14 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
             raise Refused("scores: image %d is not on the card (%d images)" % (int(i), len(devices)))
         if name:
             out.append("scores=%d|%s" % (int(i), check_scores_name(name)))
+    # PAD-307: what each adjustable image's game was built with, in index order; none at all on a
+    # card with no such image (byte for byte what it was)
+    for i, col in sorted((colours or {}).items()):
+        if not 0 <= int(i) < len(devices):
+            raise Refused("color profile: image %d is not on the card (%d images)" % (int(i), len(devices)))
+        out.append(conf_colour_line(int(i), col))
+    if settings is not None:
+        out.append("settings=%s" % check_settings(settings))
     if font:
         out.append("font=%s" % font)
     if sound_move:
@@ -2018,7 +2030,9 @@ def parse_images_conf(text):
     'footer': str|None (None = the key was absent and the selector's own instructions line is drawn,
     '' = the card asked for no instructions line at all),
     'theme': str|None, 'colors': {role: rrggbb}, 'debug_log': str|None (the log= path),
-    'scores': {image index: store name} (PAD-226; the images with high scores of their own)}.
+    'scores': {image index: store name} (PAD-226; the images with high scores of their own),
+    'colours': {image index: built colour profile} (PAD-307; the images the menu's Settings can
+    adjust), 'settings': 'on' / 'off' / None (the SETTINGS tile's switch; None = no key)}.
     3-field and 6-field image lines are valid; more than 7 fields, a bad device, a media name with
     '|' ':' or '/', more than MAX_IMAGES images, more than MAX_CARDS cards or more than MAX_GROUPS
     groups is refused.  A `group=` line names several images as ONE card (item 106); its members
@@ -2032,7 +2046,8 @@ def parse_images_conf(text):
             "timeout": 15, "heading": None, "text_size": None,
             "counter": None, "countdown_word": None, "footer": None, "font": None,
             "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None,
-            "theme": None, "colors": {}, "machine_volume": None, "debug_log": None, "scores": {}}
+            "theme": None, "colors": {}, "machine_volume": None, "debug_log": None, "scores": {},
+            "colours": {}, "settings": None}
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -2110,6 +2125,18 @@ def parse_images_conf(text):
                 conf["scores"][int(idx.strip())] = check_scores_name(name)
             except (ValueError, Refused):
                 pass
+        elif key == "color_profile":
+            # PAD-307: BEFORE the color_<role> theme keys below.  A line the selector would drop
+            # is dropped here too (that image is then not adjustable)
+            try:
+                idx, col = parse_colour_line(val)
+                conf["colours"][idx] = col
+            except (ValueError, Refused):
+                pass
+        elif key == "settings":
+            conf["settings"] = val.strip().lower() or None
+            if conf["settings"] not in SETTINGS_WORDS:
+                conf["settings"] = None
         elif key == "font":
             conf["font"] = val.strip() or None
         elif key in ("sound_move", "sound_confirm"):
@@ -3302,7 +3329,7 @@ def machine_volume_for(path, part, subdir=None):
     return out
 
 
-def conf_for_plan(plan, args, existing=None, media=None):
+def conf_for_plan(plan, args, existing=None, media=None, colours=None):
     """images.conf text for the card: --conf verbatim, else generated from the layout with the
     flags, falling back to `existing` (a parsed conf already on the card) then to defaults.
     `media` (plan_media's answer) supplies the per-image media rows, the sounds and the volume;
@@ -3311,7 +3338,9 @@ def conf_for_plan(plan, args, existing=None, media=None):
     overrides); --color alone keeps the card's theme and replaces its overrides; neither flag
     carries the card's own through; a card with none gets none.  The card log (`log=`) is
     --debug-log's alone: it is never carried through from the card, so an inject without the
-    flag - the app's - turns a development card's log off."""
+    flag - the app's - turns a development card's log off.  `colours` ({image index: built
+    profile}, :func:`plan_colours`) is what the trees' game programs say (PAD-307); without it a
+    card of the same shape keeps the color_profile= lines it carries."""
     if getattr(args, "conf", None):
         with open(args.conf, "r") as f:
             text = f.read()
@@ -3441,12 +3470,15 @@ def conf_for_plan(plan, args, existing=None, media=None):
         footer = None
     elif footer is None:
         footer = ex.get("footer")
+    if colours is None:
+        colours = dict(ex.get("colours") or {}) if same_n else {}
     return render_images_conf(plan.devices(), titles, subtitles, default, timeout, font,
                               rows, move, confirm, volume, mixer, theme=theme, colors=colors,
                               machine_volume=mv, debug_log=bool(getattr(args, "debug_log", False)),
                               groups=groups, default_card=default_card, heading=heading,
                               text_size=text_size, counter=counter,
-                              countdown_word=countdown_word, footer=footer, scores=scores)
+                              countdown_word=countdown_word, footer=footer, scores=scores,
+                              colours=colours, settings=ex.get("settings"))
 
 
 # ============================================================================= the JSON sidecars
@@ -5403,7 +5435,7 @@ def _update_locked(a, ts, card, dry):
     # the menu: re-injected when the image list moved or the menu flags say something new
     list_changed = any(a_.action != "keep" for a_ in actions)
     media = plan_media(a.media_dir, len(newplan.trees)) if a.media_dir else None
-    newconf = conf_for_plan(newplan, a, existing=conf_now, media=media)
+    newconf = conf_for_plan(newplan, a, existing=conf_now, media=media, colours=plan_colours(versions))
     u["inject"] = bool(list_changed or a.media_dir or newconf.strip() != render_images_conf_text(conf_now).strip())
     if a.expect_bytes is not None and u["size"] > a.expect_bytes * (1 + UPDATE_SLACK) + UPDATE_SLACK_BYTES:
         u["notes"].append("the update would write %s, more than the %s expected: a source changed since it was measured"
@@ -5601,7 +5633,8 @@ def render_images_conf_text(conf):
         # changed and every update re-injects its menu for nothing
         heading=conf.get("heading"), text_size=conf.get("text_size"),
         counter=conf.get("counter"), countdown_word=conf.get("countdown_word"),
-        footer=conf.get("footer"), scores=conf.get("scores"))
+        footer=conf.get("footer"), scores=conf.get("scores"),
+        colours=conf.get("colours"), settings=conf.get("settings"))
 
 
 # ============================================================================= reading a card back
@@ -6632,6 +6665,12 @@ def read_tree(card, part, subdir=None):
         state = "error"
         notes.append("the validator locator could not read %s (%s: %s)"
                      % (gpath, type(e).__name__, e))
+    try:
+        colour = tree_colour(elf)
+    except Exception as e:                                # nor on a colour profile it cannot read
+        colour = None
+        notes.append("the color profile in %s could not be read (%s: %s): the menu cannot adjust it"
+                     % (gpath, type(e).__name__, e))
     return collections.OrderedDict([
         ("device", device_name(part.num, subdir)), ("title", title), ("game_path", gpath),
         ("version", sidx_ver or elf_ver), ("version_source", source),
@@ -6639,7 +6678,7 @@ def read_tree(card, part, subdir=None):
         ("elf_version", elf_ver), ("elf_name", ident["name"] if ident else None),
         ("elf_date", ident["date"] if ident else None),
         ("node_fw", fw), ("node_fw_version", fwver), ("node_fw_digest", _fw_digest(fw)),
-        ("bypass", state), ("notes", notes)])
+        ("bypass", state), ("colour", colour), ("notes", notes)])
 
 
 def _version_pair(text):
@@ -6656,6 +6695,87 @@ def _fw_digest(names):
     """A short stable digest of a node firmware SET, so a JSON reader can compare two images
     without carrying twenty file names (the names are carried too; this is the cheap key)."""
     return hashlib.md5("\n".join(sorted(names)).encode("utf-8")).hexdigest()[:12] if names else None
+
+
+# ============================================================================= colour (PAD-307)
+#: settings= words the selector knows (the SETTINGS tile's switch)
+SETTINGS_WORDS = ("on", "off")
+#: the numbers a color_profile= line may carry: the profile file's own range
+#: (core/colour_profile.parse), which is what the selector's colour_valid() accepts
+_COLOUR_LIMITS = {"gamma": (0.1, 5.0), "gain": (0.0, 4.0), "lift": (0.0, 0.9), "saturation": (0.0, 4.0)}
+
+
+def check_settings(word):
+    w = (word or "").strip().lower()
+    if w not in SETTINGS_WORDS:
+        raise Refused("settings=%r: 'on' or 'off'" % word)
+    return w
+
+
+def tree_colour(elf):
+    """The colour profile a games tree's game program was BUILT with, when it is in the one shape
+    the boot menu's Settings > Color correction can adjust on the machine (PAD-307:
+    shader_profile.tunable_in) -> {"name", "gamma", "gain", "lift", "saturation"}, else None (a
+    stock game, one built with No change, or one built by v1.60 before the shape was fixed)."""
+    try:
+        from pinball_decryptor.plugins.stern import shader_profile
+    except ImportError:
+        if REPO_ROOT not in sys.path:
+            sys.path.insert(0, REPO_ROOT)
+        from pinball_decryptor.plugins.stern import shader_profile
+    got = shader_profile.tunable_in(bytes(elf))
+    if not got:
+        return None
+    prof, _n = got
+    return collections.OrderedDict([("name", prof.name or ""), ("gamma", list(prof.gamma)),
+                                    ("gain", list(prof.gain)), ("lift", list(prof.lift)),
+                                    ("saturation", prof.saturation)])
+
+
+def plan_colours(recs):
+    """{image index: built colour profile} out of :func:`plan_identities` records - the images
+    whose game the menu can adjust."""
+    return {int(r["index"]): r["colour"] for r in (recs or []) if r.get("colour")}
+
+
+def conf_colour_line(index, col):
+    """``color_profile=<image>|<gamma r g b>|<gain r g b>|<lift r g b>|<saturation>|<name>``."""
+    def three(key):
+        vals = [float(v) for v in col[key]]
+        if len(vals) != 3:
+            raise Refused("color profile of image %d: %s needs three numbers" % (index, key))
+        return vals
+    nums = {k: three(k) for k in ("gamma", "gain", "lift")}
+    nums["saturation"] = [float(col["saturation"])]
+    for k, vals in nums.items():
+        lo, hi = _COLOUR_LIMITS[k]
+        if any(not lo <= v <= hi for v in vals):
+            raise Refused("color profile of image %d: %s must be between %g and %g" % (index, k, lo, hi))
+    name = " ".join(str(col.get("name") or "").replace("|", "/").split())
+    return "color_profile=%d|%s|%s|%s|%.4f|%s" % (
+        index, " ".join("%.4f" % v for v in nums["gamma"]), " ".join("%.4f" % v for v in nums["gain"]),
+        " ".join("%.4f" % v for v in nums["lift"]), nums["saturation"][0], name)
+
+
+def parse_colour_line(val):
+    """(index, profile dict) of a color_profile= value; ValueError / Refused when the selector
+    would drop it."""
+    f = [x.strip() for x in val.split("|")]
+    if len(f) < 5 or not f[0].isdigit():
+        raise ValueError("not <image>|<gamma>|<gain>|<lift>|<saturation>")
+
+    def nums(text, n):
+        v = [float(x) for x in text.replace(",", " ").split()]
+        if len(v) == 1 and n == 3:
+            v = v * 3
+        if len(v) != n:
+            raise ValueError("needs %d numbers" % n)
+        return v
+    col = collections.OrderedDict([("name", f[5] if len(f) > 5 else ""), ("gamma", nums(f[1], 3)),
+                                   ("gain", nums(f[2], 3)), ("lift", nums(f[3], 3)),
+                                   ("saturation", nums(f[4], 1)[0])])
+    conf_colour_line(int(f[0]), col)                     # the same range check the render makes
+    return int(f[0]), col
 
 
 def source_part(path, num=3):
@@ -6709,7 +6829,7 @@ def _unread_tree(dev, why):
         ("version_source", None), ("package", None), ("sidx", None), ("sidx_version", None),
         ("elf_version", None), ("elf_name", None), ("elf_date", None),
         ("node_fw", []), ("node_fw_version", None), ("node_fw_digest", None),
-        ("bypass", "error"), ("notes", [why])])
+        ("bypass", "error"), ("colour", None), ("notes", [why])])
 
 
 def _distinct(recs, key):
@@ -9227,7 +9347,8 @@ def main(argv=None):
                     for name in media["files"]:
                         say("media %s: %s" % (name, media["kinds"][name]))
                     say("media: %d files, %s" % (len(media["files"]), _gb(media["total"])))
-                conf = conf_for_plan(plan, a, media=media)          # generated (and validated) before the long copy
+                conf = conf_for_plan(plan, a, media=media,          # generated (and validated) before the long copy
+                                     colours=plan_colours(versions))
                 manifests = selector_manifests(plan, conf, a.media_dir, [a.primary] + list(a.extra),
                                                versions=versions)
                 stage_selector(a.selector_dir, tempfile.mkdtemp(prefix="mkmulticard.chk."), conf, hook_game_script(SYNTH_GAME),

@@ -708,8 +708,34 @@ def test_the_cards_sound_and_volume_keys_reach_the_emulator_conf_but_media_does_
     outer = _select_outer()
     assert ("grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|"
             "machine_volume|mixer_volume|heading|text_size|counter|countdown_word|"
-            "footer|theme|color_[a-z_]+)[[:space:]]*='") in outer
+            "footer|theme|settings|color_[a-z_]+)[[:space:]]*='") in outer
     assert "media=" not in outer.replace("image=", ""), "media= is the card's path; the rig passes --media"
+
+
+def test_the_cards_color_profile_lines_ride_on_the_image_count_gate():
+    """PAD-307: color_profile=<N>|... names an IMAGE INDEX, so the verbatim carry leaves it out
+    and it comes over only when the card's image lines and what resolved here agree - the gate
+    the group lines have - or a line could name another build."""
+    outer = _select_outer()
+    assert "| grep -vE '^[[:space:]]*color_profile[[:space:]]*=' || true" in outer
+    gate = outer[outer.index("| grep -vE '^[[:space:]]*color_profile[[:space:]]*=' || true"):]
+    gate = gate[:gate.index('> "$R/dump/codeselect.conf"')]
+    assert """grep -cE '^[[:space:]]*image[[:space:]]*=')" = "$SEL_N" ]""" in gate
+    assert "grep -E '^[[:space:]]*color_profile[[:space:]]*='" in gate
+    assert "DROPPED" in gate
+
+
+def test_the_rig_applies_the_color_correction_the_way_select_sh_does():
+    """PAD-307: after the tree is bound, the same selector step (--apply-color) writes the copy
+    and the copy is bound over /games/$GAME/game; a fallback boots image 0's colors; never fatal."""
+    code = _code(_read("run_game.sh"))
+    step = code[code.index("SEL_COLIDX=0"):][:3000]
+    assert '[ "$SEL_RC" = 0 ] && [ -n "$SEL_DIR" ] && SEL_COLIDX=$SEL_CHOICE' in step
+    assert ('chroot "$R" /usr/local/codeselect/codeselect --apply-color --conf /dump/codeselect.conf'
+            in step)
+    assert '--color-file /data/codeselect.color' in step
+    assert 'mount --bind "$R/dump/padcolor/$GAME.game" "$R/games/$GAME/game"' in step
+    assert 'rm -f "$R/dump/padcolor/$GAME.game"' in step
 
 
 def test_the_cards_heading_and_colours_reach_the_emulator_conf():
@@ -1222,6 +1248,8 @@ def _srcs(var):
 #: the media pass (item 90 v2) added art.c/h (PNG + GIF decode, blit) and
 #: audio.c/h + audio_fifo.c + audio_alsa.c (the WAV mixer and its two sinks).
 EXPECTED_SRCS = ["codeselect.c", "conf.c", "conf.h",
+                 # PAD-307: the colour correction and the SETTINGS tile's screens
+                 "colour.c", "colour.h", "settings.c", "settings.h",
                  "theme.c", "theme.h", "themes.json", "gen_themes.py",
                  "gfx.c", "gfx.h",
                  "egl_stern.c", "egl_stern.h", "input.c", "input.h",

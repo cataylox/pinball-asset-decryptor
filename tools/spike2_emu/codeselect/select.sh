@@ -45,6 +45,16 @@
 # modes and nobody else's. Image 0 keeps the set its own card put there. A card
 # with no $DIR/modes is left exactly as it always was.
 #
+# THE COLOR CORRECTION SET ON THIS MACHINE (PAD-307): the menu's Settings >
+# Color correction keeps the operator's numbers per image in $COLOR (on /data).
+# Once image N is mounted, and only when the conf says its game can be adjusted
+# (a color_profile= line) and $COLOR holds numbers for it that differ from the
+# build's, the selector writes a copy of the game program with those numbers in
+# its drawing shaders into RAM ($COLOR_DIR, on the /var/volatile tmpfs) and the
+# copy is bound over <title>/game. The games partition is never written. Every
+# failure leaves the program as it was built: the colours it was built with,
+# never a machine that will not boot.
+#
 #   select.sh                     the hook (what /etc/init.d/game calls)
 #   select.sh --lookup N [conf]   print image N's device (without :<sub>)
 #   select.sh --lookup-sub N [conf]   print image N's subdirectory ("" when none)
@@ -68,6 +78,8 @@ NV=${CODESELECT_NV:-/data/nv}
 NV_OWN=${CODESELECT_NV_OWN:-/data/nv.own}
 MODES=${CODESELECT_MODES:-$DIR/modes}
 PADMODE=${CODESELECT_PADMODE:-/usr/local/padmode}
+COLOR=${CODESELECT_COLOR:-/data/codeselect.color}
+COLOR_DIR=${CODESELECT_COLOR_DIR:-/var/volatile/padcolor}
 
 log() {
     [ -n "$LOG" ] && echo "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null) select.sh: $*" >> "$LOG" 2>/dev/null
@@ -207,10 +219,42 @@ own_modes() {
     fi
 }
 
+# PAD-307: image $idx's game program with the operator's colour numbers, bound
+# over its own (see the header).  The selector does the copy (--apply-color):
+# exit 0 = a copy is at $out, 1 = nothing to do, anything else = refused.  Its
+# own log is NOT passed: a second --log run would start the menu's file afresh,
+# so its one line comes back on stdout and goes into this script's log.
+own_color() {
+    [ -f "$COLOR" ] || return 0
+    grep -q '^[ 	]*color_profile[ 	]*=' "$CONF" 2>/dev/null || return 0
+    title=$(game_title) || { log "image $idx: cannot tell its title from $GAMES/game: its colors are as built"; return 0; }
+    prog=$GAMES/$title/game
+    [ -f "$prog" ] || { log "image $idx: no $prog: its colors are as built"; return 0; }
+    mkdir -p "$COLOR_DIR" 2>/dev/null || { log "image $idx: cannot create $COLOR_DIR: its colors are as built"; return 0; }
+    out=$COLOR_DIR/$title.game
+    rm -f "$out"
+    msg=$("$BIN" --apply-color --conf "$CONF" --image "$idx" --program "$prog" --to "$out" \
+            --color-file "$COLOR" </dev/null 2>/dev/null)
+    rc=$?
+    [ -n "$msg" ] && log "image $idx: $(echo "$msg" | sed 's/^\[select\] //' | head -n 1)"
+    if [ "$rc" -ne 0 ]; then
+        rm -f "$out"
+        [ "$rc" -ne 1 ] && log "image $idx: the color correction could not be applied (exit $rc): its colors are as built"
+        return 0
+    fi
+    if [ -f "$out" ] && $MOUNT --bind "$out" "$prog"; then
+        log "image $idx: $out bound over $prog (the color correction set on this machine)"
+    else
+        rm -f "$out"
+        log "image $idx: binding $out over $prog failed: its colors are as built"
+    fi
+}
+
 # everything that belongs to the image that is about to boot, once it is mounted
 image_ready() {
     own_scores
     own_modes
+    own_color
 }
 
 case "$1" in

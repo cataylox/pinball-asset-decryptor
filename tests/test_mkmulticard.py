@@ -1475,6 +1475,68 @@ def test_the_modes_report_names_each_image_that_carries_some(mk, capsys):
     assert out[2].startswith("modes image 2: 0 mode files, 1 code mode (carried to %s/img2" % mk.MODES_DIR)
 
 
+REC = {"name": "Recommended", "gamma": [1.1, 1.2, 1.35], "gain": [1.0, 1.0, 1.0],
+       "lift": [0.0, 0.0, 0.0], "saturation": 0.9}
+
+
+def test_an_adjustable_image_carries_its_built_color_profile(mk):
+    """PAD-307: `color_profile=<N>|...` names the numbers image N's game was built with (what
+    puts the SETTINGS tile in the menu); a card with none is byte for byte what it always was,
+    and the line survives the like-for-like round trip `update` compares."""
+    plan = _two_image_plan(mk)
+    plain = _menu_conf(mk, plan)
+    assert "color_profile" not in plain and "settings=" not in plain
+    assert mk.parse_images_conf(plain)["colours"] == {}
+    text = _menu_conf(mk, plan, colours={1: REC})
+    assert "color_profile=1|1.1000 1.2000 1.3500|1.0000 1.0000 1.0000|0.0000 0.0000 0.0000|0.9000|Recommended\n" in text
+    conf = mk.parse_images_conf(text)
+    assert conf["colours"][1]["gamma"] == [1.1, 1.2, 1.35] and conf["colours"][1]["name"] == "Recommended"
+    # not read as a color_<role> theme key
+    assert conf["colors"] == {}
+    assert mk.render_images_conf_text(conf) == text
+    # settings= rides through as well
+    off = _menu_conf(mk, plan, colours={1: REC}, settings="off")
+    assert off.endswith("settings=off\n")
+    assert mk.render_images_conf_text(mk.parse_images_conf(off)) == off
+    # numbers the selector would refuse, and an image past the card, are refused here
+    with pytest.raises(mk.Refused):
+        _menu_conf(mk, plan, colours={1: dict(REC, gamma=[9.0, 1.0, 1.0])})
+    with pytest.raises(mk.Refused):
+        _menu_conf(mk, plan, colours={2: REC})
+    # ...and a bad line on a card reads back as an image that is not adjustable
+    assert mk.parse_images_conf(plain + "color_profile=1|9 9 9|1 1 1|0 0 0|1\n")["colours"] == {}
+    # a '|' in a name cannot split the line
+    assert "|a/b\n" in _menu_conf(mk, plan, colours={1: dict(REC, name="a|b")})
+
+
+def test_conf_for_plan_takes_colours_from_the_trees_else_the_card(mk):
+    plan = _two_image_plan(mk)
+    ex = mk.parse_images_conf(_menu_conf(mk, plan, colours={1: REC}))
+    # no trees read (an inject): the card's own ride through
+    assert "color_profile=1|" in mk.conf_for_plan(plan, argparse.Namespace(), existing=ex)
+    # the trees say (a build, an update): theirs, and theirs alone
+    out = mk.conf_for_plan(plan, argparse.Namespace(), existing=ex, colours={0: REC})
+    assert "color_profile=0|" in out and "color_profile=1|" not in out
+    assert "color_profile" not in mk.conf_for_plan(plan, argparse.Namespace(), existing=ex, colours={})
+    # plan_colours keeps the records that carry one
+    assert mk.plan_colours([{"index": 0, "colour": None}, {"index": 1, "colour": REC}]) == {1: REC}
+
+
+def test_tree_colour_reads_only_the_adjustable_shape(mk):
+    """A game program built with this shader shape names its profile; a stock one (and v1.60's
+    shape, which leaves out the terms it did not need) names none."""
+    from pinball_decryptor.core import colour_profile as cp
+    from pinball_decryptor.plugins.stern import shader_profile as sp
+    shader = ("precision highp float;uniform sampler2D t;varying vec2 v;uniform vec4 colorTransformAdd;"
+              "void main(){gl_FragColor = texture2D(t, v);}")
+    patched = sp.patch_source(shader, dict(cp.PRESETS)["recommended"]).encode()
+    col = mk.tree_colour(b"\x7fELF" + b"\x00" * 64 + patched + b"\x00" + patched + b"\x00")
+    assert col["name"] == "Recommended" and col["gamma"] == [1.1, 1.2, 1.35] and col["saturation"] == 0.9
+    assert mk.tree_colour(b"\x7fELF" + shader.encode()) is None
+    old = patched.replace(b"c=vec3(0.000000,0.000000,0.000000)+(vec3(1.0)-vec3(0.000000,0.000000,0.000000))*c;", b"")
+    assert mk.tree_colour(b"\x7fELF" + old + b"\x00") is None
+
+
 def test_conf_for_plan_takes_own_scores_from_the_flag_else_the_card(mk):
     plan = _two_image_plan(mk)
     ex = mk.parse_images_conf(_menu_conf(mk, plan, scores={1: "heisei"}))

@@ -42,6 +42,16 @@ and draws the boot logo), 9 corrected, the debug fill left alone.
 A shader that has no ``precision`` statement (the solid red debug fill) is
 left alone: a function needs a default float precision in a fragment
 shader, and that one is never on a player's screen.
+
+ADJUSTABLE ON THE MACHINE (PAD-307).  The multi-boot menu's Settings > Color
+correction lets an operator change the numbers on the machine itself.  It
+cannot rebuild anything there, so ``pad_cp`` is always written in ONE fixed
+shape, :data:`TUNABLE_TEMPLATE`: every term present (a saturation of 1 and a
+lift of 0 included, a few ALU ops for a slot to write into) and every number
+``%.6f`` of a value in [0, 10), eight characters.  The boot hook then copies
+the game program and overwrites those 13 eight-character slots in place
+(codeselect's ``--apply-color``, colour.c, which carries the same template
+and must agree with this one byte for byte).
 """
 
 import dataclasses
@@ -92,12 +102,35 @@ def fragment_shaders(raw):
     return out
 
 
+#: Every number in ``pad_cp`` is this wide, so the machine can rewrite one in
+#: place (PAD-307): ``%.6f`` of a value in [0, 10) is always ``d.dddddd``.
+SLOT = 8
+_SLOT_MAX = 9.999999
+
+#: The three statements of ``pad_cp`` that carry its numbers, in the one shape
+#: the boot menu's apply step (codeselect/colour.c, ``TUNABLE_TEMPLATE``)
+#: knows: each ``#`` run is one eight-character slot.  The slots in order are
+#: saturation, gain r g b, gamma r g b, then the lift r g b TWICE (the lift
+#: statement names its vector twice).  A test holds colour.c to this text.
+TUNABLE_TEMPLATE = (
+    "c=mix(vec3(dot(c,vec3(0.299,0.587,0.114))),c,########);"
+    "c=pow(clamp(c*vec3(########,########,########),0.0,1.0),"
+    "vec3(########,########,########));"
+    "c=vec3(########,########,########)+(vec3(1.0)-vec3(########,########,########))*c;")
+
+
 def _f(v):
-    return "%.6f" % float(v)
+    return "%.6f" % min(max(float(v), 0.0), _SLOT_MAX)
 
 
-def _v3(t):
-    return "vec3(%s,%s,%s)" % tuple(_f(x) for x in t)
+def tunable_terms(prof):
+    """:data:`TUNABLE_TEMPLATE` with *prof*'s numbers in its slots."""
+    nums = ((prof.saturation,) + tuple(prof.gain) + tuple(prof.gamma)
+            + tuple(prof.lift) + tuple(prof.lift))
+    out = TUNABLE_TEMPLATE
+    for v in nums:
+        out = out.replace("#" * SLOT, _f(v), 1)
+    return out
 
 
 def correction_glsl(prof, premultiplied, qualified=False):
@@ -105,7 +138,11 @@ def correction_glsl(prof, premultiplied, qualified=False):
 
     *qualified* gives every float type an explicit ``highp``: a GLSL ES 3.00
     fragment shader has no default float precision, so an unqualified
-    ``vec3`` in it does not compile (ES 1.00 shaders here all declare one)."""
+    ``vec3`` in it does not compile (ES 1.00 shaders here all declare one).
+
+    EVERY TERM IS WRITTEN, a saturation of 1 and a lift of 0 included, in
+    :data:`TUNABLE_TEMPLATE`'s shape: that is what lets the multi-boot menu
+    change the numbers on the machine (PAD-307)."""
     q = "highp " if qualified else ""
     body = []
     if premultiplied:
@@ -113,14 +150,7 @@ def correction_glsl(prof, premultiplied, qualified=False):
                     % (q, q))
     else:
         body.append("%sfloat a=f.a;%svec3 c=clamp(f.rgb,0.0,1.0);" % (q, q))
-    if prof.saturation != 1.0:
-        body.append("c=mix(vec3(dot(c,vec3(0.299,0.587,0.114))),c,%s);"
-                    % _f(prof.saturation))
-    body.append("c=pow(clamp(c*%s,0.0,1.0),%s);" % (_v3(prof.gain),
-                                                   _v3(prof.gamma)))
-    if any(prof.lift):
-        lo = _v3(prof.lift)
-        body.append("c=%s+(vec3(1.0)-%s)*c;" % (lo, lo))
+    body.append(tunable_terms(prof))
     body.append("return vec4(c*a,a);" if premultiplied
                 else "return vec4(c,a);")
     return "%svec4 %s(%svec4 f){%s}" % (q, _FUNC, q, "".join(body))
@@ -325,6 +355,35 @@ def profile_in(raw):
         if _numbers(preset) == key:
             return dataclasses.replace(prof, name=preset.name)
     return prof
+
+
+_TUNABLE_RE = re.compile(
+    re.escape(TUNABLE_TEMPLATE).replace(re.escape("#" * SLOT), r"(\d\.\d{6})").encode())
+
+
+def tunable_in(raw):
+    """``(Profile, functions)`` when every ``pad_cp`` the game program *raw*
+    carries is in :data:`TUNABLE_TEMPLATE`'s shape with the SAME numbers -
+    the multi-boot menu can then change them on the machine (PAD-307) - else
+    ``None``: a stock game, one built with No change, or one built before the
+    shape was fixed (v1.60, whose ``pad_cp`` leaves out a term it did not
+    need, so there is no slot to write it into)."""
+    funcs = _FUNC_RE.findall(raw)
+    if not funcs:
+        return None
+    seen = set()
+    for body in funcs:
+        m = _TUNABLE_RE.search(body)
+        if not m:
+            return None
+        seen.add(m.groups())
+    if len(seen) != 1:
+        return None
+    nums = [float(x) for x in seen.pop()]
+    if nums[7:10] != nums[10:13]:
+        return None
+    prof = profile_in(raw)
+    return prof, len(funcs)
 
 
 def _numbers(prof):

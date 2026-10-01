@@ -98,8 +98,8 @@ endif
 GLLIBS    =
 AUDLIBS   =
 LIBC      =
-SRCS = codeselect.c conf.c theme.c gfx.c egl_x11.c input.c input_jjpio.c input_padsw.c stubs_jjp.c log.c art.c audio.c audio_fifo.c audio_alsa.c audio_pulse.c nvm.c
-HDRS = conf.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h jjp_glibc.h $(BUILD)/theme_table.h
+SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c egl_x11.c input.c input_jjpio.c input_padsw.c stubs_jjp.c log.c art.c audio.c audio_fifo.c audio_alsa.c audio_pulse.c nvm.c
+HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h jjp_glibc.h $(BUILD)/theme_table.h
 else
 # ---- Stern: the ARM cross build against the card rootfs ----
 CC        = $(CROSS)gcc
@@ -138,8 +138,8 @@ GLLIBS    = -l:libEGL.so.1 -l:libGLESv2.so.2
 AUDLIBS   = -l:libasound.so.2
 # input_jjpio.c is plain POSIX and rides along: codeselect.c dispatches every
 # backend by name, and on a Stern card `--input jjpio` finds no /dev/jjpio
-SRCS = codeselect.c conf.c theme.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c input_jjpio.c log.c art.c audio.c audio_fifo.c audio_alsa.c codec.c nvm.c
-HDRS = conf.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h $(BUILD)/theme_table.h
+SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c input_jjpio.c log.c art.c audio.c audio_fifo.c audio_alsa.c codec.c nvm.c
+HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h $(BUILD)/theme_table.h
 endif
 
 # THE PAST-32 BINARY (item 105).  The animation tick used to mark the cards
@@ -190,6 +190,7 @@ check: $(BIN) capbin
 > bash test/check_elf_jjp_selftest.sh "$(BUILD)/t"
 > CAPBIN="$(CAPBIN)" CAP_N=$(CAP_N) bash test/headless.sh "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > $(PYTHON) test/padsw_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(TABLES)" "$(DEJAVU)"
+> $(PYTHON) test/settings_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > $(PYTHON) test/jjpio_test.py "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > bash -n padselect.sh && bash test/padselect_sh_test.sh
 > @echo "check: OK (jjp)"
@@ -211,6 +212,7 @@ check: $(BIN) capbin
 > bash test/check_elf.sh "$(CROSS)" "$(BIN)"
 > CAPBIN="$(CAPBIN)" CAP_N=$(CAP_N) bash test/headless.sh "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > python3 test/padsw_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(TABLES)" "$(DEJAVU)"
+> python3 test/settings_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > bash -n select.sh && bash test/select_sh_test.sh
 > @echo "check: OK"
 

@@ -89,8 +89,83 @@ def test_black_and_white_and_lift_reach_the_glsl():
     assert "dot(c,vec3(0.299,0.587,0.114))),c,0.000000)" in bw
     lifted = sp.correction_glsl(cp.Profile(lift=(0.05, 0.05, 0.05)), True)
     assert "vec3(0.050000,0.050000,0.050000)+" in lifted
+    # PAD-307: strength 100% and no lift still write their terms, as slots the
+    # multi-boot menu can rewrite on the machine
     plain = sp.correction_glsl(cp.Profile(gamma=(1.2, 1.2, 1.2)), False)
-    assert "mix(" not in plain                    # strength 100%: no mix
+    assert "c,1.000000);" in plain
+    assert "c=vec3(0.000000,0.000000,0.000000)+" in plain
+
+
+def test_every_pad_cp_is_in_the_one_shape_the_machine_rewrites():
+    """PAD-307: the boot menu rewrites the numbers in place, so every profile -
+    whatever it leaves at 1 or 0 - is the same text with eight-character slots."""
+    import re
+    rx = re.compile(re.escape(sp.TUNABLE_TEMPLATE).replace(
+        re.escape("#" * sp.SLOT), r"\d\.\d{6}"))
+    for prof in [p for _k, p in cp.PRESETS] + [
+            cp.Profile(gamma=(5.0, 0.1, 1.0), gain=(4.0, 0.0, 1.0),
+                       lift=(0.9, 0.0, 0.05), saturation=4.0)]:
+        for premult in (True, False):
+            for q in (True, False):
+                g = sp.correction_glsl(prof, premult, qualified=q)
+                assert len(rx.findall(g)) == 1, (prof, g)
+                body = g[g.index("{") + 1:-1]
+                assert len(body) == len(sp.correction_glsl(
+                    cp.Profile(), premult, qualified=q)[g.index("{") + 1:-1])
+
+
+def test_tunable_in_reads_a_built_program_and_refuses_the_v160_shape():
+    raw, _o, _p = _card_elf([sp.patch_source(s, PROF) for s in (SPRITE, VIDEO, OVERLAY)])
+    prof, nfunc = sp.tunable_in(raw)
+    assert nfunc == 3
+    assert (prof.gamma, prof.gain, prof.saturation) == (PROF.gamma, PROF.gain, PROF.saturation)
+    assert prof.name == "Recommended"
+    assert sp.tunable_in(_card_elf([SPRITE, VIDEO])[0]) is None
+    # v1.60's pad_cp left out the lift statement when the lift was 0: no slot for it
+    old = sp.patch_source(SPRITE, PROF).replace(
+        "c=vec3(0.000000,0.000000,0.000000)+(vec3(1.0)-vec3(0.000000,0.000000,0.000000))*c;", "")
+    assert sp.profile_in(_card_elf([old])[0]).name == "Recommended"
+    assert sp.tunable_in(_card_elf([old])[0]) is None
+    # two shaders that disagree are not one profile to adjust
+    other = cp.Profile(gamma=(1.0, 1.0, 1.5))
+    mixed = _card_elf([sp.patch_source(SPRITE, PROF), sp.patch_source(VIDEO, other)])[0]
+    assert sp.tunable_in(mixed) is None
+
+
+def test_the_boot_menus_starting_points_are_the_tabs():
+    """PAD-307: Settings > Color correction offers the Color profile tab's starting points
+    (codeselect/settings.c PRESETS); the numbers must be core/colour_profile.py's."""
+    import os
+    import re
+    src = os.path.join(os.path.dirname(__file__), "..", "tools", "spike2_emu",
+                       "codeselect", "settings.c")
+    with open(src, encoding="utf-8") as f:
+        text = f.read()
+    rx = re.compile(r'\{\s*"([^"]+)",\s*\{([^}]*)\},\s*\{([^}]*)\},\s*\{([^}]*)\},\s*([0-9.]+)f?\s*\}')
+
+    def nums(s):
+        return tuple(round(float(x.strip().rstrip("f")), 4) for x in s.split(","))
+    menu = {m.group(1): (nums(m.group(2)), nums(m.group(3)), nums(m.group(4)),
+                         round(float(m.group(5)), 4)) for m in rx.finditer(text)}
+    tab = {p.name: (tuple(round(v, 4) for v in p.gamma), tuple(round(v, 4) for v in p.gain),
+                    tuple(round(v, 4) for v in p.lift), round(p.saturation, 4))
+           for _k, p in cp.PRESETS}
+    assert menu == tab
+
+
+def test_colour_c_carries_the_same_template():
+    """codeselect/colour.c rewrites the slots on the machine: its template must be
+    this one byte for byte, or the menu would find nothing to adjust."""
+    import os
+    import re
+    src = os.path.join(os.path.dirname(__file__), "..", "tools", "spike2_emu",
+                       "codeselect", "colour.c")
+    with open(src, encoding="utf-8") as f:
+        text = f.read()
+    m = re.search(r"TUNABLE_TEMPLATE(?:\[\])?\s*=\s*((?:\s*\"[^\"]*\")+)\s*;", text)
+    assert m, "colour.c has no TUNABLE_TEMPLATE"
+    joined = "".join(re.findall(r"\"([^\"]*)\"", m.group(1)))
+    assert joined == sp.TUNABLE_TEMPLATE
 
 
 def test_a_built_games_profile_reads_back_out_of_its_shaders():
