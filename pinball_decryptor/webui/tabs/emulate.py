@@ -2257,6 +2257,12 @@ class EmulateTab(TabService):
                     if prepare is not None:
                         over()
                     return
+            if not no_rig() and not self._rig_layer_up():
+                self._starting = False
+                self._post(down)
+                if prepare is not None:
+                    over()
+                return
             if ovr_request is not None:
                 extra = self._prepare_overrides(*ovr_request,
                                                 selector=ovr_selector)
@@ -2496,6 +2502,34 @@ class EmulateTab(TabService):
             return
         self._restart_wait = 0
         self.start()
+
+    def _rig_layer_up(self):
+        """Every rig the same (PAD-305): rig N >= 1 is the ordinary rig seen
+        through its own layer (padpath.sh RIG SLOTS), and that layer is
+        mounted by the run itself, AFTER the preparation - so a mode install
+        (this project's modes, a Modes tab Try it) found no rootfs on a rig
+        that had never run, and after a WSL restart wrote into the bare
+        mount point, which the run's mount then hid.  The layer goes up here,
+        before anything is prepared (``slot.sh up N``, root, a no-op when it
+        is up).  True when it is up or there is nothing to mount."""
+        n = rig.slot_up_cmd()
+        if n is None:
+            return True
+        try:
+            r = self._run(n, capture_output=True, timeout=120)
+        except (OSError, subprocess.SubprocessError) as exc:
+            self._log("[emulate] the rig's own layer could not be mounted: %s"
+                      % exc)
+            return False
+        said = ((r.stdout or b"") + (r.stderr or b"")).decode(
+            "utf8", "replace").strip()
+        if r.returncode != 0:
+            self._overrides_refuse("This rig could not be set up for the run: "
+                                   "%s" % (said[-400:] or "exit %d" % r.returncode))
+            return False
+        if "mounted:" in said:
+            self._log("[emulate] " + said.splitlines()[-1])
+        return True
 
     def _poll_soon(self):
         if self._poll_job is not None:

@@ -164,3 +164,26 @@ def test_a_pc_relative_reference_is_found_and_retargeted():
     lval = struct.unpack_from("<I", buf, lit_off)[0]
     assert (add_va + 8 + lval) & 0xFFFFFFFF == base     # now the copy
     assert blob.startswith(sp.patch_source(SPRITE, PROF).encode())
+
+
+ES3 = ("#version 300 es\nin highp vec2 uv;\nout lowp vec4 color;\n\n"
+       "uniform sampler2D image;\nuniform lowp vec4 tint;\n\n"
+       "void main()\n{\n    color = tint * texture(image, uv);\n}\n")
+ES3_VERTEX = ("#version 300 es\nlayout (location = 0) in vec4 vertex;\n"
+              "out vec2 uv;\nvoid main()\n{\n    uv = vertex.zw;\n"
+              "    gl_Position = vec4(vertex.xy, 0.0, 1.0);\n}\n")
+
+
+def test_a_glsl_es3_shader_writes_its_declared_output_with_highp():
+    """The boot logo is drawn by a GLSL ES 3.00 sprite shader that writes
+    `out lowp vec4 color`, not gl_FragColor, and has no default float
+    precision: the correction must wrap `color` and qualify its floats."""
+    raw, offs, _p = _card_elf([SPRITE, ES3, ES3_VERTEX])
+    assert [o for o, _t in sp.fragment_shaders(raw)] == offs[:2]  # no vertex
+    new = sp.patch_source(ES3, PROF)
+    assert "color = pad_cp(tint * texture(image, uv));" in new
+    assert "highp vec4 pad_cp(highp vec4 f){highp float a=f.a;highp vec3 c" in new
+    assert new.index("pad_cp(highp") < new.index("void main")
+    assert sp.patch_source(ES3_VERTEX, PROF) is None
+    _w, blob, report = sp.plan(raw, PROF, 0x40000)
+    assert [r[3] for r in report] == ["corrected", "corrected"]

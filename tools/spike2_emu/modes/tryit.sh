@@ -95,6 +95,14 @@ refuse_if_blocked() {
     return 0
 }
 
+# EVERY RIG THE SAME (PAD-305). Rig N >= 1 is the ordinary rig seen through its
+# own overlay (padpath.sh RIG SLOTS), and a run mounts it only when it STARTS -
+# after this install. So the overlay goes up here first (pad_slot_ready: a no-op
+# when it is up, a mount as root, and the one-line `slot.sh up` remedy as the
+# desktop user, which the app runs as root before the install). Never install
+# into the bare mount point of an unmounted rig: the run's mount would hide
+# every file put there and the modes would silently not be in the game.
+pad_slot_ready || die "rig $PAD_SLOT's own filesystem is not mounted, so the modes cannot be put in it (the app mounts it before an install; by hand: wsl -u root -e bash $RIG/slot.sh up $PAD_SLOT)"
 [ -d "$ROOT" ] || die "no guest rootfs at $ROOT - set up the emulator first"
 mkdir -p "$DUMP" || die "cannot create $DUMP"
 cmd=${1:-}

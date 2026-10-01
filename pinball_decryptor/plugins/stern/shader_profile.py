@@ -35,7 +35,9 @@ and pc + a stored offset (the video player's sprite shader, on every title:
 are moved; anything else (a look-alike word pointing into the middle of the
 text) keeps the original, so the worst a missed or odd reference can do is
 leave that one shader uncorrected.  Measured on all 57 Spike 2 card images
-on hand: 8 of the 9 shaders corrected on each, the debug fill left alone.
+on hand: 10 fragment shaders on each (nine GLSL ES 1.00 that write
+gl_FragColor, one GLSL ES 3.00 sprite shader that writes ``out vec4 color``
+and draws the boot logo), 9 corrected, the debug fill left alone.
 
 A shader that has no ``precision`` statement (the solid red debug fill) is
 left alone: a function needs a default float precision in a fragment
@@ -46,17 +48,35 @@ import re
 
 from . import progreloc
 
-#: The statement the profile is spliced into: the LAST write of the colour.
-_WRITE_RE = re.compile(r"gl_FragColor\s*=\s*([^;]+);")
+#: The colour output of a GLSL ES 3.00 fragment shader: ``out [prec] vec4 NAME;``
+_OUT_RE = re.compile(r"\bout\s+(?:(?:lowp|mediump|highp)\s+)?vec4\s+(\w+)\s*;")
 _FUNC = "pad_cp"
+
+
+def _colour_output(text):
+    """The variable *text* writes its final colour to: ``gl_FragColor`` in
+    GLSL ES 1.00, the declared ``out vec4`` in GLSL ES 3.00 (the engine's
+    ES3 sprite shader writes ``color``), or ``None`` for a shader that is
+    not a fragment shader (a vertex shader writes ``gl_Position``)."""
+    if "void main" not in text or "gl_Position" in text:
+        return None
+    if "gl_FragColor" in text:
+        return "gl_FragColor"
+    if text.lstrip().startswith("#version 300"):
+        m = _OUT_RE.search(text)
+        if m:
+            return m.group(1)
+    return None
 
 
 def fragment_shaders(raw):
     """``[(file_off, text)]`` of every NUL-terminated GLSL fragment shader in
-    the ELF *raw* (a string that writes ``gl_FragColor``)."""
+    the ELF *raw*: a ``void main`` string that writes ``gl_FragColor``
+    (GLSL ES 1.00) or a declared ``out vec4`` (GLSL ES 3.00; Godzilla LE
+    1.16 has one, the ES3 sprite shader that draws the boot logo)."""
     out = []
     seen = set()
-    for m in re.finditer(rb"gl_FragColor", raw):
+    for m in re.finditer(rb"void main", raw):
         s = raw.rfind(b"\x00", 0, m.start()) + 1
         e = raw.find(b"\x00", m.start())
         if e < 0 or s in seen:
@@ -66,7 +86,7 @@ def fragment_shaders(raw):
             text = raw[s:e].decode("ascii")
         except UnicodeDecodeError:
             continue
-        if "void main" in text:
+        if _colour_output(text):
             out.append((s, text))
     return out
 
@@ -79,13 +99,19 @@ def _v3(t):
     return "vec3(%s,%s,%s)" % tuple(_f(x) for x in t)
 
 
-def correction_glsl(prof, premultiplied):
-    """The ``pad_cp`` function for *prof* (a core.colour_profile.Profile)."""
+def correction_glsl(prof, premultiplied, qualified=False):
+    """The ``pad_cp`` function for *prof* (a core.colour_profile.Profile).
+
+    *qualified* gives every float type an explicit ``highp``: a GLSL ES 3.00
+    fragment shader has no default float precision, so an unqualified
+    ``vec3`` in it does not compile (ES 1.00 shaders here all declare one)."""
+    q = "highp " if qualified else ""
     body = []
     if premultiplied:
-        body.append("float a=f.a;vec3 c=clamp(f.rgb/max(a,0.0001),0.0,1.0);")
+        body.append("%sfloat a=f.a;%svec3 c=clamp(f.rgb/max(a,0.0001),0.0,1.0);"
+                    % (q, q))
     else:
-        body.append("float a=f.a;vec3 c=clamp(f.rgb,0.0,1.0);")
+        body.append("%sfloat a=f.a;%svec3 c=clamp(f.rgb,0.0,1.0);" % (q, q))
     if prof.saturation != 1.0:
         body.append("c=mix(vec3(dot(c,vec3(0.299,0.587,0.114))),c,%s);"
                     % _f(prof.saturation))
@@ -96,7 +122,7 @@ def correction_glsl(prof, premultiplied):
         body.append("c=%s+(vec3(1.0)-%s)*c;" % (lo, lo))
     body.append("return vec4(c*a,a);" if premultiplied
                 else "return vec4(c,a);")
-    return "vec4 %s(vec4 f){%s}" % (_FUNC, "".join(body))
+    return "%svec4 %s(%svec4 f){%s}" % (q, _FUNC, q, "".join(body))
 
 
 def _premultiplied(text):
@@ -107,21 +133,27 @@ def _premultiplied(text):
 
 def patch_source(text, prof):
     """*text* with the profile applied to its final colour, or ``None`` when
-    it is not a shader this patches (no ``precision`` statement, no
-    ``void main``, already patched)."""
-    if "precision" not in text or _FUNC + "(" in text:
+    it is not a shader this patches (an ES 1.00 shader with no ``precision``
+    statement - the solid red debug fill -, no colour write, already
+    patched)."""
+    if _FUNC + "(" in text:
+        return None
+    var = _colour_output(text)
+    if var is None:
+        return None
+    es3 = var != "gl_FragColor"
+    if not es3 and "precision" not in text:
         return None
     main = text.find("void main")
-    writes = list(_WRITE_RE.finditer(text))
-    if main < 0 or not writes:
+    write_re = re.compile(r"\b%s\s*=\s*([^;]+);" % re.escape(var))
+    writes = [w for w in write_re.finditer(text) if w.start() > main]
+    if not writes:
         return None
     w = writes[-1]
-    if w.start() < main:
-        return None
     expr = w.group(1).strip()
-    body = (text[:w.start()] + "gl_FragColor = %s(%s);" % (_FUNC, expr)
+    body = (text[:w.start()] + "%s = %s(%s);" % (var, _FUNC, expr)
             + text[w.end():])
-    func = correction_glsl(prof, _premultiplied(text))
+    func = correction_glsl(prof, _premultiplied(text), qualified=es3)
     sep = "\n" if "\n" in text[:main] else ""
     return body[:main] + func + sep + body[main:]
 
