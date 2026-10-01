@@ -2804,7 +2804,7 @@ advances the player and its draw shows it; the city's own scene show is handed t
 already in the frame's list, so `display_draw` refuses it and the city is not drawn (h12). The runtime
 does exactly that (`on_backdrop_draw`, `on_scene_show`), plays the loop again once the one surface is idle
 (a framed award of the game's took it), and while a full-screen clip of the mode's own (`pm_clip`) plays it
-sets the field back to 0 so the tick's draw is not refused. While a backdrop is up the game's FRAMED
+sets the field back to 0 so the clip's own draw is not refused. While a backdrop is up the game's FRAMED
 layered awards are dropped as its full-screen ones are (a display priority is needed): they would take
 the backdrop's place, and their words sit where the mode's title does.
 
@@ -2825,6 +2825,53 @@ award over it and the loop back after; LOOPS through; the score live throughout;
 stop; the renderer presenting every frame. Not measured: a machine; another title (no other port has the
 lines); a battle's background (the backdrop only takes the city's place, so ANGUIRUS, inside a battle,
 does not use it).
+
+### A full-screen clip on a machine: drawn at the frame hand-over (PAD-301)
+
+On David's Premium 1.16 (2026-10-01, a traced card and a phone video) a mode's full-screen clip (`pm_clip`:
+the intros, the endings, ANGUIRUS's spikes and rolls) lost whole frames to the HUD in bursts a few times a
+second; the emulator never showed it. The backdrop was clean, and the video surface reported "playing" on
+every read: it was not the decoder.
+
+How the game hands a frame to its renderer: the main loop runs the tick, asks whether the renderer is
+idle (frame begin), builds its frame only then (frame end, entered with r0 = 0 when it builds), and ends
+either way in the KICK that wakes the renderer thread. The renderer takes the whole pending list whenever it
+wakes or finishes a frame and finds it pending. The runtime used to advance and draw the clip's player from
+the TICK, before the begin: that marks the renderer busy every turn, so the game hardly builds (the
+emulator: one frame in a six-second intro, the HUD processes starved under the clip, run h10); and on the
+machine, whose GPU needs about two refreshes a frame (the game built ~29 frames a second there), the tick's
+draw is refused while the last frame still holds the player, and the next frame the game builds goes to
+the glass with the HUD alone.
+
+With `site frame_end` and `site frame_kick` in the port, the runtime advances and draws the player at the
+kick of each frame the game built: the last thing in the frame, over the HUD, while the game's display
+keeps running under it. Each clip's end logs how many frames the game built while it played and how many
+went to the glass without it; once a minute the log says how many frames the game built
+(`frames: the game built N of M frame(s) in the last minute`). A port without the lines keeps the tick;
+`value clip_draw_at_kick 0` puts a port with them back on the tick while still counting (an A/B).
+
+```
+site frame_end           0x00405f34 0xe3500000 0xe92d40f8   # godzilla_le 1.16
+site frame_kick          0x002a5530 0xe92d4070 0xe2906008
+```
+
+`frame_sites.py <game ELF> <tick address>` finds both from the tick site (the main loop's call after the
+tick is the begin; frame end is the call fed the begin's saved answer; the kick is frame end's tail jump).
+Both Godzilla Pro ports carry them, found that way and checked against the stock programs.
+
+**A hold also keeps the game's foreground WORDS off the glass.** A layered foreground of the game's (a shot
+award, a multiball's start screen) shows its clip, then its own scene, whose words sit where a mode's title
+and instruction line do. The hold keeps a new foreground that does not beat it from starting, but one
+already up when the mode starts played on: on the machine, MELTDOWN's start showed two instruction lines
+on top of each other. While a hold is up, the scene of the foreground now is not shown (`scene_show` is
+handed a null scene) unless the foreground's priority beats the hold, as the Maser's award and the battle
+select do; its clip and the rest of the game's display are untouched. `value hold_hides_fg_words 0` turns
+it off.
+
+**The emulator at the machine's cadence:** `PAD_SWAP_VBLANKS=2` makes a swap take two refreshes, and
+`PAD_REFRESH_HZ` sets the panel's own rate (a real panel is not locked to the game's 60 Hz timer). At
+`PAD_SWAP_VBLANKS=2 PAD_REFRESH_HZ=58` the old route leaked a HUD frame in every full-screen clip and the
+game built one frame per clip; the hand-over built 88-172 frames per clip, every one with the clip.
 
 ### The HUD at the glass's edges
 

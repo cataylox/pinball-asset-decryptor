@@ -1867,6 +1867,15 @@ void pm_clip_stop(void)
     clip.on = 0;
 }
 
+/* PAD-301: the frame hand-over (below clip_tick, where it is explained) */
+static int frame_hooked, frame_draws;
+static volatile int frame_pending, frame_built;
+static unsigned frame_n, frame_bare;      /* frames the game built while our full-screen clip played; without it */
+static unsigned long frame_adv;           /* pm_ms() the hand-over last advanced the player */
+static unsigned frame_loops, frame_builds;  /* the game's main-loop turns and the frames it built, this minute */
+static unsigned long frame_minute;
+static void clip_frames_said(void);
+
 static void clip_tick(void)
 {
     void *player, *surface, *display;
@@ -1878,7 +1887,16 @@ static void clip_tick(void)
         clip2_tried = pm_ms();                /* a grafted surface out of sight, once its scene is up */
         clip2_show(0);
     }
-    if (!clip.on) return;
+    if (frame_hooked && pm_ms() - frame_minute >= 60000) {
+        /* PAD-301: the machine's own frame rate, for the emulator to match (PAD_SWAP_VBLANKS): its GPU
+         * built ~29 a second while a clip played; how fast it builds the rest of the time is what this says */
+        if (frame_minute && frame_loops)
+            say("frames: the game built %u of %u frame(s) in the last minute (%u.%u a second)", frame_builds,
+                frame_loops, frame_builds / 60, frame_builds % 60 * 10 / 60);
+        frame_minute = pm_ms();
+        frame_loops = frame_builds = 0;
+    }
+    if (!clip.on) { clip_frames_said(); return; }
     if (disp_clip_lost) {                     /* item 154 display: the game played a clip of its own */
         clip.on = 0;
         disp_clip_lost = 0;
@@ -1906,14 +1924,94 @@ static void clip_tick(void)
     display = *(void **)(unsigned long)(data("display_holder") + (unsigned)pm_port_value("display_at", 0));
     state = player && surface && display ? ((int (*)(void *))(unsigned long)fn("surface_state"))(surface) : -1;
     if (state == playing) {
-        ((void (*)(void *, float))(unsigned long)fn("player_advance"))(player, (float)(now - clip.last));
-        ((void (*)(void *, void *, unsigned))(unsigned long)fn("display_draw"))
-            (display, player, (unsigned)pm_port_value("clip_layer", 0));
+        if (!frame_draws) {                   /* PAD-301: with the hand-over hooked, advanced and drawn there */
+            ((void (*)(void *, float))(unsigned long)fn("player_advance"))(player, (float)(now - clip.last));
+            ((void (*)(void *, void *, unsigned))(unsigned long)fn("display_draw"))
+                (display, player, (unsigned)pm_port_value("clip_layer", 0));
+        }
         clip.seen = 1;
     } else if (clip.seen || now - clip.started > 3000) {
         clip.on = 0;
     }
     clip.last = now;
+}
+
+/* PAD-301: A FULL-SCREEN CLIP IS DRAWN AT THE GAME'S FRAME HAND-OVER, NOT FROM THE TICK.
+ * How the game hands a frame to its renderer (Godzilla Premium 1.16, read off the program): the main
+ * loop runs the tick, asks whether the renderer is idle (frame begin, 0x2a56a0: display +0xb5 busy,
+ * +0xb0/b1/b2 a frame pending), builds its frame only then (frame end, 0x405f34, entered with r0 = 0
+ * when it builds), and wakes the renderer at the end of either path (the kick, 0x2a5530). The renderer
+ * thread takes the whole pending list whenever it wakes or finishes a frame and finds +0xb1 set.
+ * A player drawn from the TICK lands before the begin: it keeps the game from building at all while
+ * the renderer is fast (the emulator: the clip alone on the glass, the HUD processes starved, run h10),
+ * and on the machine, whose renderer needs about two refreshes a frame, the tick's draw is refused
+ * while the last frame still holds the player, so the next frame the game builds goes to the glass
+ * with the HUD and no clip: the HUD bursting through a mode's intro (traced on a Premium 1.16,
+ * 2026-10-01: drawn 60 of 60 ticks, the game building ~29 frames a second). Drawn at the kick of a
+ * frame the game built, the player is the last thing in every frame, over the HUD, and the game's
+ * display keeps running under it. A port without `site frame_end` / `site frame_kick` keeps the tick.
+ * The ADVANCE moves too: advancing the player queues its next picture for the renderer (+0xb0, the
+ * same flag the begin reads), so a tick that advances keeps the game from building as surely as a tick
+ * that draws - the emulator at the machine's cadence built 1 frame in a 6 s intro with the draw moved
+ * and the advance left on the tick. The game advances its own background's player inside its update. */
+static void clip_frames_said(void)
+{
+    if (!frame_n) return;
+    say("clip: the game built %u frame(s) while our full-screen clip played; %u went to the glass without it%s",
+        frame_n, frame_bare, frame_bare ? " (the HUD showed through)" : "");
+    frame_n = frame_bare = 0;
+}
+
+static void on_frame_end(unsigned *r)
+{
+    frame_pending = 1;
+    frame_built = r[0] == 0;                  /* the begin said the renderer was idle: a frame is built */
+    frame_loops++;
+    if (frame_built) frame_builds++;
+}
+
+static void on_frame_kick(unsigned *r)
+{
+    void *player, *surface, *display;
+    (void)r;
+    if (!frame_pending) return;               /* the kick's other caller (a loading loop): not a game frame */
+    frame_pending = 0;
+    if (!frame_built || !clip.on || clip_v2 || clip_layer || disp_clip_lost) return;
+    player = ((void *(*)(void))(unsigned long)fn("video_player"))();
+    surface = ((void *(*)(void))(unsigned long)fn("video_surface"))();
+    display = *(void **)(unsigned long)(data("display_holder") + (unsigned)pm_port_value("display_at", 0));
+    if (!player || !surface || !display ||
+        ((int (*)(void *))(unsigned long)fn("surface_state"))(surface) != pm_port_value("surface_playing", 2))
+        return;
+    if (frame_draws) {
+        unsigned long now = pm_ms(), from = frame_adv > clip.started ? frame_adv : clip.started;
+        ((void (*)(void *, float))(unsigned long)fn("player_advance"))(player, (float)(now - from));
+        frame_adv = now;
+        ((void (*)(void *, void *, unsigned))(unsigned long)fn("display_draw"))
+            (display, player, (unsigned)pm_port_value("clip_layer", 0));
+    }
+    /* the player's in-the-list mark for the layer (display_draw sets it, the renderer clears it): a frame
+     * handed over without it is a frame of the game's alone - counted either way, so the tick route
+     * (value clip_draw_at_kick 0) can be measured against this one */
+    frame_n++;
+    if (!((unsigned char *)player)[8 + (unsigned)pm_port_value("clip_layer", 0)]) frame_bare++;
+}
+
+static void frame_arm(void)
+{
+    if (!site("frame_end") && !site("frame_kick")) return;     /* a port without them: the tick draws */
+    if (!(can & PM_CAN_CLIPS) || clip_v2 || clip_layer || !site("frame_end") || !site("frame_kick")) {
+        say("clip: the frame hand-over lines are incomplete or not this build's - a full-screen clip is drawn from the tick");
+        return;
+    }
+    if (hook(fn("frame_end"), on_frame_end) && hook(fn("frame_kick"), on_frame_kick)) {
+        frame_hooked = 1;
+        frame_draws = pm_port_value("clip_draw_at_kick", 1) != 0;
+        say("clip: %s (frame end 0x%08x, kick 0x%08x)", frame_draws
+            ? "a full-screen clip is drawn at the game's frame hand-over"
+            : "a full-screen clip is drawn from the tick (clip_draw_at_kick 0); the hand-over only counts its frames",
+            fn("frame_end"), fn("frame_kick"));
+    }
 }
 
 /* ---- the backdrop: a clip BEHIND the HUD (hud-layers) --------------------------------------------
@@ -1992,10 +2090,58 @@ static void bd_play(unsigned e)
         say("backdrop: \"%s\" %s behind the HUD, in the city 0x%08x's place", was, once ? "once" : "looped", e);
 }
 
+/* PAD-301: A HOLD KEEPS THE GAME'S FOREGROUND WORDS OFF THE GLASS. A layered foreground of the game's
+ * (a shot award, a multiball's start screen) is an element like the backgrounds: its draw shows its clip
+ * when it has one, then its own scene (+backdrop_scene_at) - the award's words, set where the battle
+ * layout puts a title and an instruction line, which is where a mode's own HUD puts its own. The hold
+ * keeps a NEW foreground that does not beat it from starting (display priority, below), but one already
+ * up when the mode starts (traced on a Premium 1.16 at MELTDOWN's start, 2026-10-01: the multiball's
+ * own screen, two instruction lines on top of each other) plays on. So while a hold is up, the scene
+ * of the foreground now is not shown - scene_show returns at once for a null scene - unless the
+ * foreground's priority (+layered_fg_at + 4) beats the hold, as the Maser's award and the battle select
+ * do. Its clip, and everything else of the game's, is untouched. The layered manager keeps the
+ * foreground's DISPLAY ID at +layered_fg_at (37 for the Maser's award: a first build here read it as the
+ * element and the game took a SEGV on 0x3d) and the ELEMENT at +layered_fg_elem_at (0x68 on Premium 1.16:
+ * the manager's own methods call its virtuals there, and its clear zeroes it with the id). */
+static unsigned disp_prio;
+static unsigned char *disp_layered_mgr;
+static unsigned fg_said[8];               /* the foregrounds' vtables said, so each is said once */
+
+static int fg_words_off(unsigned *r)
+{
+    unsigned char *m = disp_layered_mgr;
+    unsigned fg, vt, i;
+    long at = pm_port_value("layered_fg_at", -1), el = pm_port_value("layered_fg_elem_at", -1);
+    if (!disp_prio || !m || !r[0] || at < 0 || el < 0 || !pm_port_value("hold_hides_fg_words", 1)) return 0;
+    if (!*(unsigned *)(m + at) || m[at + 4] > disp_prio) return 0;      /* no foreground, or it beats the hold */
+    fg = *(unsigned *)(m + el);
+    if (fg < 0x10000 || (fg & 3)) return 0;   /* not an element: never read through it */
+    if (r[0] != *(unsigned *)(unsigned long)(fg + (unsigned)pm_port_value("backdrop_scene_at", 0x18))) return 0;
+    r[0] = 0;
+    vt = *(unsigned *)(unsigned long)fg;
+    for (i = 0; i < 8 && fg_said[i] && fg_said[i] != vt; i++) ;
+    if (i < 8 && !fg_said[i]) {
+        fg_said[i] = vt;
+        say("display: the game's layered foreground (vtable 0x%08x, priority %u) keeps its words off the glass "
+            "under the hold at %u", vt, m[at + 4], disp_prio);
+    }
+    return 1;
+}
+
 /* scene_show(scene, layer): the city's own scene is where the backdrop goes */
 static void on_scene_show(unsigned *r)
 {
     unsigned e = bd.elem, playing = (unsigned)pm_port_value("surface_playing", 2);
+    /* PAD-301: while our full-screen clip plays, the hand-over draws the one video player LAST in every
+     * frame. An element of the game's that draws it too (a framed award of the game's already up when the
+     * mode started: its clip in the background's place) would put it in the frame first, under the HUD,
+     * and the hand-over's draw would be refused as a second copy - the intro under the HUD (run fg). */
+    if (frame_draws && clip.on && !clip_v2 && !clip_layer && !disp_clip_lost && r[0] &&
+        r[0] == (unsigned)(unsigned long)((void *(*)(void))(unsigned long)fn("video_player"))()) {
+        r[0] = 0;
+        return;
+    }
+    if (fg_words_off(r)) return;
     if (!e || r[0] != *(unsigned *)(unsigned long)(e + (unsigned)pm_port_value("backdrop_scene_at", 0x18))) return;
     if (!bd.on || *(unsigned *)(unsigned long)e != data("backdrop_city_vtable")) {
         if (bd.obj) bd_release(!bd.on ? "the mode ended it" : "another background");
@@ -5051,6 +5197,7 @@ static void pad_mode_start(void)
     }
     display_arm();                            /* item 154 display: the clip_play hook, display priority */
     backdrop_arm();                           /* hud-layers: a clip behind the HUD */
+    frame_arm();                              /* PAD-301: a full-screen clip drawn at the frame hand-over */
     if (can & PM_CAN_OWN_SOUND) hook(fn("sound_lookup"), on_sound_lookup);
     /* item 163: with /dump/soundlog.on there at the start, every request the game's sound worker
      * takes is logged ("[pad] sound <request> <n>"), so a check game is also the sound census that
