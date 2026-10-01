@@ -196,7 +196,8 @@ function CardSource({ s }) {
       ${s.overrides && s.colour_offer ? html`<div class="emu-ovr-sub">
         <${Check} ns="emulate" k="colour_stock" checked=${!!s.colour_stock}
           label="Stock colors: leave out my color profile"
-          title="Your color profile corrects colors for the machine's screen, so on this PC it can look darker or warmer than you made it. Tick this to see your pictures and videos here exactly as you made them. Builds still apply the profile." />
+          title="Your color profile corrects colors for the machine's screen, so on this PC it can look darker or warmer than you made it. Tick this to see your pictures and videos here exactly as you made them. Builds still apply the profile. Flip it while the game runs to switch live: a video or a screen the game loads each time it shows changes the next time it shows; a screen loaded at boot changes at the next Start." />
+        ${s.colour_live ? html`<div class="small muted">${s.colour_live}</div>` : null}
       </div>` : null}
       <div class="row emu-ovr-row">
         <span class="lbl nw">Assets folder</span>

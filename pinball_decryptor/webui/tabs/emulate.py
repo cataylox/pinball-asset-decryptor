@@ -152,6 +152,12 @@ class EmulateTab(TabService):
         # PAD-251: the override set the running game was started with ({"assets", "out"}), so
         # a scene edited on the Scenes tab can be handed to it live (push_live_scene)
         self._live_ovr = None
+        # PAD-305: the set the game runs ({"assets", "out"}), the (card,
+        # run card) it was built from, and the live colour swap's state
+        self._live_set = None
+        self._colour_src = None
+        self._colour_busy = False
+        self._colour_again = False
         self._launch_accepted = False
         self._launch_serial = 0
         self._loading = False
@@ -226,6 +232,8 @@ class EmulateTab(TabService):
             "write", lambda *_a: self._overrides_paint())
         self.emulate_scene_edits_var.trace_add(
             "write", lambda *_a: self._overrides_paint())
+        self.emulate_colour_stock_var.trace_add(
+            "write", lambda *_a: self._on_colour_stock())
         self._volume_var.trace_add("write", self._on_volume_change)
         self._mute_var.trace_add("write", self._on_volume_change)
 
@@ -1737,6 +1745,7 @@ class EmulateTab(TabService):
                                             stern_engine.card_title_index)
         if note:
             self._log("[emulate] " + note)
+        self._colour_src = (card, picked)
         out = rig.overrides_dir()
         fp = rig.assets_fingerprint(assets)
         manifest = stern_engine.read_override_manifest(out)
@@ -1790,7 +1799,152 @@ class EmulateTab(TabService):
     def _live_ready(self, assets, out, env):
         self._live_ovr = ({"assets": os.path.normcase(os.path.abspath(assets)), "out": out}
                           if env is not None and self._scene_edits_on() else None)
+        # PAD-305: the set the game runs, whatever the Scenes tick, for the
+        # colour switch's live swap
+        self._live_set = ({"assets": assets, "out": out} if env is not None
+                          else None)
         return env
+
+    # -- PAD-305: the colour switch reaching the running game ("on the fly") --
+    def _on_colour_stock(self):
+        self._refresh_colour_note()
+        self.colour_live()
+
+    def colour_live(self):
+        """Hand the RUNNING game its replaced pictures and videos again with
+        the color profile switched the way the Stock colors tick (and the
+        Color profile tab) now say, the way a Scenes edit is handed over:
+        rebuild the override set, then write each card file that changed
+        into the game's own staged copy in place (livescene.sh).  A picture
+        the game reads again (a video, a screen loaded on demand) changes the
+        next time it shows; a screen loaded once at boot changes at the next
+        Start, and the log says which.  False when no game runs on this
+        project's edits (the switch then simply applies at Start)."""
+        o = self._live_set
+        if (not o or not self._last_up or self._starting or self._stopping
+                or not self._colour_src):
+            return False
+        try:
+            if not self.emulate_overrides_var.get():
+                return False
+        except Exception:                                # noqa: BLE001
+            return False
+        if self._colour_busy:
+            self._colour_again = True
+            return True
+        self._colour_busy = True
+        self._colour_again = False
+        self.set(colour_live="Updating the running game's colors...")
+        self._thread(lambda: self._colour_live_run(dict(o)))
+        return True
+
+    def _colour_live_run(self, o):
+        from ...core import colour_profile
+        from ...plugins.stern import engine as stern_engine
+        assets, out = o["assets"], o["out"]
+        card, picked = self._colour_src
+        try:
+            stock = bool(self.emulate_colour_stock_var.get())
+        except Exception:                                # noqa: BLE001
+            stock = False
+        cancel = lambda: self._stopping or self._stopped   # noqa: E731
+        note = ""
+        try:
+            with colour_profile.forced(False if stock else None):
+                before = self._set_digests(out)
+                stage = self._stage_fn()
+                if stage is not None:
+                    stage(assets, cancel_cb=cancel)
+                counts, _m, _v, files = stern_engine.write_overrides(
+                    card, assets, out, scene_edits=self._scene_edits_on(),
+                    log=lambda msg, level="info": self._log(
+                        "[emulate] " + msg),
+                    cancel=cancel, run_card=picked)
+                if counts is None:
+                    raise RuntimeError("cancelled")
+                stern_engine.stamp_override_manifest(
+                    out, assets_fingerprint=rig.assets_fingerprint(assets))
+            after = self._set_digests(out)
+            # only asset files: the game program and the index are never
+            # rewritten under a running game
+            changed = [p for p in after
+                       if "/assets/" in p and after[p] != before.get(p)]
+            sent, later, failed = [], [], []
+            for p in changed:
+                res = self.push_live_file(p, os.path.join(
+                    out, *p.strip("/").split("/")))
+                if res == "sent":
+                    sent.append(p)
+                elif res == "not_in_set":
+                    later.append(p)
+                else:
+                    failed.append(p)
+            boot = [p for p in sent if "/auto_loaded/" in p]
+            what = "stock colors" if stock else "your color profile"
+            if not changed:
+                note = "Nothing to change: no replaced picture or video differs."
+            else:
+                note = ("%s: %d file(s) handed to the running game"
+                        % (what[0].upper() + what[1:], len(sent)))
+                if boot:
+                    note += (" (%d of them on screens loaded at boot, which "
+                             "change at the next Start)" % len(boot))
+                if later:
+                    note += "; %d more at the next Start" % len(later)
+                if failed:
+                    note += "; %d could not be written" % len(failed)
+                note += "."
+            self._log("[emulate] " + note)
+        except Exception as exc:                         # noqa: BLE001
+            note = "The colors could not be updated live: %s" % exc
+            self._log("[emulate] " + note)
+        finally:
+            self._colour_busy = False
+            self._post(lambda: self.set(colour_live=note))
+            if self._colour_again:
+                self._post(self.colour_live)
+
+    @staticmethod
+    def _set_digests(out):
+        """``{card path: md5}`` of every file of the override set in *out*."""
+        import hashlib
+        from ...plugins.stern import engine as stern_engine
+        res = {}
+        for rec in (stern_engine.read_override_manifest(out) or {}).get(
+                "files") or []:
+            p = rec.get("path") or ""
+            path = os.path.join(out, *p.strip("/").split("/"))
+            try:
+                h = hashlib.md5()
+                with open(path, "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        h.update(chunk)
+                res[p] = h.hexdigest()
+            except OSError:
+                continue
+        return res
+
+    def push_live_file(self, card_path, path):
+        """Write the file at *path* over the running game's copy of
+        *card_path* in place (livescene.sh, which takes any file of the set).
+        ``"sent"``, ``"not_in_set"`` or ``"failed"``.  Blocking."""
+        try:
+            arg = rig.wsl_path(path) if sys.platform == "win32" else path
+            r = self._run(self._cmd("livescene.sh", card_path, arg),
+                          capture_output=True, timeout=120)
+        except (OSError, subprocess.SubprocessError) as exc:
+            self._log("[emulate] could not hand the running game %s: %s"
+                      % (card_path, exc))
+            return "failed"
+        if r.returncode == 0:
+            return "sent"
+        if r.returncode == 3:
+            return "not_in_set"
+        said = ((r.stdout or b"") + (r.stderr or b"")).decode(
+            "utf8", "replace").strip()
+        self._log("[emulate] could not hand the running game %s: %s"
+                  % (card_path, said[-300:] or "exit %d" % r.returncode))
+        return "failed"
 
     def _scene_edits_on(self):
         try:

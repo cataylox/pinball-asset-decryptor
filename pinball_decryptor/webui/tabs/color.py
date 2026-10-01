@@ -130,6 +130,19 @@ class ColorTab(TabService):
                     fn()
                 except Exception:                       # noqa: BLE001
                     log.exception("colour note %s", ns)
+        self._tell_emulator()
+
+    def _tell_emulator(self):
+        """A game running on this project's edits gets the change live
+        (Emulate tab, PAD-305).  Not on every slider move: each one would
+        rebuild the set; a switch, a starting point or a Load does."""
+        emu = self.window.service("emulate")
+        fn = getattr(emu, "colour_live", None)
+        if fn is not None:
+            try:
+                fn()
+            except Exception:                           # noqa: BLE001
+                log.exception("colour live")
 
     # -- the profile -------------------------------------------------------
     def _load(self):
@@ -189,7 +202,9 @@ class ColorTab(TabService):
     def preset(self, key):
         for k, prof in cp.PRESETS:
             if k == key:
-                return self._store(prof, rev=True)
+                ok = self._store(prof, rev=True)
+                self._tell_emulator()
+                return ok
         return False
 
     @rpc
@@ -229,6 +244,7 @@ class ColorTab(TabService):
             self.toast("Could not read the profile: %s" % e, "error")
             return False
         self._store(prof, rev=True)
+        self._tell_emulator()
         if problems:
             self.set(problems=list(problems))
         self.toast("Loaded %s" % (prof.name or os.path.basename(path)),
