@@ -193,6 +193,11 @@ function CardSource({ s }) {
           label="Include my Scenes tab edits"
           title="On: the game runs with what you changed on the Scenes tab (and takes further edits there while it runs, for the screens it loads each time it shows them). Off: the scenes run as the card has them; everything else you replaced still applies." />
       </div>` : null}
+      ${s.overrides && s.colour_offer ? html`<div class="emu-ovr-sub">
+        <${Check} ns="emulate" k="colour_stock" checked=${!!s.colour_stock}
+          label="Stock colors: leave out my color profile"
+          title="Your color profile corrects colors for the machine's screen, so on this PC it can look darker or warmer than you made it. Tick this to see your pictures and videos here exactly as you made them. Builds still apply the profile." />
+      </div>` : null}
       <div class="row emu-ovr-row">
         <span class="lbl nw">Assets folder</span>
         <${Field} value=${s.assets} readOnly mono sm cls="grow" placeholder="(none)"

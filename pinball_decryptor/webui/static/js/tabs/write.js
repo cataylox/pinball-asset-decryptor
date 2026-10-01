@@ -221,18 +221,14 @@ function Destination({ s }) {
   <//>`;
 }
 
-// PAD-305: the colour profile a build applies to the user's replaced
-// pictures and videos (never to their files, never to stock art).  The
-// profile itself is a text file; Edit profile opens it.
+// PAD-305: says when the build applies a color profile to the user's
+// replaced pictures and videos; the switch and the profile live on the
+// Color profile tab.
 function ColourProfile({ s }) {
-  return html`<div class="stack wr-build">
-    <div class="row">
-      <${Check} ns="write" k="colour_profile" checked=${s.colour_profile} wrap
-        label=${s.colour_label} title=${s.colour_tip} disabled=${s.running} />
-      <${Button} kind="ghost" size="xs" onClick=${() => call("write.edit_colour_profile")}
-        title="Open the profile in your text editor; save it and build again">Edit profile...<//>
-    </div>
-    ${s.colour_note ? html`<span class=${cx("small", s.colour_note_kind === "err" ? "err-ink" : "muted")}>${s.colour_note}</span>` : null}
+  if (!s.colour_note) return null;
+  return html`<div class="row wr-colour">
+    <span class=${cx("small grow", s.colour_note_kind === "err" ? "err-ink" : "muted")}>${s.colour_note}</span>
+    <${Button} kind="ghost" size="xs" onClick=${() => call("ui.select_tab", "color")}>Color profile...<//>
   </div>`;
 }
 

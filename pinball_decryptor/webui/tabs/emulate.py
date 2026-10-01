@@ -129,6 +129,10 @@ class EmulateTab(TabService):
         self.emulate_overrides_var = self.var("overrides", "bool", False)
         # PAD-251 (DragonRR): the Scenes tab's edits have their own on/off under the opt-in
         self.emulate_scene_edits_var = self.var("scene_edits", "bool", True)
+        # PAD-305: run with the stock colours, skipping the Color profile tab's
+        # correction (the profile is made for the machine's screen, and the
+        # emulator is watched on the PC's).  Not remembered: off each session.
+        self.emulate_colour_stock_var = self.var("colour_stock", "bool", False)
         self.emulate_country_var = self.var("country", "str",
                                             rig.COUNTRY_GAME)
         self.emulate_power_var = self.var("power", "str",
@@ -720,6 +724,12 @@ class EmulateTab(TabService):
         # hover (must survive #4).
         self.set(assets=assets, ovr_hint=text, ovr_refused=False,
                  scene_edits_offer=bool(assets) and self._project_has_scene_edits(assets))
+        self._refresh_colour_note()
+
+    def _refresh_colour_note(self):
+        """PAD-305: offer "stock colours" only while a color profile is on."""
+        from ...core import colour_profile
+        self.set(colour_offer=colour_profile.enabled())
 
     def _project_has_scene_edits(self, assets):
         try:
@@ -1688,6 +1698,23 @@ class EmulateTab(TabService):
         return env
 
     def _prepare_overrides(self, card, assets, selector=False):
+        """The override set (see :meth:`_prepare_overrides_inner`), with the
+        color profile held off for its staging and build when the "stock
+        colours" tick asks (PAD-305)."""
+        from ...core import colour_profile
+        stock = False
+        try:
+            stock = bool(self.emulate_colour_stock_var.get())
+        except Exception:                                # noqa: BLE001
+            pass
+        if stock and colour_profile.enabled():
+            self._log("[emulate] stock colors: your color profile is left "
+                      "out of this run")
+        with colour_profile.forced(False if stock else None):
+            return self._prepare_overrides_inner(card, assets,
+                                                 selector=selector)
+
+    def _prepare_overrides_inner(self, card, assets, selector=False):
         from ...core.checksums import read_checksums
         from ...plugins.stern import engine as stern_engine
         if not os.path.isdir(assets):

@@ -42,7 +42,9 @@ worker threads and the emulator's override build see it without a new
 parameter through every signature.
 """
 
+import contextlib
 import os
+import threading
 from dataclasses import dataclass
 
 from .config import _settings_root
@@ -249,10 +251,81 @@ def set_enabled(on):
     os.environ[ENV] = "1" if on else "0"
 
 
+#: The emulator's "stock colours" switch (PAD-305): when not None it wins
+#: over the env for as long as :func:`forced` holds it.  Module-wide rather
+#: than per thread, because the engine fans some of an override build out to
+#: a thread pool; the Emulate tab only holds it around its own preparation.
+_FORCED = None
+_FORCED_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def forced(on):
+    """Within the block, :func:`active` answers as if the tick were *on*
+    (``None`` leaves it to the tick).  The Emulate tab's "stock colours"
+    switch runs its staging and override build under ``forced(False)``."""
+    global _FORCED
+    with _FORCED_LOCK:
+        prev, _FORCED = _FORCED, on
+    try:
+        yield
+    finally:
+        with _FORCED_LOCK:
+            _FORCED = prev
+
+
 def active():
     """The profile a build should apply now, or None (off, or a profile that
     changes nothing)."""
-    if not enabled():
+    on = enabled() if _FORCED is None else bool(_FORCED)
+    if not on:
         return None
     prof, _ = load()
     return None if prof.is_identity() else prof
+
+
+def signature():
+    """A short text that changes whenever what :func:`active` would apply
+    changes ("" when nothing): an emulator override set records it so a
+    switched or edited profile rebuilds the set rather than reusing it."""
+    prof = active()
+    if prof is None:
+        return ""
+    return "%s|%s|%s|%s" % (prof.gamma, prof.gain, prof.lift, prof.saturation)
+
+
+def _fmt(nums):
+    return " ".join("%.2f" % v for v in nums)
+
+
+def to_text(prof):
+    """The file text for *prof*: the explanatory header, then its values."""
+    head = DEFAULT_TEXT.split("\nname =", 1)[0]
+    return ("%s\nname = %s\ngamma = %s\ngain = %s\nlift = %s\n"
+            "saturation = %.2f\n" % (head, prof.name or "My profile",
+                                     _fmt(prof.gamma), _fmt(prof.gain),
+                                     _fmt(prof.lift), prof.saturation))
+
+
+def save(prof, path=None):
+    """Write *prof* to *path* (the active profile file by default)."""
+    path = path or profile_path()
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(to_text(prof))
+    os.replace(tmp, path)
+    return path
+
+
+def read_file(path):
+    """``(Profile, problems)`` from any profile file (Load...)."""
+    with open(path, encoding="utf-8-sig") as f:
+        return parse(f.read())
+
+
+#: Starting points the Color profile tab offers.
+PRESETS = (
+    ("godzilla", parse(DEFAULT_TEXT)[0]),
+    ("none", Profile(name="No change")),
+)

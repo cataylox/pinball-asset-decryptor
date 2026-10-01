@@ -196,3 +196,82 @@ def test_video_filter_chain_carries_the_profile(tmp_path, profile_on,
     assert ok, detail
     assert "Godzilla" in detail
     assert out.stat().st_size > 0
+
+
+# -- the file round trip, the emulator's override, the signature -----------
+
+def test_to_text_round_trips_and_keeps_the_header(tmp_path):
+    prof = cp.Profile(name="Mine", gamma=(1.3, 1.1, 0.9), gain=(1, .9, 1),
+                      lift=(.05, .05, .05), saturation=1.2)
+    path = cp.save(prof, str(tmp_path / "m.txt"))
+    text = open(path, encoding="utf-8").read()
+    assert text.startswith("# Pinball Asset Decryptor colour profile")
+    back, problems = cp.read_file(path)
+    assert problems == [] and back == prof
+
+
+def test_forced_off_wins_over_the_tick(profile_on):
+    assert cp.active() is not None and cp.signature()
+    with cp.forced(False):
+        assert cp.active() is None and cp.signature() == ""
+    assert cp.active() is not None
+
+
+def test_emulator_set_rebuilds_when_the_profile_changes(tmp_path, profile_on,
+                                                        monkeypatch):
+    from pinball_decryptor.webui import emulate_core
+    card = tmp_path / "card.raw"
+    card.write_bytes(b"x")
+    st = card.stat()
+    manifest = {"card": {"path": str(card.resolve()), "size": st.st_size,
+                         "mtime": int(st.st_mtime)},
+                "assets": str(tmp_path.resolve()), "assets_fingerprint": "fp",
+                "scene_edits": True, "colour_profile": cp.signature()}
+    args = (manifest, str(card), str(tmp_path), "fp")
+    assert emulate_core.overrides_reason(*args) == ""
+    monkeypatch.setenv(cp.ENV, "0")
+    assert "color profile" in emulate_core.overrides_reason(*args)
+
+
+# -- the Color profile tab ---------------------------------------------------
+
+def test_color_tab_end_to_end(tmp_path, monkeypatch):
+    from tests.webui_harness import web_app
+    path = tmp_path / "profile.txt"
+    monkeypatch.setenv(cp.ENV_FILE, str(path))
+    with web_app(tmp_path, mfr="stern") as w:
+        tabs = {t["ns"]: t for t in w.state("shell")["tabs"]}
+        assert tabs["color"]["visible"]
+        assert tabs["color"]["group"] == "Replace"
+        w.call("ui.select_tab", "color")
+        w.drain()
+        s = w.state("color")
+        assert s["enabled"] is False
+        assert s["gamma"] == [1.1, 1.2, 1.35]
+        assert s["sample_url"].startswith("data:image/png;base64,")
+        rev = s["rev"]
+
+        w.call("color.set_params", {"gamma": [1.5, 1.0, 9.0], "lift": 0.1,
+                                    "name": "Cab 2"})
+        w.drain()
+        prof, problems = cp.read_file(str(path))
+        assert problems == []
+        assert prof.name == "Cab 2"
+        assert prof.gamma == (1.5, 1.0, 2.5)          # clamped to the slider
+        assert prof.lift == (0.1, 0.1, 0.1)
+
+        w.call("color.set_enabled", True)
+        w.drain()
+        assert os.environ.get(cp.ENV) == "1"
+        assert "Cab 2" in w.state("write").get("colour_note", "")
+
+        w.call("color.preset", "none")
+        w.drain()
+        s = w.state("color")
+        assert s["rev"] > rev and s["gamma"] == [1.0, 1.0, 1.0]
+        assert cp.active() is None                     # no change = nothing
+
+        w.call("color.set_enabled", False)
+        w.drain()
+        assert os.environ.get(cp.ENV) == "0"
+        assert w.state("write").get("colour_note", "") == ""

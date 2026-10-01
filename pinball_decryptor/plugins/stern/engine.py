@@ -8865,6 +8865,11 @@ def card_title_index(path):
         return ()
 
 
+def _colour_signature():
+    from ...core import colour_profile
+    return colour_profile.signature()
+
+
 def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                     cancel=None, label=None, run_card=None, sound_ok=None, scene_edits=True):
     """Build an OVERRIDE SET: the card files the user's edits touch, patched,
@@ -9185,6 +9190,8 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         "removed": removed,
         # PAD-251: whether the Scenes tab's edits are in this set (the Emulate tab's tick)
         "scene_edits": bool(scene_edits),
+        # PAD-305: the color profile the set's pictures and clips carry
+        "colour_profile": _colour_signature(),
     }
     if modes_out:
         manifest["modes"] = modes_out

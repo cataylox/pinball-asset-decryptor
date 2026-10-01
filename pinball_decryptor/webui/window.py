@@ -387,6 +387,7 @@ class WebWindow:
             "Replace Images": g("replace_image"),
             "Replace Text": g("replace_text"),
             "Scenes": g("replace_image"),
+            "Color Profile": g("replace_image") or g("replace_video"),
             "Write": g("write"),
             "Mod Pack": g("modpack"),
             "Partition Explorer": g("partition_explorer"),

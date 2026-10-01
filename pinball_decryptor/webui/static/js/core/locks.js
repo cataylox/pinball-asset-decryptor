@@ -39,6 +39,7 @@ export const WHAT = {
   video: "Replace videos.",
   images: "Replace pictures.",
   text: "Replace on-screen text.",
+  color: "Correct your pictures' and videos' colors for the machine's screen.",
   scenes: "See each scene as the machine draws it; move, resize, recolour or add to it.",
   write: "Build a new card with your changes.",
   write_flash: "Flash a card image onto an SD card, or build one with your changes.",

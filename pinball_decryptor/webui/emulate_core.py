@@ -454,6 +454,9 @@ def overrides_reason(manifest, card_path, assets_dir, fingerprint,
     if bool(manifest.get("scene_edits", True)) != bool(scene_edits):
         return ("the Scenes tab's edits were switched %s since it was built"
                 % ("on" if scene_edits else "off"))
+    from ..core import colour_profile
+    if str(manifest.get("colour_profile") or "") != colour_profile.signature():
+        return "the color profile was changed or switched since it was built"
     return ""
 
 
