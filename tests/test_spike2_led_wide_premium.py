@@ -110,6 +110,7 @@ static unsigned led_shm_len = 8192;
 static void led_map(void) {}
 static void led_val(unsigned node, unsigned idx, unsigned char v) { shm.val[node][idx] = v; }
 static signed char led_node_verdict[16];
+static void led_show_note(unsigned node, unsigned cmd, unsigned weight) { (void)node; (void)cmd; (void)weight; }
 static unsigned short led_node_votes[16], led_node_yes[16];
 @FUNCS@
 static int frame(unsigned node, const char *h)
@@ -157,7 +158,7 @@ def shim(tmp_path_factory):
         pytest.skip("rig not present")
     if not CC:
         pytest.skip("no C compiler on this host")
-    funcs = "\n".join(_extract(n) for n in ("popcount8", "led_wide_long", "led_wide_walk", "led_wide_strip_bank", "led_node_wide_publish"))
+    funcs = "\n".join(_extract(n) for n in ("popcount8", "led_show_cmd", "led_wide_long", "led_wide_walk", "led_wide_strip_bank", "led_node_wide_publish"))
     d = tmp_path_factory.mktemp("ledpremium")
     (d / "h.c").write_text(HARNESS.replace("@FUNCS@", funcs), encoding="utf-8")
     exe = d / ("h.exe" if os.name == "nt" else "h")
