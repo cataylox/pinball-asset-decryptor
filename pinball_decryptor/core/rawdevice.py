@@ -46,6 +46,12 @@ _IO_CHUNK = 8 << 20
 # Bulk-flash read buffer (a sector multiple).  16 MB keeps the syscall count low
 # on multi-GB card images without holding much memory.
 _FLASH_CHUNK = 16 << 20
+# Linux writes to /dev/sdX land in the page cache, which soaks up gigabytes
+# before the card has seen them: the flash percentage raced ahead (10% in the
+# first seconds) and then sat at 100% for minutes while the final fsync
+# drained it (PAD-302).  Flushing every this-many bytes keeps the cache - and
+# so the progress error - to a couple of seconds of card writing.
+_FLASH_DRAIN = 64 << 20
 
 
 class FlashError(Exception):
@@ -597,6 +603,9 @@ class RawDeviceFile:
         # bulk write is sector-aligned; never let it collapse to zero.
         step = max((chunk // sec) * sec, sec)
         written = 0
+        undrained = 0
+        drain = (sys.platform.startswith("linux")
+                 and is_device_path(self.path))
         rate = []
         self._io.seek(0)
         while written < total:
@@ -621,6 +630,10 @@ class RawDeviceFile:
                 self.seek(written)
                 self.write(buf)
             written += len(buf)
+            undrained += len(buf)
+            if drain and (undrained >= _FLASH_DRAIN or written >= total):
+                self._io.fsync()
+                undrained = 0
             if progress is not None:
                 progress(written, total, "Writing image to SD card…"
                          + _rate_note(rate, written, total))
