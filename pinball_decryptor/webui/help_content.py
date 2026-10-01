@@ -1024,6 +1024,29 @@ HELP_CONTENT = {
          "loads such a file onto the same texts of this card or another one. "
          "Text too long for this card is skipped."),
     ],
+    "Color profile": [
+        ("What it does",
+         "A color profile corrects the colors of this project's build: the "
+         "middle shades and color level of each channel, the color strength "
+         "and the shadow lift. On Spike 2 the game itself draws every picture "
+         "and video through it; on other machines the replaced pictures and "
+         "videos are corrected when they are staged. 'No change' leaves the "
+         "colors alone."),
+        ("Starting points",
+         "Recommended is the usual starting point; Black and white suits the "
+         "black-and-white playfield editions. Hover a starting point's button "
+         "to see how it was made, then adjust the sliders and watch the curve "
+         "graph and the preview."),
+        ("Preview and emulator",
+         "Drag across the preview to compare before and after on a test card, "
+         "one of your Images-tab replacements or another picture. 'See it in "
+         "the emulator' runs this project's edits with the profile; Emulate's "
+         "'Stock colors' tick leaves it out."),
+        ("Part of the project",
+         "The profile is a staged change of this project: Write lists it as "
+         "pending, Revert all clears it, and Save a copy / Load move it "
+         "between projects."),
+    ],
     # The Modes tab's own tips are in PREVIEW_HELP: a copy of the app without a
     # preview code shows none of them (sections_for).  The key stays so every
     # notebook tab has an entry.
