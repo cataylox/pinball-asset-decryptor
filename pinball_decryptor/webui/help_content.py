@@ -351,6 +351,12 @@ HELP_CONTENT = {
          "Write tab (Windows and Linux) builds for a bigger SD card and gives "
          "the games partition that room, but it does not raise the 2 GB "
          "limit."),
+        ("Save and load settings",
+         "More > Save settings to a file... keeps this tab's picks, ticks and "
+         "options in one small file; Load settings from a file... puts them "
+         "back, on this card or another one. Slots the file doesn't set keep "
+         "what they have, and slots this card doesn't have are skipped. The "
+         "file only names your files, it doesn't hold them."),
     ],
     "Replace Video": [
         ("Scan and assign",
@@ -666,6 +672,12 @@ HELP_CONTENT = {
          "you don't want, then \"Use these files at best quality\". The "
          "first search of a big folder takes a few minutes; a second one "
          "reuses what it read."),
+        ("Save and load settings",
+         "More > Save settings to a file... keeps this tab's picks, ticks and "
+         "options in one small file; Load settings from a file... puts them "
+         "back, on this card or another one. Slots the file doesn't set keep "
+         "what they have, and slots this card doesn't have are skipped. The "
+         "file only names your files, it doesn't hold them."),
     ],
     "Replace Images": [
         ("Scan and assign",
@@ -902,6 +914,12 @@ HELP_CONTENT = {
         ("Undo",
          "Right-click a slot to remove an un-built assignment or revert an "
          "already-changed file."),
+        ("Save and load settings",
+         "More > Save settings to a file... keeps this tab's picks, ticks and "
+         "options in one small file; Load settings from a file... puts them "
+         "back, on this card or another one. Slots the file doesn't set keep "
+         "what they have, and slots this card doesn't have are skipped. The "
+         "file only names your files, it doesn't hold them."),
     ],
     "Replace Text": [
         ("Scan and edit",
@@ -1001,6 +1019,10 @@ HELP_CONTENT = {
          "dropdown. The folder name never changes, so the name sticks — and "
          "it's the same name the Replace Images tab shows for that scene, "
          "from either direction."),
+        ("Save and load edits",
+         "\"Save / load\" saves every text you changed to a small file, and "
+         "loads such a file onto the same texts of this card or another one. "
+         "Text too long for this card is skipped."),
     ],
     # The Modes tab's own tips are in PREVIEW_HELP: a copy of the app without a
     # preview code shows none of them (sections_for).  The key stays so every
