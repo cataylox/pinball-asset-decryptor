@@ -251,7 +251,7 @@ function Explainer({ s }) {
       <li><${Icon} name="check" />No picture or video file is changed, yours or the game's. The correction lives in the game program itself, so it can never be applied twice.</li>
       <li><${Icon} name="check" />Pick No change and build again for the game's own colors.</li>
       <li><${Icon} name="check" />Different machines need different profiles. Save a copy for each one and load the one you're building for.</li>
-      <li><${Icon} name="check" />Try it in the emulator to see it in the game. The colors are set when the game starts, so each change restarts it.</li>
+      <li><${Icon} name="check" />See it in the emulator to check it in the game. The colors are set when the game starts, so each change restarts it.</li>
     </ul>` : html`<p>A color profile corrects for that. When you build, PAD shifts the colors of your replacement pictures and videos the opposite way, so the machine's screen shifts them back to what you made.</p>
     <ul class="cp-facts">
       <li><${Icon} name="check" />Your own files are never changed. The correction is made fresh from them every time you build, so it can never be applied twice.</li>
@@ -290,7 +290,7 @@ export default function ColorTab() {
     <${PageHead} title="Color profile" sub=${INTRO}>
       <${Button} kind="primary" icon="emulate" onClick=${() => call("color.try_emulator")}
         disabled=${!s.has_project}
-        title="Run this project in the emulator with this profile (a running game restarts, since the colors are set when the game starts)">Try it in the emulator<//>
+        title="Run this project in the emulator with this profile (a running game restarts, since the colors are set when the game starts)">See it in the emulator<//>
     <//>
     ${!s.has_project ? html`<${Note} kind="warn">There is no project folder yet: choose or extract one on the Extract tab, and the profile you set here is saved with it.<//>`
       : s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is staged for this project: the next build "

@@ -138,6 +138,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.radium" \
     --hidden-import "pinball_decryptor.plugins.stern.progtext" \
     --hidden-import "pinball_decryptor.plugins.stern.progreloc" \
+    --hidden-import "pinball_decryptor.plugins.stern.shader_profile" \
     --hidden-import "pinball_decryptor.plugins.stern.radium_grow" \
     --hidden-import "pinball_decryptor.plugins.stern.fontrender" \
     --hidden-import "pinball_decryptor.plugins.stern.scene_layout" \

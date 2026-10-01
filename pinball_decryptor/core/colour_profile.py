@@ -2,7 +2,7 @@
 machine's screen (PAD-305).
 
 WHY.  A machine's display is not the PC monitor the art was made on.
-DragonRR photographed a display test card on a Stern Godzilla: mid greys come
+A field report photographed a display test card on a Stern Godzilla: mid greys come
 out far too bright and blue, saturated patches bloom, and everything under
 about 24/255 sinks into one lifted black.  A profile pre-corrects for that:
 the PC copy stays the "golden" asset, and only what the machine is given is
@@ -45,8 +45,8 @@ KEY = "color_profile"
 #: Rec.601 luma weights: the grey a pixel is desaturated toward.
 _LUMA = (0.299, 0.587, 0.114)
 
-#: The profile a new file starts from: Stern Godzilla, read off DragonRR's
-#: photographs of his display test card on the machine (PAD-305).  The
+#: The profile a new file starts from: Stern Godzilla, read off a field
+#: report's photographs of a display test card on the machine (PAD-305).  The
 #: machine showed 128 grey as roughly (164, 187, 226) and 64 as (100, 113,
 #: 148): mids far too bright, most of all in blue, then green, while white
 #: stayed white.  Darkening each channel's mids by its own gamma (and a touch

@@ -7,8 +7,9 @@ the controls show is saved in the project's ``.staged_changes.json``
 it as pending, the next build or Emulate Start applies it, and Revert all
 clears it.  "No change" is the off state; there is no separate switch.
 Save a copy / Load move a profile between projects (one per machine).
-"Try it in the emulator" hands the Emulate tab a run of this project's edits
-with the profile, restarting a running game.
+"See it in the emulator" hands the Emulate tab a run of this project's edits
+with the profile, restarting a running game.  (Never "Try it": that is the
+preview-gated mode maker's word, and this tab is public.)
 
 The PREVIEW is drawn by the page itself (static/js/tabs/color.js) with the
 same maths, so a slider moves the picture as it is dragged; this side only
@@ -249,7 +250,7 @@ class ColorTab(TabService):
 
     @rpc
     def try_emulator(self):
-        """"Try it in the emulator": the Emulate tab runs this project's
+        """"See it in the emulator": the Emulate tab runs this project's
         edits with the profile, restarting a running game."""
         emu = self.window.service("emulate")
         fn = getattr(emu, "try_colour", None)

@@ -310,8 +310,8 @@ def test_color_tab_stages_on_the_project(tmp_path):
         assert w.state("color")["active"] is False
 
 
-def test_try_it_starts_the_emulator_with_the_profile(tmp_path, monkeypatch):
-    """"Try it in the emulator" turns on the edits, takes Stock colors off and
+def test_see_it_in_the_emulator_starts_it_with_the_profile(tmp_path, monkeypatch):
+    """"See it in the emulator" turns on the edits, takes Stock colors off and
     starts the game, or stops a running one and starts it again."""
     from tests.webui_harness import web_app
     proj = tmp_path / "proj"
