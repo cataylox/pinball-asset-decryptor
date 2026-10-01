@@ -275,3 +275,10 @@ def test_color_tab_end_to_end(tmp_path, monkeypatch):
         w.drain()
         assert os.environ.get(cp.ENV) == "0"
         assert w.state("write").get("colour_note", "") == ""
+
+
+def test_black_and_white_preset_makes_every_pixel_grey():
+    prof = dict(cp.PRESETS)["bw"]
+    out = np.asarray(prof.apply_image(_ramp("RGBA")))
+    assert (out[..., 0] == out[..., 1]).all() and (out[..., 1] == out[..., 2]).all()
+    assert prof.ffmpeg_filters()[0].startswith("colorchannelmixer=rr=0.299")

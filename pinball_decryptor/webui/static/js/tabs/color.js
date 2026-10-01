@@ -8,7 +8,7 @@
 // ^ gamma), so a slider moves the picture while it is dragged.  Python is
 // told the numbers a moment after the last move and saves them to the file.
 
-import { html, useState, useEffect, useRef, useCallback, PageHead, Card, Button, Field, Select, Seg, Note,
+import { html, useState, useEffect, useRef, useCallback, PageHead, Card, Button, Field, Select, Seg, Note, Check,
          Icon, tip, call, cx, mediaUrl } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 
@@ -232,6 +232,9 @@ function Controls({ s, p, update }) {
 
     <div class="cp-group">
       <div class="cp-group-hd"><span class="h3">Whole picture</span></div>
+      <${Check} checked=${p.saturation === 0} label="Black and white"
+        title="Every replaced picture and video in greys, for a black-and-white playfield. Your other settings still apply on top. Untick for full color."
+        onChange=${(v) => update({ saturation: v ? 0 : 1 })} />
       <${Slider} label="Color strength" value=${p.saturation} min=${slo} max=${shi} step="0.01" show=${pct}
         onInput=${(v) => update({ saturation: v })} left="grey" right="vivid"
         hint="Below 100% calms colors that glow too much on the machine; above makes them stronger." />

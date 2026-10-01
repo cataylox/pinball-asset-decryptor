@@ -328,4 +328,7 @@ def read_file(path):
 PRESETS = (
     ("godzilla", parse(DEFAULT_TEXT)[0]),
     ("none", Profile(name="No change")),
+    # Black-and-white playfield editions (EHoH, Godzilla): every picture as
+    # its own grey (Rec.601 luma), nothing else changed.
+    ("bw", Profile(name="Black and white", saturation=0.0)),
 )
