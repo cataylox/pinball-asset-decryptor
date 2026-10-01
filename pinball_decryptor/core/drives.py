@@ -17,6 +17,7 @@ picker exactly so users transitioning across see the same format:
 ``JMicron Tech SCSI Disk Device (111.8 GB, External) — \\\\.\\PHYSICALDRIVE3``.
 """
 
+import os
 import re
 import subprocess
 import sys
@@ -373,6 +374,76 @@ def _pick_usb_stick(drives, externals):
             "stick and click Refresh, or pick manually.")
 
 
+# ---- WHAT IS ON A DRIVE (PAD-305) -------------------------------------
+#
+# A flash that picked a drive by its SIZE wrote a Godzilla image over a
+# 30.8 GB SanDisk USB stick sitting beside the 31.9 GB SD card it was meant
+# for: the card reader's model ("NORELSYS 1081CS1") names no reader, so the
+# "smallest external" fallback chose the stick.  A Stern Spike 2 card says
+# what it is without Administrator: its FAT boot partition is mounted (H:)
+# and holds the kernel (``zImage``) and a ``stern-*.dtb``.
+
+#: Volume entries that say nothing about what a drive is for.
+_VOLUME_NOISE = {"system volume information", "$recycle.bin", ".spotlight-v100",
+                 ".fseventsd", ".trashes"}
+
+
+def mounted_root(d):
+    """The folder *d*'s mounted volume is reachable at (the drive letter's
+    root on Windows, the mount point elsewhere), or ``None`` when it has
+    none."""
+    lab = (getattr(d, "mount_label", "") or "").strip()
+    if not lab:
+        return None
+    if len(lab) > 3 and os.path.isdir(lab):
+        return lab                      # a mount point (macOS / Linux)
+    if sys.platform == "win32":
+        root = lab.split(",")[0].strip().rstrip("\\").rstrip(":") + ":\\"
+    else:
+        root = lab
+    return root if os.path.isdir(root) else None
+
+
+def volume_entries(d):
+    """The names at the top of *d*'s mounted volume (noise left out),
+    sorted; ``None`` when there is no readable volume."""
+    root = mounted_root(d)
+    if root is None:
+        return None
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return None
+    return sorted((n for n in names if n.lower() not in _VOLUME_NOISE),
+                  key=str.lower)
+
+
+def holds_stern_boot(d):
+    """True when *d* is a Stern Spike 2 SD card: its mounted boot
+    partition holds ``zImage`` and a ``stern-*.dtb``."""
+    names = volume_entries(d)
+    if not names:
+        return False
+    low = [n.lower() for n in names]
+    return "zimage" in low and any(n.startswith("stern-") and n.endswith(".dtb")
+                                   for n in low)
+
+
+def describe_contents(d, limit=5):
+    """One phrase saying what is on *d* now, for the erase question."""
+    if holds_stern_boot(d):
+        return "a Stern pinball SD card (its boot partition is %s)" % (
+            (d.mount_label or "").split(",")[0].strip())
+    names = volume_entries(d)
+    if names is None:
+        return "no volume Windows can read (unformatted, or a card PAD wrote)"
+    if not names:
+        return "an empty volume (%s)" % (d.mount_label or "").strip()
+    more = len(names) - limit
+    return "files: %s%s" % (", ".join(names[:limit]),
+                            " and %d more" % more if more > 0 else "")
+
+
 def _pick_sd_card(drives, externals):
     """Auto-pick heuristic for plugins whose medium is a small SD card.
 
@@ -387,6 +458,19 @@ def _pick_sd_card(drives, externals):
         loud "connect the card and Refresh" so we never auto-trust a
         big drive as the write target.
     """
+    # A drive that IS a Stern card (its boot partition says so) beats any
+    # guess from model names or sizes.
+    cards = [d for d in externals if holds_stern_boot(d)]
+    if len(cards) == 1:
+        d = cards[0]
+        return (d, "high",
+                f"found the Stern SD card (its boot partition is "
+                f"{(d.mount_label or '').split(',')[0].strip()}) - using "
+                f"{d.device_path}")
+    if len(cards) > 1:
+        return (None, "low",
+                "more than one Stern SD card is connected - pick the one "
+                "to write")
     readers = [d for d in externals if _looks_like_card_reader(d)]
     if len(readers) == 1:
         d = readers[0]

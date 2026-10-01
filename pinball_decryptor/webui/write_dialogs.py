@@ -602,6 +602,19 @@ class FlashDialog:
             self.selected = None
             self.publish()
             return
+        conf = pick[1] if pick and len(pick) > 1 else None
+        if prefer == "sd_card" and len(drives) > 1 and (
+                best is None or conf != "high"):
+            # PAD-305: a guess is not a pick.  "The smallest external" chose
+            # a 30.8 GB SanDisk stick over the 31.9 GB card beside it and the
+            # flash erased the stick; with more than one drive, only a drive
+            # that IS the card (its boot partition says so) is pre-selected.
+            self.selected = None
+            why = (pick[2] if pick and len(pick) > 2 and pick[2] else
+                   "PAD could not tell which drive is the SD card")
+            self.drive_text = "(pick the SD card yourself: %s)" % why
+            self.publish()
+            return
         chosen = best if (best and best in drives) else drives[0]
         self.selected = chosen
         self.drive_text = ""
@@ -761,12 +774,26 @@ class FlashDialog:
                         if building else
                         "This will ERASE the entire %s and %s." % (noun,
                                                                    verb))
+                # PAD-305: say what is ON the drive, and shout when it is not
+                # a pinball card, so a wrong pick is caught at the last step
+                from ..core import drives as _drives
+                try:
+                    on_it = _drives.describe_contents(card)
+                    is_card = _drives.holds_stern_boot(card)
+                except Exception:                       # noqa: BLE001
+                    on_it, is_card = "", True
+                alarm = ("" if is_card or self.words["target_kind"] != "sd_card"
+                         else "\n\n\u26a0 THIS DRIVE DOES NOT LOOK LIKE A "
+                              "PINBALL SD CARD: it has no Stern boot partition. "
+                              "Check it is not a USB stick or a backup drive "
+                              "before you go on.")
                 if not mb.askyesno(
                         "Erase the %s and continue?" % noun,
-                        "%s There is no undo.\n\n  Target: %s\n  Image:  %s"
-                        "\n\nMake sure you have a backup of anything on the "
-                        "%s.%s Proceed?"
-                        % (lead, card.display, flash_what, noun, unverified),
+                        "%s There is no undo.\n\n  Target: %s\n  On it now: "
+                        "%s\n  Image:  %s%s\n\nMake sure you have a backup "
+                        "of anything on the %s.%s Proceed?"
+                        % (lead, card.display, on_it or "(could not tell)",
+                           flash_what, alarm, noun, unverified),
                         icon="warning"):
                     return False
 

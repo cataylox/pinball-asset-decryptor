@@ -703,6 +703,18 @@ class WriteTab(TabService):
         hidden = len(drives) - len(shown)
         self._drives_cache = list(shown)
         self.set(drives=[d.display for d in shown], drive_text="")
+        if prefer == "sd_card" and len(shown) > 1 and (
+                best is None or confidence != "high"):
+            # PAD-305: a guess is not a pick (a size guess erased a USB
+            # stick beside the card); only a drive that IS the card - its
+            # Stern boot partition says so - is pre-selected.
+            text = "(pick the SD card yourself)"
+            self.set(drive_text=text)
+            self.write_drive_display_var.set(text)
+            self.log("PAD could not tell which drive is the SD card%s: pick "
+                     "it from the list." % (" (%s)" % reason if reason else ""),
+                     "warning")
+            return
         if best is not None:
             self.write_drive_display_var.set(best.display)
             self.log("Selected SSD: %s" % best.display,

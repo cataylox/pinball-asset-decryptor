@@ -631,8 +631,13 @@ def run_helper_main(argv):
                 and now - state["last_write"] < _PROGRESS_MIN_INTERVAL):
             return
         state["last_write"] = now
-        _write_json_atomic(prog_path, {"done": done, "total": total,
-                                       "msg": msg, "phase": state["phase"]})
+        # best-effort: a refused tick must never stop the copy it reports on
+        try:
+            _write_json_atomic(prog_path, {"done": done, "total": total,
+                                           "msg": msg, "phase": state["phase"]},
+                               tries=_REPLACE_TRIES_PROGRESS, required=False)
+        except OSError:
+            pass
 
     def _cancel():
         return os.path.exists(cancel_path)
@@ -698,8 +703,26 @@ def _append_line(path, line):
         f.flush()
 
 
-def _write_json_atomic(path, obj):
-    """Write JSON so a concurrent reader never sees a half-written file."""
+#: How long a rename onto a file the parent is reading may keep failing:
+#: a progress tick gives up quickly (the next one is a tenth of a second
+#: away), the RESULT is worth waiting for.
+_REPLACE_TRIES_PROGRESS = 8
+_REPLACE_TRIES_RESULT = 200
+
+
+def _write_json_atomic(path, obj, tries=_REPLACE_TRIES_RESULT, required=True):
+    """Write JSON so a concurrent reader never sees a half-written file.
+
+    THE RENAME CAN BE REFUSED, and that used to end the flash.  On Windows
+    ``os.replace`` onto a file another process has open fails with
+    ``[WinError 5] Access is denied`` (or 32, a sharing violation), and the
+    parent opens ``progress.json`` several times a second to relay it.  The
+    progress callback runs inside the raw copy, so the error came out of the
+    copy itself: a card flash of 7.86 GB stopped in its read-back with "Write
+    Failed: Access is denied ... progress.json" (PAD-305).  So the rename is
+    retried for a moment, and a progress tick (*required* False) that still
+    cannot land is dropped - it only feeds a progress bar.  Returns True when
+    the file was replaced."""
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f)
@@ -708,7 +731,17 @@ def _write_json_atomic(path, obj):
             os.fsync(f.fileno())
         except OSError:
             pass
-    os.replace(tmp, path)
+    for attempt in range(max(1, tries)):
+        try:
+            os.replace(tmp, path)
+            return True
+        except PermissionError:
+            if attempt + 1 >= tries:
+                if required:
+                    raise
+                return False
+            time.sleep(min(0.05, 0.005 * (attempt + 1)))
+    return False
 
 
 def _touch(path):
