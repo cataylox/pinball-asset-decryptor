@@ -7148,6 +7148,24 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     fw_node = gfw["node"]
                 if gfw.get("valpatch_mode") is not None:
                     valpatch_mode = gfw["valpatch_mode"]
+                if gfw.get("new") and grow_places is not None:
+                    # PAD-305: a grown sound bank (a mode's new end sound) has
+                    # records the sound engine's own count has no word for.
+                    # The cave bakes that count's patch into ITS rebuilt
+                    # program and an in-place build writes it on the card, but
+                    # a program grown here (longer text, the colour profile's
+                    # shaders) is copied whole and the in-place write below is
+                    # skipped for it, so the patch goes into this file, before
+                    # its .sidx record is computed from it.
+                    from . import valpatch as _vp
+                    with open(_lp(patched_gr), "rb") as _f:
+                        _gbuf = bytearray(_f.read())
+                    for _o, _b in _vp.sound_count_overlay(bytes(_gbuf),
+                                                          log).items():
+                        _gbuf[_o:_o + len(_b)] = _b
+                    with open(_lp(patched_gr), "wb") as _f:
+                        _f.write(bytes(_gbuf))
+                    del _gbuf
 
         # The game's own modes (item 145): staged word edits in the game ELF,
         # after the display text so a grown text ELF (or the cave's) takes

@@ -131,3 +131,36 @@ def test_spike2_holds_the_file_correction_off_and_others_keep_it():
     assert m.colour_profile_on_display() is True
     m.set_era("spike1")
     assert m.colour_profile_on_display() is False
+
+
+def test_a_pc_relative_reference_is_found_and_retargeted():
+    """The video player reaches its sprite shader only as pc + offset
+    (ldr r3, [pc, #imm] ; add r3, pc, r3): no word in the file holds the
+    address, so the absolute census misses it.  Measured on every Spike 2
+    title; the first version left video uncorrected because of it."""
+    body = bytearray(b"\x00" * 16)
+    shader_off = BODY_OFF + len(body)
+    body += SPRITE.encode() + b"\x00"
+    body += b"\x00" * (-len(body) % 4)
+    ldr_off = BODY_OFF + len(body)
+    imm = 8                                      # literal 8 past pc
+    body += struct.pack("<I", 0xE59F3000 | imm)  # ldr r3, [pc, #8]
+    body += struct.pack("<I", 0xE08F3003)        # add r3, pc, r3
+    body += b"\x00" * 8                           # (filler up to the literal)
+    lit_off = ldr_off + 8 + imm
+    assert BODY_OFF + len(body) == lit_off
+    add_va = VBASE + ldr_off + 4
+    body += struct.pack("<I", (VBASE + shader_off - (add_va + 8)) & 0xFFFFFFFF)
+    raw = _elf(bytes(body))
+    found = sp.pcrel_census(raw, sp.fragment_shaders(raw))
+    assert found == {shader_off: [{"kind": "pcrel", "delta": 0,
+                                   "lit": lit_off, "base": add_va + 8}]}
+    base = 0x40000
+    writes, blob, report = sp.plan(raw, PROF, base)
+    assert [r[3] for r in report] == ["corrected"]
+    buf = bytearray(raw)
+    for off, b in writes:
+        buf[off:off + len(b)] = b
+    lval = struct.unpack_from("<I", buf, lit_off)[0]
+    assert (add_va + 8 + lval) & 0xFFFFFFFF == base     # now the copy
+    assert blob.startswith(sp.patch_source(SPRITE, PROF).encode())

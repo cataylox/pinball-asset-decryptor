@@ -28,10 +28,14 @@ WHY THE TEXT MOVES.  The corrected shader is longer than its slot, so the
 original bytes are left alone and the new text goes into the game program's
 extension segment (the same segment, header and relocation census longer
 program text uses: :mod:`.progreloc`, ``engine._grow_program_text``), with
-each reference retargeted at the copy.  Only references that point at the
-START of a shader are moved; anything else the census sees (a look-alike
-word pointing into the middle of the text) keeps the original, so the worst
-a missed or odd reference can do is leave that one shader uncorrected.
+each reference retargeted at the copy.  References come in two shapes: an
+absolute address (a pointer word, a movw/movt pair: the progreloc census)
+and pc + a stored offset (the video player's sprite shader, on every title:
+:func:`pcrel_census`).  Only references that point at the START of a shader
+are moved; anything else (a look-alike word pointing into the middle of the
+text) keeps the original, so the worst a missed or odd reference can do is
+leave that one shader uncorrected.  Measured on all 57 Spike 2 card images
+on hand: 8 of the 9 shaders corrected on each, the debug fill left alone.
 
 A shader that has no ``precision`` statement (the solid red debug fill) is
 left alone: a function needs a default float precision in a fragment
@@ -122,6 +126,99 @@ def patch_source(text, prof):
     return body[:main] + func + sep + body[main:]
 
 
+#: How far back from an ``add Rd, pc, Rm`` the ``ldr Rm, =offset`` may sit.
+_PCREL_BACK = 16
+
+
+def pcrel_census(raw, spans):
+    """Position-independent references to *spans* (``[(file_off, text)]``):
+    an ``ldr Rm, [pc, #imm]`` of a literal OFFSET, then ``add Rd, pc, Rm``
+    a few instructions on, so the address is ``pc + offset`` and no word in
+    the file holds it.  :func:`progreloc.reference_census` cannot see these;
+    the video player's sprite shader is reached only this way on every Spike
+    2 title on hand (one A32 site, ``SpiVideoPlayer``), which is why the
+    first version left video uncorrected.
+
+    Returns ``{span_off: [{"kind": "pcrel", "delta", "lit", "base"}]}`` where
+    the literal at file offset *lit* holds ``target - base``."""
+    import numpy as np
+    segs = progreloc.load_segments(raw)
+    off2va, va2off = progreloc.seg_maps(segs)
+    targets = {}
+    for off, text in spans:
+        va = off2va(off)
+        if va is not None:
+            for k in range(len(text)):
+                targets[va + k] = (off, k)
+    out = {}
+    if not targets:
+        return out
+    n = len(raw)
+    for seg_va, seg_off, fs, _ms, fl in segs:
+        if not fl & 1:
+            continue
+        lo = seg_off - seg_off % 4
+        words = np.frombuffer(raw, dtype="<u4", count=(min(n, seg_off + fs) - lo) // 4,
+                              offset=lo)
+        # A32: add Rd, pc, Rm  =  cond 0000 100S 1111 dddd 0000 0000 mmmm
+        for idx in np.nonzero((words & 0x0FEF0FF0) == 0x008F0000)[0]:
+            i = lo + int(idx) * 4
+            ins = int(words[idx])
+            rm = ins & 0xF
+            for back in range(1, _PCREL_BACK + 1):
+                j = i - 4 * back
+                if j < lo:
+                    break
+                w = int(words[idx - back])
+                if (w & 0x0F7F0000) == 0x051F0000 and ((w >> 12) & 0xF) == rm:
+                    imm = w & 0xFFF
+                    lit = j + 8 + (imm if (w >> 23) & 1 else -imm)
+                    if 0 <= lit <= n - 4:
+                        base = off2va(i) + 8
+                        lval = int.from_bytes(raw[lit:lit + 4], "little")
+                        hit = targets.get((base + lval) & 0xFFFFFFFF)
+                        if hit is not None:
+                            out.setdefault(hit[0], []).append(
+                                {"kind": "pcrel", "delta": hit[1],
+                                 "lit": lit, "base": base})
+                    break
+                if ((w >> 12) & 0xF) == rm and (w & 0x0C000000) == 0:
+                    break           # Rm rewritten by a data op: not this site
+        # T32: add Rdn, pc (16-bit 0100 0100 D111 1ddd), ldr Rt,[pc,#imm8*4]
+        hlo = lo
+        halves = np.frombuffer(raw, dtype="<u2", count=(min(n, seg_off + fs) - hlo) // 2,
+                               offset=hlo)
+        for idx in np.nonzero((halves & 0xFF78) == 0x4478)[0]:
+            i = hlo + int(idx) * 2
+            h = int(halves[idx])
+            rd = (h & 7) | ((h >> 4) & 8)
+            for back in range(1, 2 * _PCREL_BACK + 1):
+                if idx - back < 0:
+                    break
+                h2 = int(halves[idx - back])
+                if (h2 & 0xF800) == 0x4800 and ((h2 >> 8) & 7) == rd:
+                    j = i - 2 * back
+                    lit_va = ((off2va(j) + 4) & ~3) + (h2 & 0xFF) * 4
+                    lit = va2off(lit_va)
+                    if lit is not None and 0 <= lit <= n - 4:
+                        base = off2va(i) + 4
+                        lval = int.from_bytes(raw[lit:lit + 4], "little")
+                        hit = targets.get((base + lval) & 0xFFFFFFFF)
+                        if hit is not None:
+                            out.setdefault(hit[0], []).append(
+                                {"kind": "pcrel", "delta": hit[1],
+                                 "lit": lit, "base": base})
+                    break
+    return out
+
+
+def _retarget(raw, ref, va):
+    if ref["kind"] == "pcrel":
+        return [(ref["lit"], ((va - ref["base"]) & 0xFFFFFFFF).to_bytes(
+            4, "little"))]
+    return progreloc.retarget_writes(raw, ref, va)
+
+
 def plan(raw, prof, base_va):
     """Where every patched shader goes and what to rewrite.
 
@@ -130,23 +227,26 @@ def plan(raw, prof, base_va):
     report)``: *file_writes* the ``[(file_off, bytes)]`` reference rewrites,
     *blob* the NUL-terminated new shader texts back to back, *report* a list
     of ``(file_off, n_refs_moved, n_refs_left, what)`` per shader, for the
-    log.  A shader with no reference at its start is not placed at all."""
+    log.  A shader with no reference at its start is not placed at all.
+    References are the absolute ones :func:`progreloc.reference_census`
+    finds and the position-independent ones :func:`pcrel_census` finds."""
     shaders = fragment_shaders(raw)
     census = progreloc.reference_census(raw, shaders) if shaders else {}
+    pcrel = pcrel_census(raw, shaders) if shaders else {}
     writes, blob, report = [], bytearray(), []
     for off, text in shaders:
         new = patch_source(text, prof)
         if new is None:
             report.append((off, 0, 0, "left alone"))
             continue
-        refs = census.get(off) or []
+        refs = (census.get(off) or []) + (pcrel.get(off) or [])
         head = [r for r in refs if r["delta"] == 0]
         if not head:
             report.append((off, 0, len(refs), "no reference found"))
             continue
         va = base_va + len(blob)
         for r in head:
-            writes += progreloc.retarget_writes(raw, r, va)
+            writes += _retarget(raw, r, va)
         blob += new.encode("ascii") + b"\x00"
         while len(blob) % 4:
             blob += b"\x00"
