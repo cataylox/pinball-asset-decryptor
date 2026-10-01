@@ -317,9 +317,6 @@ class App:
         # text (default on).  Mirrored to PAD_STERN_TEXT_GROW before any
         # Write / Build / emulator-override run can read it.
         self._apply_text_grow_env(self._text_grow_setting())
-        # Write tab: the colour profile (PAD-305), mirrored to
-        # PAD_COLOUR_PROFILE the same way.
-        self._apply_colour_profile_env(self._colour_profile_setting())
         # Write tab: the SD card size a Stern Spike 2 build is for
         # (plugins/stern/card_size.py).  Mirrored to PAD_STERN_CARD_SIZE the
         # same way; the original's own size leaves the var unset.
@@ -458,8 +455,6 @@ class App:
             on_audio_advanced_change=self._on_audio_advanced_change,
             initial_text_grow=self._text_grow_setting(),
             on_text_grow_change=self._on_text_grow_change,
-            initial_colour_profile=self._colour_profile_setting(),
-            on_colour_profile_change=self._on_colour_profile_change,
             initial_card_size=self._card_size_setting(),
             on_card_size_change=self._on_card_size_change,
             on_detected_game_change=self._on_detected_game_change,
@@ -2320,7 +2315,6 @@ class App:
         # before the pipeline reads it (belt and braces: it is also set at
         # startup and on every toggle).
         self._apply_text_grow_env(self.window.text_grow_enabled())
-        self._apply_colour_profile_env(self.window.colour_profile_enabled())
         # The Write tab's SD card size, the same way.
         self._apply_card_size_env(self.window.card_size_choice())
         if self._current_mfr.supports_build_update():
@@ -4295,6 +4289,9 @@ class App:
             cleared.append("%d staged replacement(s)" % n_assign)
         if n_text:
             cleared.append("%d text edit(s)" % n_text)
+        from .core import colour_profile
+        if colour_profile.for_project(assets_dir) is not None:
+            cleared.append("the color profile")
         if cleared:
             bullets.append("  •  clears " + " and ".join(cleared))
         bullets.append("  •  restores every modified file to the original "
@@ -6181,25 +6178,6 @@ class App:
         """Persist + apply the Write tab's grow option."""
         self._settings[self._TEXT_GROW_KEY] = bool(on)
         self._apply_text_grow_env(bool(on))
-        self._save_settings()
-
-    #: Settings key for the Write tab's "Apply colour profile" (PAD-305).
-    #: Default OFF: it changes how every replaced picture and clip looks.
-    _COLOUR_PROFILE_KEY = "colour_profile"
-
-    def _colour_profile_setting(self):
-        return bool(self._settings.get(self._COLOUR_PROFILE_KEY, False))
-
-    @staticmethod
-    def _apply_colour_profile_env(on):
-        """Mirror the tick into ``PAD_COLOUR_PROFILE``; staging reads it
-        (core/colour_profile.py), on whichever worker runs the build."""
-        from .core import colour_profile
-        colour_profile.set_enabled(bool(on))
-
-    def _on_colour_profile_change(self, on):
-        self._settings[self._COLOUR_PROFILE_KEY] = bool(on)
-        self._apply_colour_profile_env(bool(on))
         self._save_settings()
 
     #: Settings key for the Write tab's "SD card size" (Stern Spike 2,

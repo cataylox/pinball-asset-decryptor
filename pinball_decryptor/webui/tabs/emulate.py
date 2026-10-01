@@ -156,6 +156,9 @@ class EmulateTab(TabService):
         # run card) it was built from, for the color switch's status line
         self._live_set = None
         self._colour_src = None
+        # the Color profile tab's "Try it in the emulator": Start again once
+        # the running game has stopped (a count of polls left to wait)
+        self._restart_wait = 0
         self._launch_accepted = False
         self._launch_serial = 0
         self._loading = False
@@ -733,9 +736,15 @@ class EmulateTab(TabService):
         self._refresh_colour_note()
 
     def _refresh_colour_note(self):
-        """PAD-305: offer "stock colours" only while a color profile is on."""
+        """PAD-305: offer "stock colours" only while the project has a color
+        profile staged (the Color profile tab)."""
         from ...core import colour_profile
-        self.set(colour_offer=colour_profile.enabled())
+        assets = self._assets()
+        try:
+            on = bool(assets) and colour_profile.for_project(assets) is not None
+        except Exception:                                # noqa: BLE001
+            on = False
+        self.set(colour_offer=on)
 
     def _project_has_scene_edits(self, assets):
         try:
@@ -1713,7 +1722,7 @@ class EmulateTab(TabService):
             stock = bool(self.emulate_colour_stock_var.get())
         except Exception:                                # noqa: BLE001
             pass
-        if stock and colour_profile.enabled():
+        if stock and colour_profile.for_project(assets) is not None:
             self._log("[emulate] stock colors: your color profile is left "
                       "out of this run")
         with colour_profile.forced(False if stock else None):
@@ -2445,12 +2454,48 @@ class EmulateTab(TabService):
             from ...core import rigslot
             rigslot.release_claimed()
             self._stopping = False
+            if self._restart_wait:
+                self._post(self._restart_when_down)
             if needs_restart and sys.platform == "win32":
                 self._post(self._offer_wsl_restart)
             # the next poll re-reads the status (Stop is VERIFIED)
             self._post(self._poll_soon)
 
         self._thread(run)
+
+    # -- PAD-305: the Color profile tab's "Try it in the emulator" ----------
+    def try_colour(self):
+        """Run this project's edits with its color profile: the opt-in on,
+        Stock colors off, and the game started, or stopped and started again
+        when one is running (the profile is in the game program's shaders,
+        which the game compiles at boot, so only a fresh Start shows it).
+        Returns the sentence the Color profile tab shows."""
+        if not self._card():
+            return ("Pick a card image on the Emulate tab first (the one you "
+                    "extracted, or any card of this game).")
+        if self._starting or self._stopping or self._preparing is not None:
+            return "The emulator is busy starting or stopping; try again in a moment."
+        self.emulate_overrides_var.set(True)
+        self.emulate_colour_stock_var.set(False)
+        self.set(colour_live="")
+        if self._last_up or self._launched():
+            self._restart_wait = 40
+            self.stop()
+            return "Restarting the game with your color profile..."
+        self.start()
+        return "Starting the game with your color profile..."
+
+    def _restart_when_down(self):
+        """After a Try-it Stop: Start once the rig says nothing is up."""
+        if not self._restart_wait:
+            return
+        if self._stopping or self._last_up or self._launched():
+            self._restart_wait -= 1
+            if self._restart_wait > 0:
+                self._after(500, self._restart_when_down)
+            return
+        self._restart_wait = 0
+        self.start()
 
     def _poll_soon(self):
         if self._poll_job is not None:

@@ -216,20 +216,8 @@ function Destination({ s }) {
     </div>` : null}
     ${s.text_grow_cap ? html`<${Check} ns="write" k="text_grow" checked=${s.text_grow} wrap
         label=${s.text_grow_label} title=${s.text_grow_tip} disabled=${s.running} />` : null}
-    ${s.colour_cap ? html`<${ColourProfile} s=${s} />` : null}
     ${s.card_size_cap && !direct ? html`<${CardSize} s=${s} />` : null}
   <//>`;
-}
-
-// PAD-305: says when the build applies a color profile to the user's
-// replaced pictures and videos; the switch and the profile live on the
-// Color profile tab.
-function ColourProfile({ s }) {
-  if (!s.colour_note) return null;
-  return html`<div class="row wr-colour">
-    <span class=${cx("small grow", s.colour_note_kind === "err" ? "err-ink" : "muted")}>${s.colour_note}</span>
-    <${Button} kind="ghost" size="xs" onClick=${() => call("ui.select_tab", "color")}>Color profile...<//>
-  </div>`;
 }
 
 // Stern Spike 2: the SD card class the build is for (the games partition

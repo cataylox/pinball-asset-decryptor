@@ -277,7 +277,30 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
                          "image", "Pending (scene edit)", "pending"))
     rows.extend(mode_rows(mfr, assets_path, direct=direct))
     rows.extend(stock_mode_rows(mfr, assets_path))
+    rows.extend(colour_rows(mfr, assets_path))
     return rows
+
+
+def colour_rows(mfr, assets_path):
+    """PAD-305: the project's color profile, staged on the Color profile tab,
+    as one pending row naming the profile and what it corrects."""
+    if not assets_path or mfr is None:
+        return []
+    from ..core import colour_profile
+    try:
+        prof = colour_profile.for_project(assets_path)
+    except Exception:                                   # noqa: BLE001
+        prof = None
+    if prof is None or prof.is_identity():
+        return []
+    try:
+        wide = bool(mfr.colour_profile_on_display())
+    except Exception:                                   # noqa: BLE001
+        wide = False
+    return [("color profile  —  %s, on %s" % (
+        prof.label(), "everything the game draws" if wide
+        else "your replaced pictures and videos"),
+        "color", "Pending (color profile)", "pending")]
 
 
 def stock_mode_rows(mfr, assets_path):
@@ -420,6 +443,12 @@ def fingerprint(window, assets_path, epoch, grow_on):
     except Exception:                                   # noqa: BLE001
         parts.append(None)
     parts.append(_modes_fingerprint(assets_path))
+    try:
+        # PAD-305: the project's color profile (the Color profile tab)
+        from ..core import colour_profile
+        parts.append(colour_profile.signature(assets_path))
+    except Exception:                                   # noqa: BLE001
+        parts.append(None)
     try:
         from ..plugins.stern import stock_modes
         parts.append(stock_modes.fingerprint(assets_path))

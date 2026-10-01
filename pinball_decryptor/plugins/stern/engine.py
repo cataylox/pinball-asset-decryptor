@@ -3753,14 +3753,15 @@ def _classify_audio_edits(byidx, audio_edits, assets_dir):
     return fits, grows
 
 
-def _shader_colour_profile():
-    """The color profile a Spike 2 build applies to everything the game draws
-    (PAD-305), or ``None``: the Color profile tab's switch, an Emulate run's
-    "Stock colors" hold (core/colour_profile.forced) and a profile that
-    changes nothing all answer ``None``.  Never raises."""
+def _shader_colour_profile(assets_dir):
+    """The color profile a Spike 2 build of *assets_dir* applies to
+    everything the game draws (PAD-305), or ``None``: no profile staged on
+    the Color profile tab, an Emulate run's "Stock colors" hold
+    (core/colour_profile.forced) and a profile that changes nothing all
+    answer ``None``.  Never raises."""
     try:
         from ...core import colour_profile
-        return colour_profile.active()
+        return colour_profile.active(assets_dir)
     except Exception:                                   # noqa: BLE001
         return None
 
@@ -6171,7 +6172,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-305: the color profile, applied to everything the game draws by
     # patching its drawing shaders (plugins/stern/shader_profile.py) - a game
     # program edit with no file of the project behind it
-    shader_prof = _shader_colour_profile()
+    shader_prof = _shader_colour_profile(assets_dir)
     # Recoloured display text (text/colors.tsv) — the colour lives in the scene,
     # not in the font, so this is a radium patch too.
     color_edits = _changed_radium_text_colors(assets_dir)
@@ -8941,9 +8942,9 @@ def card_title_index(path):
         return ()
 
 
-def _colour_signature():
+def _colour_signature(assets_dir):
     from ...core import colour_profile
-    return colour_profile.signature()
+    return colour_profile.signature(assets_dir)
 
 
 def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
@@ -9267,7 +9268,7 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         # PAD-251: whether the Scenes tab's edits are in this set (the Emulate tab's tick)
         "scene_edits": bool(scene_edits),
         # PAD-305: the color profile the set's pictures and clips carry
-        "colour_profile": _colour_signature(),
+        "colour_profile": _colour_signature(assets_dir),
     }
     if modes_out:
         manifest["modes"] = modes_out

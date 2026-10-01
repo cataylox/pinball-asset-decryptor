@@ -196,11 +196,7 @@ function Controls({ s, p, update }) {
     <${Button} size="sm" icon="upload" onClick=${() => call("color.load_file")}
       title="Use a profile saved earlier">Load...<//>
   </div>`;
-  const footer = html`<span class="small muted grow">Saved as you go.</span>
-    <${Button} size="sm" kind="ghost" icon="file" onClick=${() => call("color.open_text")}
-      title=${"Open the profile in your text editor: " + (s.path || "")}>Edit as text<//>
-    <${Button} size="sm" kind="ghost" icon="refresh" onClick=${() => call("color.reload")}
-      title="Read the profile file again (after editing it as text)">Reload<//>`;
+  const footer = html`<span class="small muted">Saved with this project as you go, like your other changes. Save a copy keeps it for another table.</span>`;
   return html`<${Card} title="Adjust" cls="cp-controls" extra=${extra} footer=${footer}>
     <div class="cp-row">
       <span class="lbl">Start from</span>
@@ -253,9 +249,9 @@ function Explainer({ s }) {
     ${s.on_display ? html`<p>A color profile corrects for that. When you build, PAD teaches the game to shift every color it draws the opposite way, so the machine's screen shifts them back to what you made. It covers everything on the screen: the game's own art, videos, mode screens, text, and your replacements.</p>
     <ul class="cp-facts">
       <li><${Icon} name="check" />No picture or video file is changed, yours or the game's. The correction lives in the game program itself, so it can never be applied twice.</li>
-      <li><${Icon} name="check" />Switch it off and build again for the game's own colors.</li>
+      <li><${Icon} name="check" />Pick No change and build again for the game's own colors.</li>
       <li><${Icon} name="check" />Different machines need different profiles. Save a copy for each one and load the one you're building for.</li>
-      <li><${Icon} name="check" />The Emulate tab can show the stock colors instead, since you're watching it on your PC.</li>
+      <li><${Icon} name="check" />Try it in the emulator to see it in the game. The colors are set when the game starts, so each change restarts it.</li>
     </ul>` : html`<p>A color profile corrects for that. When you build, PAD shifts the colors of your replacement pictures and videos the opposite way, so the machine's screen shifts them back to what you made.</p>
     <ul class="cp-facts">
       <li><${Icon} name="check" />Your own files are never changed. The correction is made fresh from them every time you build, so it can never be applied twice.</li>
@@ -292,15 +288,18 @@ export default function ColorTab() {
   const samples = [...(s.samples || []), { value: "browse", label: "Another picture..." }];
   return html`<div class="page cp-page">
     <${PageHead} title="Color profile" sub=${INTRO}>
-      <span class="lbl nw" ...${tip(s.on_display
-        ? "On: every build corrects everything the game draws with this profile. Off: the game draws in its own colors."
-        : "On: every build corrects your replaced pictures and videos with this profile. Off: they go onto the card exactly as they are.")}>Use when building</span>
-      <${Seg} value=${s.enabled ? "on" : "off"} options=${[{ value: "off", label: "Off" }, { value: "on", label: "On" }]}
-        onChange=${(v) => call("color.set_enabled", v === "on")} />
+      <${Button} kind="primary" icon="emulate" onClick=${() => call("color.try_emulator")}
+        disabled=${!s.has_project}
+        title="Run this project in the emulator with this profile (a running game restarts, since the colors are set when the game starts)">Try it in the emulator<//>
     <//>
-    ${!s.enabled ? html`<${Note} kind="info">${s.on_display
-      ? "The profile is off: the game draws in its own colors. You can still try it out here."
-      : "The profile is off: builds put your pictures and videos on the card exactly as they are. You can still try it out here."}<//>` : null}
+    ${!s.has_project ? html`<${Note} kind="warn">There is no project folder yet: choose or extract one on the Extract tab, and the profile you set here is saved with it.<//>`
+      : s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is staged for this project: the next build "
+          + (s.on_display ? "corrects everything the game draws." : "corrects your replaced pictures and videos.")
+          + " Pick No change to take it off."}<//>`
+      : html`<${Note} kind="info">${s.on_display
+          ? "No color profile on this project: the game draws in its own colors. Pick a starting point or move a slider to stage one."
+          : "No color profile on this project: your pictures and videos go onto the card as they are. Pick a starting point or move a slider to stage one."}<//>`}
+    ${s.try_note ? html`<div class="small muted">${s.try_note}</div>` : null}
     <div class="cp-grid">
       <div class="cp-main">
         <${Card} title="Preview" cls="cp-preview" extra=${html`<div class="row">

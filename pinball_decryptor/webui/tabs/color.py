@@ -1,13 +1,14 @@
-"""The Color profile tab (PAD-305): the colour correction a build applies to
-the user's replacement pictures and videos so the machine's display shows
-them the way the PC does.
+"""The Color profile tab (PAD-305): the colour correction a project's build
+applies so the machine's display shows what the PC does.
 
-The maths, the file and where a build applies it are core/colour_profile.py.
-This service holds the switch (settings.json ``colour_profile``, mirrored to
-``PAD_COLOUR_PROFILE`` by the app), the profile's numbers (saved to the
-profile file on every change, so the file stays the one source a build
-reads), the presets, Save a copy / Load for keeping one profile per machine,
-and the picture the page previews them on.
+A STAGED CHANGE OF THE PROJECT, like every other Replace tab's: the profile
+the controls show is saved in the project's ``.staged_changes.json``
+(core/colour_profile.py ``store``) the moment it changes, the Write tab lists
+it as pending, the next build or Emulate Start applies it, and Revert all
+clears it.  "No change" is the off state; there is no separate switch.
+Save a copy / Load move a profile between projects (one per machine).
+"Try it in the emulator" hands the Emulate tab a run of this project's edits
+with the profile, restarting a running game.
 
 The PREVIEW is drawn by the page itself (static/js/tabs/color.js) with the
 same maths, so a slider moves the picture as it is dragged; this side only
@@ -86,77 +87,51 @@ class ColorTab(TabService):
     label = "Color profile"
     group = "Replace"
     icon = "palette"
-    exports = ("colour_profile_enabled",)
 
     def __init__(self, window):
         super().__init__(window)
-        cb = window.cb
-        self.enabled_var = self.var(
-            "enabled", "bool", bool(cb.get("initial_colour_profile")))
-        self.enabled_var.trace_add("write", lambda *_a: self._on_enabled())
-        self._prof = None
+        self._prof = None            # the project's profile (None = No change)
         self._rev = 0
         self._sample = "card"
+        self._project = ""
         self.set(sample="card", sample_url="", sample_path="", samples=[],
-                 problems=[], rev=0)
+                 problems=[], rev=0, active=False, project="",
+                 has_project=False, try_note="")
 
-    # -- the switch --------------------------------------------------------
-    def colour_profile_enabled(self):
+    # -- the project ---------------------------------------------------------
+    def _assets(self):
+        var = getattr(self.window, "write_assets_var", None)
         try:
-            return bool(self.enabled_var.get())
+            return (var.get() or "").strip() if var is not None else ""
         except Exception:                               # noqa: BLE001
-            return False
+            return ""
 
-    @rpc
-    def set_enabled(self, on):
-        self.enabled_var.set(bool(on))
-        return True
-
-    def _on_enabled(self):
-        fn = self.window.cb.get("on_colour_profile_change")
-        if fn is not None:
-            try:
-                fn(self.colour_profile_enabled())
-            except Exception:                           # noqa: BLE001
-                log.exception("colour profile change")
-        else:
-            cp.set_enabled(self.colour_profile_enabled())
-        # the Write and Emulate tabs say whether it is on
-        for ns in ("write", "emulate"):
-            svc = self.window.service(ns)
-            fn = getattr(svc, "_refresh_colour_note", None)
-            if fn is not None:
-                try:
-                    fn()
-                except Exception:                       # noqa: BLE001
-                    log.exception("colour note %s", ns)
-        self._tell_emulator()
-
-    def _tell_emulator(self):
-        """A game running on this project's edits gets the change live
-        (Emulate tab, PAD-305).  Not on every slider move: each one would
-        rebuild the set; a switch, a starting point or a Load does."""
-        emu = self.window.service("emulate")
-        fn = getattr(emu, "colour_live", None)
-        if fn is not None:
-            try:
-                fn()
-            except Exception:                           # noqa: BLE001
-                log.exception("colour live")
-
-    # -- the profile -------------------------------------------------------
     def _load(self):
-        prof, problems = cp.load()
+        """Read the project's staged profile into the controls."""
+        assets = self._assets()
+        self._project = assets
+        prof = None
+        if assets and os.path.isdir(assets):
+            try:
+                prof = cp.for_project(assets)
+            except Exception:                           # noqa: BLE001
+                log.exception("color profile load")
         self._prof = prof
         self._rev += 1
-        self._publish(problems)
+        self._publish(problems=[])
+
+    def _shown(self):
+        return self._prof or cp.Profile(name="No change")
 
     def _publish(self, problems=None):
-        p = self._prof or cp.load()[0]
+        p = self._shown()
+        assets = self._project
         values = dict(
             name=p.name, gamma=list(p.gamma), gain=list(p.gain),
             lift=max(p.lift), saturation=p.saturation, rev=self._rev,
-            path=cp.profile_path(),
+            active=self._prof is not None,
+            project=assets,
+            has_project=bool(assets and os.path.isdir(assets)),
             presets=[{"key": k, "label": v.name,
                       "tip": cp.PRESET_TIPS.get(k, "")}
                      for k, v in cp.PRESETS],
@@ -166,23 +141,45 @@ class ColorTab(TabService):
         self.set(**values)
 
     def _store(self, prof, rev=False):
+        """Stage *prof* for the project (``None`` or no change = none)."""
+        assets = self._project
+        if not (assets and os.path.isdir(assets)):
+            self.toast("Choose a project folder on the Extract tab first.",
+                       "error")
+            return False
+        if prof is not None and prof.is_identity():
+            prof = None
         self._prof = prof
         try:
-            cp.save(prof)
-        except OSError as e:
-            self.set(problems=["could not save %s (%s)" % (cp.profile_path(),
-                                                           e)])
+            cp.store(assets, prof)
+        except Exception as e:                          # noqa: BLE001
+            self.set(problems=["could not save the project's profile (%s)"
+                               % e])
             return False
         if rev:
             self._rev += 1
         self._publish(problems=[])
+        self._changed()
         return True
+
+    def _changed(self):
+        """The Write tab's pending list, Emulate's offer and a running game's
+        note follow a staged change."""
+        for ns, name in (("emulate", "_refresh_colour_note"),
+                         ("emulate", "colour_live"),
+                         ("write", "_maybe_rescan_write_preview")):
+            fn = getattr(self.window.service(ns), name, None)
+            if fn is not None:
+                try:
+                    fn()
+                except Exception:                       # noqa: BLE001
+                    log.exception("color profile %s.%s", ns, name)
 
     @rpc
     def set_params(self, params):
         """The page's sliders: any of name, gamma [r g b], gain [r g b],
         lift (one number, all three), saturation."""
-        p = self._prof or cp.load()[0]
+        p = self._shown()
         kw = dict(name=p.name, gamma=p.gamma, gain=p.gain, lift=p.lift,
                   saturation=p.saturation)
         params = params or {}
@@ -198,25 +195,20 @@ class ColorTab(TabService):
         if "saturation" in params:
             kw["saturation"] = round(_clamp("saturation",
                                             params["saturation"]), 3)
+        if kw["name"] in ("", "No change"):
+            kw["name"] = "My profile"
         return self._store(cp.Profile(**kw))
 
     @rpc
     def preset(self, key):
         for k, prof in cp.PRESETS:
             if k == key:
-                ok = self._store(prof, rev=True)
-                self._tell_emulator()
-                return ok
+                return self._store(None if k == "none" else prof, rev=True)
         return False
 
     @rpc
-    def reload(self):
-        self._load()
-        return True
-
-    @rpc
     def save_copy(self):
-        p = self._prof or cp.load()[0]
+        p = self._shown()
         stem = "".join(c if c.isalnum() or c in "-_ " else "_"
                        for c in (p.name or "profile")).strip() or "profile"
         path = self.window.ask_save(
@@ -245,32 +237,42 @@ class ColorTab(TabService):
         except OSError as e:
             self.toast("Could not read the profile: %s" % e, "error")
             return False
+        if not prof.name:
+            prof = cp.Profile(name=os.path.splitext(os.path.basename(path))[0],
+                              gamma=prof.gamma, gain=prof.gain,
+                              lift=prof.lift, saturation=prof.saturation)
         self._store(prof, rev=True)
-        self._tell_emulator()
         if problems:
             self.set(problems=list(problems))
-        self.toast("Loaded %s" % (prof.name or os.path.basename(path)),
-                   "success")
+        self.toast("Loaded %s" % prof.label(), "success")
         return True
 
     @rpc
-    def open_text(self):
-        from ..shellx_common import open_in_text_viewer
-        try:
-            open_in_text_viewer(cp.ensure_file())
-        except OSError as e:
-            self.toast("Could not open the profile: %s" % e, "error")
+    def try_emulator(self):
+        """"Try it in the emulator": the Emulate tab runs this project's
+        edits with the profile, restarting a running game."""
+        emu = self.window.service("emulate")
+        fn = getattr(emu, "try_colour", None)
+        if fn is None or not getattr(emu, "_visible", False):
+            self.set(try_note="This machine has no emulator in PAD yet.")
             return False
+        note = fn()
+        self.set(try_note=note or "")
+        self.window.select_tab("emulate")
         return True
 
-    # -- the preview picture -----------------------------------------------
-    def _assets(self):
-        var = getattr(self.window, "write_assets_var", None)
+    def clear_replace_assignments(self, assets_dir):
+        """Revert all: the project's profile goes with its other changes."""
         try:
-            return (var.get() or "").strip() if var is not None else ""
+            cp.store(assets_dir, None)
         except Exception:                               # noqa: BLE001
-            return ""
+            log.exception("color profile revert")
+        same = (os.path.normcase(os.path.abspath(assets_dir or ""))
+                == os.path.normcase(os.path.abspath(self._project or "")))
+        if same:
+            self._load()
 
+    # -- the preview picture -----------------------------------------------
     def _replacement_pictures(self):
         """``[(label, path)]`` of the pictures the user has assigned on the
         Images tab of this project, for the preview's picker."""
@@ -323,12 +325,15 @@ class ColorTab(TabService):
 
     # -- hooks ---------------------------------------------------------------
     def rail_needs(self):
-        return "none"
+        return "project"
 
     def on_show(self):
-        # the file may have been edited in a text editor since
+        self.set(try_note="")
         self._load()
         self._publish_sample()
+
+    def on_project(self, folder):
+        self._load()
 
     def on_manufacturer(self, mfr):
         try:
@@ -336,7 +341,7 @@ class ColorTab(TabService):
         except Exception:                               # noqa: BLE001
             on_display = False
         self.set(on_display=on_display)
-        self._publish()
+        self._load()
 
 
 TAB = ColorTab

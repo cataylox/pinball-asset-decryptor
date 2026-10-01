@@ -557,8 +557,6 @@ class WriteTab(TabService):
             editable_hint=(EDITABLE_HINT if mfr.key == "bof" and g("write")
                            else ""),
             text_grow_cap=bool(g("replace_text") and g("write")),
-            colour_cap=bool((g("replace_image") or g("replace_video"))
-                            and g("write")),
             version_cap=bool(g("write_version_date") and g("write")),
             delta_cap=g("apply_delta"),
             delta_text=DELTA_TEXT,
@@ -599,7 +597,6 @@ class WriteTab(TabService):
         self._update_write_filename()
         self._refresh_prebuild_notes()
         self._refresh_card_size()
-        self._refresh_colour_note()
         self._sync_buttons()
 
     @staticmethod
@@ -1191,39 +1188,6 @@ class WriteTab(TabService):
             except Exception:                           # noqa: BLE001
                 log.exception("text grow change")
         self._refresh_pending_text_rows()
-
-    # ------------------------------------------------------------------
-    # colour profile (PAD-305)
-    # ------------------------------------------------------------------
-    def _refresh_colour_note(self):
-        """One line saying which color profile a build applies (the Color
-        profile tab holds the switch), and any line of its file skipped."""
-        from ...core import colour_profile
-        if not colour_profile.enabled():
-            self.set(colour_note="", colour_note_kind="")
-            return
-        try:
-            prof, problems = colour_profile.load()
-        except Exception as e:                          # noqa: BLE001
-            self.set(colour_note="The profile could not be read: %s" % e,
-                     colour_note_kind="err")
-            return
-        if problems:
-            self.set(colour_note="%s; skipped %s" % (
-                prof.label(), "; ".join(problems[:3])),
-                colour_note_kind="err")
-        elif prof.is_identity():
-            self.set(colour_note="%s changes nothing as it stands"
-                     % prof.label(), colour_note_kind="")
-        else:
-            try:
-                wide = bool(self.mfr.colour_profile_on_display())
-            except Exception:                           # noqa: BLE001
-                wide = False
-            self.set(colour_note="Color profile on: %s is applied to %s"
-                     % (prof.label(), "everything the game draws" if wide
-                        else "your replaced pictures and videos"),
-                     colour_note_kind="")
 
     def _refresh_pending_text_rows(self):
         """Re-list the strings.tsv rows in place (their status names the

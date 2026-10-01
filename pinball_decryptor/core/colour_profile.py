@@ -1,59 +1,46 @@
-"""Colour profile: a colour correction applied to the user's replacement
-pictures and videos as a build writes them, never to the files themselves
-(PAD-305).
+"""Colour profile: the colour correction a project's build applies for the
+machine's screen (PAD-305).
 
 WHY.  A machine's display is not the PC monitor the art was made on.
 DragonRR photographed a display test card on a Stern Godzilla: mid greys come
 out far too bright and blue, saturated patches bloom, and everything under
-about 24/255 sinks into one lifted black.  Art that looks right on the PC
-looks washed out and blue on the cabinet.  A profile pre-corrects for that:
-the PC copy stays the "golden" asset, and only what goes onto the card is
-bent so the machine shows what the PC shows.
+about 24/255 sinks into one lifted black.  A profile pre-corrects for that:
+the PC copy stays the "golden" asset, and only what the machine is given is
+bent so it shows what the PC shows.
 
-WHERE IT APPLIES.  Only at staging, the step every Write / Build (and the
-Emulate tab's "apply my replaced assets") runs to turn the user's own files
-into the project folder's slot files, plus a scene's added picture as the
-build encodes it.  Each of those reads the user's untouched source every
-time, so the profile can never land twice on one asset, and switching it off
-and building again gives the uncorrected card back.  Stock assets are never
-touched: the stock art was made for the machine already.
+A STAGED CHANGE OF THE PROJECT, like every other Replace tab's: the Color
+profile tab records the project's profile in its ``.staged_changes.json``
+(:data:`KEY`), the Write tab lists it as pending, the next build or Emulate
+Start applies it, and Revert all clears it.  No profile (or one that changes
+nothing) is the "off" state; there is no separate switch.
 
-THE MATHS, kept identical between Pillow (pictures) and ffmpeg (videos):
+WHERE IT APPLIES.  On Spike 2, in the game's own drawing shaders
+(plugins/stern/shader_profile.py): everything on the screen, no file touched.
+Elsewhere, at staging, to the user's replacement pictures and videos (the
+only thing PAD can reach there), each read from the user's untouched source
+every time, so it can never land twice.
+
+THE MATHS, kept identical between Pillow (pictures), ffmpeg (videos) and the
+GLSL the shaders get:
 
 1. saturation: each pixel mixed toward its own Rec.601 grey by
-   ``saturation`` (1 = unchanged, 0 = greyscale).  Pillow's
-   ``convert("RGB", matrix)`` and ffmpeg's ``colorchannelmixer`` take the
-   same 3x3 matrix.
+   ``saturation`` (1 = unchanged, 0 = greyscale).
 2. per channel: ``out = lift + (1 - lift) * clip(in * gain) ** gamma`` on a
    0..1 scale.  Gamma above 1 darkens the mid tones (the machine shows them
    too bright), gain below 1 pulls a channel down overall, lift raises the
-   darkest values.  Pillow uses the table, ffmpeg's ``lutrgb`` the same
-   expression.
+   darkest values.
 
-THE FILE is plain ``key = value`` text in the settings folder, created from
-:data:`DEFAULT_TEXT` the first time it is wanted, so a user can edit it in
-any text editor and keep a copy per machine.  Unknown keys and bad values
-are ignored (named by :func:`problems`), never fatal: a typo must not stop a
-build.
-
-The Write tab's tick turns it on; the choice is mirrored to
-``PAD_COLOUR_PROFILE`` ("1" / "0") like the other build options, so the
-worker threads and the emulator's override build see it without a new
-parameter through every signature.
+A COPY is plain ``key = value`` text (:func:`to_text`, :func:`read_file`), so
+a user can keep one per machine, share it, or edit it in any text editor and
+Load it back.  Unknown keys and bad values are skipped and named, never fatal.
 """
 
 import contextlib
-import os
 import threading
 from dataclasses import dataclass
 
-from .config import _settings_root
-
-#: Env var the Write tab's tick is mirrored into ("1" = apply).
-ENV = "PAD_COLOUR_PROFILE"
-#: Env var naming a profile file other than the default (tests, power users).
-ENV_FILE = "PAD_COLOUR_PROFILE_FILE"
-FILE_NAME = "colour_profile.txt"
+#: The project's profile in its ``.staged_changes.json``.
+KEY = "color_profile"
 
 #: Rec.601 luma weights: the grey a pixel is desaturated toward.
 _LUMA = (0.299, 0.587, 0.114)
@@ -69,11 +56,11 @@ _LUMA = (0.299, 0.587, 0.114)
 DEFAULT_TEXT = """\
 # Pinball Asset Decryptor colour profile
 #
-# Applied to YOUR replacement pictures and videos as a build writes them to
-# the card, when "Apply colour profile" is ticked on the Write tab.  Your own
-# files are never changed, and stock art is never touched.
+# Corrects colors for a pinball machine's screen.  Load it on a project's
+# Color profile tab and every build of that project applies it (on Spike 2,
+# to everything the game draws).  No picture or video file is changed.
 #
-# Edit the numbers, save, and build again.  Three numbers = red green blue.
+# Edit the numbers, save, and Load it again.  Three numbers = red green blue.
 #
 #   gamma       above 1 darkens the mid tones, below 1 brightens them
 #   gain        multiplies the channel (0.9 = 10% less of that colour)
@@ -216,54 +203,51 @@ def parse(text):
     return Profile(**fields), problems
 
 
-def profile_path():
-    return os.environ.get(ENV_FILE) or os.path.join(_settings_root(),
-                                                     FILE_NAME)
-
-
-def ensure_file():
-    """The profile file's path, written from :data:`DEFAULT_TEXT` first if
-    it is not there yet."""
-    path = profile_path()
-    if not os.path.isfile(path):
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        with open(path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(DEFAULT_TEXT)
-    return path
-
-
-def load():
-    """``(Profile, problems)`` from the file (created when missing)."""
+def _from_dict(d):
     try:
-        with open(ensure_file(), encoding="utf-8-sig") as f:
-            return parse(f.read())
-    except OSError as e:
-        prof, _ = parse(DEFAULT_TEXT)
-        return prof, ["could not read %s (%s); using the default"
-                      % (profile_path(), e)]
+        return Profile(name=str(d.get("name") or ""),
+                       gamma=tuple(float(v) for v in d["gamma"])[:3],
+                       gain=tuple(float(v) for v in d["gain"])[:3],
+                       lift=tuple(float(v) for v in d["lift"])[:3],
+                       saturation=float(d["saturation"]))
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
-def enabled():
-    return os.environ.get(ENV, "0") == "1"
+def for_project(assets_dir):
+    """The profile staged for *assets_dir*, or ``None`` (none staged)."""
+    from . import staged_changes
+    d = staged_changes.load(assets_dir).get(KEY)
+    return _from_dict(d) if isinstance(d, dict) else None
 
 
-def set_enabled(on):
-    os.environ[ENV] = "1" if on else "0"
+def store(assets_dir, prof):
+    """Stage *prof* for *assets_dir*; ``None`` (or a profile that changes
+    nothing) takes it away."""
+    from . import staged_changes
+    data = staged_changes.load(assets_dir)
+    if prof is None or prof.is_identity():
+        data.pop(KEY, None)
+    else:
+        data[KEY] = {"name": prof.name, "gamma": list(prof.gamma),
+                     "gain": list(prof.gain), "lift": list(prof.lift),
+                     "saturation": prof.saturation}
+    staged_changes.save(assets_dir, data)
 
 
-#: The emulator's "stock colours" switch (PAD-305): when not None it wins
-#: over the env for as long as :func:`forced` holds it.  Module-wide rather
-#: than per thread, because the engine fans some of an override build out to
-#: a thread pool; the Emulate tab only holds it around its own preparation.
+#: The emulator's "stock colours" switch: when not None it wins over the
+#: project's profile for as long as :func:`forced` holds it.  Module-wide
+#: rather than per thread, because the engine fans some of an override build
+#: out to a thread pool; the Emulate tab only holds it around its own
+#: preparation, and Spike 2 staging around its file staging.
 _FORCED = None
 _FORCED_LOCK = threading.Lock()
 
 
 @contextlib.contextmanager
 def forced(on):
-    """Within the block, :func:`active` answers as if the tick were *on*
-    (``None`` leaves it to the tick).  The Emulate tab's "stock colours"
-    switch runs its staging and override build under ``forced(False)``."""
+    """Within the block, :func:`active` answers ``None`` when *on* is False
+    (``None`` leaves it to the project)."""
     global _FORCED
     with _FORCED_LOCK:
         prev, _FORCED = _FORCED, on
@@ -274,21 +258,19 @@ def forced(on):
             _FORCED = prev
 
 
-def active():
-    """The profile a build should apply now, or None (off, or a profile that
-    changes nothing)."""
-    on = enabled() if _FORCED is None else bool(_FORCED)
-    if not on:
+def active(assets_dir):
+    """The profile a build of *assets_dir* applies now, or ``None``."""
+    if _FORCED is False:
         return None
-    prof, _ = load()
-    return None if prof.is_identity() else prof
+    prof = for_project(assets_dir)
+    return None if prof is None or prof.is_identity() else prof
 
 
-def signature():
+def signature(assets_dir):
     """A short text that changes whenever what :func:`active` would apply
     changes ("" when nothing): an emulator override set records it so a
-    switched or edited profile rebuilds the set rather than reusing it."""
-    prof = active()
+    changed or held-off profile rebuilds the set rather than reusing it."""
+    prof = active(assets_dir)
     if prof is None:
         return ""
     return "%s|%s|%s|%s" % (prof.gamma, prof.gain, prof.lift, prof.saturation)
@@ -307,9 +289,9 @@ def to_text(prof):
                                      _fmt(prof.lift), prof.saturation))
 
 
-def save(prof, path=None):
-    """Write *prof* to *path* (the active profile file by default)."""
-    path = path or profile_path()
+def save(prof, path):
+    """Write *prof* to the text file *path* (Save a copy)."""
+    import os
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:

@@ -337,7 +337,7 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
                       trim_to_length: bool = False, no_conversion: bool = False,
                       cancel_cb=None, byte_budget: Optional[int] = None,
                       match_bitrate: Optional[float] = None,
-                      best_quality: bool = False):
+                      best_quality: bool = False, colour=None):
     """Stage a single replacement over *slot*.
 
     With *no_conversion* set, the replacement is copied through verbatim and
@@ -380,12 +380,12 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
     rep_ext = os.path.splitext(replacement_path)[1].lower()
     tmp = slot.abs_path + ".stage" + slot.ext
     has_backend = backend_for(slot.abs_path) is not None
-    # The colour profile (PAD-305) changes every frame, so a clip that would
-    # otherwise be copied through or repackaged is re-encoded instead.  A
-    # clip the user forced "as-is" stays as-is, and a custom-backend format
-    # is not ffmpeg's to filter.
-    from . import colour_profile
-    colour = colour_profile.active() if find_ffmpeg() else None
+    # *colour*, the project's colour profile (PAD-305), changes every frame,
+    # so a clip that would otherwise be copied through or repackaged is
+    # re-encoded instead.  A clip the user forced "as-is" stays as-is, and a
+    # custom-backend format is not ffmpeg's to filter.
+    if not find_ffmpeg():
+        colour = None
 
     try:
         if no_conversion:
@@ -699,6 +699,9 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
     source and options produced last time is left as it is
     (:class:`StagedCache`).
     """
+    from . import colour_profile
+    # the project's colour profile (PAD-305), read once for the whole pass
+    colour = colour_profile.active(assets_dir) if assets_dir else None
     from .checksums import read_baseline_any
     from . import staged_originals
 
@@ -767,6 +770,11 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
         k = _slot_keyint(orig or slot.abs_path)
         if k:
             gop = {"keyint": k}
+        # A clip converted under one colour profile is made again under
+        # another (PAD-305); with none the recipe is exactly what it was.
+        if colour is not None:
+            gop["colour"] = "%s|%s|%s|%s" % (colour.gamma, colour.gain,
+                                             colour.lift, colour.saturation)
         recipe = cache.recipe(slot, rep, orig, trim=slot_trim,
                               length=seconds or 0,
                               noconv=slot_noconv, budget=budget,
@@ -788,7 +796,9 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
                                        cancel_cb=cancel_cb,
                                        byte_budget=budget,
                                        match_bitrate=rate,
-                                       best_quality=best_quality)
+                                       best_quality=best_quality,
+                                       **({"colour": colour}
+                                          if colour is not None else {}))
         if ok:
             staged += 1
             cache.record(slot, recipe)
