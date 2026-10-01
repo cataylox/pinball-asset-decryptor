@@ -2868,10 +2868,18 @@ handed a null scene) unless the foreground's priority beats the hold, as the Mas
 select do; its clip and the rest of the game's display are untouched. `value hold_hides_fg_words 0` turns
 it off.
 
+While the clip plays, a `scene_show` of the video player by anything of the game's is skipped (a framed
+award already up when the mode started draws the one player in its own slot, under the HUD, and the
+hand-over's draw would then be refused as a second copy): the hand-over draws it, once, last.
+
 **The emulator at the machine's cadence:** `PAD_SWAP_VBLANKS=2` makes a swap take two refreshes, and
-`PAD_REFRESH_HZ` sets the panel's own rate (a real panel is not locked to the game's 60 Hz timer). At
-`PAD_SWAP_VBLANKS=2 PAD_REFRESH_HZ=58` the old route leaked a HUD frame in every full-screen clip and the
-game built one frame per clip; the hand-over built 88-172 frames per clip, every one with the clip.
+`PAD_REFRESH_HZ` sets the panel's own rate (a real panel is not locked to the game's 60 Hz timer); a
+Godzilla run defaults to 2 (watch.sh). Measured 2026-10-01 on Premium 1.16 at `PAD_SWAP_VBLANKS=2
+PAD_REFRESH_HZ=58` (runs abA/abB, abAfg/abBfg3, abBc3 in C:	mp\PAD-301): the old route built one frame
+per full-screen clip and that frame went out without the clip; the hand-over built 87-305 frames per
+clip, every one with it. With the Maser's award up when MASER BARRAGE started, the old runtime showed both
+title lines and both instruction lines on top of each other; the hold now leaves only the mode's, and the
+intro plays over the HUD. segv 0 in every run.
 
 ### The HUD at the glass's edges
 
