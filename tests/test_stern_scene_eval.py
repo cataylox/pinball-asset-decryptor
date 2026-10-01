@@ -313,6 +313,26 @@ def test_a_sprite_that_slides_in_rests_where_it_stops_on_the_screen():
     assert E.outline(d)[0][0] == 20
 
 
+def test_a_card_pushed_off_by_the_camera_keeps_its_idle_state():
+    """Peanutsfr (PAD-299): Venom's character select zooms its camera in, the cards at the
+    edge hang off the glass, and they jumped to their Select state - whose full-screen black
+    fade blanked the scene from frame 12. A later label that draws OTHER pictures is another
+    state, not where an entrance rests."""
+    idle = N(10, "Idle", [9], kf=((1, 1), (4, 0)), tr=((1, (1, 0, 0, 1, 150, 10)),))
+    fade = N(11, "Fade", [8], kf=((1, 0), (4, 1)), tr=((1, (1, 0, 0, 1, 0, 0)),))
+    card = {"kind": "Sprite", "frames": 6, "labels": [["IdleStart", 1], ["SelectStart", 4]],
+            "kids": [idle, fade]}
+    big = dict(BMP, w=100, h=20)
+    black = dict(BMP, w=200, h=100, image="scene_textures/black.png")
+    zoom = ((1, (1, 0, 0, 1, 0, 0)), (2, (1.5, 0, 0, 1.5, 0, 0)))
+    m = man([N(1, "Camera", [3], kf=((1, 1), (2, 1)), tr=zoom)],
+            {3: {"kind": "Sprite", "frames": 1, "labels": [], "kids": [N(2, "Card", [5])]},
+             5: card, 9: big, 8: black}, frames=2)
+    for f in (1, 2):
+        for play in (False, True):
+            assert [d["path"][-1] for d in E.draw_list(m, f, play=play)] == ["Idle"]
+
+
 def test_an_entrance_rests_where_it_leads_and_plays_from_its_start():
     """DragonRR: Battle Select never showed the selected kaiju's tile in colour, and the
     Godzilla logo showed only its first flame. A sprite whose first label begins an entrance
