@@ -9191,6 +9191,7 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                         for f_off, buf in file_writes:
                             f.seek(f_off)
                             f.write(buf)
+                    _override_card_mode(dest, node)
                     written.append((card_path, node["size"]))
                     records.append(_override_record(dest, card_path, ranges))
                     delta.append(
@@ -9390,6 +9391,17 @@ def _write_override_modes(out_dir, modes, log):
             "end_sound": modes.get("end_sound"),
             "own_sounds": list(modes.get("own_sounds") or ()),
             "code_object": bool(modes.get("code_object"))}
+
+
+def _override_card_mode(dest, node):
+    """PAD-306: give an override file the card file's own permission bits (kept writable for
+    the next build's in-place patch). extract_file writes 0644, and on native Linux the
+    emulator execs the set's copy of the game program: without its execute bit the game
+    never starts ("/games/<title>/game: Permission denied"). /mnt/c hid it on Windows."""
+    try:
+        os.chmod(_lp(dest), (int(node.get("mode") or 0) & 0o777) | 0o600)
+    except (OSError, TypeError, ValueError):
+        pass
 
 
 def _override_whole_why(card_rel, grow_plan):
