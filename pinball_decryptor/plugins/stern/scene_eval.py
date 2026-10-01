@@ -436,10 +436,25 @@ def settled_frame(man, o, world=None, _settled=None):
     off = _off_screen(draws(best), stage)
     if off < 0.02:
         return best
+    # an entrance is the SAME art moving onto the screen: a later label that draws other
+    # pictures is another state, not where this one rests (PAD-299: Venom's character select
+    # zooms its camera in, the cards at the edge hang off the glass, and Cap and Wolverine
+    # jumped to their Select state - whose full-screen black fade blanked the scene)
+    pics = _pictures(draws(best))
     for f in labels:
-        if hi <= f <= frames and _off_screen(draws(f), stage) < off - 0.1                 and _score(sub, draws(f)) >= best_n                 and (f >= frames or _same(draws(f), draws(f + 1))):
+        if (hi <= f <= frames and _off_screen(draws(f), stage) < off - 0.1
+                and _score(sub, draws(f)) >= best_n
+                and pics <= _pictures(draws(f))
+                and (f >= frames or _same(draws(f), draws(f + 1)))):
             return f
     return best
+
+
+def _pictures(draws):
+    """What *draws* show, as ``{(node, image)}``: the same set at two moments is the same art,
+    wherever it sits."""
+    return {(d["node"], d.get("image")) for d in draws
+            if d["kind"] in ("bitmap", "flip", "text")}
 
 
 def _off_screen(draws, stage):
