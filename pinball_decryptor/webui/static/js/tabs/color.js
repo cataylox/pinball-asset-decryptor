@@ -138,8 +138,19 @@ function Preview({ s, p }) {
       <span class="cp-tag cp-tag-r">Written to the card</span>
     </div>
     ${failed ? html`<${Note} kind="warn">That picture could not be shown here. Pick another one, or the test card.<//>` : null}
-    <p class="small muted cp-why">The right side is meant to look darker and warmer here. You're seeing it on your PC; the machine's screen brightens and cools it back to what you made. Drag the line to compare.</p>
+    <p class="small muted cp-why">${previewWords(p)} Drag the line to compare.</p>
   </div>`;
+}
+
+// What the right side is: a correction the machine's screen undoes, or (black
+// and white) the look the machine will really show - never "warmer" for a grey.
+function previewWords(p) {
+  const sat = Number(p.saturation), lift = Number(p.lift || 0);
+  if (sat === 0) return "The right side is how the machine will show it: in black and white.";
+  const same = sat === 1 && lift === 0
+    && [0, 1, 2].every((i) => Number(p.gamma[i]) === 1 && Number(p.gain[i]) === 1);
+  if (same) return "No change: the card gets your picture exactly as it is.";
+  return "The right side is meant to look off here: it is corrected for the machine's screen, which shifts it back to what you made.";
 }
 
 // -------------------------------------------------------------- the curves
