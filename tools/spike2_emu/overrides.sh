@@ -84,6 +84,18 @@ signature() {   # <dir>
     ( cd "$1" && find . -type f -printf '%P %s %T@\n' 2>/dev/null | LC_ALL=C sort )
 }
 
+# PAD-306: a file the set holds executable (the game program) is executable in the
+# stage too. cp onto a file the stage already has, and dd, keep the stage's old mode,
+# so a stage laid down before the set carried the bit would go on refusing to exec
+# the game.
+keep_exec() {
+    ( cd "$SRC" && find . -type f -perm -u+x -printf '%P\n' ) \
+        | while IFS= read -r rel; do
+              [ -f "$STAGE/$rel" ] && chmod a+x "$STAGE/$rel" 2>/dev/null
+          done
+    return 0
+}
+
 # Bring the stage forward one generation, or return 1 and let the full copy
 # below deal with it. Deliberately unforgiving: every mismatch here (no delta,
 # a stage of some other generation, a file the delta names that the stage does
@@ -151,6 +163,7 @@ stage_delta() {
     [ -z "$mism" ] || return 1
 
     chmod -R u+rwX "$STAGE" 2>/dev/null
+    keep_exec
     printf '%s\n' "$WANT" > "$STAMP"
     printf '%s\n' "$gen" > "$GENF"
     give_back "$STAGE" "$STAMP" "$GENF"
@@ -211,6 +224,7 @@ echo "[ovr] staging $(( ${KB:-0} / 1024 )) MB of override files -> $STAGE" >&2
 # need. The guest only ever reads these.
 cp -rL "$SRC/." "$STAGE/" || { rm -rf "$STAGE"; die "could not stage $SRC"; }
 chmod -R u+rwX "$STAGE" 2>/dev/null
+keep_exec
 printf '%s\n' "$WANT" > "$STAMP"
 # What the NEXT set will be patched out of. Without this every build after a
 # full copy would be a full copy too, since a stage of no known generation is

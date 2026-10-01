@@ -1007,6 +1007,27 @@ def test_overrides_sh_stages_a_delta_rather_than_the_set():
     assert body.index("cp -rL") < body.rindex('> "$GENF"')
 
 
+def test_overrides_sh_keeps_the_game_programs_execute_bit():
+    """PAD-306: both stagings (whole and delta) give the stage's copy of an executable set
+    file its execute bit; cp onto an existing file and dd keep the stage's old mode."""
+    body = (RIG / "overrides.sh").read_text(encoding="utf-8", errors="replace")
+    assert "find . -type f -perm -u+x -printf '%P\\n'" in body
+    assert body.count("    keep_exec\n") == 1 and body.count("\nkeep_exec\n") == 1
+    assert body.index('cp -rL "$SRC/." "$STAGE/"') < body.rindex("\nkeep_exec\n")
+
+
+def test_an_override_file_takes_the_card_files_mode(tmp_path, monkeypatch):
+    """PAD-306: extract_file writes 0644; the set's copy of the game program has to carry
+    the card's 0755, or native Linux refuses to exec it ("Permission denied")."""
+    got = []
+    monkeypatch.setattr(engine.os, "chmod", lambda p, m: got.append(m))
+    dest = tmp_path / "game"
+    dest.write_bytes(b"x")
+    engine._override_card_mode(str(dest), {"mode": 0o100755})
+    engine._override_card_mode(str(dest), {"mode": 0o100444})
+    assert got == [0o755, 0o644]
+
+
 def test_run_game_never_binds_the_two_bookkeeping_files():
     """Neither has a card path to land on, so binding one fails the run."""
     body = (RIG / "run_game.sh").read_text(encoding="utf-8", errors="replace")
