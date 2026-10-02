@@ -47,7 +47,7 @@ if hasattr(sniper, "start_sequence"):     # the after tree: the shots in order, 
     sniper.starts_on = "sequence"
     sniper.start_sequence = ["Left ramp", "Right ramp", "Left ramp", "Right ramp", "Building"]
     sniper.sequence_reset_any = True
-    sniper.end_shot = MP.END_SHOT_OTHERS
+    sniper.end_shot = ["Building", "Godzilla target", "Maser target", "Shield target left", "Shield target right"]
 specs.append(("SNIPER LOOPS", sniper))
 for i, (_n, spec) in enumerate(specs):
     MP.save(%(project)r, "%%d_%%s" %% (i + 1, MP.slugify(spec.name)), spec)

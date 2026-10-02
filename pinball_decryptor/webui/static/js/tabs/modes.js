@@ -49,7 +49,8 @@ const T = {
   film: "Cut this mode's clip, its sound or its screen's picture from a video file of your own (a film, an episode, anything): pick the video, a start time and a length (up to 30 seconds), and whether to keep its letterbox or fill the frame. The mode keeps only the cut (clip.mp4, end.wav, art.png), never the video.",
   rising: "The Nth scoring shot pays N times its points: 1x, 2x, 3x...",
   fixed: "Every scoring shot pays its points once.",
-  endShot: "A shot that ends the mode at once, before its clock: a sniper's mode. It pays first if it is a scoring shot. \"Any shot that does not score\" is every shot of the game but the ones that score (and, in a multiball, the shots that add a ball or bring the balls); the cabinet buttons never end it.",
+  endShot: "A shot that ends the mode at once, before its clock: a sniper's mode. It pays first if it is a scoring shot. \"Any shot that does not score\" is every shot of the game but the ones that score (and, in a multiball, the shots that add a ball or bring the balls); the cabinet buttons never end it. \"These shots\" lets you tick the ones that end it.",
+  endPick: "Any one of the ticked shots ends the mode at once. A ticked shot that also scores pays first.",
   secondClip: "A clip at the OTHER end from the one under Clip: at the end when that one plays at the start, and the other way round.",
   clip2Title: "The second title card's words. Empty uses the mode's name.",
   callouts: "One of the game's own callouts, by number, when that many seconds are left. Pick names the ones measured to play on this game; the countdown under Sound adds its own.",
@@ -340,7 +341,9 @@ function ModePage({ s, f, off, dis, rs }) {
   const seqSet = Array.from({ length: SEQ_MAX }, (_, i) => !!f["seq_shot_" + i] && f["seq_shot_" + i] !== SEQ_NONE);
   const seqRows = Math.min(SEQ_MAX, Math.max(2, seqSet.lastIndexOf(true) + 2));
   const seqOn = f.starts_kind === "sequence";
+  const END_PICK = "(these shots)";
   const endOpts = withValue((prof.end_shots || ["(no shot)"]).map((x) => ({ value: x, label: x })), f.end_shot);
+  const endOn = new Set(s.end_shots_on || []);
   return html`<div class="modes-grid2">
       <div class="stack">
         <label class="lbl" for="m-name">Name</label>
@@ -394,6 +397,10 @@ function ModePage({ s, f, off, dis, rs }) {
           <span class="dim nw">and sooner, on</span>
           <${Select} value=${f.end_shot} options=${endOpts} ns="modes" k="f:end_shot" disabled=${off || !shots.length} width=${260} title=${T.endShot} />
         </div>
+        ${f.end_shot === END_PICK && shots.length ? html`<div class="modes-shots" style="padding-left:26px">
+          ${shots.map((n) => html`<${Check} key=${"e" + n} label=${n} checked=${endOn.has(n)} disabled=${off} title=${T.endPick}
+              onChange=${(v) => setField("modes", "endshot:" + n, v, { flush: true })} />`)}
+        </div>` : null}
       <//>
       <${Sec} title="How often it can start" tipText=${T.starts}>
         <div class="row wrap" style="gap:4px 16px">

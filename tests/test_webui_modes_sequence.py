@@ -18,9 +18,8 @@ def test_the_sequence_and_the_end_shot_round_trip(tmp_path, preview_on):
         f = st["form"]
         assert f["starts_kind"] == "shot" and f["seq_reset_any"] is False
         assert all(f["seq_shot_%d" % i] == "(no more shots)" for i in range(8))
-        assert f["end_shot"] == "(no shot)"
-        assert st["profile"]["end_shots"][:2] == ["(no shot)", MP.END_SHOT_OTHERS]
-        assert "Left ramp" in st["profile"]["end_shots"]
+        assert f["end_shot"] == "(no shot)" and st["end_shots_on"] == []
+        assert st["profile"]["end_shots"] == ["(no shot)", MP.END_SHOT_OTHERS, "(these shots)"]
 
         path = proj / "modes" / slug / "mode.json"
         w.call("ui.set", "modes", "f:starts_kind", "sequence")
@@ -56,6 +55,34 @@ def test_the_sequence_and_the_end_shot_round_trip(tmp_path, preview_on):
         assert f["starts_kind"] == "sequence" and f["seq_reset_any"] is True
         assert (f["seq_shot_0"], f["seq_shot_1"], f["seq_shot_2"]) == ("Left ramp", "Right ramp", "(no more shots)")
         assert f["end_shot"] == MP.END_SHOT_OTHERS
+
+        # the multi-select: (these shots) + ticks save a list; a tick-less pick is refused on the Mode page
+        w.call("ui.set", "modes", "f:end_shot", "(these shots)")
+        assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("end_shot") == [])
+        assert "Tick a shot that ends the mode" in w.state("modes")["status"]
+        assert w.state("modes")["fix_pages"] == ["mode"]
+        w.call("ui.set", "modes", "endshot:Building", True)
+        w.call("ui.set", "modes", "endshot:Godzilla target", True)
+        w.call("ui.set", "modes", "endshot:Building", True)          # already on: no change
+        assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("end_shot") == ["Building", "Godzilla target"])
+        st = w.state("modes")
+        assert st["status"] == "Ready to build." and st["end_shots_on"] == ["Building", "Godzilla target"]
+        w.call("ui.set", "modes", "endshot:Building", False)
+        assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("end_shot") == ["Godzilla target"])
+        w.call("modes.new")
+        w.call("modes.select", slug, "form")
+        st = w.state("modes")
+        assert st["form"]["end_shot"] == "(these shots)" and st["end_shots_on"] == ["Godzilla target"]
+        # a mode saved before the list form, with one name, opens as a pick of that one
+        d = json.loads(path.read_text("utf-8"))
+        d["end_shot"] = "Maser target"
+        path.write_text(json.dumps(d), "utf-8")
+        w.call("modes.new")
+        w.call("modes.select", slug, "form")
+        st = w.state("modes")
+        assert st["form"]["end_shot"] == "(these shots)" and st["end_shots_on"] == ["Maser target"]
+        w.call("ui.set", "modes", "f:end_shot", MP.END_SHOT_OTHERS)
+        assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("end_shot") == MP.END_SHOT_OTHERS)
 
         # back to its shot: the sequence is kept in the file but not written to the card
         w.call("ui.set", "modes", "f:starts_kind", "shot")

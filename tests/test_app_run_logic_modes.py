@@ -1751,7 +1751,7 @@ def test_modes_tab_advanced_and_the_games_call_follow_the_title(tmp_path):
         slug = w.call("modes.new")
         st = _st(w)
         assert list(st["awards"]) == names
-        assert st["profile"]["end_shots"] == [svc.PARAM_NEVER, MP.END_SHOT_OTHERS] + names   # PAD-314
+        assert st["profile"]["end_shots"] == [svc.PARAM_NEVER, MP.END_SHOT_OTHERS, svc.END_PICK]   # PAD-314
         assert st["profile"]["callouts"] == [] and "TMNT Pro 1.59" in st["profile"]["callouts_none"]
         assert st["dis"]["end_game"]                            # "The game's own call" greyed
         assert "nothing plays when time is up" in st["reasons"]["sound"]
@@ -1777,7 +1777,7 @@ def test_modes_tab_advanced_and_the_games_call_follow_the_title(tmp_path):
         _project(w, project)
         st = _st(w)
         assert st["awards"]["Left orbit"] == "750000"        # shown, not kept aside
-        assert st["form"]["end_shot"] == "Center loop"
+        assert st["form"]["end_shot"] == svc.END_PICK and st["end_shots_on"] == ["Center loop"]   # PAD-314
         no_port = _modes_card_project(tmp_path, "godzilla_pro-1_14_0_spike2.Release.8G.sdcard.raw",
                                       "1.14.0", folder="noport")
         _project(w, no_port)                                 # no port, no modes: no shot names anywhere
@@ -2311,7 +2311,8 @@ def test_modes_tab_advanced_section_writes_every_parameter(tmp_path):
         w.run(svc._open, slug, MP.load(str(path)))
         st = _st(w)
         f = st["form"]
-        assert f["award_ladder"] == "fixed" and f["end_shot"] == "Shield target left"
+        assert f["award_ladder"] == "fixed" and f["end_shot"] == svc.END_PICK      # PAD-314
+        assert st["end_shots_on"] == ["Shield target left"]
         assert st["awards"]["Building"] == "5000000" and st["awards"]["Big loop"] == ""
         assert (f["clip_both"], f["clip_both_title"], f["clip_both_seconds"]) == (
             "title", "PARAM END", "3")
@@ -2405,7 +2406,8 @@ def test_modes_tab_advanced_section_keeps_hand_edited_values_until_changed(tmp_p
         st = _st(w)
         f = st["form"]
         assert (f["award_ladder"], f["end_shot"], f["clip_both"]) == (
-            "rising", svc.PARAM_NEVER, "none")
+            "rising", svc.END_PICK, "none")                  # PAD-314: a list is a pick of shots
+        assert st["end_shots_on"] == ["Shield target left"]
         assert st["awards"]["Building"] == "5"
         assert [(f["callout_secs_%d" % i], f["callout_id_%d" % i]) for i in range(4)] == [
             ("25", "1"), ("24", "2"), ("", ""), ("", "")]
@@ -2416,7 +2418,7 @@ def test_modes_tab_advanced_section_keeps_hand_edited_values_until_changed(tmp_p
         assert data["shot_award"] == [["Building", 5], ["Building", 7], [["x"], 3]]
         assert data["callout_at"] == [[25, 1], [24, 2], "bad"]
         status = _status(w)
-        for words in ("rising or fixed", "to end the mode", "same clip, a title card", "[shot, points]",
+        for words in ("rising or fixed", "same clip, a title card", "[shot, points]",      # PAD-314: a list end_shot is valid
                       "Building has its own points twice", "[seconds left, id]"):
             assert words in status, words
 

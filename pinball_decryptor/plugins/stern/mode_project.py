@@ -1508,8 +1508,9 @@ class ModeSpec:
     # item 141, the Advanced section: every other parameter the runtime has
     award_ladder: str = "rising"         # rising: the Nth shot pays N x; fixed: every shot x 1
     shot_award: list = field(default_factory=list)   # [[shot name, points]]: pays instead of award
-    end_shot: str = ""                   # a shot name that ends the mode, or END_SHOT_OTHERS (PAD-314:
-    #                                      any playfield shot that is not the mode's own); "" = none
+    end_shot: object = ""                # what ends the mode early: "" = nothing; a shot name; PAD-314: a
+    #                                      LIST of shot names (any of them), or END_SHOT_OTHERS (any
+    #                                      playfield shot that is not the mode's own)
     clip_both: dict = field(default_factory=dict)    # {} = one clip; else a second clip at the
     #                                      other end: {clip: same|title|file, title, file, seconds}
     callout_at: list = field(default_factory=list)   # [[seconds left, callout id]], on top of
@@ -1840,7 +1841,11 @@ def _retarget_advanced(out, old_key, p, names, dropped):
                 continue
             kept.append(row)
         out.shot_award = kept
-    if isinstance(out.end_shot, str) and out.end_shot and out.end_shot not in names \
+    if isinstance(out.end_shot, list):                  # PAD-314: any of these shots, matched by name
+        gone = [s for s in out.end_shot if isinstance(s, str) and s not in names]
+        dropped += [s for s in gone if s not in dropped]
+        out.end_shot = [s for s in out.end_shot if s not in gone]
+    elif isinstance(out.end_shot, str) and out.end_shot and out.end_shot not in names \
             and out.end_shot != END_SHOT_OTHERS:        # PAD-314: "any other shot" names no shot
         if out.end_shot not in dropped:
             dropped.append(out.end_shot)
@@ -1935,6 +1940,12 @@ def retarget_advanced_words(old, new, dropped, p):
     if isinstance(old.end_shot, str) and old.end_shot and not new.end_shot:
         words.append("%s is not on %s, so no shot ends the mode early until you pick one" % (
             old.end_shot, p.label))
+    elif isinstance(old.end_shot, list):             # PAD-314: any of these shots
+        gone = [s for s in old.end_shot if s in dropped]
+        if gone:
+            words.append("%s %s not on %s, so %s left out of the shots that end the mode early" % (
+                ", ".join(gone), "is" if len(gone) == 1 else "are", p.label,
+                "it is" if len(gone) == 1 else "they are"))
     calls = dropped_callouts(dropped)
     if calls:
         words.append("%s %s a sound number of another game and no callout measured on %s, "
@@ -2409,6 +2420,15 @@ def other_shots(spec, p):
     return [n for n in playfield_shots(p) if n not in own]
 
 
+def end_shot_list(spec):
+    """The shot names ``spec.end_shot`` picks: ``[]`` for none (or for :data:`END_SHOT_OTHERS`,
+    which names no shot), a single name as a list of one, a list as it is (PAD-314)."""
+    v = spec.end_shot
+    if isinstance(v, list):
+        return list(v)
+    return [v] if isinstance(v, str) and v and v != END_SHOT_OTHERS else []
+
+
 def ends_on_parts(spec):
     """``("drain" | "clock" | "event", event name or None)`` (item 147)."""
     words = (spec.ends_on or "drain").split()
@@ -2855,6 +2875,15 @@ def validate_parameters(spec, p, folder=None):
     if spec.end_shot == END_SHOT_OTHERS:             # PAD-314
         if not other_shots(spec, p):
             out.append("Every shot scores, so no shot is left to end the mode.")
+    elif isinstance(spec.end_shot, list):            # PAD-314: any of these shots
+        if not all(isinstance(s, str) for s in spec.end_shot):
+            out.append("The shots that end the mode are a list of shot names.")
+        elif not spec.end_shot:
+            out.append("Tick a shot that ends the mode, or pick (no shot).")
+        else:
+            for s in spec.end_shot:
+                if s not in names:
+                    out.append("%s has no shot called %r to end the mode." % (p.label, s))
     elif spec.end_shot and (not isinstance(spec.end_shot, str) or spec.end_shot not in names):
         out.append("%s has no shot called %r to end the mode." % (p.label, spec.end_shot))
     both = spec.clip_both
@@ -2918,8 +2947,8 @@ def parameter_lines(spec, slug, p):
         lines.append("shot_award     0x%08x %d" % (p.mask([shot]), _int_or_none(points)))
     if spec.end_shot == END_SHOT_OTHERS:      # PAD-314: one mask of every shot that is not the mode's own
         lines.append("end_shot       0x%08x" % p.mask(other_shots(spec, p)))
-    elif spec.end_shot:
-        lines.append("end_shot       0x%08x" % p.mask([spec.end_shot]))
+    elif end_shot_list(spec):                 # one shot, or (PAD-314) any of a list: one mask
+        lines.append("end_shot       0x%08x" % p.mask(end_shot_list(spec)))
     if spec.clip_both and spec.clip != "none" and p.can("clip"):   # item 148 (j): no clip, no second
         other = "clip_end" if spec.clip_when == "start" else "clip_start"
         name = names["clip"] if spec.clip_both.get("clip") == "same" else second_clip_name(slug)

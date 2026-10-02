@@ -212,3 +212,31 @@ def test_any_shot_that_does_not_score_ends_it():
     # a retarget keeps the choice: it names no shot
     new, dropped = MP.retarget(MP.ModeSpec(name="X", end_shot=MP.END_SHOT_OTHERS), MP.GODZILLA_PRO_1_15)
     assert new.end_shot == MP.END_SHOT_OTHERS and dropped == []
+
+
+def test_any_of_a_list_of_shots_ends_it():
+    """Ales's follow-up: a multi-select - end_shot as a list is one mask of every name in it."""
+    p = MP.GODZILLA_PRO_1_15
+    spec = MP.ModeSpec(name="X", end_shot=["Building", "Shield target left"])
+    assert MP.validate(spec) == []
+    assert _keys(MP.runtime_cfg(spec, "x"))["end_shot"] == ["0x%08x" % p.mask(["Building", "Shield target left"])]
+    assert MP.end_shot_list(spec) == ["Building", "Shield target left"]
+    assert MP.end_shot_list(MP.ModeSpec(name="X", end_shot="Building")) == ["Building"]
+    assert MP.end_shot_list(MP.ModeSpec(name="X", end_shot=MP.END_SHOT_OTHERS)) == []
+    spec.end_shot = ["Building", "Snake"]
+    assert "Godzilla Pro 1.15 has no shot called 'Snake' to end the mode." in MP.validate(spec)
+    spec.end_shot = []
+    assert "Tick a shot that ends the mode, or pick (no shot)." in MP.validate(spec)
+    assert not [ln for ln in MP.parameter_lines(MP.ModeSpec(name="X", end_shot=[]), "x", p) if "end_shot" in ln]
+    spec.end_shot = ["Building", 3]
+    assert "The shots that end the mode are a list of shot names." in MP.validate(spec)
+    # a retarget drops the names the title lacks and says so
+    try:
+        jaws = MP.profile("jaws_le_1_02")
+    except MP.ModeProjectError:
+        pytest.skip("no Jaws profile")
+    spec = MP.ModeSpec(name="X", end_shot=["Left ramp", "Building", "Godzilla target"])
+    new, dropped = MP.retarget(spec, jaws)
+    assert new.end_shot == ["Left ramp"] and {"Building", "Godzilla target"} <= set(dropped)
+    assert "Building, Godzilla target are not on %s, so they are left out of the shots that end the mode early" \
+        % jaws.label in MP.retarget_words(spec, new, dropped, jaws)

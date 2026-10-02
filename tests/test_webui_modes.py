@@ -682,6 +682,8 @@ def test_page_of_every_problem_sentence():
     assert problem_pages(["The lit shots are solid, blink, pulse or chase."]) == ["lights"]
     assert problem_pages(["Godzilla Pro 1.15 has no shot called 'X' to end the mode."]) == ["mode"]   # PAD-314
     assert problem_pages(["Every shot scores, so no shot is left to end the mode."]) == ["mode"]
+    assert problem_pages(["Tick a shot that ends the mode, or pick (no shot).",
+                          "The shots that end the mode are a list of shot names."]) == ["mode"]
     assert problem_pages(["Pick at least two shots, in order, that start the mode.",
                           "Godzilla Pro 1.15 has no shot called 'X' in the shots that start it."]) == ["mode"]
     assert problem_pages(["Godzilla Pro 1.15 has no shot called 'X'."]) == ["mode"]
