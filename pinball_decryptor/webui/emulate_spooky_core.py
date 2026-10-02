@@ -1,21 +1,23 @@
 """Emulate tab for Spooky Pinball - the Tk-free facts of the rig in
 ``tools/spooky_emu`` (the tab itself is ``webui/tabs/emulate_spooky.py``).
 
-Beetlejuice is a native x86-64 Linux Unity game with a desktop mode of its
-own, so like Barrels of Fun there is no CPU to emulate and no key: the rig
-stands in for the one board it talks to over USB serial (Spooky's "Warden"
-playfield controller).  See ``tools/spooky_emu/README.md``.
+Spooky's games since Halloween are native x86-64 Linux programs (Unity or
+Godot), so like Barrels of Fun there is no CPU to emulate and no key: the
+rig stands in for the one board each talks to over USB serial (Spooky's
+"Warden" playfield controller, or Halloween's and Ultraman's "Pinotaur").
+See ``tools/spooky_emu/README.md``.
 
-ONE GAME SO FAR.  Spooky makes a dozen titles on three engines; only
-Beetlejuice has been brought up.  The tab says so up front and refuses any
-other update with that answer (``SUPPORTED``), rather than failing inside
-the rig.
+``SUPPORTED`` is every title the rig runs, told apart by the update file's
+name the way the machine tells them apart (PAD-316).  The tab names them up
+front and refuses any other file with that answer, rather than failing
+inside the rig.
 
 Everything that knows the rig's layout lives here, as the BoF tab's does in
 ``emulate_bof_core``; how a script is invoked and how status is parsed is
 ``webui/rig.py``'s, shared by every rig.
 """
 
+import fnmatch
 import json
 import os
 import pathlib
@@ -33,8 +35,24 @@ POLL_MS = 2000
 POLL_IDLE_MS = 10000
 POLL_FIRST_MS = 700
 
-#: The Spooky games the emulator runs: (display name, update file suffix).
-SUPPORTED = (("Beetlejuice", ".beetlejuice"),)
+#: The Spooky games the emulator runs: (display name, the rig's title key
+#: (tools/spooky_emu/spktitles.py), the update file's name patterns, lower
+#: case).  A .pkg is told apart by its name, as the machine and the Spooky
+#: plugin's PKG_FILENAME_PATTERNS do; a Write-tab build keeps that name.
+SUPPORTED = (
+    ("Beetlejuice", "bj", ("*.beetlejuice",)),
+    ("Scooby-Doo", "scooby", ("*.scooby",)),
+    ("Texas Chainsaw Massacre", "tcm", ("tcm-*.pkg",)),
+    ("Evil Dead", "ed", ("*.ed",)),
+    ("Looney Tunes", "looney", ("*.looney",)),
+    ("Halloween", "h78", ("code_h78*.pkg",)),
+    ("Ultraman", "um", ("code_um*.pkg",)),
+)
+
+#: The file picker's filter: every pattern above, once.
+FILE_PATTERNS = " ".join(sorted({"*." + p.rsplit(".", 1)[1]
+                                 for _n, _k, pats in SUPPORTED
+                                 for p in pats}))
 
 #: watch.sh's step headers -> the footer ladder (copy = first chip).
 FOOTER_STEPS = (("== Unpack ==", "copy", 0, "Unpacking the game…"),
@@ -47,22 +65,30 @@ PHASES = ("Unpack", "Board", "Game", "Ready")
 #: watch.sh's exit codes that mean something a user can act on.
 EXIT_TEXT = {
     3: "Not enough free space in the app's Linux to unpack this update.",
-    4: "This file is not a Beetlejuice update, or it is damaged. Beetlejuice "
-       "is the only Spooky game the emulator runs so far.",
+    4: "This file is not an update of a Spooky game the emulator runs, or "
+       "it is damaged.",
     5: "The file opened but holds no game program.",
     6: "The game did not reach attract mode.",
 }
 
 
 def supported_names():
-    return [name for name, _ext in SUPPORTED]
+    return [name for name, _key, _pats in SUPPORTED]
+
+
+def title_of(path):
+    """The display name of the game *path* is an update of, or "".  By the
+    file's name, the way the machine itself tells its update files apart."""
+    base = os.path.basename((path or "").replace("\\", "/")).lower()
+    for name, _key, pats in SUPPORTED:
+        if any(fnmatch.fnmatchcase(base, p) for p in pats):
+            return name
+    return ""
 
 
 def supported_file(path):
-    """Is *path* an update of a game the emulator runs?  By suffix, the way
-    the machine itself tells its update files apart."""
-    p = (path or "").lower()
-    return any(p.endswith(ext) for _name, ext in SUPPORTED)
+    """Is *path* an update of a game the emulator runs?"""
+    return bool(title_of(path))
 
 
 def rig_dir():
@@ -112,9 +138,10 @@ def state_text(info):
         return ("WSL not answering",
                 "The game runs inside WSL, the app's Linux.")
     if info.get("running") == "1":
+        name = game_name(info)
         if info.get("attract") != "1":
-            return ("Starting", "Beetlejuice is loading…")
-        bits = ["Beetlejuice"]
+            return ("Starting", "%s is loading…" % name)
+        bits = [name]
         if info.get("version"):
             bits.append(info["version"])
         rss = int(info.get("rss_kb") or 0)
@@ -127,6 +154,14 @@ def state_text(info):
     return "Stopped", ""
 
 
+def game_name(info):
+    """The running game's name, from status.sh's title_name (or its key)."""
+    if info.get("title_name"):
+        return info["title_name"]
+    key = info.get("title") or "bj"
+    return next((n for n, k, _p in SUPPORTED if k == key), "the game")
+
+
 def parse_cache(text):
     """``cache.sh --list`` -> ``(entries, disk)``: the AP rig's protocol, so
     its parser (and the AP tab's Cache window) serve this tab too."""
@@ -136,8 +171,8 @@ def parse_cache(text):
 
 def cache_label(entry):
     """What the Cache window calls an entry: bj_v2026.09.15.11 ->
-    Beetlejuice v2026.09.15.11."""
+    Beetlejuice v2026.09.15.11 (a build is <title key>_<version>)."""
     name = entry["name"]
-    if name.startswith("bj_"):
-        return "Beetlejuice " + name[3:]
-    return name
+    key, _, version = name.partition("_")
+    title = next((n for n, k, _p in SUPPORTED if k == key), "")
+    return "%s %s" % (title, version) if title and version else name

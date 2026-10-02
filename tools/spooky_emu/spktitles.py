@@ -47,11 +47,11 @@ Switch names are the game's own (Switches.cs / SwitchConfig.cs / switches.cs
 / switches.gd of the build named in the comment); switch numbers are the
 Warden's inputs.
 
-Halloween is the one title here on Spooky's other board, the Pinotaur
-(/dev/pinheck, spkpinotaur.py; "board": "pinotaur", PAD-268); its cabinet
-switches are its own ("aliases").  Ultraman runs on the same board but is
-not profiled yet; Rick and Morty, Alice Cooper and Total Nuclear
-Annihilation are P-ROC games (PAD-269).  Both are refused with the reason.
+Halloween and Ultraman are the titles here on Spooky's other board, the
+Pinotaur (/dev/pinheck, spkpinotaur.py; "board": "pinotaur", PAD-268,
+PAD-316); their cabinet switches are their own ("aliases"), and "game_row"
+is what the board says it is set up for.  Rick and Morty, Alice Cooper and
+Total Nuclear Annihilation are P-ROC games (proc/, PAD-269).
 """
 import os
 import re
@@ -60,6 +60,35 @@ import sys
 CABINET_ALIASES = {"start": 87, "launch": 85, "coin": 90, "action": 81,
                    "tilt": 84, "enter": 91, "back": 94, "up": 92, "down": 93,
                    "lflip": 86, "rflip": 80, "ulflip": 83, "urflip": 82}
+
+#: Halloween's and Ultraman's switches (the same SwitchConfig.cs labels on
+#: both; Halloween v1.18.1, Ultraman v1.18).
+PINOTAUR_SWITCHES = {
+            4: "UPPER LEFT EOS", 5: "MIDDLE LEFT TARGET", 6: "MID PF SCOOP",
+            7: "MIDDLE RIGHT TARGET", 12: "LEFT SPINNER",
+            13: "RIGHT SPINNER", 14: "UPPER PF ENTRY", 15: "UPPER RIGHT EOS",
+            16: "TROUGH 5", 18: "TROUGH 7", 19: "TROUGH 6", 20: "TROUGH 4",
+            21: "TROUGH 3", 22: "TROUGH 2", 23: "SHOOTER LANE",
+            26: "UP PF DROP", 27: "DROP BANK MID", 28: "DROP BANK RIGHT",
+            29: "DROP BANK LEFT", 30: "MID PF DROP", 31: "LOWER DROP",
+            32: "CAPTURE TARGET", 33: "RIGHT OUTLANE", 34: "RIGHT INLANE",
+            35: "RIGHT ORBIT", 36: "RIGHT EOS", 37: "RIGHT SLING",
+            38: "STANDUP 6", 39: "STANDUP 5", 41: "LEFT RAMP EXIT",
+            48: "LEFT ORBIT", 49: "LEFT EOS", 50: "LEFT OUTLANE",
+            51: "LEFT SLING", 52: "STANDUP 1", 53: "STANDUP 2",
+            54: "STANDUP 3", 55: "STANDUP 4", 56: "COIN LEFT",
+            59: "COIN RIGHT", 60: "MENU ENTER", 61: "VOLUME UP",
+            62: "VOLUME DOWN", 63: "MENU BACK", 64: "TROUGH JAM",
+            65: "TROUGH 1", 66: "LEFT SUBWAY 1", 67: "CROSSOVER",
+            68: "MID RAMP LEFT", 69: "MID PF TO R SCOOP", 70: "RIGHT SUBWAY",
+            71: "LOWER RIGHT SCOOP", 72: "LOWER RIGHT DROP",
+            73: "LEFT SUBWAY 2", 74: "LEFT SUBWAY 4", 75: "MIDDLE RAMP",
+            76: "LEFT BOTTOM SCOOP", 77: "LEFT TOP SCOOP",
+            78: "LEFT SUBWAY 3", 79: "LEFT MIDDLE SCOOP",
+            80: "RIGHT FLIPPER BUTTON", 81: "LEFT FLIPPER BUTTON",
+            82: "UPPER RIGHT FLIPPER BUTTON", 83: "UPPER LEFT FLIPPER BUTTON",
+            84: "LAUNCH BUTTON", 85: "TILT", 87: "START BUTTON",
+        }
 
 TITLES = {
     # Beetlejuice v2026.09.15.11 (Switches.cs).
@@ -307,32 +336,27 @@ TITLES = {
         "aliases": {"start": 87, "launch": 84, "coin": 56, "tilt": 85,
                     "enter": 60, "back": 63, "up": 61, "down": 62,
                     "lflip": 81, "rflip": 80, "ulflip": 83, "urflip": 82},
-        "switches": {
-            4: "UPPER LEFT EOS", 5: "MIDDLE LEFT TARGET", 6: "MID PF SCOOP",
-            7: "MIDDLE RIGHT TARGET", 12: "LEFT SPINNER",
-            13: "RIGHT SPINNER", 14: "UPPER PF ENTRY", 15: "UPPER RIGHT EOS",
-            16: "TROUGH 5", 18: "TROUGH 7", 19: "TROUGH 6", 20: "TROUGH 4",
-            21: "TROUGH 3", 22: "TROUGH 2", 23: "SHOOTER LANE",
-            26: "UP PF DROP", 27: "DROP BANK MID", 28: "DROP BANK RIGHT",
-            29: "DROP BANK LEFT", 30: "MID PF DROP", 31: "LOWER DROP",
-            32: "CAPTURE TARGET", 33: "RIGHT OUTLANE", 34: "RIGHT INLANE",
-            35: "RIGHT ORBIT", 36: "RIGHT EOS", 37: "RIGHT SLING",
-            38: "STANDUP 6", 39: "STANDUP 5", 41: "LEFT RAMP EXIT",
-            48: "LEFT ORBIT", 49: "LEFT EOS", 50: "LEFT OUTLANE",
-            51: "LEFT SLING", 52: "STANDUP 1", 53: "STANDUP 2",
-            54: "STANDUP 3", 55: "STANDUP 4", 56: "COIN LEFT",
-            59: "COIN RIGHT", 60: "MENU ENTER", 61: "VOLUME UP",
-            62: "VOLUME DOWN", 63: "MENU BACK", 64: "TROUGH JAM",
-            65: "TROUGH 1", 66: "LEFT SUBWAY 1", 67: "CROSSOVER",
-            68: "MID RAMP LEFT", 69: "MID PF TO R SCOOP", 70: "RIGHT SUBWAY",
-            71: "LOWER RIGHT SCOOP", 72: "LOWER RIGHT DROP",
-            73: "LEFT SUBWAY 2", 74: "LEFT SUBWAY 4", 75: "MIDDLE RAMP",
-            76: "LEFT BOTTOM SCOOP", 77: "LEFT TOP SCOOP",
-            78: "LEFT SUBWAY 3", 79: "LEFT MIDDLE SCOOP",
-            80: "RIGHT FLIPPER BUTTON", 81: "LEFT FLIPPER BUTTON",
-            82: "UPPER RIGHT FLIPPER BUTTON", 83: "UPPER LEFT FLIPPER BUTTON",
-            84: "LAUNCH BUTTON", 85: "TILT", 87: "START BUTTON",
-        },
+        "switches": PINOTAUR_SWITCHES,
+    },
+    # Ultraman v1.18 (SwitchConfig.cs, CoilConfig.cs, VirtualCoil.cs):
+    # Halloween's code base ("H78UM") on the same Pinotaur board, wired the
+    # same - trough, cabinet, the pumpkin bank's places, every coil the
+    # Halloween profile names - so the same mechanisms.  The board's
+    # game-name row says Ultraman (0 1; firmware.cs GameSetting).
+    "um": {
+        "name": "Ultraman", "engine": "unity", "layout": "code",
+        "board": "pinotaur", "game_row": [0, 1],
+        "attract": "coils enabled", "attract_in": "warden.log",
+        "seed": ["highscores.config:config/default_highscores.config"],
+        "trough": [65, 22, 21, 20, 16, 19, 18], "jam": 64, "shooter": 23,
+        "eject": [18], "launch": {21: 23}, "balls": 7,
+        "rest": [27, 28, 29],
+        "sets": {11: {27: 1, 28: 1, 29: 1}, 12: {31: 1}, 13: {31: 0},
+                 7: {30: 1}, 6: {30: 0}, 4: {26: 0}, 5: {6: 0}},
+        "aliases": {"start": 87, "launch": 84, "coin": 56, "tilt": 85,
+                    "enter": 60, "back": 63, "up": 61, "down": 62,
+                    "lflip": 81, "rflip": 80, "ulflip": 83, "urflip": 82},
+        "switches": PINOTAUR_SWITCHES,
     },
 }
 
@@ -342,7 +366,7 @@ UNITY_PRODUCTS = {"SPF": "bj", "Scooby": "scooby", "TCM": "tcm",
 PINOTAUR_PRODUCTS = {"VideoServer"}      # Halloween, Ultraman
 # Which Pinotaur game: the update's own name, kept in its code (staticVars
 # correctUpdateFileName, a UTF-16 string in Assembly-CSharp.dll) -> title.
-PINOTAUR_UPDATES = {"code_H78.pkg": "h78"}
+PINOTAUR_UPDATES = {"code_H78.pkg": "h78", "code_UM.pkg": "um"}
 # application/config/name of a Godot game's PCK -> title.
 GODOT_PROJECTS = {"GDToons": "looney"}
 
@@ -431,7 +455,7 @@ def detect(d):
             if upd.encode("utf-16-le") in code:
                 return key, None
         return None, ("a Pinotaur-board game this emulator does not know yet "
-                      "(Ultraman?) - it runs Halloween")
+                      "- it runs Halloween and Ultraman")
     if product is not None:
         return None, "an unknown Unity game (%s)" % (product or "no name")
     exe = os.path.join(d, "main.x86_64")

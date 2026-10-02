@@ -18,7 +18,7 @@ to attract and take switch input. App wiring is a follow-up.
 | Texas Chainsaw Massacre | 1.00 | Unity 2019 Mono | Warden (`pinAPI.IOsystem = 20`; a Pinotaur path exists but is not selected) | runs |
 | Evil Dead | 2026.07.15 | Unity 2022.3 Mono | Warden (`warden.cs`, threaded, fixed-length replies) | runs |
 | Looney Tunes | 2025.10.08 | Godot 4.1.2 (custom), PCK in the ELF | Warden (`autoloads/warden.gd`, wjwwood serial) | runs |
-| Ultraman | 1.18 | Unity | **Pinotaur** (`/dev/pinheck`, `/dev/ttyUSB<n>`), no Warden code | refused: PAD-268's board |
+| Ultraman | 1.18 | Unity | **Pinotaur** (`/dev/pinheck`, `/dev/ttyUSB<n>`), no Warden code | runs on PAD-268's board (PAD-316) |
 
 The protocol is one firmware seen from five hosts; the argument count of
 every opcode agrees across all of them (tabulated from every `warden_send` /
@@ -69,7 +69,7 @@ its serve followed the diverter servo to the right lane.
 
 ## Left for later
 
-* Offer the four new titles in the app's Emulate Spooky tab (file types,
-  supported-games card, labels).
-* Ultraman and Halloween: a Pinotaur board (PAD-268).
+* ~~Offer the four new titles in the app's Emulate Spooky tab~~ - done with
+  Halloween and Ultraman (PAD-316).
+* ~~Ultraman and Halloween: a Pinotaur board~~ (PAD-268; Ultraman PAD-316).
 * Scoops, VUKs, locks, toys: switches pressed by hand, as on the other rigs.

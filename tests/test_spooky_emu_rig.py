@@ -408,21 +408,40 @@ def test_detect_unity_titles(tmp_path, sub, product, key):
     assert titles.detect(str(_unity(tmp_path, sub, product))) == (key, None)
 
 
-def test_detect_halloween_by_its_update_name_in_its_code(tmp_path):
-    d = _unity(tmp_path / "h78", "uptest/main_Data", "VideoServer")
+@pytest.mark.parametrize("update,key", [("code_H78.pkg", "h78"),
+                                        ("code_UM.pkg", "um")])
+def test_detect_pinotaur_titles_by_their_update_name_in_their_code(
+        tmp_path, update, key):
+    """Halloween and Ultraman are one code base ("H78UM", product
+    VideoServer); each carries its own update's name (PAD-316)."""
+    d = _unity(tmp_path / key, "uptest/main_Data", "VideoServer")
     (d / "uptest/main_Data/Managed").mkdir()
     (d / "uptest/main_Data/Managed/Assembly-CSharp.dll").write_bytes(
-        b"MZ..." + "code_H78.pkg".encode("utf-16-le") + b"...")
-    assert titles.detect(str(d)) == ("h78", None)
+        b"MZ..." + update.encode("utf-16-le") + b"...")
+    assert titles.detect(str(d)) == (key, None)
 
 
 def test_the_passphrase_comes_from_the_apps_spooky_plugin():
     from pinball_decryptor.plugins.spooky import games
     assert titles.passphrase("code_H78.pkg") == games.H78_GPG_PASSPHRASE
+    assert titles.passphrase("code_UM.pkg") == games.UM_GPG_PASSPHRASE
     assert titles.passphrase("v2025.12.01.09.scooby") is None
 
 
-def test_detect_refuses_pinotaur_and_misplaced_builds(tmp_path):
+def test_ultraman_is_wired_as_halloween_is():
+    """Same board, switches, trough, cabinet and coil effects (Ultraman
+    v1.18's SwitchConfig.cs / CoilConfig.cs / VirtualCoil.cs); only the
+    board's game-name row differs."""
+    um, h78 = titles.TITLES["um"], titles.TITLES["h78"]
+    assert um["switches"] is h78["switches"] is titles.PINOTAUR_SWITCHES
+    for k in ("board", "engine", "layout", "trough", "jam", "shooter",
+              "eject", "launch", "balls", "rest", "sets", "aliases", "seed",
+              "attract", "attract_in"):
+        assert um[k] == h78[k], k
+    assert um["game_row"] == [0, 1] and "game_row" not in h78
+
+
+def test_detect_refuses_unknown_pinotaur_and_misplaced_builds(tmp_path):
     key, why = titles.detect(str(_unity(tmp_path / "um", "uptest/main_Data",
                                         "VideoServer")))
     assert key is None and "Pinotaur" in why
@@ -614,6 +633,18 @@ def test_pinotaur_game_name_row_is_halloweens(pino):
     assert pino.sent[-1][:4] == bytes([PRX, 40, 0, 0]) and len(pino.sent[-1]) == 34
     pino.host_bytes(_msg(40, 0, 0, 0x1F, 0x00))            # another row
     assert pino.sent[-1] == bytes([PRX, 40]) + b"\xff" * 32
+
+
+def test_pinotaur_game_name_row_is_ultramans_for_ultraman(tmp_path, monkeypatch):
+    """firmware.cs GameSetting: 0 1 at row 8064 = Ultraman (PAD-316)."""
+    b = pinotaur.Pinotaur(str(tmp_path), pty=False, title="um")
+    b.sent = []
+    monkeypatch.setattr(b, "send", lambda data: b.sent.append(bytes(data)))
+    try:
+        b.host_bytes(_msg(40, 0, 0, 0x1F, 0x80))
+        assert b.sent[-1] == bytes([PRX, 40, 0, 1]) + b"\xff" * 30
+    finally:
+        b.log.close()
 
 
 def test_pinotaur_frames_by_its_length_byte(pino):
