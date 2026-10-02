@@ -565,6 +565,8 @@ function MenuDialog({ s, w }) {
       </div>
       <${Check} ns=${NS} k="same_text" checked=${s.same_text} wrap label="Same text size on every card (a long name is not shrunk on its own)" />
       <${Check} ns=${NS} k="counter" checked=${s.counter} wrap label="Count the cards under them (the “<  3 / 7  >” line; five cards or more)" />
+      ${w.settings_tile ? html`<${Check} ns=${NS} k="settings_tile" checked=${s.settings_tile} wrap
+        label="End the menu with a SETTINGS card (adjust each game's color correction on the machine; shown for games built with a color profile)" />` : null}
       <${Check} ns=${NS} k="footer_on" checked=${s.footer_on} wrap label="Show the instructions under the cards (the line naming the buttons)" />
       <div class="kv mb-kv2">
         <label class="k" for=${fid("footer")}>Instructions:</label>

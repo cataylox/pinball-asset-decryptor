@@ -143,6 +143,29 @@ def test_the_head_puts_the_selector_before_the_user():
         "wsl.exe", "-d", runtime.DISTRO, "-u", "root"]
 
 
+def test_rehead_asks_the_distro_again_for_a_wsl_command():
+    """PAD-307: a step built on the interface thread with a cold status cache
+    went to the default distro while the next went to ours.  rehead puts the
+    head of every wsl.exe command back to what the machine says NOW, keeps
+    '-u root', leaves any other user alone, and does not touch other commands."""
+    ours = _runner(listed=[runtime.DISTRO])
+    bare = ["wsl.exe", "-e", "bash", "-lc", "make"]
+    assert runtime.rehead(bare, runner=ours) == ["wsl.exe", "-d", runtime.DISTRO,
+                                                 "-e", "bash", "-lc", "make"]
+    root = ["wsl.exe", "-u", "root", "-e", "env", "HOME=/home/x", "bash"]
+    assert runtime.rehead(root, runner=ours) == [
+        "wsl.exe", "-d", runtime.DISTRO, "-u", "root", "-e", "env", "HOME=/home/x", "bash"]
+    # ...and the other way: a command routed to a distro the machine no longer
+    # has ready goes back to the default
+    routed = ["wsl.exe", "-d", "Elsewhere", "-u", "root", "-e", "true"]
+    assert runtime.rehead(routed, runner=_runner(listed=["Ubuntu"])) == [
+        "wsl.exe", "-u", "root", "-e", "true"]
+    assert runtime.rehead(["wsl.exe", "-u", "david", "-e", "id"], runner=ours) == [
+        "wsl.exe", "-d", runtime.DISTRO, "-u", "david", "-e", "id"]
+    assert runtime.rehead(["bash", "-lc", "make"], runner=ours) == ["bash", "-lc", "make"]
+    assert runtime.rehead([], runner=ours) == []
+
+
 def test_the_head_is_the_bare_wsl_when_there_is_no_runtime():
     """A machine without ours keeps doing exactly what it always did."""
     r = _runner(listed=["Ubuntu"])

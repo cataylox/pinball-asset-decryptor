@@ -888,6 +888,16 @@ down.
    and a card naming a file that is not there logs `cannot use nope.wav`
    exactly once, is NOT counted in the `media:` line, falls back to the
    menu-wide sound and still exits 0 with its choice written.
+3a. `test/settings_test.py` (PAD-307) - the SETTINGS tile, pressed by name
+   through the cab[] bytes (no switch table): the walk (the tile is the last
+   card, START opens Settings and Color correction, red middle shades +2
+   steps, SAVE FOR THIS GAME writes exactly that line, BACK, BACK TO THE
+   GAMES, and the countdown - which never runs inside Settings - boots the
+   card the menu opened on), SAVE FOR EVERY GAME (an image whose numbers
+   equal its build's gets no line), a HELD flipper repeating, the idle exit
+   (`PAD_SETTINGS_IDLE_MS`), and `--apply-color` on a synthetic program:
+   the slots rewritten byte-exact, the mode kept, "nothing to do" for an
+   image with no line or no profile, and the v1.60 shape refused.
 4. `bash -n select.sh` + `test/select_sh_test.sh` - the images.conf lookups
    (`--lookup`, `--lookup-sub`, three-, six- and seven-field lines - the awk
    reads `$1` and must not care how many fields follow - the `:<sub>` form,

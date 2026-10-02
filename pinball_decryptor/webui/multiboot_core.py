@@ -915,6 +915,11 @@ class MultibootForm:
     #: selector's own default - a carousel counts its cards under them; off
     #: takes the line off the glass.  Four cards or fewer never have one.
     show_counter: bool = True
+    #: THE SETTINGS CARD at the end of the menu (PAD-307; David, 2026-10-01:
+    #: "the settings section can be optional when setting up the multi-boot
+    #: menu").  On, the card ends the menu whenever an image's game can be
+    #: adjusted (built with a color profile); off, the menu never shows it.
+    settings_tile: bool = True
     #: THE FIRST WORD OF THE COUNTDOWN LINE (same report: "have the option to
     #: change this text in case you want something like 'Launching' or
     #: 'Booting'").  '' is a real answer - the countdown is then "<title> in
@@ -943,6 +948,12 @@ class MultibootForm:
     #: mkmulticard.py) or ``jjp`` (a multi-boot install ISO, mkjjpmulti.py).
     #: The command builders read it; a form that never says is a Stern one.
     platform: str = "stern"
+    #: WHAT THE IMAGES' GAMES WERE BUILT WITH (PAD-307): ``{image index: built
+    #: colour profile}`` for each image whose game the boot menu can adjust,
+    #: read off the images (:func:`adjustable_profile`) - never typed and never
+    #: saved.  The preview needs it to draw the SETTINGS card where the built
+    #: card will have one; the builder reads the same fact off the trees itself.
+    colour_profiles: dict = field(default_factory=dict)
 
 
 _COLOR_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")
@@ -1092,6 +1103,15 @@ def text_size_args(form):
     absent, keep whatever is there"."""
     return ["--text-size", TEXT_SIZE_UNIFORM if form.same_text_size
             else TEXT_SIZE_PER_CARD]
+
+
+def settings_args(form):
+    """``--settings on|off`` - the SETTINGS card (PAD-307).  Always passed on a
+    platform that has it, on heading_args' rule: a tick taken off here has to
+    reach the card as ``settings=off``.  JJP has no such card: nothing."""
+    if not backend_for(form).settings_tile:
+        return []
+    return ["--settings", "on" if form.settings_tile else "off"]
 
 
 def menu_text_args(form):
@@ -2490,6 +2510,7 @@ def build_args(form):
     if any(subtitles):
         args += ["--subtitles", ";".join(subtitles)]
     args += own_scores_args(form)
+    args += settings_args(form)
     # ALWAYS: the validator bypass on every image (David, after the TMNT
     # proved it: "we don't need to make it optional. it should always be on").
     # Since item 98 it also ignores the saved grades at boot, so a GAME
@@ -2565,6 +2586,7 @@ def inject_args(form, card):
     args += (heading_args(form) + text_size_args(form)
              + menu_text_args(form) + theme_args(form))
     args += own_scores_args(form)
+    args += settings_args(form)
     if form.machine_volume:
         args.append("--machine-volume")
     if form.media_dir:
@@ -2593,6 +2615,7 @@ def update_args(form, card, dry_run=False, expect_bytes=None):
     args += (heading_args(form) + text_size_args(form)
              + menu_text_args(form) + theme_args(form))
     args += own_scores_args(form)
+    args += settings_args(form)
     if form.machine_volume:
         args.append("--machine-volume")
     args.append("--bypass-validation")      # always (see build_args)
@@ -3234,6 +3257,113 @@ def parse_snapshot_frames(text):
     return out
 
 
+#: The biggest game program in the library is rush_le's 190 MB.
+_GAME_MAX = 512 << 20
+
+
+def _split_edits(spec):
+    """``(card, edits folder or None)`` of a source spec: a card image, or a
+    base card + an edits folder joined by '+' (PAD-241; the tools' own
+    editsource.split, which this mirrors so the app needs no tool import)."""
+    if not spec or "+" not in spec or os.path.exists(spec):
+        return spec, None
+    at = len(spec)
+    while True:
+        at = spec.rfind("+", 0, at)
+        if at <= 0:
+            return spec, None
+        base, edits = spec[:at], spec[at + 1:]
+        if os.path.isfile(base) and os.path.isfile(os.path.join(edits, "overrides.json")):
+            return base, edits
+
+
+def _games_title(ci, part):
+    """The title directory of a games partition (the root ``game`` link's
+    target, else the directory holding a ``game``), or None."""
+    entries = ci.list_dir(part, "/")
+    names = {e.name for e in entries}
+    if "usr" in names or "lib" in names:
+        return None
+    link = next((e.link_target for e in entries
+                 if e.name == "game" and e.is_symlink), None)
+    if link and "/" in link:
+        cand = link.split("/", 1)[0]
+        if any(e.name == cand and e.is_dir for e in entries):
+            return cand
+    for e in entries:
+        if not e.is_dir or e.is_symlink or e.name in ("lost+found", "spk"):
+            continue
+        try:
+            if "game" in {k.name for k in ci.list_dir(part, e.path)}:
+                return e.name
+        except Exception:                               # noqa: BLE001
+            continue
+    return None
+
+
+def adjustable_profile(path):
+    """The colour profile the game in *path* (a card image, or a base card +
+    an edits folder) was built with, when the boot menu's Settings can adjust
+    it (PAD-307: plugins/stern/shader_profile.tunable_in) -> ``{"name",
+    "gamma", "gain", "lift", "saturation"}``, else None: a stock game, one
+    built with No change or before the shape was fixed, or a card that cannot
+    be read.  READS THE GAME PROGRAM OFF THE CARD, so never on the UI thread.
+    Never raises."""
+    try:
+        from ..plugins.stern import shader_profile
+        from ..plugins.stern.explorer import CardImage
+        card, edits = _split_edits((path or "").strip().strip('"'))
+        if not card or not os.path.isfile(card):
+            return None
+        ci = CardImage(card)
+        try:
+            for p in ci.partitions():
+                if not p.browsable:
+                    continue
+                try:
+                    title = _games_title(ci, p.index)
+                except Exception:                       # noqa: BLE001
+                    continue
+                if not title:
+                    continue
+                raw = None
+                own = os.path.join(edits, title, "game") if edits else None
+                if own and os.path.isfile(own):
+                    with open(own, "rb") as f:
+                        raw = f.read()
+                if raw is None:
+                    raw = ci.preview(p.index, "/%s/game" % title, cap=_GAME_MAX)
+                got = shader_profile.tunable_in(raw) if raw else None
+                if not got:
+                    return None
+                prof = got[0]
+                return {"name": prof.name or "", "gamma": list(prof.gamma),
+                        "gain": list(prof.gain), "lift": list(prof.lift),
+                        "saturation": prof.saturation}
+        finally:
+            ci.close()
+    except Exception:                                   # noqa: BLE001
+        return None
+    return None
+
+
+def colour_profile_line(img, col):
+    """images.conf's ``color_profile=`` line for image *img* (mkmulticard's
+    conf_colour_line, the same text), or "" for one that cannot be spelled."""
+    try:
+        def three(key):
+            vals = [float(v) for v in col[key]]
+            return " ".join("%.4f" % v for v in vals) if len(vals) == 3 else None
+        g, k, lo = three("gamma"), three("gain"), three("lift")
+        if not (g and k and lo):
+            return ""
+        name = " ".join(str(col.get("name") or "").replace("|", "/").split())
+        return "color_profile=%d|%s|%s|%s|%.4f|%s" % (int(img), g, k, lo,
+                                                      float(col["saturation"]), name)
+    except (KeyError, TypeError, ValueError):
+        return ""
+
+
 def write_preview_conf(form):
     """The images.conf the preview is drawn from, as text: the form's
     titles, subtitles, media names, default, countdown and theme.  The
@@ -3302,6 +3432,16 @@ def write_preview_conf(form):
         lines.append("footer=")
     elif (form.footer or "").strip():
         lines.append("footer=%s" % (form.footer or "").strip())
+    # ...and the SETTINGS card, as the card will carry it (PAD-307): the
+    # images' built profiles, which are what put the card in the menu, and
+    # the owner's switch
+    if be.settings_tile:
+        for img, col in sorted((form.colour_profiles or {}).items()):
+            line = colour_profile_line(img, col)
+            if line:
+                lines.append(line)
+        if not form.settings_tile:
+            lines.append("settings=off")
     lines += theme_conf_lines(form)
     return "\n".join(lines) + "\n"
 
@@ -4129,6 +4269,8 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None, platform="ste
         # counter line and the word 'starting' - so that is what the form shows
         # (PAD-190).  "" on the word is a card that asked for no word at all.
         show_counter=(info.get("counter") != COUNTER_OFF),
+        # ...and the SETTINGS card: null = the card never said, which is "on"
+        settings_tile=(info.get("settings") != "off"),
         countdown_word=(DEF_COUNTDOWN_WORD if info.get("countdown_word") is None
                         else str(info["countdown_word"])),
         # THE INSTRUCTIONS LINE'S THREE ANSWERS, read back as the two fields
@@ -4154,8 +4296,8 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None, platform="ste
 #: MultibootPanel._loaded_diff.)
 MENU_FIELD_ORDER = ("title", "subtitle", "art", "animation", "music",
                     "move sound", "confirm sound", "volume", "countdown",
-                    "heading", "text size", "card counter", "countdown word",
-                    "instructions", "default", "bypass", "theme",
+                    "heading", "text size", "card counter", "settings card",
+                    "countdown word", "instructions", "default", "bypass", "theme",
                     "high scores")
 
 #: Of those, the ones the media has to be rendered again for.
@@ -4214,6 +4356,8 @@ def _menu_fields(before, after):
         changed.add("text size")
     if bool(before.show_counter) != bool(after.show_counter):
         changed.add("card counter")
+    if bool(before.settings_tile) != bool(after.settings_tile):
+        changed.add("settings card")
     if ((before.countdown_word or "").strip()
             != (after.countdown_word or "").strip()):
         changed.add("countdown word")
@@ -4831,6 +4975,8 @@ def menu_from_state(menu):
             # ...and a state from before these two describes the menu the
             # selector drew with both of its own answers (PAD-190)
             "show_counter": bool(menu.get("show_counter", True)),
+            # ...and a state from before the SETTINGS card offers it (PAD-307)
+            "settings_tile": bool(menu.get("settings_tile", True)),
             "countdown_word": str(menu.get("countdown_word",
                                            DEF_COUNTDOWN_WORD))[:COUNTDOWN_WORD_MAX],
             # ...and a state from before the instructions field describes a
@@ -5736,6 +5882,8 @@ def menu_summary(form):
                 # of these are what every menu says unless somebody changed
                 # them (PAD-190)
                 + ("" if form.show_counter else "  ·  no card counter")
+                + ("" if form.settings_tile or not backend_for(form).settings_tile
+                   else "  ·  no settings card")
                 + ("" if word == DEF_COUNTDOWN_WORD else
                    "  ·  countdown says %s" % (
                        "just the game and the seconds" if not word
@@ -6462,6 +6610,8 @@ class MultibootPanel:
         #: The card counter under the cards, and the countdown's first word
         #: (PAD-190): both start as what the selector itself draws.
         self._counter_var = tk.BooleanVar(value=True)
+        #: The SETTINGS card (PAD-307): on, as the selector has it.
+        self._settings_var = tk.BooleanVar(value=True)
         self._countdown_word_var = tk.StringVar(value=DEF_COUNTDOWN_WORD)
         #: ...and the instructions line as its two fields: drawn at all, and
         #: the words (empty = the selector's own, which is what every card
@@ -6533,6 +6683,7 @@ class MultibootPanel:
         for var in (self._move_var, self._confirm_var, self._volume_var,
                     self._machine_vol_var, self._timeout_var,
                     self._heading_var, self._same_text_var, self._counter_var,
+                    self._settings_var,
                     self._countdown_word_var, self._footer_var,
                     self._footer_text_var, self._default_var):
             var.trace_add("write", lambda *_a: self._menu_changed())
@@ -6554,6 +6705,11 @@ class MultibootPanel:
         self._play_var = tk.BooleanVar(value=True)
         self._pv_cache = {}
         self._pv_totals = {}
+        #: PAD-307: source path -> the built colour profile its game can be
+        #: adjusted from, or None; and the paths a worker is reading now.  A
+        #: loaded card's own answers are put here as it loads (_seed_colours).
+        self._colour_known = {}
+        self._colour_reading = set()
         #: (fingerprint, highlight) -> {image: (x, y, w, h)}: where the
         #: selector put every visible animated card's picture in its frame
         #: (the snapshot line's ``pictures``), which is where the clips are
@@ -6723,7 +6879,7 @@ class MultibootPanel:
                     self._ed_roll_norepeat) + self._ed_media_vars + (
                     self._move_var, self._confirm_var, self._volume_var,
                     self._timeout_var, self._heading_var, self._same_text_var,
-                    self._counter_var, self._countdown_word_var,
+                    self._counter_var, self._settings_var, self._countdown_word_var,
                     self._footer_var, self._footer_text_var,
                     self._default_var, self._out_var, self._selector_var,
                     self._theme_var) + tuple(self._color_vars.values()):
@@ -6766,7 +6922,7 @@ class MultibootPanel:
         # rescheduling while one was out left the row silently never
         # updating.
         if (self._busy or self._pv_busy or self._probe_busy
-                or not self._queue.empty()):
+                or self._colour_reading or not self._queue.empty()):
             try:
                 self._drain_job = self._timer().after(self.DRAIN_MS,
                                                       self._drain)
@@ -8596,6 +8752,7 @@ class MultibootPanel:
             self._heading_var.set(DEF_HEADING)
             self._same_text_var.set(True)
             self._counter_var.set(True)
+            self._settings_var.set(True)
             self._countdown_word_var.set(DEF_COUNTDOWN_WORD)
             self._footer_var.set(True)
             self._footer_text_var.set("")
@@ -9041,6 +9198,7 @@ class MultibootPanel:
                              self._heading_var.get(),
                              self._same_text_var.get(),
                              self._counter_var.get(),
+                             self._settings_var.get(),
                              self._countdown_word_var.get(),
                              self._footer_var.get(),
                              self._footer_text_var.get(),
@@ -9060,7 +9218,7 @@ class MultibootPanel:
         self._forget_menu_dialog()
         if self._menu_backup is not None:
             (move, confirm, vol, machine, timeout, heading, same_text,
-             counter, word, foot_on, foot_text, default, selector, theme,
+             counter, settings, word, foot_on, foot_text, default, selector, theme,
              colors) = self._menu_backup
             self._menu_backup = None
             self._move_var.set(move)
@@ -9071,6 +9229,7 @@ class MultibootPanel:
             self._heading_var.set(heading)
             self._same_text_var.set(same_text)
             self._counter_var.set(counter)
+            self._settings_var.set(settings)
             self._countdown_word_var.set(word)
             self._footer_var.set(foot_on)
             self._footer_text_var.set(foot_text)
@@ -9243,6 +9402,7 @@ class MultibootPanel:
             heading=self._heading_var.get().strip(),
             same_text_size=bool(self._same_text_var.get()),
             show_counter=bool(self._counter_var.get()),
+            settings_tile=bool(self._settings_var.get()),
             show_footer=bool(self._footer_var.get()),
             # NOT `or` anything: an empty box with the tick on is the
             # selector's own instructions line, which is a real answer
@@ -9257,7 +9417,69 @@ class MultibootPanel:
             selector_dir=self._selector_var.get().strip()
             or self._backend.selector_default,
             platform=self._backend.key,
-            theme=theme, colors=colors)
+            theme=theme, colors=colors,
+            colour_profiles=self._colour_profiles())
+
+    def _colour_profiles(self):
+        """``{image index: built colour profile}`` for the images known to be
+        adjustable (PAD-307) - what the preview needs to draw the SETTINGS card.
+        An image not known yet is read on a worker, and the preview is asked
+        for again when the answer is in; until then it counts as not
+        adjustable.  Only a platform that has the card asks at all."""
+        if not self._backend.settings_tile:
+            return {}
+        probe = MultibootForm(images=[replace(r) for r in self._rows],
+                              platform=self._backend.key)
+        out, missing = {}, []
+        for img, path, _ri, _mi in form_trees(probe):
+            key = _norm(path) if path else ""
+            if not key:
+                continue
+            if key in self._colour_known:
+                if self._colour_known[key]:
+                    out[img] = self._colour_known[key]
+            elif key not in self._colour_reading:
+                missing.append((key, path))
+        if missing:
+            self._read_colours(missing)
+        return out
+
+    def _read_colours(self, wanted):
+        """Read *wanted* (``[(key, path)]``) on a worker: each game program is a
+        few MB off a card image (190 MB for the biggest), which is not a thing
+        the UI thread can wait for."""
+        if self._stopped:
+            return
+        for key, _p in wanted:
+            self._colour_reading.add(key)
+
+        def work():
+            for key, path in wanted:
+                col = self._colour_reader(path)
+
+                def done(key=key, col=col):
+                    self._colour_reading.discard(key)
+                    self._colour_known.setdefault(key, col)
+                    if col:
+                        self.schedule_preview()
+                self._ui(done)
+        threading.Thread(target=work, daemon=True).start()
+        self._kick_drain()
+
+    def _colour_reader(self, path):
+        """One image's answer (:func:`adjustable_profile`), on the worker.  A
+        method so a test can stand in for the card read."""
+        return adjustable_profile(path)
+
+    def _seed_colours(self, info):
+        """A loaded card says itself which of its images can be adjusted (its
+        images.conf, read back by inspect): those answers are final - the
+        sources they were built from need not be on this machine at all."""
+        cols = info.get("colours") or {}
+        for i, im in enumerate(info.get("images") or []):
+            src = host_path(im.get("source") or "")
+            if src:
+                self._colour_known[_norm(src)] = cols.get(str(i)) or cols.get(i) or None
 
     def _validated_form(self, sources=True):
         form = self.form()
@@ -9312,6 +9534,7 @@ class MultibootPanel:
                      "heading": self._heading_var.get().strip(),
                      "same_text_size": bool(self._same_text_var.get()),
                      "show_counter": bool(self._counter_var.get()),
+                     "settings_tile": bool(self._settings_var.get()),
                      "show_footer": bool(self._footer_var.get()),
                      "footer": self._footer_text_var.get().strip(),
                      "countdown_word":
@@ -9439,6 +9662,7 @@ class MultibootPanel:
             # ...and so is a document from before the counter tick and the
             # countdown word existed: both come back as the selector's own
             self._counter_var.set(bool(menu.get("show_counter", True)))
+            self._settings_var.set(bool(menu.get("settings_tile", True)))
             self._countdown_word_var.set(menu.get("countdown_word",
                                                   DEF_COUNTDOWN_WORD))
             self._footer_var.set(bool(menu.get("show_footer", True)))
@@ -10088,6 +10312,7 @@ class MultibootPanel:
             self._heading_var.set(form.heading)
             self._same_text_var.set(bool(form.same_text_size))
             self._counter_var.set(bool(form.show_counter))
+            self._settings_var.set(bool(form.settings_tile))
             self._countdown_word_var.set(form.countdown_word)
             self._footer_var.set(bool(form.show_footer))
             self._footer_text_var.set(form.footer)
@@ -10106,6 +10331,7 @@ class MultibootPanel:
         _ticked, self._armed = bypass_state(info)
         self._loaded_card = card
         self._loaded_info = info
+        self._seed_colours(info)
         pend = getattr(self, "_pending_device", None)
         if pend and _norm(pend[0]) == _norm(card):
             self._card_device, self._card_device_name = pend[1], pend[2]
@@ -10240,6 +10466,7 @@ class MultibootPanel:
             self._heading_var.set(menu["heading"])
             self._same_text_var.set(bool(menu.get("same_text_size", True)))
             self._counter_var.set(bool(menu.get("show_counter", True)))
+            self._settings_var.set(bool(menu.get("settings_tile", True)))
             self._countdown_word_var.set(menu["countdown_word"])
             self._footer_var.set(bool(menu.get("show_footer", True)))
             self._footer_text_var.set(menu.get("footer", ""))
@@ -12724,6 +12951,14 @@ class MultibootPanel:
                         self._append("[multi-boot] %s: %s" % (label, exc))
                         rc, failed = 1, label
                         break
+                # EVERY STEP OF A RUN IN THE SAME LINUX: the distro is asked
+                # again here, on the worker.  A step built on the UI thread
+                # before the runtime's status was known went to the default
+                # distro while the next one, built here, went to ours - the
+                # preview compiled its menu program in one and ran it in the
+                # other, and failed at frame 0 (PAD-307; runtime.rehead, which
+                # leaves anything that is not a wsl.exe command alone).
+                argv = runtime.rehead(argv)
                 self._append("$ " + argv[-1])
                 try:
                     proc = subprocess.Popen(

@@ -112,6 +112,18 @@ EOF
 # records its own command line so the log switch can be checked
 cat > "$W/fakesel" <<'EOF'
 #!/bin/sh
+# PAD-307: the apply step - records its arguments, leaves a copy at --to when
+# FAKE_APPLY_RC is 0, says one [select] line and exits FAKE_APPLY_RC (1 = nothing to do)
+case " $* " in
+    *" --apply-color "*)
+        echo "$*" > "$APPLYARGS"
+        to=""
+        while [ $# -gt 0 ]; do [ "$1" = "--to" ] && to=$2; shift; done
+        rc=${FAKE_APPLY_RC:-1}
+        [ "$rc" = 0 ] && echo copy > "$to"
+        echo "[select] color: fake apply, exit $rc"
+        exit "$rc" ;;
+esac
 echo "$*" > "$SELARGS"
 out=""
 while [ $# -gt 0 ]; do [ "$1" = "--out" ] && out=$2; shift; done
@@ -286,6 +298,46 @@ rm -rf "$W/modes"; mkdir -p "$PM"
 hook modes_oldcard 1 0 "" "umount $G" "mount -t ext4 -o ro,relatime,exec /dev/mmcblk0p7 $G"
 unset CODESELECT_PADMODE
 rm -rf "$PM"
+# ---- PAD-307: the color correction set on this machine ------------------------------------------
+# a values file and a color_profile= line: the selector writes a copy of <title>/game into the
+# colour dir and the copy is bound over the program; everything else leaves the program alone
+CV="$W/padcolor"; CF="$W/codeselect.color"
+export CODESELECT_COLOR="$CF" CODESELECT_COLOR_DIR="$CV" APPLYARGS="$W/applyargs"
+rm -f "$G/game"; mkdir -p "$G/godzilla_pro"; : > "$G/godzilla_pro/game"; ln -s godzilla_pro/game "$G/game"
+{ cat "$W/conf"; echo "color_profile=0|1.10 1.20 1.35|1 1 1|0 0 0|0.90|Recommended"; } > "$W/conf_color"
+export CODESELECT_CONF="$W/conf_color"
+rm -f "$CF" "$APPLYARGS"
+hook color_nofile 0 0 ""
+[ ! -e "$APPLYARGS" ] || { echo "select_sh_test: FAIL (color_nofile) the selector was asked with no values file"; exit 1; }
+echo "/dev/mmcblk0p3|1.30 1.20 1.35|1 1 1|0 0 0|0.90" > "$CF"
+FAKE_APPLY_RC=0 hook color_apply 0 0 "" "mount --bind $CV/godzilla_pro.game $G/godzilla_pro/game"
+[ "$(cat "$APPLYARGS")" = "--apply-color --conf $W/conf_color --image 0 --program $G/godzilla_pro/game --to $CV/godzilla_pro.game --color-file $CF" ] \
+    || { echo "select_sh_test: FAIL (color_apply) the selector was asked:"; cat "$APPLYARGS"; exit 1; }
+grep -q "image 0: color: fake apply, exit 0" "$W/out" || { echo "select_sh_test: FAIL (color_apply) the selector's line is not in the log"; cat "$W/out"; exit 1; }
+grep -q "image 0: $CV/godzilla_pro.game bound over $G/godzilla_pro/game" "$W/out" || { echo "select_sh_test: FAIL (color_apply) message"; cat "$W/out"; exit 1; }
+# the same after a choice of another image: the step follows the image that boots
+FAKE_APPLY_RC=0 hook color_image2 2 0 "" "umount $G" "mount -t ext4 -o ro,relatime,exec /dev/mmcblk0p7 $M" "mount --bind $M/img2 $G"
+grep -q "cannot tell its title" "$W/out" || { echo "select_sh_test: FAIL (color_image2) the fake tree has no title and must say so"; cat "$W/out"; exit 1; }
+rm -f "$G/game"; ln -s godzilla_pro/game "$G/game"
+# nothing to do (exit 1): no bind, nothing left behind
+FAKE_APPLY_RC=1 hook color_nothing 0 0 ""
+[ ! -e "$CV/godzilla_pro.game" ] || { echo "select_sh_test: FAIL (color_nothing) a copy was left"; exit 1; }
+grep -q "could not be applied" "$W/out" && { echo "select_sh_test: FAIL (color_nothing) nothing to do is not a failure"; cat "$W/out"; exit 1; }
+# refused (exit 2): no bind, as built, and the log says so
+FAKE_APPLY_RC=2 hook color_refused 0 0 ""
+grep -q "could not be applied (exit 2): its colors are as built" "$W/out" || { echo "select_sh_test: FAIL (color_refused) message"; cat "$W/out"; exit 1; }
+# the bind fails: the copy is taken away again
+FAKE_APPLY_RC=0 hook color_bindfail 0 0 "$CV/godzilla_pro.game" "mount --bind $CV/godzilla_pro.game $G/godzilla_pro/game"
+grep -q "binding $CV/godzilla_pro.game over $G/godzilla_pro/game failed: its colors are as built" "$W/out" \
+    || { echo "select_sh_test: FAIL (color_bindfail) message"; cat "$W/out"; exit 1; }
+[ ! -e "$CV/godzilla_pro.game" ] || { echo "select_sh_test: FAIL (color_bindfail) the copy was left"; exit 1; }
+# a conf with no color_profile= line: the selector is never asked, values file or not
+rm -f "$APPLYARGS"
+export CODESELECT_CONF="$W/conf"
+FAKE_APPLY_RC=0 hook color_noline 0 0 ""
+[ ! -e "$APPLYARGS" ] || { echo "select_sh_test: FAIL (color_noline) the selector was asked"; exit 1; }
+unset CODESELECT_COLOR CODESELECT_COLOR_DIR
+rm -rf "$G/godzilla_pro" "$CV" "$CF"; rm -f "$G/game"
 # ---- deltas (item 107): a tree carrying .multiboot/deltas runs materialize.py --------------
 # the fake mount grows the index under img2 when FAKE_DELTAS is set; the fake python records
 # its command line; no --mount-dev when CODESELECT_WORKDEV is empty (a plain work directory)

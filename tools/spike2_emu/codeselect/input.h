@@ -82,6 +82,10 @@ void input_sample(struct input *in, int key, int pressed);
 void input_raw(struct input *in, int code);           /* queue an EV_RAW() code (jjpio --learn) */
 int  input_poll(struct input *in, long long now_ms);   /* next event or EV_NONE */
 int  input_has(const struct input *in, int ev);        /* 0 = ev can never arrive */
+/* is the key held DOWN right now (its debounced level)?  The settings screens
+ * repeat a held flipper (PAD-307); a sampling thread writes the level, and an
+ * int read is all this is */
+int  input_held(const struct input *in, int ev);
 void input_close(struct input *in);
 const char *input_event_name(int ev);
 

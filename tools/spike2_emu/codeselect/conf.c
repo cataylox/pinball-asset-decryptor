@@ -287,6 +287,10 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
      * for it gone (PAD-190), on the same rule: a card built before the key
      * existed is the menu it always was */
     c->counter = 1;
+    /* the SETTINGS tile is offered whenever it has something to set, unless
+     * the file says settings=off (PAD-307) */
+    c->settings = 1;
+    c->settings_card = -1;
     {
         int k;
         for (k = 0; k < 5; k++) c->jjp_byte[k] = c->jjp_bit[k] = c->jjp_byte2[k] = c->jjp_bit2[k] = -1;
@@ -452,6 +456,36 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
             if (*val) c->volume_max = clamp_int(val, 0, 100);
         } else if (!strcmp(key, "theme")) {
             copy_field(c->theme, val);
+        } else if (!strcmp(key, "color_profile")) {
+            /* PAD-307: <image>|<gamma>|<gain>|<lift>|<saturation>[|<name>] - the
+             * numbers image N's game was built with.  BEFORE the color_<role>
+             * branch below, which would read it as a theme role.  Anything
+             * wrong is dropped out loud: that image is then not adjustable,
+             * and nothing else about the menu changes. */
+            char *fld[7], why[120];
+            struct colour built;
+            int idx = -1;
+            split_fields(val, fld);
+            if (fld[0] && *fld[0] && strspn(fld[0], "0123456789") == strlen(fld[0]))
+                idx = atoi(fld[0]);
+            if (idx < 0 || idx >= CONF_MAX_IMAGES) {
+                conf_warn(c, "%s:%d: color_profile=%s names no image: dropped", path, lineno,
+                          fld[0] ? fld[0] : "");
+            } else if (colour_parse(fld + 1, &built, why, sizeof why) < 0) {
+                conf_warn(c, "%s:%d: color_profile for image %d: %s: that image is not adjustable",
+                          path, lineno, idx, why);
+                c->colour[idx].set = 0;
+            } else {
+                c->colour[idx].set = 1;
+                c->colour[idx].built = built;
+                snprintf(c->colour[idx].name, sizeof c->colour[idx].name, "%s",
+                         fld[5] ? fld[5] : "");
+            }
+        } else if (!strcmp(key, "settings")) {
+            if (!*val || !strcmp(val, "on")) c->settings = 1;
+            else if (!strcmp(val, "off")) c->settings = 0;
+            else conf_warn(c, "%s:%d: settings=%s is not 'on' or 'off': read as 'on'",
+                           path, lineno, val);
         } else if (!strcmp(key, "key_left") || !strcmp(key, "key_right") || !strcmp(key, "key_start")
                    || !strcmp(key, "key_plus") || !strcmp(key, "key_minus")) {
             /* JJP (--input jjpio): <byte>.<bit> in the I/O board frame, and
@@ -511,7 +545,38 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
     if (resolve_groups(c, gpos, gline, path, err, errlen) < 0) return -1;
     if (c->def >= c->n) c->def = -1;
     if (c->def_card >= c->ncards) c->def_card = -1;
+    /* PAD-307: a color_profile= line for an image the file does not have is
+     * dropped; the rest are counted, and they are what the SETTINGS tile is
+     * for.  The tile goes LAST, after every card the conf lays out, and only
+     * once default_card= has been checked against the conf's own cards - the
+     * tile is never anything the countdown can land on. */
+    {
+        int i;
+        for (i = 0; i < CONF_MAX_IMAGES; i++) {
+            if (!c->colour[i].set) continue;
+            if (i >= c->n) {
+                conf_warn(c, "%s: color_profile for image %d, which is not on the card: dropped", path, i);
+                c->colour[i].set = 0;
+                continue;
+            }
+            c->ncolour++;
+        }
+    }
+    if (c->settings && c->ncolour > 0) {
+        c->settings_card = c->ncards;
+        c->cards[c->ncards].image = -1;
+        c->cards[c->ncards].group = -1;
+        c->ncards++;
+        copy_field(c->settings_face.device, "settings");
+        copy_field(c->settings_face.title, "SETTINGS");
+        copy_field(c->settings_face.subtitle, "Color correction");
+    }
     return 0;
+}
+
+int conf_card_is_settings(const struct conf *c, int k)
+{
+    return k >= 0 && k == c->settings_card;
 }
 
 int conf_has_art(const struct conf *c)
@@ -527,6 +592,7 @@ int conf_has_art(const struct conf *c)
 const struct conf_image *conf_card_face(const struct conf *c, int k)
 {
     if (k < 0 || k >= c->ncards) return &c->img[0];
+    if (k == c->settings_card) return &c->settings_face;
     if (c->cards[k].group >= 0) return &c->grp[c->cards[k].group].card;
     return &c->img[c->cards[k].image];
 }
@@ -551,7 +617,7 @@ int conf_card_group(const struct conf *c, int k)
 
 int conf_card_nmembers(const struct conf *c, int k)
 {
-    if (k < 0 || k >= c->ncards) return 0;
+    if (k < 0 || k >= c->ncards || k == c->settings_card) return 0;
     if (c->cards[k].group >= 0) return c->grp[c->cards[k].group].nmember;
     return 1;
 }

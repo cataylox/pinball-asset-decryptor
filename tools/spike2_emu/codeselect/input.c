@@ -74,6 +74,12 @@ int input_has(const struct input *in, int ev)
     return in->present[KEY_OF(ev)];
 }
 
+int input_held(const struct input *in, int ev)
+{
+    if (!in || ev <= EV_NONE || ev >= EV_COUNT) return 0;
+    return in->stable[KEY_OF(ev)] == 1;
+}
+
 void input_close(struct input *in)
 {
     if (in && in->ops && in->ops->close) in->ops->close(in);

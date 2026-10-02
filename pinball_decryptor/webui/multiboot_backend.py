@@ -93,6 +93,10 @@ class MultibootBackend:
     conf_font: str                    # font= in the preview's conf
     #: steps of a writing run that need root
     root_steps: frozenset
+    #: THE SETTINGS CARD (PAD-307): the menu's last card, color correction on the
+    #: machine.  Only a Stern game can be adjusted (its colors are in its own
+    #: drawing shaders), so only Stern offers the tick.
+    settings_tile: bool = False
 
     # ---- pure helpers -----------------------------------------------------
     def device(self, img):
@@ -178,7 +182,7 @@ STERN = MultibootBackend(
     selector_default="~/spike2root/usr/local/codeselect",
     selector_suffix="/usr/local/codeselect", selector_binary="codeselect",
     preview_native=False, conf_font="/usr/local/codeselect/font.ttf",
-    root_steps=frozenset(("build", "update")))
+    root_steps=frozenset(("build", "update")), settings_tile=True)
 
 #: JJP: every writing step mounts something (the ISOs, the scratch root) and
 #: the restored roots the emulator shares are root's, so the media step (it

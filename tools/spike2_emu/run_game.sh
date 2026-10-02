@@ -288,7 +288,17 @@ if [ -n "${PAD_CARD:-}" ]; then
             # ...and counter= / countdown_word= / footer= (PAD-190), same reason:
             # a card whose counter line is off and whose countdown says
             # 'Launching' must preview as that card, not as the default menu.
-            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|text_size|counter|countdown_word|footer|theme|color_[a-z_]+)[[:space:]]*=' || true
+            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|text_size|counter|countdown_word|footer|theme|settings|color_[a-z_]+)[[:space:]]*=' \
+                | grep -vE '^[[:space:]]*color_profile[[:space:]]*=' || true
+            # ★ PAD-307: EACH IMAGE'S BUILT COLOR PROFILE, the lines that put the SETTINGS tile
+            # in the menu. They name IMAGE INDEXES, so they ride on the group lines' gate: only
+            # when the card's image lines and what resolved here are the same count, or a line
+            # would name another build.
+            if [ "$(printf '%s\n' "$SEL_CARDCONF" | grep -cE '^[[:space:]]*image[[:space:]]*=')" = "$SEL_N" ]; then
+                printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*color_profile[[:space:]]*=' || true
+            elif printf '%s\n' "$SEL_CARDCONF" | grep -qE '^[[:space:]]*color_profile[[:space:]]*='; then
+                echo "[select] the card's color_profile line(s) are DROPPED: its image indexes do not line up with what resolved here" >&2
+            fi
         } > "$R/dump/codeselect.conf"
         # ★ PAD-226: THE CARD'S OWN INDEX FOR EACH DEVICE, and the store name its
         # scores= line gives it. The menu above counts the trees it found; the
@@ -922,6 +932,37 @@ if [ -n "$SEL_DIRS" ]; then
                 echo "[select] image $SEL_CARDIDX: its own machine store could not be bound; it shares the title's" >&2
             fi ;;
     esac
+    # ★ PAD-307: THE COLOR CORRECTION SET ON THIS MACHINE, as the card's select.sh applies it on
+    # the machine. The menu's Settings > Color correction keeps the operator's numbers per image
+    # in /data/codeselect.color ($R/data persists across runs here); when the image that boots
+    # has a line, the selector writes a copy of its game program with those numbers in the
+    # drawing shaders and the copy is bound over /games/$GAME/game. The same program, the same
+    # step, the same exit codes as on the machine (0 bind, 1 nothing to do, else as built); a
+    # menu that fell back boots image 0, and so does its color.
+    SEL_COLIDX=0
+    [ "$SEL_RC" = 0 ] && [ -n "$SEL_DIR" ] && SEL_COLIDX=$SEL_CHOICE
+    if [ -f "$R/data/codeselect.color" ] && [ -f "$R/dump/codeselect.conf" ] \
+            && grep -qE '^[[:space:]]*color_profile[[:space:]]*=' "$R/dump/codeselect.conf"; then
+        mkdir -p "$R/dump/padcolor"
+        # ROOT IS ELEVATION, NOT OWNERSHIP (PAD-182): the directory goes to whoever owns the
+        # rig's dump, so a later run as that user can clear what this one left
+        [ "$(id -u)" = 0 ] && chown "$(stat -c %u:%g "$R/dump" 2>/dev/null)" "$R/dump/padcolor" 2>/dev/null
+        rm -f "$R/dump/padcolor/$GAME.game"
+        _cmsg=$(chroot "$R" /usr/local/codeselect/codeselect --apply-color --conf /dump/codeselect.conf \
+                    --image "$SEL_COLIDX" --program "/games/$GAME/game" --to "/dump/padcolor/$GAME.game" \
+                    --color-file /data/codeselect.color </dev/null 2>/dev/null)
+        _crc=$?
+        [ -n "$_cmsg" ] && printf '%s\n' "$_cmsg" | head -1
+        if [ "$_crc" = 0 ] && [ -f "$R/dump/padcolor/$GAME.game" ] \
+                && mount --bind "$R/dump/padcolor/$GAME.game" "$R/games/$GAME/game"; then
+            echo "[select] image $SEL_COLIDX: its game program with the color correction set on this machine, bound over /games/$GAME/game"
+        else
+            rm -f "$R/dump/padcolor/$GAME.game"
+            [ "$_crc" != 0 ] && [ "$_crc" != 1 ] && \
+                echo "[select] image $SEL_COLIDX: the color correction could not be applied (exit $_crc): its colors are as built" >&2
+            [ "$_crc" = 0 ] && echo "[select] image $SEL_COLIDX: the corrected copy could not be bound: its colors are as built" >&2
+        fi
+    fi
 fi
 
 # ★ ITEM 45 - THIS TITLE'S PANEL IS BOLTED IN UPSIDE DOWN AND OUR MONITOR IS NOT.

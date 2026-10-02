@@ -49,8 +49,10 @@
 #include "nvm.h"
 #include "codec.h"
 #include "log.h"
+#include "colour.h"
+#include "settings.h"
 
-#define VERSION "3.0"
+#define VERSION "3.1"
 
 /* the card's paths.  Stern's unless the build says otherwise: the JJP build
  * (make PLATFORM=jjp) puts the selector under /jjpe/gen1/padselect and its
@@ -69,6 +71,12 @@
 #endif
 #ifndef DEF_MEDIA
 #define DEF_MEDIA    "/usr/local/codeselect/media"
+#endif
+/* THE OPERATOR'S COLOUR CORRECTION (PAD-307): what Settings > Color
+ * correction saves, per image device, on the card's writable /data beside the
+ * last-choice file; select.sh hands it to --apply-color at boot */
+#ifndef DEF_COLOUR_FILE
+#define DEF_COLOUR_FILE "/data/codeselect.color"
 #endif
 #ifndef CARD_FONT
 #define CARD_FONT    "/usr/local/spike/VeraMono.ttf"
@@ -120,8 +128,15 @@
  * Multi-boot preview) can lift the text from here instead of retyping it. */
 #define FOOT_START   "LEFT / RIGHT FLIPPER: choose      START: boot"
 #define FOOT_ACTION  "LEFT / RIGHT FLIPPER: choose      START or ACTION: boot"
+/* ...and the menu's own footer while the SETTINGS tile is highlighted, which
+ * opens rather than boots (PAD-307; a conf's own footer= is drawn as it is) */
+#define FOOT_SETTINGS        "LEFT / RIGHT FLIPPER: choose      START: settings"
+#define FOOT_SETTINGS_ACTION "LEFT / RIGHT FLIPPER: choose      START or ACTION: settings"
 #define PRESS_START  "press START to boot "
 #define PRESS_ACTION "press START or ACTION to boot "
+/* ...and the same line on the SETTINGS tile, which boots nothing (PAD-307) */
+#define PRESS_SETTINGS        "press START for the settings"
+#define PRESS_SETTINGS_ACTION "press START or ACTION for the settings"
 /* ...and the line across the top, which images.conf's heading= replaces. Same
  * reason it is a named constant here: the GUI offers it as the field's
  * placeholder rather than retyping it. */
@@ -136,6 +151,14 @@ struct opts {
     const char *conf, *out, *input, *nodebus, *spi, *padsw, *tables, *last, *log,
                *headless, *font, *preamble, *media, *audio, *audio_fmt, *audio_dump,
                *snapshot, *codec, *jjpio, *volume_file;
+    /* PAD-307: the values file, and the boot hook's apply step:
+     * --apply-color --image N --program PATH --to OUT */
+    const char *colour_file, *apply_program, *apply_to;
+    int apply_colour, apply_image;
+    /* --snapshot --screen settings|color [--screen-row N] [--screen-edit]:
+     * a settings screen instead of the menu (tests, the preview, screenshots) */
+    const char *screen;
+    int screen_row, screen_edit;
     int learn;        /* --input jjpio: log the cabinet bytes whenever they change */
     int timeout;      /* -1 = from conf */
     int def;          /* -1 = from conf */
@@ -217,6 +240,12 @@ static void usage(FILE *f)
         "                     with --snapshot: the highlighted card's frame (wraps), and the\n"
         "                     first of the --frames K run\n"
         "  --audio-dump FILE  raw s16le 44100 Hz stereo of everything mixed\n"
+        "  --color-file PATH  the color correction set on this machine (default " DEF_COLOUR_FILE ")\n"
+        "  --screen settings|color  --snapshot only: draw that settings screen instead of the menu,\n"
+        "                     --screen-row N highlighted (--screen-edit: being changed)\n"
+        "  --apply-color --image N --program PATH --to OUT   the boot hook's step: when the values\n"
+        "                     file sets image N's colors, write a copy of PATH with them in its\n"
+        "                     shaders to OUT; exit 0 = written, 1 = nothing to do, 2 = refused\n"
         "exit status: 0 = a choice was written, 2 = no choice\n", ANIM_MAX_FRAMES, DEF_VOLUME,
         VOLUME_CEILING);
 }
@@ -282,6 +311,9 @@ static int parse_args(struct opts *o, int argc, char **argv)
     o->pick = -1;
     o->roll_state = NULL;
     o->seed = -1;
+    o->colour_file = DEF_COLOUR_FILE;
+    o->apply_image = -1;
+    o->screen_row = -1;
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
         const char *v = i + 1 < argc ? argv[i + 1] : NULL;
@@ -306,8 +338,16 @@ static int parse_args(struct opts *o, int argc, char **argv)
         ARG("--codec", codec)
         ARG("--jjpio", jjpio)
         ARG("--volume-file", volume_file)
+        ARG("--color-file", colour_file)
+        ARG("--program", apply_program)
+        ARG("--to", apply_to)
+        ARG("--screen", screen)
 #undef ARG
         if (!strcmp(a, "--learn")) { o->learn = 1; continue; }
+        if (!strcmp(a, "--apply-color")) { o->apply_colour = 1; continue; }
+        if (!strcmp(a, "--image")) { if (!v) goto missing; o->apply_image = atoi(v); i++; continue; }
+        if (!strcmp(a, "--screen-row")) { if (!v) goto missing; o->screen_row = atoi(v); i++; continue; }
+        if (!strcmp(a, "--screen-edit")) { o->screen_edit = 1; continue; }
         if (!strcmp(a, "--timeout")) { if (!v) goto missing; o->timeout = atoi(v); i++; continue; }
         if (!strcmp(a, "--default")) { if (!v) goto missing; o->def = atoi(v); i++; continue; }
         if (!strcmp(a, "--volume")) { if (!v) goto missing; o->volume = atoi(v); i++; continue; }
@@ -379,6 +419,14 @@ missing:
             fprintf(stderr, "codeselect: %s\n", perr);
             return -1;
         }
+    }
+    if (o->apply_colour && (o->apply_image < 0 || !o->apply_program || !o->apply_to)) {
+        fprintf(stderr, "codeselect: --apply-color needs --image N, --program PATH and --to OUT\n");
+        return -1;
+    }
+    if (o->screen && !o->snapshot) {
+        fprintf(stderr, "codeselect: --screen is only used with --snapshot\n");
+        return -1;
     }
     if (o->volume > 100) o->volume = 100;
     return 0;
@@ -509,8 +557,8 @@ struct clip_cache {
  * raising that cap is free up to the point where that stops being true.  The
  * image cap is a different and much larger number that does not reach here:
  * only the boot decision and the two index files still speak in images. */
-_Static_assert(CONF_MAX_CARDS >= 1 && CONF_MAX_CARDS <= 256,
-               "CONF_MAX_CARDS sizes every per-card array in this file");
+_Static_assert(CONF_MAX_MENU >= 1 && CONF_MAX_MENU <= 257,
+               "CONF_MAX_MENU sizes every per-card array in this file");
 
 /* EVERY `image N` IN THIS FILE'S LOG IS A CARD INDEX from item 106 on.  The
  * wording is kept because the Multi-boot tab parses `anim: image N F frames`
@@ -519,15 +567,15 @@ _Static_assert(CONF_MAX_CARDS >= 1 && CONF_MAX_CARDS <= 256,
  * conf's own group lines are logged as `card K` and the boot decision as
  * `group: card K boots image N`, where `image` does mean an image. */
 struct media {
-    struct art_image *art[CONF_MAX_CARDS];
-    struct art_anim *anim[CONF_MAX_CARDS];
-    struct audio_clip *music[CONF_MAX_CARDS];
+    struct art_image *art[CONF_MAX_MENU];
+    struct art_anim *anim[CONF_MAX_MENU];
+    struct audio_clip *music[CONF_MAX_MENU];
     /* an image's OWN confirm sound (conf field 7); NULL = use ->confirm */
-    struct audio_clip *own_confirm[CONF_MAX_CARDS];
+    struct audio_clip *own_confirm[CONF_MAX_MENU];
     struct audio_clip *move, *confirm;
     /* every WAV is decoded once and shared by name: at most one music and one
      * confirm per image, plus the two menu-wide sounds */
-    struct clip_cache cache[CONF_MAX_CARDS * 2 + 2];
+    struct clip_cache cache[CONF_MAX_MENU * 2 + 2];
     int ncache;
     int n_art, n_anim, n_music, n_own_confirm, logged;
     /* EVERY animation plays, all the time (David, 2026-09-03: "all boot
@@ -535,8 +583,8 @@ struct media {
      * just when hovered)"): each keeps its own frame and the moment its
      * next one is due (sel_now_ms() values; 0 = not ticking: pinned, or
      * a still) */
-    int frame[CONF_MAX_CARDS];
-    double due[CONF_MAX_CARDS];
+    int frame[CONF_MAX_MENU];
+    double due[CONF_MAX_MENU];
     /* ticks[i]: how many times clip i has advanced since media_start.
      * paints[i]: how many of those advances reached the repaint step.  TWO
      * counters, not one, because the past-32 bug moved the frame and then
@@ -544,9 +592,11 @@ struct media {
      * right through it.  With a correct tick the two are EQUAL; a clip whose
      * ticks climb while its paints stay at 0 is animating into a panel
      * nobody is drawing, which is the bug seen from the log. */
-    int ticks[CONF_MAX_CARDS];
-    int paints[CONF_MAX_CARDS];
+    int ticks[CONF_MAX_MENU];
+    int paints[CONF_MAX_MENU];
     char dir[CONF_STR];
+    /* the SETTINGS tile's card (PAD-307), or -1: its panel shows the test card */
+    int settings_card;
 };
 
 static void media_path(const struct media *m, const char *name, char *out, int outlen)
@@ -581,6 +631,7 @@ static void media_load(struct media *m, const struct conf *c, const struct layou
 {
     int i;
     char path[CONF_STR * 2 + 2], err[300];
+    m->settings_card = c->settings_card;
     for (i = 0; i < c->ncards; i++) {
         const struct conf_image *im = conf_card_face(c, i);
         if (im->art[0]) {
@@ -640,7 +691,7 @@ static void media_check(const struct media *m, int i)
 static void media_stats(const struct media *m)
 {
     int i;
-    for (i = 0; i < CONF_MAX_CARDS; i++) {
+    for (i = 0; i < CONF_MAX_MENU; i++) {
         const struct art_anim *a = m->anim[i];
         if (!a || !a->decodes) continue;
         if (a->caching)
@@ -736,7 +787,7 @@ static void media_log(struct media *m)
 {
     int i, frames = 0;
     if (m->logged) return;
-    for (i = 0; i < CONF_MAX_CARDS; i++)
+    for (i = 0; i < CONF_MAX_MENU; i++)
         if (m->anim[i]) frames += m->anim[i]->n;
     sel_log("media: %d art, %d anim (%d frames), %d music, %d card confirm, move=%s confirm=%s",
             m->n_art, m->n_anim, frames, m->n_music, m->n_own_confirm,
@@ -747,7 +798,7 @@ static void media_log(struct media *m)
 static void media_free(struct media *m)
 {
     int i;
-    for (i = 0; i < CONF_MAX_CARDS; i++) {
+    for (i = 0; i < CONF_MAX_MENU; i++) {
         art_image_free(m->art[i]);
         art_anim_free(m->anim[i]);
     }
@@ -836,6 +887,14 @@ static void draw_panel(struct gfx *g, const struct layout *L, const struct media
     if (!L->art_h) return;
     panel_rect(L, slot, &px, &py, &pw, &ph);
     gfx_rect(g, px, py, pw, ph, on ? TH(L, CARD_HL) : TH(L, CARD));
+    /* THE SETTINGS TILE'S PICTURE is the menu gear (PAD-307; David,
+     * 2026-10-01: "it should have a default 'menu gear' icon on it"), drawn
+     * here in the card's own title colour, so it needs no file on the card */
+    if (i == m->settings_card) {
+        int r = (ph < pw ? ph : pw) * 2 / 5;
+        gfx_gear(g, px + pw / 2, py + ph / 2, r, on ? TH(L, TITLE_HL) : TH(L, TITLE));
+        return;
+    }
     pic = card_picture(m, i);
     if (pic) gfx_blit(g, px + (pw - pic->w) / 2, py + (ph - pic->h) / 2, pic->rgba, pic->w, pic->h);
 }
@@ -942,6 +1001,14 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
     if (!L->art_h) {
         /* the v1 picture, byte for byte (bar the dropped caption) */
         base = top + (int)((t.tl == 2 ? 0.36f : 0.42f) * ch);
+        /* ...except the SETTINGS tile, which has no picture panel here and
+         * carries its gear anyway: the gear in the top half, the words below */
+        if (conf_card_is_settings(c, i)) {
+            int r = (int)(0.15f * ch);
+            if (r > cw * 3 / 10) r = cw * 3 / 10;
+            gfx_gear(g, x + cw / 2, top + (int)(0.30f * ch), r, on ? TH(L, TITLE_HL) : TH(L, TITLE));
+            base = top + (int)(0.62f * ch);
+        }
         for (k = 0; k < t.tl; k++) {
             gfx_ellipsize(f, t.tpx, t.tlines[k], inner, cut, sizeof cut);
             gfx_text_center(g, f, t.tpx, x + cw / 2, base + (int)(k * t.tpx * 1.15f), cut,
@@ -1000,7 +1067,9 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
 static void card_note(const struct conf *c, int hl, int ncards, char *out, int outlen)
 {
     int nm = conf_card_nmembers(c, hl);
-    if (!c->ngroups)
+    if (conf_card_is_settings(c, hl))
+        snprintf(out, (size_t)outlen, ", card %d/%d (settings)", hl + 1, ncards);
+    else if (!c->ngroups)
         out[0] = 0;
     else if (conf_card_boots(c, hl) >= 0)
         snprintf(out, (size_t)outlen, ", card %d/%d", hl + 1, ncards);
@@ -1202,10 +1271,13 @@ static void countdown_text(char *out, int n, const char *word,
 }
 
 /* action = this title has a lockdown-bar ACTION button the menu can read; 0
- * means the footer must not promise one */
+ * means the footer must not promise one.  `boots` is the card the countdown
+ * boots: the highlighted one, except on the SETTINGS tile (PAD-307), which
+ * boots nothing - there the countdown still ends in a game, the one the menu
+ * opened on, so an unattended machine always plays. */
 static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
                       const struct conf *c, const struct media *m,
-                      int hl, int remain, int action, const char *sound_off)
+                      int hl, int boots, int remain, int action, const char *sound_off)
 {
     float s = L->s;
     int W = g->w, slot;
@@ -1275,8 +1347,10 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
      * switch table has not resolved one either - promising "START or ACTION"
      * named a button nothing on this machine is wired to. */
     {
-        const char *foot = menu_footer(c, action);
-        const char *title = conf_card_face(c, hl)->title;
+        const char *foot = conf_card_is_settings(c, hl) && !c->footer_set
+                           ? (action ? FOOT_SETTINGS_ACTION : FOOT_SETTINGS)
+                           : menu_footer(c, action);
+        const char *title = conf_card_face(c, boots)->title;
         /* "starting", not "booting" (PAD-141): the machine is already up, and
          * what the countdown ends in is the game starting.  It is the DEFAULT
          * rather than the only word since PAD-190 - countdown_word= replaces
@@ -1290,8 +1364,11 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
             gfx_ellipsize(f, fpx, foot, wmax, cut, sizeof cut);
             gfx_text_center(g, f, fpx, W / 2, (int)(662 * s), cut, TH(L, FOOTER));
         }
-        snprintf(press, sizeof press, "%s%s", action ? PRESS_ACTION : PRESS_START,
-                 title);
+        if (conf_card_is_settings(c, hl))
+            snprintf(press, sizeof press, "%s", action ? PRESS_SETTINGS_ACTION : PRESS_SETTINGS);
+        else
+            snprintf(press, sizeof press, "%s%s", action ? PRESS_ACTION : PRESS_START,
+                     title);
         /* THE SIZE COMES FROM THE LONGEST FORM THIS LINE TAKES, which is the
          * 'press ...' one for the menu's own word but can be the countdown
          * for somebody else's ("Now launching" is longer than "press START to
@@ -1453,6 +1530,57 @@ static int image_slot(const struct layout *L, int hl, int i)
     return -1;
 }
 
+/* THE CARD AN UNATTENDED MENU BOOTS when the highlight sits on the SETTINGS
+ * tile (PAD-307): the one the menu opened on, which is the last choice or the
+ * conf's default - never the tile, which boots nothing.  `opened` is that
+ * card; a tile there (only a test's --highlight-card can do it) falls back to
+ * the card of image 0. */
+static int home_card(const struct conf *c, int opened)
+{
+    int k;
+    if (!conf_card_is_settings(c, opened)) return opened;
+    k = conf_card_of_image(c, 0);
+    return k >= 0 ? k : 0;
+}
+
+/* --apply-color (PAD-307): the boot hook's step, once image N is mounted.
+ * 0 = a copy of the program with the operator's numbers was written to --to
+ * (bind it), 1 = nothing to do (the image is not adjustable, or nothing is
+ * set, or what is set is what it was built with), 2 = refused (the program
+ * keeps the colours it was built with). */
+static int apply_colour_main(const struct opts *o, const struct conf *c)
+{
+    int i = o->apply_image, n;
+    struct colour want;
+    char msg[700], vals[200];
+    if (i >= c->n) {
+        sel_say("color: image %d is not on this card (%d images)", i, c->n);
+        return 2;
+    }
+    if (!c->colour[i].set) {
+        sel_say("color: image %d (%s) has no adjustable color profile: nothing to do", i, c->img[i].title);
+        return 1;
+    }
+    if (!colour_file_get(o->colour_file, c->img[i].device, &want)) {
+        sel_say("color: image %d (%s): nothing set on this machine in %s: as built", i,
+                c->img[i].title, o->colour_file);
+        return 1;
+    }
+    if (colour_equal(&want, &c->colour[i].built)) {
+        sel_say("color: image %d (%s): what is set is what it was built with: as built", i, c->img[i].title);
+        return 1;
+    }
+    colour_format(&want, vals, sizeof vals);
+    n = colour_apply_program(o->apply_program, o->apply_to, &want, msg, sizeof msg);
+    if (n < 0) {
+        sel_say("color: image %d (%s): %s", i, c->img[i].title, msg);
+        return 2;
+    }
+    sel_say("color: image %d (%s): %s -> %s with %s: %s", i, c->img[i].title, o->apply_program,
+            o->apply_to, vals, msg);
+    return 0;
+}
+
 /* -------------------------------------------------------------- snapshot */
 
 static const char *media_dir(const struct opts *o, const struct conf *c)
@@ -1523,10 +1651,11 @@ static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx
             media_free(&media);
             return 2;
         }
-        char where[CONF_MAX_CARDS * 24 + 8];
+        char where[CONF_MAX_MENU * 24 + 8];
         int wn = 0, i;
         media_pin(&media, n, pin);
-        draw_menu(g, font, L, c, &media, hl, timeout > 0 ? timeout : -1, action, NULL);
+        draw_menu(g, font, L, c, &media, hl, conf_card_is_settings(c, hl) ? home_card(c, hl) : hl,
+                  timeout > 0 ? timeout : -1, action, NULL);
         for (i = 0; i < n; i++) media_check(&media, i);
         if (gfx_write_ppm(g, path, invert) < 0) {
             sel_say("error: cannot write %s: %s", path, strerror(errno));
@@ -1622,6 +1751,19 @@ static void present(struct gfx *g, struct egl_stern *egl, int headless, int inve
     else egl_stern_frame(egl, packed, x, y, w, h);      /* swap EVERY frame */
 }
 
+/* ...the same, for the settings screens' own loop (settings.h) */
+struct present_ctx {
+    struct gfx *g;
+    struct egl_stern *egl;
+    int headless, invert;
+};
+
+static void present_cb(void *ctx)
+{
+    struct present_ctx *p = ctx;
+    present(p->g, p->egl, p->headless, p->invert);
+}
+
 int main(int argc, char **argv)
 {
     struct opts o;
@@ -1662,6 +1804,10 @@ int main(int argc, char **argv)
     long long reaim_due = 0;
     int remain_shown = -2, dirty;
     int rc = 2;
+    /* PAD-307: the card the countdown boots from the SETTINGS tile, and the
+     * request to open the tile's screens */
+    int home = 0, open_settings = 0;
+    struct present_ctx pctx;
 
     if (parse_args(&o, argc, argv) < 0) return 2;
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -1676,6 +1822,12 @@ int main(int argc, char **argv)
     if (conf_load(&c, o.conf, err, sizeof err) < 0) {
         sel_say("error: %s", err);
         return 2;
+    }
+    if (o.apply_colour) {
+        rc = apply_colour_main(&o, &c);
+        sel_log("exit %d", rc);
+        sel_log_close();
+        return rc;
     }
     nimg = c.n;
     n = c.ncards;
@@ -1804,6 +1956,7 @@ int main(int argc, char **argv)
         if (hlimg < 0) hlimg = conf_card_member(&c, hl, 0);
         if (hlimg < 0) hlimg = 0;
     }
+    home = home_card(&c, hl);
     headless = o.headless != NULL;
     pinned = o.anim_frame >= 0;
     /* the switch list, resolved here because --snapshot needs it too: it runs
@@ -1856,6 +2009,33 @@ int main(int argc, char **argv)
             snprintf(bad, sizeof bad, ", %d colour value%s ignored", c.bad_colors, c.bad_colors == 1 ? "" : "s");
         if (!L.th_known) sel_log("theme: '%s' is not a theme, using %s", c.theme, THEME_DEFAULT);
         sel_log("theme: %s (%d of %d colours set by the conf%s)", L.th.name, L.th_set, TH_N, bad);
+    }
+    if (snapshot && o.screen) {
+        struct settings_env se;
+        char why[200];
+        memset(&se, 0, sizeof se);
+        se.g = &g;
+        se.font = font;
+        se.th = &L.th;
+        se.c = &c;
+        se.colour_file = o.colour_file;
+        se.first_image = hlimg;
+        if (settings_snapshot(&se, o.screen, o.screen_row, o.screen_edit, why, sizeof why) < 0) {
+            sel_say("error: %s", why);
+            rc = 2;
+        } else if (gfx_write_ppm(&g, o.snapshot, invert) < 0) {
+            sel_say("error: cannot write %s: %s", o.snapshot, strerror(errno));
+            rc = 2;
+        } else {
+            sel_say("snapshot: %s %dx%d, screen %s, row %d%s", o.snapshot, g.w, g.h, o.screen,
+                    o.screen_row, o.screen_edit ? " (being changed)" : "");
+            rc = 0;
+        }
+        gfx_free(&g);
+        gfx_font_free(font);
+        sel_log("exit %d", rc);
+        sel_log_close();
+        return rc;
     }
     if (snapshot) {
         rc = snapshot_frame(&o, &c, &g, font, &L, hl, hlimg, how, timeout, invert, fontpath, action);
@@ -1974,7 +2154,7 @@ int main(int argc, char **argv)
      * NEAREST THE HIGHLIGHT and follows it from here (item 109).  Not when the
      * frames are pinned: those modes need frame k exactly. */
     if (!pinned) {
-        struct art_anim *rank[CONF_MAX_CARDS];
+        struct art_anim *rank[CONF_MAX_MENU];
         char why[240];
         int k, ai;
         for (ai = 0; ai < n; ai++) if (media.anim[ai]) media.anim[ai]->idx = ai;
@@ -2019,7 +2199,8 @@ int main(int argc, char **argv)
      * modes (--anim-frame) hold them all at that frame instead */
     if (pinned) media_pin(&media, n, o.anim_frame);
     else media_start(&media, n, (double)start);
-    draw_menu(&g, font, &L, &c, &media, hl, deadline ? timeout : -1, action, audio_missing(au));
+    draw_menu(&g, font, &L, &c, &media, hl, conf_card_is_settings(&c, hl) ? home : hl,
+              deadline ? timeout : -1, action, audio_missing(au));
     remain_shown = deadline ? timeout : -1;
     dirty = 0;
     if (!headless) egl_stern_texture(&egl, w, h, gfx_pixels(&g, invert));
@@ -2090,15 +2271,49 @@ int main(int argc, char **argv)
                     move_voice = audio_play(au, media.move, 0);
                 break;
             case EV_START: case EV_ACTION: case EV_SELECT:
+                /* THE SETTINGS TILE OPENS, it never boots (PAD-307) */
+                if (conf_card_is_settings(&c, hl)) { open_settings = 1; break; }
                 chosen = hl;                        /* ACTION = the lockdown-bar button */
                 break;
             default:
                 break;                          /* BACK: ignored */
             }
             last_key = now;
-            if (chosen >= 0) break;
+            if (chosen >= 0 || open_settings) break;
         }
         if (chosen >= 0) break;
+        if (open_settings) {
+            /* THE SETTINGS SCREENS take the glass, the buttons and the move
+             * sound until the operator leaves them; no countdown runs in there,
+             * and the menu comes back with its countdown started afresh */
+            struct settings_env se;
+            memset(&se, 0, sizeof se);
+            pctx.g = &g;
+            pctx.egl = &egl;
+            pctx.headless = headless;
+            pctx.invert = invert;
+            se.g = &g;
+            se.font = font;
+            se.th = &L.th;
+            se.c = &c;
+            se.in = in;
+            se.au = au;
+            se.move = media.move;
+            se.colour_file = o.colour_file;
+            se.first_image = lastimg;
+            se.present = present_cb;
+            se.ctx = &pctx;
+            se.stop = &g_stop;
+            if (music_voice >= 0) { audio_stop(au, music_voice); music_voice = -1; music_clip = NULL; }
+            settings_run(&se);
+            open_settings = 0;
+            now = sel_now_ms();
+            last_key = now;
+            if (deadline) { start = now; deadline = now + (long long)timeout * 1000LL; }
+            remain_shown = -2;
+            dirty = 1;
+            if (g_stop) break;
+        }
         if (hl != old_hl) {
             /* WHERE THE HIGHLIGHT WENT, one line per move.  From five images
              * up the menu is a carousel of three and the highlight is the
@@ -2128,7 +2343,7 @@ int main(int argc, char **argv)
          * only the highlighted one, and a card you scroll to has to be
          * mid-loop rather than starting over. Only the FRAMES move. */
         if (reaim_due && now >= reaim_due) {
-            struct art_anim *rank[CONF_MAX_CARDS];
+            struct art_anim *rank[CONF_MAX_MENU];
             char why[240];
             int k = rank_by_distance(rank, media.anim, n, hl);
             art_cache_set(rank, k, anim_cache_budget(), why, sizeof why);
@@ -2139,8 +2354,11 @@ int main(int argc, char **argv)
             /* a key restarts the countdown so a reader is not cut off */
             if (last_key > start) { deadline = last_key + (long long)timeout * 1000LL; start = last_key; }
             if (now >= deadline) {
-                sel_log("countdown expired: booting card %d", hl + 1);
-                chosen = hl;
+                /* the SETTINGS tile boots nothing: the countdown ends in the
+                 * game the menu opened on (PAD-307) */
+                chosen = conf_card_is_settings(&c, hl) ? home : hl;
+                sel_log("countdown expired: booting card %d%s", chosen + 1,
+                        chosen != hl ? " (the settings tile is highlighted; the card the menu opened on)" : "");
                 break;
             }
             remain = (int)((deadline - now + 999) / 1000);
@@ -2163,7 +2381,7 @@ int main(int argc, char **argv)
          * the panels that moved are repainted - or none, when the whole
          * menu is about to be */
         {
-            unsigned char moved[CONF_MAX_CARDS];
+            unsigned char moved[CONF_MAX_MENU];
             int nmoved = pinned ? 0 : media_tick(&media, n, (double)now, moved);
             int i;
             for (i = 0; nmoved && i < n; i++) {
@@ -2179,7 +2397,8 @@ int main(int argc, char **argv)
         audio_pump(au, now);
 
         if (dirty) {
-            draw_menu(&g, font, &L, &c, &media, hl, remain, action, audio_missing(au));
+            draw_menu(&g, font, &L, &c, &media, hl, conf_card_is_settings(&c, hl) ? home : hl,
+                      remain, action, audio_missing(au));
             dirty = 0;
         }
         /* THE VOLUME INDICATOR, on top of whatever was just painted - an
@@ -2188,7 +2407,8 @@ int main(int argc, char **argv)
          * settled level goes to perm */
         if (osd_until && now >= osd_until) {
             osd_until = 0;
-            draw_menu(&g, font, &L, &c, &media, hl, remain, action, audio_missing(au));
+            draw_menu(&g, font, &L, &c, &media, hl, conf_card_is_settings(&c, hl) ? home : hl,
+                      remain, action, audio_missing(au));
             sel_log("volume: indicator off at %d", volume);
             /* a level no button moved is never written to perm (PAD-219) */
             if (vol_touched) remember_volume(vol_file, volume, vol_conf, &vol_saved);

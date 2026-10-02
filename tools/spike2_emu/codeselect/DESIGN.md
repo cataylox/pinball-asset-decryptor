@@ -524,6 +524,73 @@ power-ups, two different games.
 a group card for exactly that; its previous three-image menu was saved first and can be injected
 back.
 
+## The SETTINGS tile: color correction on the machine (PAD-307)
+
+David, 2026-10-01: "someone would not like the color correction that we've applied or want to
+slightly tweak it on the machine ... a settings tile at the end of the multi-boot menu ... one of
+the items would be color correction and in that they could navigate around and change the values
+and see how they are affected on the screen itself" - and then, "each game image can have its own
+color profile", "or optionally a 'set to all'".  Later the same day: "the settings section can be
+optional when setting up the multi-boot menu. and it should have a default 'menu gear' icon on it".
+
+**Optional, and on by default.**  Menu settings in the Multi-boot tab has the tick "End the menu
+with a SETTINGS card" (Stern only; `settings_tile` in the form, `--settings on|off` to
+mkmulticard, `settings=` in images.conf, recorded in build.json and read back from a card).
+Unticked, the menu never shows the card, whatever the images carry.
+
+**What the operator sees.**  The last card is SETTINGS whenever an image's game can be adjusted.
+Its picture is a menu gear the selector draws itself (`gfx_gear`: eight teeth, anti-aliased, in
+the card's title colour, so no file rides on the card): in the picture panel when the menu has
+artwork, above the words when it does not.  START on it opens a list - COLOR CORRECTION, BACK TO THE GAMES -
+and Color correction shows, per game, the Color profile tab's own controls: START FROM (As built,
+Recommended, No change, Black and white), MIDDLE SHADES and COLOR LEVEL for red, green and blue,
+COLOR STRENGTH, DARKEST SHADES; then SAVE FOR THIS GAME, SAVE FOR EVERY GAME (two or more
+adjustable images) and BACK / LEAVE WITHOUT SAVING.  A GAME row picks which image is being set.
+The right half is the tab's test card, corrected on the CPU with the same maths the shaders run,
+so a press moves the picture.  Flippers (or Service -/+) move between rows; START / ACTION (or
+Select) changes a row, and while changing, the flippers step the value - held, they repeat.
+
+**What is never in the way.**  No countdown runs inside Settings; on the tile itself the countdown
+boots the card the menu opened on (the tile boots nothing); two minutes with no press closes
+Settings without saving (`PAD_SETTINGS_IDLE_MS` for the tests).  An unattended machine always
+ends up playing.
+
+**Where the numbers live.**  The game's colours are literals in its drawing shaders (PAD-305,
+`shader_profile.py`), so a build now always writes `pad_cp` in ONE shape (`TUNABLE_TEMPLATE`, held
+to colour.c's copy by a test): every term present and every number `%.6f` of a value in [0, 10),
+eight characters.  `mkmulticard` reads each tree's game program (`tree_colour`) and writes the
+numbers it was built with as `color_profile=<image>|<gamma>|<gain>|<lift>|<saturation>|<name>`;
+that line is what makes an image adjustable and what "As built" puts back.  Saved numbers go to
+`/data/codeselect.color`, one `<device>|...` line per image (a line equal to the build's is
+removed rather than written).  A v1.60 build (its `pad_cp` leaves out terms it did not need) has
+no slot to write into and gets no line.
+
+**How they reach the game.**  `select.sh` (`own_color`, after the image is mounted and its scores
+and modes are bound) asks the selector: `codeselect --apply-color --image N --program
+/games/<title>/game --to /var/volatile/padcolor/<title>.game`.  It copies the program into RAM
+(the exec-capable tmpfs), rewrites every `pad_cp` slot in place (all or nothing: every definition
+must match the template), and the copy is bound over `<title>/game`.  Exit 1 = nothing to do,
+anything else = refused; either way the program the image was built with runs.  The games
+partition is never written, so the store's blobs, `trees.json`, the bypass record and `update`
+are untouched.  A program needs RAM for its copy (6-9 MB for most titles, 62-190 MB for four);
+less than its size + 96 MB free and the step refuses.  The rig does the same step after its bind
+(`run_game.sh`), with the card's `color_profile=` lines carried on the group lines' image-count
+gate.
+
+**Proven in the emulator, 2026-10-01** (rig slot 1, hidden and muted).  Card: `mkmulticard build
+--layout store` of stock `turtles_pro-1_59_0.Release` plus the same card with a Try it override
+set whose only change is the Recommended profile (9 of 10 shaders, the adjustable shape); the
+builder wrote `color_profile=1|1.1000 1.2000 1.3500|...|0.9000|Recommended`.  Run 1: the menu
+showed STERN STOCK, TMNT RECOMMENDED, SETTINGS; Settings > Color correction opened on image 1
+"As built"; START FROM stepped to Black and white with the test card going grey as it moved;
+SAVE wrote `p3:img1|1.0 1.0 1.0|1.0 1.0 1.0|0 0 0|0.0` to the rig's `/data`; back to the games,
+image 1 booted: `color: image 1 ... 9 color function(s) rewritten in a 6467584-byte copy`, `bound
+over /games/turtles_pro/game`, and the game's attract came up in greys (glshot), no validation
+error.  Run 2 (a power-up later): Color correction remembered Black and white; START FROM back to
+As built and SAVE removed the line; image 1 booted with `nothing set on this machine: as built`,
+no copy, no bind, attract in colour.  Teardown `alive.sh` 0 after each.  The emulator proof is the
+verification: David is not running it on the machine.
+
 ## What is deliberately NOT in the proof of concept
 
 * Per-image NVRAM snapshots (settings/scores kept apart per image). Both
