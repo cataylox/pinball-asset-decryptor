@@ -228,5 +228,5 @@ Shared core modules this plugin leans on:
 
 ## Related docs
 
-- [Project README](../../README.md) — PB summary row ([README.md:69](../../README.md#L69)), prereqs table ([README.md:338](../../README.md#L338)), and "add a manufacturer" guide that uses `plugins/pb/` as the reference template ([README.md:435](../../README.md#L435)).
+- [Project README](../../README.md) — PB summary row; prerequisites in [the install guide](../guide/install.md#per-manufacturer-prerequisites), and the "add a manufacturer" guide that uses `plugins/pb/` as the reference template in [Development](../development.md#adding-a-new-manufacturer-plugin).
 - [`docs/AP_PKG_RE.md`](../AP_PKG_RE.md) and [`docs/CGC_BNK_RE.md`](../CGC_BNK_RE.md) — sibling format reverse-engineering notes (other plugins; useful for contrast). PB has no comparable RE doc because its `.upd` format needs none (plain gzip+tar).
