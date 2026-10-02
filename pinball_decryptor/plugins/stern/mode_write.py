@@ -1578,6 +1578,8 @@ def _settings_only_reason(kept, now):
         if not isinstance(a, dict) or not isinstance(b, dict):
             return "a mode's file does not read"
         diff = {k for k in set(a) | set(b) if a.get(k) != b.get(k)}
+        if not a.get("screen_layout") and not b.get("screen_layout"):
+            diff.discard("screen_layout")     # PAD-323: a file saved before it had none = {}
         if diff - SETTINGS_ONLY_FIELDS:
             return "a mode's screen, clip, sound or name changed"
         if diff & _SETTINGS_ONLY_UNLESS_MUSIC and (a.get("music") or b.get("music")):
