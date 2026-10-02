@@ -10,6 +10,7 @@ parser reads differently is exactly the bug this guards against.
 
 import importlib.util
 import pathlib
+import re
 import sys
 
 import pytest
@@ -226,6 +227,51 @@ def test_scripts_are_lf_and_source_the_path_file(script):
         assert b'pbpath.sh"' in raw
 
 
+def test_the_game_loads_nothing_from_the_rigs_own_folder():
+    """An installed app's rig is /mnt/c/Program Files/...: the launch line is
+    word-split and LD_PRELOAD is a space-separated list, so the shim's path
+    broke at its spaces - env ran "Files/Pinball" and Predator never started
+    on any installed copy (PAD-313).  The shim is copied into the slot's
+    folder and preloaded from there."""
+    src = (RIG / "run_game.sh").read_text()
+    for line in src.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        for m in re.finditer(r'LD_(?:PRELOAD|LIBRARY_PATH)="?(\S+)', line):
+            assert not re.search(r"\$\{?(PB_TOOLS|PB_SHIM|HERE)\b", m.group(1)), line
+    assert 'cp "$PB_SHIM" "$PB_RIG/pbshim.so"' in src
+    assert "LD_PRELOAD=$PB_RIG/pbshim.so" in src
+
+
+def test_the_shim_unlocks_memory_so_the_game_has_sound():
+    """pinprog's mlockall(MCL_FUTURE) made PulseAudio's shared-memory pool
+    fail with EAGAIN under PAD-Runtime's 64 MB memlock limit: no sound at
+    all (PAD-313).  The shim makes it a no-op."""
+    src = (RIG / "pbshim.c").read_text()
+    assert re.search(r"int mlockall\(int flags\) \{\s*\(void\)flags;\s*return 0;", src)
+
+
+def test_a_desktop_run_gets_a_window_that_moves_and_scales():
+    """vidprog asks SDL for a BORDERLESS 1920x1080 window - a slab with no
+    title bar on the desktop (PAD-313).  A visible run sets PB_WINDOWED, the
+    shim drops BORDERLESS/FULLSCREEN, makes it resizable at a size that fits,
+    and scales the game's 1920x1080 picture into it; a hidden run is left
+    exactly as the machine makes it."""
+    src = (RIG / "pbshim.c").read_text()
+    assert "SDL_CreateWindow" in src and "SDL_RenderSetLogicalSize" in src
+    assert "PB_SDL_BORDERLESS" in src and "PB_SDL_RESIZABLE" in src
+    run = (RIG / "run_game.sh").read_text()
+    assert "PB_WINDOWED=${PB_WINDOWED:-$VISIBLE}" in run
+
+
+def test_a_failed_start_shows_the_games_last_words():
+    """`tail -20 a b` is refused ("option used in invalid context"), so a
+    start that failed said only "did not reach attract" - not why (PAD-313)."""
+    src = (RIG / "run_game.sh").read_text()
+    assert not re.search(r'tail -\d+ "[^"]*" "', src)
+    assert "pinprog.out" in src.split("did not reach attract", 1)[1]
+
+
 def test_kills_are_filtered_by_this_rigs_mark():
     """pbio_emu (PAD-272) runs programs with the SAME names (pinprog,
     vidprog) as the same user: a bare pkill would stop its games."""
@@ -349,3 +395,11 @@ def test_a_tap_from_the_window_is_held_long_enough_for_the_debounce():
     e.press(5, 1)
     run_timers(e)
     assert e.switches[5] == 1
+
+
+def test_the_game_window_gets_the_playfield_keys():
+    """PAD-313: on the desktop run_game.sh starts the shared game-window key
+    listener, which finds the game's windows by this rig's mark."""
+    run = (RIG / "run_game.sh").read_text()
+    assert "ap_emu/gamekeys.py" in run and '--mark "PB_MARK=$PB_RIG"' in run
+    assert "PAD_GAMEKEYS:-$VISIBLE" in run

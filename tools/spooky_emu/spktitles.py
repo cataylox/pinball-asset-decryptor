@@ -67,6 +67,10 @@ TITLES = {
         "name": "Beetlejuice", "engine": "unity", "layout": "flat",
         "attract": "Attract_mode started",
         "factory_defaults": "beetlejuice_factory_defaults.json",
+        # Keys the game's own window already acts on (its desktop mode:
+        # Enter starts, Space launches, the arrows flip) - the game-window
+        # key listener (ap_emu/gamekeys.py) leaves them to it (PAD-313).
+        "own_keys": ["Enter", "NumpadEnter", "Space", "ArrowLeft", "ArrowRight"],
         "trough": [7, 6, 5, 4, 3, 1, 0], "jam": 2, "shooter": 8,
         "eject": [51], "launch": {54: 8}, "balls": 6,
         # Beyond the trough: the scoop, ramp and subway optos.

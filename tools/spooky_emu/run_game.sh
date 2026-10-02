@@ -62,7 +62,14 @@ bash "$SPK_TOOLS/killgame.sh" >/dev/null 2>&1
 
 rm -rf "$SPK_RIG"
 G=$SPK_RIG/game
-mkdir -p "$SPK_RIG"/{logs,tmp,media,backup,update,bin}
+mkdir -p "$SPK_RIG"/{logs,tmp,media,backup,update,bin,lib}
+# The shim and the Godot titles' libXinerama stub are loaded from this slot's
+# folder, never from the rig's: an installed app's rig is /mnt/c/Program
+# Files/..., and both the launch line below (word-split) and LD_PRELOAD
+# itself (a space-separated list) break a path at its spaces - env ran
+# "Files/Pinball" and the game never started (PAD-313).
+cp "$SPK_SHIM" "$SPK_RIG/spkshim.so"
+cp "$SPK_TOOLS"/lib/* "$SPK_RIG/lib/" 2>/dev/null
 cp -al "$(realpath "$BUILD")" "$G"
 UPTEST=$G; [ "$LAYOUT" = code ] && UPTEST=$G/uptest
 # Settings, audits, high scores and the game's home outlive a run, as on a
@@ -146,7 +153,7 @@ fi
 LIBS=
 if [ "$ENGINE" = godot ]; then
     # Godot 4.1 will not start without a libXinerama (xinerama_stub.c).
-    ldconfig -p | grep -q 'libXinerama\.so\.1 ' || LIBS="LD_LIBRARY_PATH=$SPK_TOOLS/lib"
+    ldconfig -p | grep -q 'libXinerama\.so\.1 ' || LIBS="LD_LIBRARY_PATH=$SPK_RIG/lib"
     # The project asks for Vulkan (Forward+); the compatibility renderer
     # runs on Mesa's OpenGL (the GPU through d3d12, below, or llvmpipe).
     # Its log is stdout.
@@ -193,7 +200,7 @@ cd /game/code/uptest || exit 1
 exec runuser -u $SPK_USER -- env -i PATH=$SPK_RIG/bin:/usr/local/bin:/usr/bin:/bin \\
     HOME=$NV/home USER=$SPK_USER LANG=C.UTF-8 DISPLAY=$DISP $AUDIO_ENV \\
     SPK_MARK=$SPK_RIG LP_NUM_THREADS=${SPK_LP_THREADS:-4} $GL_ENV \\
-    SPK_WARDEN=$TTY LD_PRELOAD=$SPK_SHIM $LIBS \\
+    SPK_WARDEN=$TTY LD_PRELOAD=$SPK_RIG/spkshim.so $LIBS \\
     $RUN
 EOF
 # Detached whole (setsid -f, stdin closed): a child of runuser dies with the
@@ -224,8 +231,24 @@ done
 if spk_game_alive && spk_attract; then
     echo "Ready: $(basename "$BUILD"), slot $SPK_SLOT, display $DISP"
     rigboard_post spooky "$SPK_SLOT" "$(spk_game_pid)" "$(basename "$BUILD")" "${PAD_TITLE:-$(tget name)}" "$VISIBLE" "$AUDIO"
+    # The playfield window's keys in the game's own window too (PAD-313),
+    # except the keys the game already acts on there (spktitles own_keys):
+    # on the desktop (PAD_GAMEKEYS=1 forces it on a hidden run, for tests).
+    # It ends with the game.
+    if [ "${PAD_GAMEKEYS:-$VISIBLE}" = 1 ]; then
+        setsid -f python3 -u "$SPK_TOOLS/../ap_emu/gamekeys.py" --display "$DISP" \
+            --mark "SPK_MARK=$SPK_RIG" --sock "$SPK_RIG/ctl.sock" \
+            --pidfile "$SPK_RIG/game.pid" --table "$SPK_RIG/switches.json" \
+            --skip "$(tget own_keys 2>/dev/null)" \
+            < /dev/null > "$SPK_RIG/gamekeys.log" 2>&1
+    fi
 else
     echo "run_game.sh: the game did not reach attract:" >&2
-    tail -20 "$SPK_RIG/player.log" "$SPK_RIG/warden.log" "$SPK_RIG/game.out" >&2 2>/dev/null
+    # each log on its own: `tail -20 a b` is refused outright ("option used
+    # in invalid context") and printed nothing at all (PAD-313)
+    for f in "$SPK_RIG/player.log" "$SPK_RIG/warden.log" "$SPK_RIG/warden.out" \
+             "$SPK_RIG/game.out"; do
+        [ -s "$f" ] && { echo "--- $(basename "$f")"; tail -n 20 "$f"; }
+    done >&2
     exit 1
 fi

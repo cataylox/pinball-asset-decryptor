@@ -46,6 +46,11 @@ TITLE=$(basename "$PROFILE" .json)
 HOMEDIR=$BOF_HOMES/$TITLE
 rm -rf "$BOF_RIG"
 mkdir -p "$BOF_RIG/bin" "$BOF_RIG/hw" "$HOMEDIR"
+# The shim is preloaded from this slot's folder, never from the rig's: an
+# installed app's rig is /mnt/c/Program Files/..., and LD_PRELOAD is a
+# space-separated list - ld.so tried "/mnt/c/Program", "Files/Pinball"...,
+# ignored them all, and the game never found its boards (PAD-313).
+cp "$BOF_SHIM" "$BOF_RIG/bofhwshim.so"
 echo "$BIN" > "$BOF_RIG/binary"
 echo "$TITLE" > "$BOF_RIG/title"
 echo "$VISIBLE" > "$BOF_RIG/visible"
@@ -120,7 +125,7 @@ setsid -f runuser -u "$BOF_USER" -- env -i \
     HOME="$HOMEDIR" USER="$BOF_USER" LANG=C.UTF-8 \
     DISPLAY="$DISP" XDG_RUNTIME_DIR="$BOF_RIG" $AUDIO_ENV \
     BOFEMU_LOG_DIR="$BOF_RIG" GODOT_SILENCE_ROOT_WARNING=1 \
-    LD_PRELOAD="$BOF_SHIM" BOFHW_DEV="$BOF_RIG/hw/dev" BOFHW_SYS="$BOF_RIG/hw/sys" \
+    LD_PRELOAD="$BOF_RIG/bofhwshim.so" BOFHW_DEV="$BOF_RIG/hw/dev" BOFHW_SYS="$BOF_RIG/hw/sys" \
     "$BIN" --display-driver x11 --rendering-method gl_compatibility \
         --audio-driver $AUDIO_ARG < /dev/null > "$BOF_RIG/game.log" 2>&1
 for _ in $(seq 1 50); do
@@ -131,6 +136,16 @@ done
 [ -n "${GP:-}" ] || { echo "run_game.sh: the game did not start:" >&2; tail -20 "$BOF_RIG/game.log" >&2; exit 4; }
 echo "$GP" > "$BOF_RIG/game.pid"
 rigboard_post bof "$BOF_SLOT" "$GP" "$TITLE" "${PAD_TITLE:-}" "$VISIBLE" "$AUDIO"
+# The playfield window's keys in the game's own window too (PAD-313): on the
+# desktop (PAD_GAMEKEYS=1 forces it on a hidden run, for tests).  The game's
+# environment carries BOFEMU_LOG_DIR=<this rig>, its mark.  It ends with the
+# game.
+if [ "${PAD_GAMEKEYS:-$VISIBLE}" = 1 ]; then
+    setsid -f python3 -u "$BOF_TOOLS/../ap_emu/gamekeys.py" --display "$DISP" \
+        --mark "BOFEMU_LOG_DIR=$BOF_RIG" --sock "$BOF_RIG/hw/ctl.sock" \
+        --pidfile "$BOF_RIG/game.pid" --bof-profile "$TITLE" \
+        < /dev/null > "$BOF_RIG/gamekeys.log" 2>&1
+fi
 echo "pid=$GP"
 echo "display=$DISP"
 [ $DETACH = 1 ] && exit 0

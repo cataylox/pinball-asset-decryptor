@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import sys
 
 import pytest
@@ -551,7 +552,7 @@ def test_the_ap_window_serves_beetlejuice(monkeypatch):
     assert rig.cmd[-2].endswith("tools/spooky_emu/ctl.sh")
 
 
-def test_the_window_says_its_keys_are_its_own(monkeypatch):
+def test_the_window_says_its_keys_work_in_the_game_window_too(monkeypatch):
     monkeypatch.delenv("SPK_TITLE", raising=False)
     appf = _import_rig("appf")
     spkpf = _import_rig("spkpf")
@@ -561,8 +562,10 @@ def test_the_window_says_its_keys_are_its_own(monkeypatch):
         def ask(self, line):
             return None
     spec = spkpf.App(t, Pipe(), "", "Beetlejuice").state("main")["panel"]["spec"]
-    assert spec["where"] == "works in this window"
-    # the AP window itself keeps the page's default
+    # the game-window listener gives the game's window these keys too
+    # (PAD-313), so the page keeps its default "works here and in the game
+    # window", as the AP window does
+    assert "where" not in spec
     assert "where" not in appf.App(t, Pipe(), "", "x").state("main")["panel"]["spec"]
     # the flippers' end-of-stroke switches take no letter
     keyed = {n for r in t["rows"] if r["keys"] for n in r["ns"]}
@@ -681,3 +684,39 @@ def test_pinotaur_coils_on_is_attract_and_lights_are_kept(pino, tmp_path):
     assert st["leds_lit"] == 3 and st["board"] == "pinotaur"
     assert st["power"]["flippers"] == 1 and st["gi"] == {"3": 1}
     assert st["opcodes"]["48"] == 1
+
+
+# ------------------------------------------ an installed copy (PAD-313)
+def test_the_game_loads_nothing_from_the_rigs_own_folder():
+    """An installed app's rig is /mnt/c/Program Files/...: the launch line is
+    word-split and LD_PRELOAD / LD_LIBRARY_PATH are space-separated lists, so
+    the shim's path broke at its spaces - env ran "Files/Pinball" and
+    Beetlejuice never started on any installed copy (PAD-313).  The shim and
+    the libXinerama stub are copied into the slot's folder and loaded there."""
+    src = (RIG / "run_game.sh").read_text()
+    for line in src.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        for m in re.finditer(r'LD_(?:PRELOAD|LIBRARY_PATH)="?(\S+)', line):
+            assert not re.search(r"\$\{?(SPK_TOOLS|SPK_SHIM|HERE)\b", m.group(1)), line
+    assert 'cp "$SPK_SHIM" "$SPK_RIG/spkshim.so"' in src
+    assert "LD_PRELOAD=$SPK_RIG/spkshim.so" in src
+    assert "LD_LIBRARY_PATH=$SPK_RIG/lib" in src
+
+
+def test_a_failed_start_shows_the_games_last_words():
+    """`tail -20 a b` is refused ("option used in invalid context"), so a
+    start that failed said only "did not reach attract" - not why (PAD-313)."""
+    src = (RIG / "run_game.sh").read_text()
+    assert not re.search(r'tail -\d+ "[^"]*" "', src)
+    assert "game.out" in src.split("did not reach attract", 1)[1]
+
+
+def test_the_game_window_gets_the_playfield_keys_but_not_the_games_own():
+    """PAD-313: run_game.sh starts the shared game-window key listener on
+    the desktop, and Beetlejuice's own desktop keys stay the game's."""
+    run = (RIG / "run_game.sh").read_text()
+    assert "ap_emu/gamekeys.py" in run and '--mark "SPK_MARK=$SPK_RIG"' in run
+    assert "PAD_GAMEKEYS:-$VISIBLE" in run and "tget own_keys" in run
+    titles = _import_rig("spktitles").TITLES
+    assert set(titles["bj"]["own_keys"]) >= {"Enter", "Space", "ArrowLeft", "ArrowRight"}

@@ -39,15 +39,11 @@ class Rig(appf.Rig):
 
 
 class App(appf.App):
-    """appf's host, with one difference the page shows: a Spooky game's own
-    window keeps the game's built-in keys (Beetlejuice's: Enter starts,
-    Space launches, the arrows flip), so this window's keys work in this
-    window only."""
-
-    def _panel_spec(self):
-        spec = super()._panel_spec()
-        spec["where"] = "works in this window"
-        return spec
+    """appf's host.  A Spooky game's own window keeps the game's built-in
+    keys (Beetlejuice's: Enter starts, Space launches, the arrows flip); since
+    PAD-313 the rig's game-window listener (tools/ap_emu/gamekeys.py) adds
+    this window's other keys there, so the page's default "works here and in
+    the game window" is true."""
 
 
 def serve(table, distro="", slot="0", audio_ctl="", title=""):

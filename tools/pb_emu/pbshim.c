@@ -13,8 +13,21 @@
  *                                   would hide the rig's Xvfb, whose only
  *                                   socket in PAD-Runtime is abstract)
  *
- * plus one behaviour fix: a pty refuses the modem-line ioctls (DTR/RTS), which
- * a USB CDC port accepts; those report success.
+ * plus three behaviour fixes:
+ *
+ *   - a pty refuses the modem-line ioctls (DTR/RTS), which a USB CDC port
+ *     accepts; those report success.
+ *   - mlockall() is a no-op.  pinprog locks all its memory, present and
+ *     FUTURE, as a real-time cabinet program; under an ordinary user's
+ *     RLIMIT_MEMLOCK every later mmap then fails with EAGAIN - PulseAudio's
+ *     shared-memory pool among them ("mmap() failed: Resource temporarily
+ *     unavailable"), so SDL_mixer opened no sound and the game was silent
+ *     (PAD-313).
+ *   - on the desktop (PB_WINDOWED=1, run_game.sh --visible) vidprog's window
+ *     gets a title bar: its SDL_CreateWindow flags lose BORDERLESS and
+ *     FULLSCREEN and gain RESIZABLE, and it opens near the top left.  The
+ *     cabinet's borderless 1920x1080 slab could not be moved (PAD-313).  A
+ *     hidden run keeps the window exactly as the machine makes it.
  *
  * Nothing needs a glibc newer than 2.34 (build.sh proves it); the game needs
  * 2.39.
@@ -132,6 +145,84 @@ int ioctl(int fd, unsigned long req, ...) {
     if (r < 0 && isatty(fd) && req == TIOCMGET && arg) {
         *(int *)arg = TIOCM_DTR | TIOCM_RTS | TIOCM_CTS | TIOCM_DSR;
         return 0;
+    }
+    return r;
+}
+
+/* No memory locking on a PC: see the header (the game's sound). */
+int mlockall(int flags) {
+    (void)flags;
+    return 0;
+}
+
+/* SDL2's window and renderer calls, without SDL's headers.  Flag values
+ * from SDL_video.h (stable ABI across SDL 2.x).
+ *
+ * On the desktop the window gets a title bar, opens near the top left at
+ * PB_WIN_W x PB_WIN_H (default 1280x720, so it fits a 1080p screen with its
+ * title bar) and can be resized: vidprog draws in 1920x1080 coordinates with
+ * no logical size of its own, so the renderer is given the game's size as
+ * its logical size and SDL scales the picture to whatever the window is. */
+typedef struct SDL_Window SDL_Window;
+typedef struct SDL_Renderer SDL_Renderer;
+#define PB_SDL_FULLSCREEN         0x00000001u
+#define PB_SDL_FULLSCREEN_DESKTOP 0x00001001u
+#define PB_SDL_BORDERLESS         0x00000010u
+#define PB_SDL_RESIZABLE          0x00000020u
+SDL_Window *SDL_CreateWindow(const char *title, int x, int y, int w, int h,
+                             unsigned int flags);
+SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, int index,
+                                 unsigned int flags);
+
+static int pb_windowed(void) {
+    const char *v = getenv("PB_WINDOWED");
+    return v && v[0] == '1';
+}
+
+static int pb_env_int(const char *name, int dflt) {
+    /* by hand: atoi/strtol pull in glibc 2.38's __isoc23_strtol (build.sh) */
+    const char *v = getenv(name);
+    int n = 0;
+    for (; v && *v >= '0' && *v <= '9' && n < 100000; v++) n = n * 10 + (*v - '0');
+    return n > 0 ? n : dflt;
+}
+
+/* the game's own drawing size, from its window call */
+static int game_w, game_h;
+
+SDL_Window *SDL_CreateWindow(const char *title, int x, int y, int w, int h,
+                             unsigned int flags) {
+    REAL(SDL_CreateWindow);
+    if (!real_SDL_CreateWindow) return NULL;
+    if (pb_windowed()) {
+        unsigned int was = flags;
+        flags &= ~(PB_SDL_FULLSCREEN_DESKTOP | PB_SDL_FULLSCREEN | PB_SDL_BORDERLESS);
+        flags |= PB_SDL_RESIZABLE;
+        game_w = w;
+        game_h = h;
+        x = 40;
+        y = 40;
+        w = pb_env_int("PB_WIN_W", 1280);
+        h = pb_env_int("PB_WIN_H", 720);
+        fprintf(stderr, "pbshim: window \"%s\" %dx%d flags 0x%x -> %dx%d flags 0x%x "
+                "(windowed)\n", title ? title : "", game_w, game_h, was, w, h, flags);
+    }
+    return real_SDL_CreateWindow(title, x, y, w, h, flags);
+}
+
+SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, int index,
+                                 unsigned int flags) {
+    REAL(SDL_CreateRenderer);
+    if (!real_SDL_CreateRenderer) return NULL;
+    SDL_Renderer *r = real_SDL_CreateRenderer(window, index, flags);
+    if (r && pb_windowed() && game_w > 0 && game_h > 0) {
+        int (*logical)(SDL_Renderer *, int, int) =
+            (int (*)(SDL_Renderer *, int, int))dlsym(RTLD_NEXT, "SDL_RenderSetLogicalSize");
+        if (logical) {
+            int rc = logical(r, game_w, game_h);
+            fprintf(stderr, "pbshim: renderer logical size %dx%d (%d)\n",
+                    game_w, game_h, rc);
+        }
     }
     return r;
 }
