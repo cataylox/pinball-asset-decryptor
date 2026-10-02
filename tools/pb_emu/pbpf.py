@@ -41,13 +41,9 @@ class Rig(appf.Rig):
 
 class App(appf.App):
     """appf's host.  The game's own window has no keys of its own (on the
-    machine every input is a switch), so this window's keys work in this
-    window only."""
-
-    def _panel_spec(self):
-        spec = super()._panel_spec()
-        spec["where"] = "works in this window"
-        return spec
+    machine every input is a switch); since PAD-313 the rig's game-window
+    listener (tools/ap_emu/gamekeys.py) gives it this window's keys, so the
+    page's default "works here and in the game window" is true."""
 
 
 def serve(table, distro="", slot="0", audio_ctl="", title=""):

@@ -552,7 +552,7 @@ def test_the_ap_window_serves_beetlejuice(monkeypatch):
     assert rig.cmd[-2].endswith("tools/spooky_emu/ctl.sh")
 
 
-def test_the_window_says_its_keys_are_its_own(monkeypatch):
+def test_the_window_says_its_keys_work_in_the_game_window_too(monkeypatch):
     monkeypatch.delenv("SPK_TITLE", raising=False)
     appf = _import_rig("appf")
     spkpf = _import_rig("spkpf")
@@ -562,8 +562,10 @@ def test_the_window_says_its_keys_are_its_own(monkeypatch):
         def ask(self, line):
             return None
     spec = spkpf.App(t, Pipe(), "", "Beetlejuice").state("main")["panel"]["spec"]
-    assert spec["where"] == "works in this window"
-    # the AP window itself keeps the page's default
+    # the game-window listener gives the game's window these keys too
+    # (PAD-313), so the page keeps its default "works here and in the game
+    # window", as the AP window does
+    assert "where" not in spec
     assert "where" not in appf.App(t, Pipe(), "", "x").state("main")["panel"]["spec"]
     # the flippers' end-of-stroke switches take no letter
     keyed = {n for r in t["rows"] if r["keys"] for n in r["ns"]}
@@ -708,3 +710,13 @@ def test_a_failed_start_shows_the_games_last_words():
     src = (RIG / "run_game.sh").read_text()
     assert not re.search(r'tail -\d+ "[^"]*" "', src)
     assert "game.out" in src.split("did not reach attract", 1)[1]
+
+
+def test_the_game_window_gets_the_playfield_keys_but_not_the_games_own():
+    """PAD-313: run_game.sh starts the shared game-window key listener on
+    the desktop, and Beetlejuice's own desktop keys stay the game's."""
+    run = (RIG / "run_game.sh").read_text()
+    assert "ap_emu/gamekeys.py" in run and '--mark "SPK_MARK=$SPK_RIG"' in run
+    assert "PAD_GAMEKEYS:-$VISIBLE" in run and "tget own_keys" in run
+    titles = _import_rig("spktitles").TITLES
+    assert set(titles["bj"]["own_keys"]) >= {"Enter", "Space", "ArrowLeft", "ArrowRight"}

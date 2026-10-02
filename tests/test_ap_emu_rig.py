@@ -639,3 +639,61 @@ def test_apquit_wraps_the_one_event_call_apiav_makes():
     src = (RIG / "apquit.c").read_text()
     assert "int SDL_PollEvent(SDL_Event *event)" in src
     assert "SDL_WINDOWEVENT_CLOSE" in src and "SDL_QUIT" in src and "RTLD_NEXT" in src
+
+
+# ------------------------------------------- the game-window keys (PAD-313)
+gamekeys = _load("gamekeys", RIG / "gamekeys.py")
+
+
+class _Board:
+    def __init__(self):
+        self.sent = []
+
+    def ask(self, line):
+        self.sent.append(line)
+        return "ok"
+
+
+def test_x_keysyms_become_the_keymaps_codes():
+    c = gamekeys.code_of
+    assert (c(0x61), c(0x5a), c(0x31), c(0x20)) == ("KeyA", "KeyZ", "Digit1", "Space")
+    assert (c(0xff51), c(0xff53), c(0xff0d), c(0xff8d)) == (
+        "ArrowLeft", "ArrowRight", "Enter", "NumpadEnter")
+    assert (c(0x2d), c(0x3d), c(0xff08), c(0xff13), c(0xffc6)) == (
+        "Minus", "Equal", "Backspace", "Pause", "F9")
+    assert (c(0xffe1), c(0x2f), c(0xffb5)) == ("ShiftLeft", "Slash", "Numpad5")
+    assert c(0x1234) == ""
+
+
+def test_a_held_key_holds_its_switches_once_and_lets_go():
+    board = _Board()
+    k = gamekeys.Keys([{"codes": ["ArrowLeft"], "ns": [8, 9], "action": None},
+                       {"codes": ["KeyF"], "ns": [], "action": "plunge"},
+                       {"codes": ["Pause"], "ns": [], "action": "pause"}],
+                      board, say=lambda t: None)
+    assert k.key("ArrowLeft", True) and k.key("ArrowLeft", True)   # repeat
+    assert board.sent == ["sw 8 1", "sw 9 1"]
+    k.key("ArrowLeft", False)
+    assert board.sent[2:] == ["sw 8 0", "sw 9 0"]
+    k.key("KeyF", True), k.key("KeyF", True), k.key("KeyF", False)
+    k.key("Pause", True), k.key("Pause", False), k.key("Pause", True)
+    assert board.sent[4:] == ["plunge", "pause 1", "pause 0"]
+    assert not k.key("KeyQ", True)
+
+
+def test_losing_focus_lets_every_key_go_and_the_games_own_keys_are_skipped():
+    board = _Board()
+    k = gamekeys.Keys([{"codes": ["Enter"], "ns": [91], "action": None},
+                       {"codes": ["Digit1"], "ns": [87], "action": None}],
+                      board, skip=["Enter"], say=lambda t: None)
+    assert not k.key("Enter", True)
+    k.key("Digit1", True)
+    k.release_all()
+    assert board.sent == ["sw 87 1", "sw 87 0"]
+
+
+def test_the_listener_finds_the_games_windows_by_the_rigs_mark(tmp_path):
+    assert gamekeys.marked(os.getpid(), "PAD_NO_SUCH_MARK=1") is False
+    assert gamekeys.alive(str(tmp_path / "none.pid")) is False
+    (tmp_path / "me.pid").write_text(str(os.getpid()))
+    assert gamekeys.alive(str(tmp_path / "me.pid")) == os.path.exists("/proc")

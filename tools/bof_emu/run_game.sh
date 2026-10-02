@@ -136,6 +136,16 @@ done
 [ -n "${GP:-}" ] || { echo "run_game.sh: the game did not start:" >&2; tail -20 "$BOF_RIG/game.log" >&2; exit 4; }
 echo "$GP" > "$BOF_RIG/game.pid"
 rigboard_post bof "$BOF_SLOT" "$GP" "$TITLE" "${PAD_TITLE:-}" "$VISIBLE" "$AUDIO"
+# The playfield window's keys in the game's own window too (PAD-313): on the
+# desktop (PAD_GAMEKEYS=1 forces it on a hidden run, for tests).  The game's
+# environment carries BOFEMU_LOG_DIR=<this rig>, its mark.  It ends with the
+# game.
+if [ "${PAD_GAMEKEYS:-$VISIBLE}" = 1 ]; then
+    setsid -f python3 -u "$BOF_TOOLS/../ap_emu/gamekeys.py" --display "$DISP" \
+        --mark "BOFEMU_LOG_DIR=$BOF_RIG" --sock "$BOF_RIG/hw/ctl.sock" \
+        --pidfile "$BOF_RIG/game.pid" --bof-profile "$TITLE" \
+        < /dev/null > "$BOF_RIG/gamekeys.log" 2>&1
+fi
 echo "pid=$GP"
 echo "display=$DISP"
 [ $DETACH = 1 ] && exit 0

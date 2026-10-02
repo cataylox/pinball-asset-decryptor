@@ -231,6 +231,17 @@ done
 if spk_game_alive && spk_attract; then
     echo "Ready: $(basename "$BUILD"), slot $SPK_SLOT, display $DISP"
     rigboard_post spooky "$SPK_SLOT" "$(spk_game_pid)" "$(basename "$BUILD")" "${PAD_TITLE:-$(tget name)}" "$VISIBLE" "$AUDIO"
+    # The playfield window's keys in the game's own window too (PAD-313),
+    # except the keys the game already acts on there (spktitles own_keys):
+    # on the desktop (PAD_GAMEKEYS=1 forces it on a hidden run, for tests).
+    # It ends with the game.
+    if [ "${PAD_GAMEKEYS:-$VISIBLE}" = 1 ]; then
+        setsid -f python3 -u "$SPK_TOOLS/../ap_emu/gamekeys.py" --display "$DISP" \
+            --mark "SPK_MARK=$SPK_RIG" --sock "$SPK_RIG/ctl.sock" \
+            --pidfile "$SPK_RIG/game.pid" --table "$SPK_RIG/switches.json" \
+            --skip "$(tget own_keys 2>/dev/null)" \
+            < /dev/null > "$SPK_RIG/gamekeys.log" 2>&1
+    fi
 else
     echo "run_game.sh: the game did not reach attract:" >&2
     # each log on its own: `tail -20 a b` is refused outright ("option used

@@ -1682,8 +1682,8 @@ HELP_CONTENT = {
          "ball resting in a scoop); right-click to latch it until you "
          "right-click again. Plunge puts the ball in the shooter lane into "
          "play, Drain sends one back to the trough, and Coin door opens or "
-         "closes it. With that window focused, Z and / (or the Shift keys) "
-         "are the flippers, 1 is Start, 5 a coin, Space Launch, P Plunge and "
+         "closes it. With that window or the game's own window focused, Z "
+         "and / (or the Shift keys) are the flippers, 1 is Start, 5 a coin, Space Launch, P Plunge and "
          "D Drain. Closed it? \"Switches window\" on this tab brings it "
          "back. The game's own window can be moved and resized like any "
          "other; the picture scales to fit."),
@@ -1788,8 +1788,9 @@ HELP_CONTENT = {
          "5 a coin, Space the Launch button, Down the Action button, T tilt, "
          "the letters beside the playfield switches press them, F plunges, D "
          "drains, Backspace, -, = and Enter are the service buttons, and "
-         "Pause or F9 freezes the game. The game's own window has its own "
-         "keys: Enter starts, Space launches, the arrows flip. Closed the "
+         "Pause or F9 freezes the game. The same keys work in the game's own "
+         "window, except the ones the game uses there itself: Enter starts, "
+         "Space launches, the arrows flip. Closed the "
          "playfield? \"Playfield window\" beside Stop brings it back."),
         ("Volume",
          "Volume and Mute on this tab (and the VOL bar in the playfield "
@@ -1843,8 +1844,8 @@ HELP_CONTENT = {
          "spinning). There is no ball physics: Start serves a ball to the "
          "shooter lane, the Launch button (Space) fires it into play, you "
          "press the switches it would hit, and Drain sends it back to the "
-         "trough. With that window focused, the arrow keys are the "
-         "flippers, 1 is Start, 5 a coin, Space the Launch button, T tilt, "
+         "trough. With that window or the game's own window focused, the "
+         "arrow keys are the flippers, 1 is Start, 5 a coin, Space the Launch button, T tilt, "
          "the letters beside the playfield switches press them, F plunges, "
          "D drains, Backspace, -, = and Enter are the coin door's buttons, "
          "and Pause or F9 freezes the game. Closed the playfield? "

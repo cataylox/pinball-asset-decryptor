@@ -181,6 +181,15 @@ if pb_game_alive && grep -qE "$ATTRACT" "$G/raven.log" 2>/dev/null; then
     python3 "$PB_TOOLS/pbswitches.py" "$PB_RIG" && chmod 644 "$PB_RIG/switches.json"
     echo "Ready: $(basename "$BUILD"), slot $PB_SLOT, display $DISP"
     rigboard_post pb "$PB_SLOT" "$(pb_game_pid)" "$(basename "$BUILD")" "${PAD_TITLE:-$(tget title)}" "$VISIBLE" "$AUDIO"
+    # The playfield window's keys in the game's own window too (PAD-313):
+    # on the desktop (PAD_GAMEKEYS=1 forces it on a hidden run, for tests).
+    # It ends with the game.
+    if [ "${PAD_GAMEKEYS:-$VISIBLE}" = 1 ]; then
+        setsid -f python3 -u "$PB_TOOLS/../ap_emu/gamekeys.py" --display "$DISP" \
+            --mark "PB_MARK=$PB_RIG" --sock "$PB_RIG/ctl.sock" \
+            --pidfile "$PB_RIG/game.pid" --table "$PB_RIG/switches.json" \
+            < /dev/null > "$PB_RIG/gamekeys.log" 2>&1
+    fi
 else
     echo "run_game.sh: the game did not reach attract:" >&2
     # each log on its own: `tail -20 a b` is refused outright ("option used

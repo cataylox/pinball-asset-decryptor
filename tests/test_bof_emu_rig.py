@@ -304,3 +304,11 @@ def test_the_game_loads_nothing_from_the_rigs_own_folder():
             assert not re.search(r"\$\{?(BOF_TOOLS|BOF_SHIM|HERE)\b", m.group(1)), line
     assert 'cp "$BOF_SHIM" "$BOF_RIG/bofhwshim.so"' in src
     assert 'LD_PRELOAD="$BOF_RIG/bofhwshim.so"' in src
+
+
+def test_the_game_window_gets_the_playfield_keys():
+    """PAD-313: on the desktop run_game.sh starts the shared game-window key
+    listener, which finds the game's windows by this rig's mark."""
+    run = (RIG / "run_game.sh").read_text()
+    assert "ap_emu/gamekeys.py" in run and '--mark "BOFEMU_LOG_DIR=$BOF_RIG"' in run
+    assert "PAD_GAMEKEYS:-$VISIBLE" in run

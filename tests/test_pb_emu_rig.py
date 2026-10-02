@@ -395,3 +395,11 @@ def test_a_tap_from_the_window_is_held_long_enough_for_the_debounce():
     e.press(5, 1)
     run_timers(e)
     assert e.switches[5] == 1
+
+
+def test_the_game_window_gets_the_playfield_keys():
+    """PAD-313: on the desktop run_game.sh starts the shared game-window key
+    listener, which finds the game's windows by this rig's mark."""
+    run = (RIG / "run_game.sh").read_text()
+    assert "ap_emu/gamekeys.py" in run and '--mark "PB_MARK=$PB_RIG"' in run
+    assert "PAD_GAMEKEYS:-$VISIBLE" in run
