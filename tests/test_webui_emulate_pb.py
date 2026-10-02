@@ -349,7 +349,7 @@ PBIO_RUNNING = {"wsl": "1", "running": "1", "title": "abba", "title_name": "ABBA
                 "_kind": "pbio"}
 
 
-def test_an_alien_file_starts_the_io_board_rig_without_sound(rig, monkeypatch, tmp_path):
+def test_an_alien_file_starts_the_io_board_rig_with_sound(rig, monkeypatch, tmp_path):
     from pinball_decryptor.webui import emulate_pb_core as core
     seen = []
     monkeypatch.setattr(core, "rig_cmd_root",
@@ -368,7 +368,10 @@ def test_an_alien_file_starts_the_io_board_rig_without_sound(rig, monkeypatch, t
         args, kw = seen[0]
         assert args[0] == "watch.sh" and kw["kind"] == "pbio"
         assert "PAD_TITLE=Alien" in kw["env"] and "PAD_VISIBLE=1" in kw["env"]
-        assert not any(e.startswith("PAD_AUDIO") for e in kw["env"])
+        # sound on, at the shared Volume / Mute (pbioaudio.py, PAD-322)
+        assert "PAD_AUDIO=1" in kw["env"]
+        assert any(e.startswith("PAD_AUDIO_CTL=") and e.endswith("audio_ctl.json")
+                   for e in kw["env"])
         # Stop and Cancel go to the same rig
         assert svc._kind == "pbio"
     # the failure names what an Alien delta needs, not Predator's files

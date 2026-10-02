@@ -145,9 +145,11 @@ Source: "{#ProjectDir}\tools\pb_emu\*"; DestDir: "{app}\tools\pb_emu"; \
     Flags: recursesubdirs ignoreversion; \
     Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.upd"
 ; The Pinball Brothers I/O-board rig (tools/pbio_emu, PAD-272/PAD-315):
-; Alien and ABBA on the same Emulate PB tab.  All scripts, nothing built: the
-; game runs on the machine's own Linux, restored from its image under
-; /var/tmp inside WSL, never here.  Its switch window is tools/pb_emu's.
+; Alien and ABBA on the same Emulate PB tab.  Scripts and one BUILT file,
+; pbioshim.so (PAD-322: the game's window), so .so must never join the
+; excludes.  The game runs on the machine's own Linux, restored from its
+; image under /var/tmp inside WSL, never here.  Its switch window is
+; tools/pb_emu's.
 Source: "{#ProjectDir}\tools\pbio_emu\*"; DestDir: "{app}\tools\pbio_emu"; \
     Flags: recursesubdirs ignoreversion; \
     Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.upd,*.iso"

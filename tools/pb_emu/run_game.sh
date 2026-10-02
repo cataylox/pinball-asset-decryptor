@@ -133,7 +133,10 @@ VIDPORT=$((15555 + PB_SLOT))
 GST="GST_PLUGIN_SYSTEM_PATH=$PB_ENV/lib/gstreamer-1.0 GST_PLUGIN_SCANNER=$PB_ENV/libexec/gstreamer-1.0/gst-plugin-scanner GST_REGISTRY=$PB_ROOT/gst-registry.bin"
 ENVS="PATH=$PB_RIG/bin:/usr/local/bin:/usr/bin:/bin HOME=$PB_RIG/home USER=$PB_USER LANG=C.UTF-8 \
 DISPLAY=$DISP $AUDIO_ENV PB_MARK=$PB_RIG PB_DEV=$PB_RIG/dev PB_VIDPORT=$VIDPORT \
-PB_WINDOWED=${PB_WINDOWED:-$VISIBLE} LD_LIBRARY_PATH=$PB_ENV/lib LD_PRELOAD=$PB_RIG/pbshim.so $GST"
+PB_WINDOWED=${PB_WINDOWED:-$VISIBLE} LD_LIBRARY_PATH=$PB_ENV/lib LD_PRELOAD=$PB_RIG/pbshim.so PB_FPS_LOG=$PB_RIG/fps.log $GST"
+
+# vidprog (the game's user) writes its frame rate here (pbshim.c)
+: > "$PB_RIG/fps.log"; chmod 666 "$PB_RIG/fps.log"
 
 # ns.sh records itself: neither it nor the runuser wrappers it starts carry
 # PB_MARK, and a wrapper whose program was killed sits STOPPED (T) with a

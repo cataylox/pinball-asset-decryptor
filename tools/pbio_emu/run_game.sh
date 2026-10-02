@@ -6,9 +6,15 @@
 # prepare.sh made (a name under $PBIO_CACHE or a path).  Run as root.
 # Returns once the game reached attract mode (or it died).
 #
-#   --visible   draw on the WSLg desktop instead of the slot's hidden Xvfb
-#   --audio     not supported yet: the game's SDL 1.2 speaks ALSA only, and
-#               the rig always runs muted (SDL's dummy driver)
+#   --visible   draw on the WSLg desktop instead of the slot's hidden Xvfb,
+#               in a window with a title bar that moves and resizes
+#               (pbioshim.so: PBIO_WINDOWED=1 forces it on a hidden run)
+#   --audio     play the game's sound through WSLg's PulseAudio (default:
+#               none - SDL's dummy driver).  The game's SDL 1.2 speaks ALSA
+#               only, so the chroot's ALSA writes into a FIFO and
+#               pbioaudio.py plays it; with PAD_AUDIO_CTL (the app's
+#               audio_ctl.json, a WSL path) it follows the app's Volume /
+#               Mute, live
 #
 # The machine is a PC running Buildroot Linux: pinprog (the game: rules,
 # lamps, sound, the I/O boards on USB serial) and vidprog (SDL2 +
@@ -43,7 +49,6 @@ case "$BUILD" in /*) ;; "") ;; *) BUILD=$PBIO_CACHE/$BUILD ;; esac
     { echo "run_game.sh: not a prepared build: ${BUILD:-<none>} (prepare.sh)" >&2; exit 2; }
 [ "$(id -u)" = 0 ] || { echo "run_game.sh: run as root" >&2; exit 2; }
 AUDIO=$(rigboard_audio "$VISIBLE" "$AUDIO")
-[ "$AUDIO" = 1 ] && echo "run_game.sh: --audio is not supported yet; running muted" >&2
 
 TITLE=$(cat "$BUILD/title")
 tget() { python3 "$PBIO_TOOLS/pbiotitles.py" get "$TITLE" "$1"; }
@@ -105,6 +110,36 @@ exec /bin/busybox date "$@"
 EOF
 chmod 755 "$U/usr/bin/date"
 
+# vidprog's window on the desktop (moves, resizes, scales) and its frame
+# rate, by pbioshim.so - built for the machine's glibc (build.sh)
+mkdir -p "$U/usr/lib"
+cp "$PBIO_TOOLS/pbioshim.so" "$U/usr/lib/pbioshim.so"
+WINDOWED=${PBIO_WINDOWED:-$VISIBLE}
+# SDL's own software renderer, not OpenGL: with no GPU in the chroot, GL is
+# Mesa's softpipe (the image's swrast_dri.so, built without LLVM), which held
+# Alien's screens to ~9 frames a second at a whole core; the software
+# renderer draws the same picture at 60 for a fifth of one (PAD-322)
+RENDER=${PBIO_RENDER:-software}
+
+# Sound: the chroot's ALSA default writes 48 kHz stereo into a FIFO in
+# /mnt/log, and pbioaudio.py (here, outside the chroot, marked as this
+# slot's) plays it at the app's Volume / Mute
+if [ "$AUDIO" = 1 ]; then
+    mkdir -p "$U/etc"
+    python3 "$PBIO_TOOLS/pbioaudio.py" --fifo /mnt/log/audio.fifo --rig "$PBIO_RIG"         --conf "$U/etc/asound.conf"
+    mkfifo -m 666 "$PBIO_RIG/audio.fifo"
+    CTLARG=()
+    [ -n "${PAD_AUDIO_CTL:-}" ] && CTLARG=(--ctl "$PAD_AUDIO_CTL")
+    setsid python3 -u "$PBIO_TOOLS/pbioaudio.py" --fifo "$PBIO_RIG/audio.fifo"         --rig "$PBIO_RIG" --name "${PAD_TITLE:-Pinball Brothers}" "${CTLARG[@]}"         < /dev/null > "$PBIO_RIG/pbioaudio.log" 2>&1 &
+    echo $! > "$PBIO_RIG/audio.pid"
+    # the relay holds the FIFO open before the game may open it: an ALSA
+    # open of a FIFO with no reader would block the game's start
+    for _ in $(seq 1 50); do grep -q '^.* fifo ' "$PBIO_RIG/pbioaudio.log" 2>/dev/null && break; sleep 0.1; done
+    SDLAUDIO=alsa
+else
+    SDLAUDIO=dummy
+fi
+
 # The board
 PBIO_TITLE=$TITLE setsid python3 "$PBIO_TOOLS/pbioboard.py" "$PBIO_RIG" \
     > "$PBIO_RIG/board.out" 2>&1 < /dev/null &
@@ -152,7 +187,7 @@ else
     echo \$! > $PBIO_RIG/xvfb.pid
     sleep 1
 fi
-export DISPLAY=$DISP SDL_AUDIODRIVER=dummy HOME=/root TERM=linux
+export DISPLAY=$DISP SDL_AUDIODRIVER=$SDLAUDIO HOME=/root TERM=linux
 DROP=-sys_time,-sys_boot,-sys_module,-sys_rawio,-mknod
 setpriv --bounding-set \$DROP chroot $R /bin/sh -c 'cd /game/$DIR && exec ./pinprog -o /mnt/log/pinprog.log' \
     > $PBIO_RIG/pinprog.out 2>&1 < /dev/null &
@@ -162,7 +197,7 @@ echo \$PIN > $PBIO_RIG/game.pid
 (
     while kill -0 \$PIN 2>/dev/null; do
         sleep 1
-        setpriv --bounding-set \$DROP chroot $R /bin/sh -c 'cd /game/$DIR && exec ./vidprog $VIDARGS -o /mnt/log/vidprog.log' \
+        setpriv --bounding-set \$DROP chroot $R /bin/sh -c 'cd /game/$DIR && LD_PRELOAD=/usr/lib/pbioshim.so PBIO_WINDOWED=$WINDOWED PBIO_SCREEN=$SCREEN PBIO_FPS_LOG=/mnt/log/fps.log SDL_RENDER_DRIVER=$RENDER exec ./vidprog $VIDARGS -o /mnt/log/vidprog.log' \
             >> $PBIO_RIG/vidprog.out 2>&1 < /dev/null &
         echo \$! > $PBIO_RIG/vidprog.pid
         echo \$PIN \$! > $PBIO_RIG/game.pids
@@ -190,7 +225,7 @@ if ! pbio_game_alive; then
     exit 1
 fi
 if pbio_attract; then
-    rigboard_post pbio "$PBIO_SLOT" "$(pbio_game_pid)" "$(basename "$BUILD")" "${PAD_TITLE:-$(tget name)}" "$VISIBLE" 0
+    rigboard_post pbio "$PBIO_SLOT" "$(pbio_game_pid)" "$(basename "$BUILD")" "${PAD_TITLE:-$(tget name)}" "$VISIBLE" "$AUDIO"
     # The playfield window's keys in the game's own window too (PAD-313's
     # listener, as on Predator's rig): on the desktop (PAD_GAMEKEYS=1 forces
     # it on a hidden run, inside the slot's network namespace where its

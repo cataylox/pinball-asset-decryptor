@@ -9,8 +9,9 @@
 # as given.
 #
 # Env: PAD_VISIBLE 1 = draw on the desktop, 0 = hidden (unsaid: as the other
-# rigs - seen, except a labelled run, PAD-309); PAD_AUDIO is not supported
-# yet (always muted).
+# rigs - seen, except a labelled run, PAD-309); PAD_AUDIO=1 plays the
+# game's sound (run_game.sh --audio), PAD_AUDIO_CTL at the app's Volume /
+# Mute.
 # Prints `== Unpack ==`, `== Board ==`, `== Game ==`, `== Ready ==`.
 # Exit: 0 ready, 2 bad args / not root, 3 no disk space, 4 not a title this
 # rig knows, 5 no game in it / damaged, 6 the game did not reach attract.
