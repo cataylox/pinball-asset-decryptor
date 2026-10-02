@@ -38,10 +38,13 @@ correction on the machine (PAD-307)". This page is the plan and what is owed.
 - **No countdown inside Settings; the tile never boots.** On the tile the countdown boots the card
   the menu opened on; two idle minutes close Settings without saving.
 
-## Owed
+## Status
 
-- Hardware: a card built with this, Settings on the machine, a game booted with saved values.
-- The Multi-boot tab's preview draws from its own conf and does not read the game programs, so
-  it does not show the tile yet (the card does).
+Emulator-proven, and that is the verification (David, 2026-10-01: "If it works fine in emulation
+I'm sure it will work in the game so I'm not going to verify it on the machine"). The Multi-boot
+tab's preview draws the tile too, from the same `color_profile=` lines the card carries.
+
+## Not covered
+
 - Stock images (no profile) and single-image cards have no way in; a card that should be
   adjustable everywhere would need the identity `pad_cp` added to every image's build.

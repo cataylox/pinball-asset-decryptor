@@ -588,7 +588,8 @@ image 1 booted: `color: image 1 ... 9 color function(s) rewritten in a 6467584-b
 over /games/turtles_pro/game`, and the game's attract came up in greys (glshot), no validation
 error.  Run 2 (a power-up later): Color correction remembered Black and white; START FROM back to
 As built and SAVE removed the line; image 1 booted with `nothing set on this machine: as built`,
-no copy, no bind, attract in colour.  Teardown `alive.sh` 0 after each.  Hardware is owed.
+no copy, no bind, attract in colour.  Teardown `alive.sh` 0 after each.  The emulator proof is the
+verification: David is not running it on the machine.
 
 ## What is deliberately NOT in the proof of concept
 
