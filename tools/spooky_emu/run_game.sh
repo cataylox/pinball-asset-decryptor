@@ -219,15 +219,6 @@ for _ in $(seq 1 50); do
     [ -n "$p" ] && { echo "$p" > "$SPK_RIG/game.pid"; break; }
     sleep 0.1
 done
-# A window on the desktop you can resize (PAD-321): the Unity titles hold
-# their size in the window's hints (min = max), which the window manager
-# obeys; spkwin.py lifts that and the player scales to any size.  It ends
-# with the game.  (A hidden display has no window manager to obey it.)
-if [ $VISIBLE = 1 ]; then
-    setsid -f python3 -u "$SPK_TOOLS/spkwin.py" \
-        --display "$DISP" --mark "SPK_MARK=$SPK_RIG" --pidfile "$SPK_RIG/game.pid" \
-        < /dev/null > "$SPK_RIG/spkwin.log" 2>&1
-fi
 
 # Up = attract mode started (spk_attract: the game's log says so, or for
 # Looney Tunes the board's).  Loading several GB of media takes a while on a

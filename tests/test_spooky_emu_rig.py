@@ -5,7 +5,6 @@ Pinotaur board (spkpinotaur.py), the title profiles and detection, sw.py's
 switch names and the virtual playfield's table (spkswitches.py) and window
 (spkpf.py, on tools/ap_emu/appf.py)."""
 
-import ctypes
 import importlib.util
 import json
 import os
@@ -763,24 +762,3 @@ def test_the_game_window_gets_the_playfield_keys_but_not_the_games_own():
     titles = _import_rig("spktitles").TITLES
     assert set(titles["bj"]["own_keys"]) >= {"Enter", "Space", "ArrowLeft", "ArrowRight"}
 
-
-# ------------------------------------------ a window you can resize (PAD-321)
-def test_the_game_window_loses_only_its_size_lock():
-    """The Unity titles hold their window to one size (WM_NORMAL_HINTS min =
-    max), so the desktop refused every drag of an edge; spkwin.py clears the
-    minimum and maximum and keeps the rest of the hints."""
-    spkwin = _import_rig("spkwin")
-    p_min, p_max = spkwin.PMinSize, spkwin.PMaxSize
-    us_position = 1
-    assert spkwin.unlocked(us_position | p_min | p_max) == us_position
-    assert spkwin.unlocked(p_max) == 0
-    assert spkwin.unlocked(us_position) is None          # Looney Tunes: left alone
-    assert spkwin.unlocked(0) is None
-    # Xutil.h's XSizeHints: flags, then 17 ints
-    assert spkwin.XSizeHints.win_gravity.offset == ctypes.sizeof(ctypes.c_long) + 16 * 4
-
-
-def test_run_game_lifts_the_size_lock_on_the_desktop_only():
-    run = (RIG / "run_game.sh").read_text()
-    assert re.search(r'if \[ \$VISIBLE = 1 \]; then\n\s+setsid -f python3 -u "\$SPK_TOOLS/spkwin\.py"', run)
-    assert '--mark "SPK_MARK=$SPK_RIG" --pidfile "$SPK_RIG/game.pid"' in run

@@ -285,12 +285,11 @@ the board's `$SPK_RIG/warden.log`, the no-op'd shell calls
   Mute (PAD-321: each stream moved to a null sink with PAD-Runtime's
   speakers muted; 30% gives 0.3x the level, Mute silence). Rig runs stay
   muted.
-* **The window resizes** (PAD-321): the Unity titles say min size = max
-  size in their window's hints (a cabinet build), so the desktop refused
-  every drag of an edge. On a visible run `spkwin.py` clears that from
-  every window the game owns (and again if the game sets it back); the
-  player draws whatever size its window is. Looney Tunes (Godot) never set
-  it.
+* **The window** on the desktop moves by its title bar and resizes from its
+  edges, and the game scales its picture to the size (PAD-321, a mouse
+  drag on Beetlejuice). The Unity titles' hints say min size = max size (a
+  cabinet build), but WSLg's window manager does not hold a window to
+  them; a window manager that did would need them cleared.
 * No lights in the virtual playfield: the board decodes every LED write
   (`leds`), but the Spooky games ship no map from LED numbers to insert
   positions, so the window's light grid stays empty.
