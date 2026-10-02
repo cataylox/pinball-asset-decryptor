@@ -52,6 +52,20 @@ def _lamp_lines(path):
     return out
 
 
+def _generated_lamp_lines(path):
+    """The lamp lines of the block lamp_map.py writes (its `# ---- lamps:` header to the next `# ----`
+    section) - not the ones a later section adds by hand, such as PAD-228's ACTION BUTTON on the
+    cabinet front, which is no playfield insert and so is never generated."""
+    out, inside = [], False
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        s = raw.strip()
+        if s.startswith("# ----"):
+            inside = s.startswith("# ---- lamps:")
+        elif inside and s.startswith("lamp "):
+            out.append(lamp_map.parse_lamp(s[5:]))
+    return out
+
+
 # ---- the port lines ---------------------------------------------------------------------------------
 @pytest.mark.parametrize("key", sorted(PORTS))
 def test_every_lamp_line_reads_and_names_one_insert(key):
@@ -127,7 +141,7 @@ def test_lamp_map_reads_the_committed_lines_off_the_game(key):
     got = [lamp_map.parse_lamp(l[5:]) for l in lamp_map.port_lines(elf) if l.startswith("lamp ")]
     if got and all(g[2] == 0 for g in got):
         pytest.skip("unicorn is not installed: the shot table was not read")
-    assert got == _lamp_lines(PORTS[key])
+    assert got == _generated_lamp_lines(PORTS[key])
 
 
 # ---- the runtime's lamp section, on the host ----------------------------------------------------------
