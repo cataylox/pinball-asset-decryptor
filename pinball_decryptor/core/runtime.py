@@ -448,6 +448,39 @@ def wsl_head(root: bool = False, runner=None) -> list:
     return head
 
 
+def rehead(argv, runner=None) -> list:
+    """*argv* with its WSL head - ``wsl.exe [-d X] [-u root]`` - asked for
+    again, NOW; anything that is not a ``wsl.exe`` command comes back as it is.
+
+    WHY A COMMAND IS ASKED TWICE.  A command built on the interface thread
+    while the status cache is still cold gets the machine's default distro
+    (:func:`status` never waits there, and "unknown" routes to the default),
+    and one built later, on a worker, gets ours.  A run whose steps were built
+    at different moments then started one step in one Linux and the next in the
+    other: the Multi-boot preview compiled its menu program under the default
+    distro's home and ran it from PAD-Runtime's, where it did not exist, and
+    the preview failed at its first frame (PAD-307).  Called where a step is
+    about to START, on a worker thread - where :func:`status` may wait for the
+    honest answer - so every step of a run goes to the same Linux.
+
+    Only the head is rewritten: ``-d <anything>`` and ``-u root`` before the
+    first other word.  Any other ``-u`` is somebody's deliberate choice and
+    stops the scan where it stands."""
+    argv = list(argv)
+    if not argv or os.path.basename(str(argv[0])).lower() not in ("wsl.exe", "wsl"):
+        return argv
+    i, root = 1, False
+    while i + 1 < len(argv):
+        if argv[i] == "-d":
+            i += 2
+        elif argv[i] == "-u" and argv[i + 1] == "root":
+            root = True
+            i += 2
+        else:
+            break
+    return wsl_head(root=root, runner=runner) + argv[i:]
+
+
 def distro_for(rig: str, runner=None) -> Optional[str]:
     """Kept for the rig callers, which name the rig they are.  The answer no
     longer depends on which one - see :func:`wsl_distro`."""

@@ -1573,3 +1573,50 @@ def test_adjustable_profile_reads_the_game_off_the_card_or_the_edits(tmp_path, m
     assert got["name"] == "Black and white" and got["saturation"] == 0.0
     assert mt.adjustable_profile(str(tmp_path / "missing.raw")) is None
     assert mt.adjustable_profile("") is None
+
+
+def test_every_step_of_a_run_is_routed_when_it_starts(tmp_path, monkeypatch):
+    """PAD-307: the preview's selector step was built on the UI thread with
+    the runtime's status still unknown (default distro) and its snapshot on
+    the worker (ours), so the menu program was compiled in one Linux and run
+    from the other.  The worker asks the distro again for EVERY step, just
+    before it starts, whether the step was a ready argv or a callable."""
+    from pinball_decryptor.webui import multiboot_panel as mbp
+    started = []
+
+    class Proc:
+        stdout = iter([b"ok\n"])
+
+        def wait(self):
+            return 0
+
+    def popen(argv, **_kw):
+        started.append(list(argv))
+        return Proc()
+    asked = []
+
+    def rehead(argv):
+        asked.append(list(argv))
+        return ["wsl.exe", "-d", "PAD-Runtime"] + [a for a in argv[1:] if a not in ("-d", "Other")]
+    with web_app(tmp_path, mfr="stern") as w:
+        panel = _panel(w)
+        # the worker itself, with the tools stood in for below
+        monkeypatch.setenv("PAD_UI_NO_RIG", "0")
+        monkeypatch.setitem(mbp._GLOBALS, "subprocess",
+                            types.SimpleNamespace(Popen=popen, PIPE=subprocess.PIPE,
+                                                  STDOUT=subprocess.STDOUT))
+        monkeypatch.setitem(mbp._GLOBALS, "runtime", types.SimpleNamespace(rehead=rehead))
+        done = []
+        cmds = [("selector", ["wsl.exe", "-e", "bash", "-lc", "make"]),
+                ("frame 0", lambda _t: ["wsl.exe", "-d", "Other", "-e", "bash", "-lc", "snap"])]
+        assert w.run(panel._run_commands, cmds, None,
+                     lambda rc, failed, texts: done.append((rc, failed)), (), True)
+        import time
+        for _ in range(200):
+            w.drain()
+            if done:
+                break
+            time.sleep(0.02)
+        assert done == [(0, None)]
+        assert [a[:3] for a in started] == [["wsl.exe", "-d", "PAD-Runtime"]] * 2
+        assert len(asked) == 2

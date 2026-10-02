@@ -12951,6 +12951,14 @@ class MultibootPanel:
                         self._append("[multi-boot] %s: %s" % (label, exc))
                         rc, failed = 1, label
                         break
+                # EVERY STEP OF A RUN IN THE SAME LINUX: the distro is asked
+                # again here, on the worker.  A step built on the UI thread
+                # before the runtime's status was known went to the default
+                # distro while the next one, built here, went to ours - the
+                # preview compiled its menu program in one and ran it in the
+                # other, and failed at frame 0 (PAD-307; runtime.rehead, which
+                # leaves anything that is not a wsl.exe command alone).
+                argv = runtime.rehead(argv)
                 self._append("$ " + argv[-1])
                 try:
                     proc = subprocess.Popen(
