@@ -383,3 +383,21 @@ def test_the_cache_window_lists_and_names_builds(rig, tmp_path):
         assert c["rows"][0]["label"] == "Beetlejuice v2026.09.15.11"
         assert c["rows"][0]["src"].endswith(".beetlejuice")
         assert c["head"].startswith("1 item")
+
+
+def test_rig_commands_carry_the_apps_rig_slot(monkeypatch):
+    """An app a ticket started drives its own rig (PAD_SLOT), as the Stern
+    and PB tabs do - before PAD-319 every Spooky run went to rig 0."""
+    from pinball_decryptor.webui import emulate_spooky_core as core
+    monkeypatch.setattr(core, "rig_distro", lambda: "PAD-Runtime")
+    monkeypatch.setenv("PAD_SLOT", "2")
+    monkeypatch.setenv("PAD_LABEL", "PAD-319")
+    cmd = core.rig_cmd_root("watch.sh", "x.pkg", env=["PAD_VISIBLE=1"])
+    assert cmd.index("PAD_SLOT=2") < cmd.index("PAD_VISIBLE=1")
+    assert "PAD_LABEL=PAD-319" in cmd
+    assert "PAD_SLOT=2" in core.rig_cmd("status.sh")
+    # an ordinary install: rig 0, nothing added
+    monkeypatch.delenv("PAD_SLOT")
+    monkeypatch.delenv("PAD_LABEL")
+    monkeypatch.delenv("PAD_TICKET", raising=False)
+    assert not any(c.startswith("PAD_SLOT=") for c in core.rig_cmd("status.sh"))

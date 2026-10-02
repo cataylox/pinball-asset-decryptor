@@ -32,19 +32,17 @@ def state(url):
     return ws.state(url).get(NS) or {}
 
 
-def playfield(args, slot):
+def playfield(args, slot, browser):
     import spkpf
     path = r"\\wsl.localhost\%s\var\tmp\pad_spkproc\rig%s\switches.json" % (
         args.distro, slot)
     with open(path, encoding="utf-8") as f:
         table = json.load(f)
     app, rig, host = spkpf.serve(table, args.distro, slot)
-    from playwright.sync_api import sync_playwright
     errors = []
     try:
-        with sync_playwright() as p:
-            b = p.chromium.launch(channel="msedge")
-            page = b.new_page(viewport={"width": 1000, "height": 980})
+        if True:
+            page = browser.new_page(viewport={"width": 1000, "height": 980})
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.goto(host.url())
             time.sleep(4)
@@ -68,7 +66,7 @@ def playfield(args, slot):
             page.screenshot(path=os.path.join(
                 args.out, "%splayfield_%s.png" % (args.prefix, args.name)))
             print("notes:", app.note)
-            b.close()
+            page.close()
     finally:
         app.stopping = True
         rig.close()
@@ -126,7 +124,7 @@ def shoot(args):
                 page.screenshot(path=os.path.join(
                     args.out, "%semulate_spooky_%s.png" % (args.prefix, args.name)))
                 if st.get("up"):
-                    errors += playfield(args, args.slot)
+                    errors += playfield(args, args.slot, browser)
                     ws.api(url, NS + ".toggle")      # Stop
                     for _ in range(60):
                         st = state(url)

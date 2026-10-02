@@ -26,7 +26,7 @@ import os
 import pathlib
 import sys
 
-from pinball_decryptor.core import runtime
+from pinball_decryptor.core import rigslot, runtime
 from pinball_decryptor.webui import rig as _rig
 
 #: The rig ships next to this package.  ``PAD_SPOOKY_EMU_DIR`` moves it.
@@ -133,14 +133,22 @@ def rig_distro():
     return runtime.distro_for("spooky")
 
 
-def rig_cmd(*args, **kw):
+def _rig_kw(kw):
+    """*kw* for webui/rig.py: the distro, and the rig slot this app drives
+    first in the env (``rigslot.rig_env``: empty on an ordinary install -
+    rig 0 - and PAD_SLOT / PAD_LABEL for an app a ticket started, so its runs
+    stay off rig 0, as the Stern and PB tabs' do; PAD-319)."""
     kw.setdefault("distro", rig_distro())
-    return _rig.rig_cmd(rig_dir(), *args, **kw)
+    kw["env"] = rigslot.rig_env() + list(kw.get("env") or ())
+    return kw
+
+
+def rig_cmd(*args, **kw):
+    return _rig.rig_cmd(rig_dir(), *args, **_rig_kw(kw))
 
 
 def rig_cmd_root(*args, **kw):
-    kw.setdefault("distro", rig_distro())
-    return _rig.rig_cmd_root(rig_dir(), *args, **kw)
+    return _rig.rig_cmd_root(rig_dir(), *args, **_rig_kw(kw))
 
 
 def state_text(info):
