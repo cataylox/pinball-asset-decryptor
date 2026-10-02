@@ -2120,7 +2120,9 @@ class EmulateTab(TabService):
         elif self._select_touched:
             env.append("PAD_SELECT=1" if self._select_var.get()
                        else "PAD_SELECT=0")
-        return env
+        # last, so it wins: a session's app runs hidden and muted (PAD-309)
+        from ...core import rigslot
+        return env + rigslot.quiet_env()
 
     def _watch_cmd(self, env):
         if no_rig():

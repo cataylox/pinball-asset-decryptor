@@ -252,3 +252,126 @@ def test_every_emulate_tab_launch_carries_the_board(tab):
     with open(os.path.join(REPO, "pinball_decryptor", "webui", "tabs", tab + ".py"),
               encoding="utf-8") as fh:
         assert "rigslot.board_env()" in fh.read()
+
+
+# --------------------------------------------------------------------------
+# A session's runs are hidden and muted (PAD-309). David, 2026-10-01:
+# "shouldn't the rigs always be headless (no window) when running?"
+# --------------------------------------------------------------------------
+
+@needs_bash
+def test_a_labelled_run_is_hidden_unless_it_says_otherwise():
+    rc, out, err = _sh(r'''
+rigboard_visible
+PAD_LABEL=PAD-309 rigboard_visible
+PAD_TICKET=PAD-309 rigboard_visible
+PAD_LABEL=PAD rigboard_visible
+PAD_LABEL=PAD-309 PAD_VISIBLE=1 rigboard_visible
+PAD_LABEL=PAD-309 PAD_HIDDEN=0 rigboard_visible
+PAD_HIDDEN=1 rigboard_visible
+PAD_VISIBLE=0 rigboard_visible
+''')
+    assert rc == 0, err
+    # unlabelled: seen; a ticket's: hidden; the app's own "PAD" label is
+    # nobody's; the caller's word wins either way
+    assert out.split() == ["1", "0", "0", "1", "1", "1", "0", "0"]
+
+
+@pytest.mark.parametrize("emu", ["ap_emu", "bof_emu", "dp_emu", "pb_emu",
+                                 "pbio_emu", "spooky_emu"])
+def test_every_emulators_watch_asks_whether_to_be_seen(emu):
+    s = _src(emu, "watch.sh")
+    assert '[ "$(rigboard_visible)" = 1 ] && ARGS+=(--visible)' in s
+    assert "PAD_VISIBLE:-1" not in s
+
+
+@pytest.mark.parametrize("path", ["ap_emu/appath.sh", "bof_emu/bofpath.sh",
+                                  "cgc_emu/cgcpath.sh", "cgcpf_emu/cgcpfpath.sh",
+                                  "dp_emu/dppath.sh", "jjp_emu/padpath.sh",
+                                  "pb_emu/pbpath.sh", "pbio_emu/pbiopath.sh",
+                                  "proc_emu/procpath.sh", "spooky_emu/spkpath.sh"])
+def test_an_old_install_without_the_helper_keeps_its_old_default(path):
+    assert 'rigboard_visible() { echo "${PAD_VISIBLE:-1}"; }' in _src(*path.split("/"))
+
+
+def _spike2_hidden_default():
+    """watch.sh's own PAD_HIDDEN decision, cut out of it as written."""
+    s = _src("spike2_emu", "watch.sh")
+    start = s.index('if [ -z "${PAD_HIDDEN:-}" ]; then')
+    return s[start:s.index("export PAD_HIDDEN", start)]
+
+
+@needs_bash
+@pytest.mark.parametrize("env,want", [
+    ("PAD_LABEL= PAD_SLOT=0", "0"),                 # David's own rig, from main
+    ("PAD_LABEL=PAD-309 PAD_SLOT=0", "1"),          # a ticket's run
+    ("PAD_LABEL= PAD_SLOT=2", "1"),                 # a rig of its own
+    ("PAD_LABEL=PAD-309 PAD_SLOT=2 PAD_HIDDEN=0", "0"),
+    ("PAD_LABEL=PAD-309 PAD_SLOT=2 PAD_VISIBLE=1", "0"),
+    ("PAD_LABEL= PAD_SLOT=0 PAD_HIDDEN=1", "1"),
+])
+def test_spike2_hides_a_ticket_run_unless_told(env, want):
+    script = "unset PAD_HIDDEN PAD_VISIBLE\n%s\n%s\necho $PAD_HIDDEN\n" % (
+        "\n".join(env.split()), _spike2_hidden_default())
+    out = subprocess.run([BASH, "-c", script], capture_output=True, text=True,
+                         timeout=30)
+    assert out.stdout.split() == [want], out.stderr
+
+
+def test_a_sessions_app_runs_hidden_and_muted(monkeypatch):
+    from pinball_decryptor.core import rigslot
+    assert not rigslot.hidden() and not rigslot.muted()
+    assert rigslot.quiet_env() == ["PAD_HIDDEN=0"]
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert rigslot.hidden() and rigslot.muted()
+    assert rigslot.quiet_env() == ["PAD_HIDDEN=1", "PAD_VISIBLE=0", "PAD_AUDIO=0"]
+
+
+def test_a_session_shows_or_sounds_a_run_only_when_it_says_so(monkeypatch):
+    from pinball_decryptor.core import rigslot
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("PAD_HIDDEN", "0")
+    assert rigslot.quiet_env() == ["PAD_HIDDEN=0", "PAD_AUDIO=0"]
+    monkeypatch.setenv("PAD_AUDIO", "1")
+    assert rigslot.quiet_env() == ["PAD_HIDDEN=0"]
+    # and anyone may hide one; a hidden run is silent whatever was asked
+    monkeypatch.delenv("CLAUDECODE")
+    monkeypatch.setenv("PAD_HIDDEN", "1")
+    assert rigslot.quiet_env() == ["PAD_HIDDEN=1", "PAD_VISIBLE=0", "PAD_AUDIO=0"]
+
+
+@needs_bash
+def test_the_quiet_words_win_over_a_tabs_own(monkeypatch):
+    """env(1) applies NAME=value in order: put last, they override the tab's
+    PAD_VISIBLE=1 / PAD_AUDIO=1."""
+    import shlex
+    from pinball_decryptor.core import rigslot
+    monkeypatch.setenv("CLAUDECODE", "1")
+    env = ["PAD_VISIBLE=1", "PAD_AUDIO=1", "PAD_LABEL=PAD"] + rigslot.quiet_env()
+    script = "env %s bash -c 'echo $PAD_VISIBLE $PAD_AUDIO $PAD_HIDDEN'" % \
+        " ".join(shlex.quote(e) for e in env)
+    out = subprocess.run([BASH, "-c", script], capture_output=True, text=True,
+                         timeout=30)
+    assert out.stdout.split() == ["0", "0", "1"], out.stderr
+
+
+@pytest.mark.parametrize("tab", ["emulate", "emulate_ap", "emulate_bof",
+                                 "emulate_dp", "emulate_jjp", "emulate_pb",
+                                 "emulate_spike1", "emulate_spooky"])
+def test_every_emulate_tab_start_ends_with_the_quiet_words(tab):
+    with open(os.path.join(REPO, "pinball_decryptor", "webui", "tabs", tab + ".py"),
+              encoding="utf-8") as fh:
+        s = fh.read()
+    assert "rigslot.quiet_env()" in s
+    if tab != "emulate":
+        assert s.index("rigslot.board_env()") < s.index("rigslot.quiet_env()")
+
+
+@pytest.mark.parametrize("tab", ["emulate_ap", "emulate_bof", "emulate_dp",
+                                 "emulate_pb", "emulate_spooky"])
+def test_a_hidden_run_opens_no_playfield_window(tab):
+    with open(os.path.join(REPO, "pinball_decryptor", "webui", "tabs", tab + ".py"),
+              encoding="utf-8") as fh:
+        s = fh.read()
+    body = s[s.index("def _open_switches(self, info=None):"):]
+    assert body.split("\n", 2)[1].strip() == "if rigslot.hidden():"

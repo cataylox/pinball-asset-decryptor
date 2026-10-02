@@ -25,6 +25,7 @@ if [ -f "$PROC_TOOLS/../rigboard.sh" ]; then
     . "$PROC_TOOLS/../rigboard.sh"
 else
     rigboard_post() { :; }; rigboard_clear() { :; }; rigboard_audio() { echo "${2:-0}"; }
+    rigboard_visible() { echo "${PAD_VISIBLE:-1}"; }
 fi
 
 proc_hw_pid() { cat "$PROC_RIG/prochw.pid" 2>/dev/null; }

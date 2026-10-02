@@ -235,7 +235,7 @@ class EmulateJJPTab(RigTabMixin, TabService):
                         # PAD_AUDIO=1: a rig is silent unless asked (PAD-253)
                         env=["PAD_AUDIO=1",
                              "PAD_AUDIO_CTL=" + self._audio_ctl_file()]
-                        + rigslot.board_env()),
+                        + rigslot.board_env() + rigslot.quiet_env()),
                     timeout=1800)
                 if saw_wrong_key or rc == 7:
                     self._mark_wrong_key()

@@ -385,6 +385,12 @@ class EmulateSpookyTab(RigTabMixin, TabService):
         return cmd
 
     def _open_switches(self, info=None):
+        if rigslot.hidden():
+            # a session's app runs hidden: no window on the desktop, this
+            # one included (PAD-309)
+            self._log("Spooky: a hidden run opens no playfield window "
+                      "(PAD_HIDDEN=0 in this app's environment shows it).")
+            return False
         if self._sw_proc is not None and self._sw_proc.poll() is None:
             return True
         if info is None or not info.get("switches_json"):
@@ -486,7 +492,7 @@ class EmulateSpookyTab(RigTabMixin, TabService):
                              "PAD_TITLE=%s" % next(
                                  (t for t, ext in spk.SUPPORTED
                                   if path.lower().endswith(ext)), "")]
-                        + rigslot.board_env()),
+                        + rigslot.board_env() + rigslot.quiet_env()),
                     timeout=1800, on_line=self._footer_line)
                 if self._cancelling:
                     self._started_here = False

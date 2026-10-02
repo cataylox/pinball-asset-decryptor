@@ -270,6 +270,8 @@ class EmulateSpike1Tab(RigTabMixin, TabService):
                 args = [card] if card else []
                 env = ["PAD_AUDIO=1", "PAD_AUDIO_CTL=" + audio_ctl_file(),
                        "PAD_AUDIO_SINK=relay", "S1_PIVOT=1"] + rigslot.board_env()
+                # last, so it wins: a session's app runs muted (PAD-309)
+                env += rigslot.quiet_env()
                 rc = self._run_streaming(
                     s1.rig_cmd_root("start.sh", *args, env=env),
                     timeout=1800, on_line=on_line)

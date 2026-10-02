@@ -41,6 +41,7 @@ if [ -f "$CGCPF_TOOLS/../rigboard.sh" ]; then
     . "$CGCPF_TOOLS/../rigboard.sh"
 else
     rigboard_post() { :; }; rigboard_clear() { :; }; rigboard_audio() { echo "${2:-0}"; }
+    rigboard_visible() { echo "${PAD_VISIBLE:-1}"; }
 fi
 
 # The game's state word (pin 1.0.2: 0x4503b4): 1 attract, 2 a game,

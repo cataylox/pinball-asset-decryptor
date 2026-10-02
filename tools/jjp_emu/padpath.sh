@@ -138,6 +138,7 @@ if [ -f "$(dirname "${BASH_SOURCE[0]}")/../rigboard.sh" ]; then
     . "$(dirname "${BASH_SOURCE[0]}")/../rigboard.sh"
 else
     rigboard_post() { :; }; rigboard_clear() { :; }; rigboard_audio() { echo "${2:-0}"; }
+    rigboard_visible() { echo "${PAD_VISIBLE:-1}"; }
 fi
 
 # Sentinel LDK (the purple dongle).  0529:0001 is the HASP HL key.

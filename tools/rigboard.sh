@@ -27,6 +27,9 @@
 #       ("Legends of Valhalla"); empty, the dashboard makes one from <game>.
 #   rigboard_clear <emu> <slot>
 #       from killgame.sh, so a stop clears the pill at once.
+#   VISIBLE=$(rigboard_visible)
+#       before the launch: whether the run's windows go on the desktop
+#       (PAD-309) - what the caller said, else hidden for a labelled run.
 #   AUDIO=$(rigboard_audio <visible> <audio>)
 #       before the launch: a HIDDEN run never plays sound unless the person
 #       asked for it in words (PAD_AUDIO_ASKED=1) - a sound nobody can find
@@ -84,6 +87,18 @@ rigboard_audio() {                  # <visible> <audio> -> the audio to use
     else
         echo "${2:-0}"
     fi
+}
+
+#: Whether a run's windows go on the desktop, 0/1 (PAD-309). The caller's
+#: word wins - PAD_VISIBLE, else PAD_HIDDEN (the one Spike 2 and the
+#: sessions' rules use), and the app always says. Unsaid, a run for a ticket
+#: or a session (it has a label) is HIDDEN: David, 2026-10-01, "shouldn't the
+#: rigs always be headless (no window) when running?". An unlabelled one -
+#: David at a terminal on his own rig - is seen, as before.
+rigboard_visible() {
+    case "${PAD_VISIBLE:-}" in 1) echo 1; return ;; ?*) echo 0; return ;; esac
+    case "${PAD_HIDDEN:-}" in 1) echo 0; return ;; ?*) echo 1; return ;; esac
+    [ -n "$(rigboard_label)" ] && echo 0 || echo 1
 }
 
 rigboard_post() {                   # <emu> <slot> <pid> <game> <title> <visible> <audio>

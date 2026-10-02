@@ -199,6 +199,48 @@ disruptive"; the triage dashboard's rig pill names the game instead.
   48V banner in the glshot frame, no PAD-230 window among the desktop's
   top-level windows (three PAD-225 sweep windows were).
 
+### Hidden unless asked, and no window outlives its run (PAD-309)
+
+David, 2026-10-01: "the emulator rigs need to clean up their 'virtual
+playfield' windows too when they are done with the rigs. also, shouldn't the
+rigs always be headless (no window) when running?" On his desktop at the time:
+rig 3's `PAD-306-check` run, visible and sounding (`"hidden":false,
+"audio":true`) for a ticket already released, plus an Edge playfield window
+from that run's previous start whose server was gone - an orphan.
+
+- **The orphan.** pfweb's third window rung (`AppBackend`, a Chromium
+  `--app` window, taken whenever the Python running the playfield has no
+  pywebview - an agent's or a worktree's Python) is a browser process of its
+  own. Windows does not end a child with its parent, and every hard stop
+  ends the host without its cleanup: killgame.sh's `Stop-Process -Force`,
+  the Spike 2 tab's `proc.kill()` after its grace, a crash. 61 dead
+  `padpf-*` profiles sat in %TEMP%, one per such stop. Now each window goes
+  into a kill-on-close job object whose only handle is the host's
+  (`_KillWithUs`), so the kernel ends the window with the host however the
+  host ends; and the first window of a host sweeps the dead profiles (a live
+  browser's `lockfile` refuses removal; Windows only). Every emulator's
+  playfield rides pfweb, so this is all of them; the AP-family tabs' own
+  close-stdin-then-kill-tree stays as the polite path.
+- **Hidden by default, on the rig.** A run with a label (Spike 2's
+  `pad_label`: PAD_LABEL, the slot's holder, PAD_TICKET, a ticket branch) or
+  on a rig >= 1 is hidden unless it says `PAD_HIDDEN=0` / `PAD_VISIBLE=1`.
+  Spike 2's watch.sh decides it after the label is fixed; every other
+  emulator's watch.sh asks `rigboard_visible` (tools/rigboard.sh), which
+  honours PAD_VISIBLE, then PAD_HIDDEN, then the label - the app's own
+  `PAD` label is nobody's. An unlabelled run (David's own rig from main, a
+  terminal) is seen, as before. JJP has no hidden display (Xephyr is a
+  window by design) and is unchanged; Spike 1's viewers are in the app page.
+- **Hidden and muted in a session's app.** Claude Code sets `CLAUDECODE=1`
+  in every command it runs, so an app a session starts knows it
+  (`rigslot.agent_driven`). Every Emulate tab's Start ends its env with
+  `rigslot.quiet_env()` - env(1) applies assignments in order, so they win
+  over the tab's `PAD_VISIBLE=1` / `PAD_AUDIO=1` - and the AP / BoF / DP /
+  PB / Spooky tabs open no playfield window for a hidden run. `PAD_HIDDEN=0`
+  (and `PAD_AUDIO=1`) in the app's environment show (and sound) it when
+  David asks. Otherwise the app says `PAD_HIDDEN=0` out loud, because a
+  ticket's app (the dashboard's launch, which drops CLAUDECODE) labels its
+  runs and must still show David the change.
+
 ### What it deliberately does not do
 
 - Per-slot CPU limits. Each guest is ~1.5 cores; `PAD_SLOTS_MAX` is the only

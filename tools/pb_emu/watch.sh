@@ -7,7 +7,8 @@
 # brings the full update it builds on from the same folder (pbupdates.py).
 #
 # Env (all optional):
-#   PAD_VISIBLE   1 = draw on the desktop (the app's default), 0 = hidden
+#   PAD_VISIBLE   1 = draw on the desktop, 0 = hidden. Unsaid: seen, except a
+#                 run for a ticket or a session (it has a label) - hidden (PAD-309)
 #   PAD_AUDIO     1 = sound on (a rig is silent unless asked)
 #   PAD_AUDIO_CTL the app's audio_ctl.json (WSL path): Volume / Mute, live
 #
@@ -47,7 +48,8 @@ BUILD=$(sed -n 's/^build=//p' "$PREP" | tail -1)
 
 echo "== Board =="
 ARGS=()
-[ "${PAD_VISIBLE:-1}" = 1 ] && ARGS+=(--visible)
+# unsaid, a run for a ticket or a session is hidden (rigboard_visible, PAD-309)
+[ "$(rigboard_visible)" = 1 ] && ARGS+=(--visible)
 [ "${PAD_AUDIO:-0}" = 1 ] && ARGS+=(--audio)
 echo "== Game =="
 bash "$HERE/run_game.sh" "$BUILD" "${ARGS[@]}" || exit 6

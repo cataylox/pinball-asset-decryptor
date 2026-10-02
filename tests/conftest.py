@@ -103,6 +103,17 @@ def _no_rig_slot(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _not_a_session(monkeypatch):
+    """Every test is David's own app, not one a Claude Code session started.
+    The suite runs from sessions (CLAUDECODE=1) as well as from CI, and a
+    session's app hides and mutes its emulator runs (rigslot.hidden,
+    PAD-309) - the same test must not mean two things."""
+    for k in ("CLAUDECODE", "PAD_HIDDEN", "PAD_VISIBLE", "PAD_AUDIO"):
+        monkeypatch.setenv(k, "")
+        monkeypatch.delenv(k)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_title_cache(tmp_path_factory, monkeypatch):
     """Every test gets its own empty per-build cache (title_reader.cache_dir: ports and
     tables worked out on this machine), so no test reads or writes the developer's own,

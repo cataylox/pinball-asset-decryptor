@@ -256,3 +256,105 @@ def test_the_host_needs_nothing_but_the_standard_library():
         elif isinstance(node, ast.ImportFrom) and node.module:
             top.add(node.module.split(".")[0])
     assert top <= set(sys.stdlib_module_names), top - set(sys.stdlib_module_names)
+
+
+# --------------------------------------------------------------------------
+# A Stop never leaves a window behind (PAD-309)
+# --------------------------------------------------------------------------
+
+def test_every_app_window_is_bound_to_its_host(host, monkeypatch):
+    """The --app window is a browser process of its own; each one goes into
+    the host's kill-on-close job the moment it is started."""
+    import pfweb
+    bound, made = [], []
+
+    class Job:
+        def add(self, proc):
+            bound.append(proc)
+            return True
+
+    class Proc:
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(pfweb, "_chromium", lambda: "edge")
+    monkeypatch.setattr(pfweb, "_KillWithUs", Job)
+    monkeypatch.setattr(pfweb, "_sweep_profiles", lambda: made.append("swept"))
+    monkeypatch.setattr(pfweb.subprocess, "Popen",
+                        lambda *a, **k: made.append(a[0]) or Proc())
+    b = pfweb.AppBackend(host)
+    first = b._spawn({"page": "main"})
+    b.open("villain", {"page": "villain"})
+    assert bound == [first, b.procs["villain"]]
+    assert made[0] == "swept" and made.count("swept") == 1   # once per host
+    for d in b.dirs:
+        os.rmdir(d)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="a Windows job object")
+def test_a_killed_host_takes_its_windows_with_it(tmp_path):
+    """What killgame.sh's Stop-Process -Force and the app's proc.kill() do to
+    the host: TerminateProcess, no cleanup of its own. Its child must go too
+    (rig 3, 2026-10-01: an orphaned playfield outlived its run)."""
+    import ctypes
+    import subprocess
+    script = tmp_path / "host.py"
+    script.write_text(
+        "import subprocess, sys, time\n"
+        "sys.path.insert(0, %r)\n"
+        "import pfweb\n"
+        "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
+        "print(p.pid, pfweb._KillWithUs().add(p), flush=True)\n"
+        "time.sleep(120)\n" % RIG)
+    host = subprocess.Popen([sys.executable, str(script)],
+                            stdout=subprocess.PIPE, text=True)
+    child = None
+    try:
+        pid, ok = host.stdout.readline().split()
+        assert ok == "True"
+        k32 = ctypes.windll.kernel32
+        child = k32.OpenProcess(0x00100000, False, int(pid))   # SYNCHRONIZE
+        assert child
+        assert k32.WaitForSingleObject(child, 0) == 0x102      # still running
+        host.kill()
+        assert k32.WaitForSingleObject(child, 10000) == 0      # ended with it
+    finally:
+        if host.poll() is None:
+            host.kill()
+        if child:
+            ctypes.windll.kernel32.CloseHandle(child)
+
+
+def test_dead_profiles_are_swept_and_live_ones_kept(tmp_path, monkeypatch):
+    """A killed host never deletes its throwaway profile. The sweep takes the
+    ones nobody holds; a live browser's lockfile refuses removal."""
+    import pfweb
+    monkeypatch.setattr(sys, "platform", "win32")
+    old = time.time() - 3600
+    for name in ("padpf-dead", "padpf-live", "padpf-young", "other"):
+        (tmp_path / name).mkdir()
+    (tmp_path / "padpf-live" / "lockfile").write_text("")
+    (tmp_path / "padpf-dead" / "Default").mkdir()
+    for name in ("padpf-dead", "padpf-live", "other"):
+        os.utime(tmp_path / name, (old, old))
+    live = str(tmp_path / "padpf-live" / "lockfile")
+    real_remove = os.remove
+
+    def remove(p):
+        if p == live:
+            raise PermissionError(32, "in use by another process")
+        real_remove(p)
+    monkeypatch.setattr(pfweb.os, "remove", remove)
+    gone = pfweb._sweep_profiles(root=str(tmp_path))
+    assert [os.path.basename(d) for d in gone] == ["padpf-dead"]
+    assert sorted(os.listdir(tmp_path)) == ["other", "padpf-live", "padpf-young"]
+
+
+def test_the_sweep_is_windows_only(tmp_path, monkeypatch):
+    """On Linux the lock is a symlink anyone may remove: no test of use."""
+    import pfweb
+    monkeypatch.setattr(sys, "platform", "linux")
+    (tmp_path / "padpf-x").mkdir()
+    os.utime(tmp_path / "padpf-x", (0, 0))
+    assert pfweb._sweep_profiles(root=str(tmp_path)) == []
+    assert os.listdir(tmp_path) == ["padpf-x"]

@@ -96,6 +96,58 @@ def board_env():
     return out
 
 
+def agent_driven():
+    """This app was started from a Claude Code session: Claude Code sets
+    ``CLAUDECODE=1`` in every command it runs, and an app started by one of
+    them inherits it. David's own starts - the shortcut, the installer, the
+    triage dashboard's launch (which drops it, PAD-309) - never carry it."""
+    return bool((os.environ.get("CLAUDECODE") or "").strip())
+
+
+def hidden():
+    """Whether this app's emulator runs stay off the desktop (PAD-309).
+
+    David, 2026-10-01: "shouldn't the rigs always be headless (no window)
+    when running?" - for a session's runs, yes: an agent driving this app
+    put a visible, sounding game and its playfield on his desktop for a
+    ticket already released. So an app a session started runs every
+    emulator hidden; ``PAD_HIDDEN=0`` in its environment shows them (when
+    David asks to watch), ``PAD_HIDDEN=1`` hides them for anyone."""
+    v = (os.environ.get("PAD_HIDDEN") or "").strip()
+    if v:
+        return v != "0"
+    return agent_driven()
+
+
+def muted():
+    """Whether this app's emulator runs are silent: every hidden run (a sound
+    nobody can find the source of is the worst case, PAD-266), and a
+    session's run unless its environment says ``PAD_AUDIO=1``."""
+    v = (os.environ.get("PAD_AUDIO") or "").strip()
+    if hidden() or v == "0":
+        return True
+    return agent_driven() and v != "1"
+
+
+def quiet_env():
+    """``NAME=value`` entries every emulator Start puts LAST in its list -
+    env(1) applies them in order, so these win over the tab's own
+    ``PAD_VISIBLE=1`` / ``PAD_AUDIO=1`` (PAD-309).
+
+    Hidden: ``PAD_HIDDEN=1`` (Spike 2's watch.sh) and ``PAD_VISIBLE=0`` (every
+    other emulator's). Muted: ``PAD_AUDIO=0``. Otherwise ``PAD_HIDDEN=0``,
+    said out loud because a run labelled for a ticket hides by default on the
+    rig side - and a ticket's app, which David opens to see the change, labels
+    its runs."""
+    if hidden():
+        out = ["PAD_HIDDEN=1", "PAD_VISIBLE=0"]
+    else:
+        out = ["PAD_HIDDEN=0"]
+    if muted():
+        out.append("PAD_AUDIO=0")
+    return out
+
+
 def title_tag():
     """The app window's own tag, in the words the rig's windows use."""
     n, l = slot(), label()

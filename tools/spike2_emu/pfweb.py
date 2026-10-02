@@ -677,10 +677,135 @@ def _chromium():
     return None
 
 
+class _KillWithUs:
+    """A Windows job object that ends every process put in it when THIS
+    process ends, however it ends (PAD-309).
+
+    An --app window is a browser process of its own, and Windows does not end
+    a child with its parent. Stop's backstop (killgame.sh's Stop-Process
+    -Force), the app's Stop (proc.kill() after its grace) and a crash all end
+    this host without run() or quit() ever reaching terminate(), so the window
+    stayed on the desktop with its page dead until somebody closed it by hand
+    - David, 2026-10-01: "the emulator rigs need to clean up their virtual
+    playfield windows too". The job's only handle is ours, the kernel closes
+    it when this process goes, and KILL_ON_JOB_CLOSE takes the window with it.
+
+    Best-effort: if anything here fails the window behaves exactly as before.
+    Elsewhere than Windows it does nothing."""
+
+    def __init__(self):
+        self.handle = None
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.CreateJobObjectW.restype = wintypes.HANDLE
+            k32.CreateJobObjectW.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR)
+            k32.SetInformationJobObject.restype = wintypes.BOOL
+            k32.SetInformationJobObject.argtypes = (
+                wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD)
+            k32.AssignProcessToJobObject.restype = wintypes.BOOL
+            k32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE,
+                                                     wintypes.HANDLE)
+
+            class Basic(ctypes.Structure):          # JOBOBJECT_BASIC_LIMIT_...
+                _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64),
+                            ("PerJobUserTimeLimit", ctypes.c_int64),
+                            ("LimitFlags", wintypes.DWORD),
+                            ("MinimumWorkingSetSize", ctypes.c_size_t),
+                            ("MaximumWorkingSetSize", ctypes.c_size_t),
+                            ("ActiveProcessLimit", wintypes.DWORD),
+                            ("Affinity", ctypes.c_size_t),
+                            ("PriorityClass", wintypes.DWORD),
+                            ("SchedulingClass", wintypes.DWORD)]
+
+            class Extended(ctypes.Structure):       # ..._EXTENDED_LIMIT_...
+                _fields_ = [("BasicLimitInformation", Basic),
+                            ("IoInfo", ctypes.c_uint64 * 6),
+                            ("ProcessMemoryLimit", ctypes.c_size_t),
+                            ("JobMemoryLimit", ctypes.c_size_t),
+                            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                            ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+            job = k32.CreateJobObjectW(None, None)
+            if not job:
+                return
+            info = Extended()
+            info.BasicLimitInformation.LimitFlags = 0x2000  # KILL_ON_JOB_CLOSE
+            if not k32.SetInformationJobObject(job, 9,  # ExtendedLimitInfo
+                                               ctypes.byref(info),
+                                               ctypes.sizeof(info)):
+                return
+            self._k32, self.handle = k32, job
+        except Exception:                                   # noqa: BLE001
+            self.handle = None
+
+    def add(self, proc):
+        """Bind *proc* (a Popen) to this process's lifetime. Done the moment
+        Popen returns, while the browser is still loading: the processes it
+        starts after that are in the job too, and one it started before would
+        end with the browser anyway (its pipe to it closes)."""
+        if self.handle is None:
+            return False
+        try:
+            return bool(self._k32.AssignProcessToJobObject(
+                self.handle, int(proc._handle)))
+        except Exception:                                   # noqa: BLE001
+            return False
+
+
+#: A throwaway profile younger than this may be one another host has just
+#: made and not yet started its browser in: left alone by the sweep.
+PROFILE_SWEEP_AGE_S = 60
+
+
+def _sweep_profiles(root=None, now=None):
+    """Delete the throwaway profiles killed hosts left behind (PAD-309).
+
+    run() deletes its own on the way out, but a host that is killed never
+    gets there, and they piled up in %TEMP% (61 on David's PC, 2026-10-01).
+    A live browser holds its profile's ``lockfile`` open without delete
+    sharing, so removing that file is the test: refused means somebody is
+    using the profile; gone (Chromium deletes it on close, and the kernel
+    does when the browser is killed) means nobody is. Windows only - on
+    Linux the lock is a symlink anyone can remove. Returns the profiles
+    deleted."""
+    if sys.platform != "win32":
+        return []
+    root = root or tempfile.gettempdir()
+    now = time.time() if now is None else now
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return []
+    gone = []
+    for name in names:
+        if not name.startswith("padpf-"):
+            continue
+        d = os.path.join(root, name)
+        try:
+            if not os.path.isdir(d) or \
+                    now - os.path.getmtime(d) < PROFILE_SWEEP_AGE_S:
+                continue
+            lock = os.path.join(d, "lockfile")
+            if os.path.lexists(lock):
+                os.remove(lock)
+        except OSError:
+            continue                        # in use, or not ours to judge
+        shutil.rmtree(d, ignore_errors=True)
+        gone.append(d)
+    return gone
+
+
 class AppBackend(_Base):
     """A Chromium-family browser's --app window, one process per window, each
     in its own throwaway profile (a shared profile would hand the window to
-    an already-running browser and our process would lose track of it)."""
+    an already-running browser and our process would lose track of it).
+
+    Every window is bound to this process (_KillWithUs): whatever ends the
+    host ends its windows, so a Stop never leaves one behind (PAD-309)."""
 
     @staticmethod
     def available():
@@ -691,9 +816,13 @@ class AppBackend(_Base):
         self.procs = {}
         self.dirs = []
         self._quit = threading.Event()
+        self._job = None
 
     def _spawn(self, spec):
         exe = _chromium()
+        if self._job is None:
+            self._job = _KillWithUs()
+            _sweep_profiles()
         prof = tempfile.mkdtemp(prefix="padpf-")
         self.dirs.append(prof)
         # msImplicitSignin: Edge signs every NEW profile in to the Windows
@@ -714,10 +843,12 @@ class AppBackend(_Base):
                                                      int(spec["y"])))
         if sys.platform.startswith("linux") and os.geteuid() == 0:
             args.append("--no-sandbox")         # chromium refuses root without
-        return subprocess.Popen(args, stdin=subprocess.DEVNULL,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                                creationflags=_CREATE_NO_WINDOW)
+        p = subprocess.Popen(args, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL,
+                             creationflags=_CREATE_NO_WINDOW)
+        self._job.add(p)
+        return p
 
     def run(self, main, on_close, ready=None):
         self._on_close = on_close

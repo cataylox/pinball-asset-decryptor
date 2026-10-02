@@ -28,6 +28,7 @@ if [ -f "$PB_TOOLS/../rigboard.sh" ]; then
     . "$PB_TOOLS/../rigboard.sh"
 else
     rigboard_post() { :; }; rigboard_clear() { :; }; rigboard_audio() { echo "${2:-0}"; }
+    rigboard_visible() { echo "${PAD_VISIBLE:-1}"; }
 fi
 
 # The first ordinary account (uid 1000..59999): "pad" in PAD-Runtime.
