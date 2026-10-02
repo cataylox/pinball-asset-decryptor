@@ -9,7 +9,8 @@
 # its installed version in version order, as the machine's updater does.
 #
 # Env (all optional):
-#   PAD_VISIBLE 1 = draw on the desktop (the app's default), 0 = hidden
+#   PAD_VISIBLE 1 = draw on the desktop, 0 = hidden. Unsaid: seen, except a
+#               run for a ticket or a session (it has a label) - hidden (PAD-309)
 #   PAD_AUDIO   1 = sound on (a rig is silent unless asked)
 #
 # Prints `== step ==` headers for the app's footer ladder:
@@ -55,7 +56,8 @@ echo "build=$BUILD"
 
 echo "== Game =="
 ARGS=()
-[ "${PAD_VISIBLE:-1}" = 1 ] && ARGS+=(--visible)
+# unsaid, a run for a ticket or a session is hidden (rigboard_visible, PAD-309)
+[ "$(rigboard_visible)" = 1 ] && ARGS+=(--visible)
 [ "${PAD_AUDIO:-0}" = 1 ] && ARGS+=(--audio)
 bash "$HERE/run_game.sh" "$BUILD" "${ARGS[@]}" || exit 6
 

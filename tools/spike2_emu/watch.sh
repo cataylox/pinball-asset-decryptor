@@ -66,7 +66,24 @@ fi
 # DISPLAY gate below passes a hidden run (pad_display_state says `hidden`): it
 # looks for the socket FILE.
 # Readiness is Xvfb's own -displayfd, not a probe tool the distro may lack.
-PAD_HIDDEN=${PAD_HIDDEN:-0}
+#
+# UNSAID, A RUN FOR A TICKET OR A SESSION IS HIDDEN (PAD-309). David,
+# 2026-10-01: "shouldn't the rigs always be headless (no window) when
+# running?" - the rule was the sessions' to remember, and one that did not
+# left a sounding game and its playfield on his desktop. A run with a label
+# (pad_label: PAD_LABEL, the slot's holder, PAD_TICKET, a ticket branch) or
+# on a rig of its own is hidden unless it says PAD_HIDDEN=0 (or
+# PAD_VISIBLE=1). The app always says. An unlabelled run on rig 0 - David's
+# own, from main - is seen, as before.
+if [ -z "${PAD_HIDDEN:-}" ]; then
+    if [ "${PAD_VISIBLE:-}" = 1 ]; then
+        PAD_HIDDEN=0
+    elif [ -n "$PAD_LABEL" ] || [ "$PAD_SLOT" != 0 ]; then
+        PAD_HIDDEN=1
+    else
+        PAD_HIDDEN=0
+    fi
+fi
 export PAD_HIDDEN
 if [ "$PAD_HIDDEN" = 1 ]; then
     HID_N=$((70 + PAD_SLOT))

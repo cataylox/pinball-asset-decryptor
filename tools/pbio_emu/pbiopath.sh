@@ -30,6 +30,7 @@ if [ -f "$PBIO_TOOLS/../rigboard.sh" ]; then
     . "$PBIO_TOOLS/../rigboard.sh"
 else
     rigboard_post() { :; }; rigboard_clear() { :; }; rigboard_audio() { echo "${2:-0}"; }
+    rigboard_visible() { echo "${PAD_VISIBLE:-1}"; }
 fi
 
 pbio_game_pid() { cat "$PBIO_RIG/game.pid" 2>/dev/null; }

@@ -269,6 +269,12 @@ class EmulateDPTab(RigTabMixin, TabService):
         return cmd
 
     def _open_switches(self, info=None):
+        if rigslot.hidden():
+            # a session's app runs hidden: no window on the desktop, this
+            # one included (PAD-309)
+            self._log("DP: a hidden run opens no playfield window "
+                      "(PAD_HIDDEN=0 in this app's environment shows it).")
+            return False
         if self._sw_proc is not None and self._sw_proc.poll() is None:
             return True
         if info is None or not info.get("switches_json"):
@@ -347,7 +353,8 @@ class EmulateDPTab(RigTabMixin, TabService):
                         "watch.sh", *args,
                         env=["PAD_VISIBLE=1",
                              "PAD_AUDIO=%d" % (0 if muted else 1),
-                             "PAD_LABEL=PAD"] + rigslot.board_env()),
+                             "PAD_LABEL=PAD"] + rigslot.board_env()
+                        + rigslot.quiet_env()),
                     timeout=3600, on_line=self._footer_line)
                 if self._cancelling:
                     self._started_here = False
