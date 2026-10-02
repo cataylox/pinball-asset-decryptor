@@ -673,6 +673,55 @@ def test_disk_space_window(tmp_path, monkeypatch):
         assert w.state("shellx")["disk"] is None
 
 
+def test_disk_space_lists_the_emulators_files_in_wsl(tmp_path, monkeypatch):
+    """PAD-318: a full WSL disk said "Nothing to clean up" - the emulators'
+    unpacked games and runs were never listed.  They are now, under their
+    maker; a running emulator's are marked and kept."""
+    from pinball_decryptor.core import host_temp, wsl_disk
+    monkeypatch.setattr(host_temp, "usage", lambda: None)
+    monkeypatch.setattr(host_temp, "scan", lambda: [])
+    deleted = []
+    monkeypatch.setattr(wsl_disk, "delete",
+                        lambda paths: deleted.extend(paths) or 7 * 2 ** 30)
+    rigs = [
+        {"path": "/var/tmp/pad_ap/cache/tank", "size": 7 * 2 ** 30,
+         "manufacturer": "American Pinball", "detail": "Unpacked game: tank",
+         "kind": "game", "live": False},
+        {"path": "/var/tmp/pad_spooky/rig0", "size": 5 * 2 ** 30,
+         "manufacturer": "Spooky Pinball",
+         "detail": "Last run's folder (rig 0)", "kind": "run", "live": True}]
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = w.window.service("shellx")
+        w.call("shellx.disk_open")
+        assert until(w, lambda: not w.state("shellx")["disk"]["busy"])
+        svc._disk_scan_id += 1
+        svc._disk_apply_scan(svc._disk_scan_id, {
+            "wsl_ok": True, "wsl_usage": {"total": 100 * 2 ** 30,
+                                          "used": 94 * 2 ** 30,
+                                          "free": 6 * 2 ** 30, "pct": 94},
+            "wsl_entries": [], "rig_entries": rigs, "host_entries": [],
+            "emu_entries": []})
+        d = w.state("shellx")["disk"]
+        assert d["status"] == "Found 2 emulator items using 12.00 GiB."
+        texts = [r["text"] for r in d["rows"]]
+        assert texts[0].startswith("Emulators' files in WSL  —  2 items")
+        assert "American Pinball  (1)" in texts
+        assert ("Last run's folder (rig 0)  —  in use: stop its game first"
+                in texts)
+        w.answers.append("yes")
+        assert w.call("shellx.disk_clean", None, "all") is True
+        assert "running" in w.asked[-1]["message"]
+        assert until(w, lambda: w.state("shellx")["disk"]["status"]
+                     .startswith("Freed"))
+        assert deleted == ["/var/tmp/pad_ap/cache/tank"]
+        # only the running one is left, and it alone is refused
+        live = [r for r in w.state("shellx")["disk"]["rows"] if r["level"] == 2]
+        assert len(live) == 1
+        w.answers.append("ok")
+        assert w.call("shellx.disk_clean", live[0]["leaves"]) is False
+        assert w.asked[-1]["title"] == "In use"
+
+
 def test_every_form_field_belongs_to_its_project(tmp_path):
     """David, 2026-09-26: "all the form entries on any of the tabs should be
     saved per project".  Every PROJECT_FIELDS field, the Write file name and

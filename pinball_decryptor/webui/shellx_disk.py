@@ -23,23 +23,30 @@ from .shellx_common import fmt_binary as _fmt
 
 log = logging.getLogger(__name__)
 
-LOC_WSL, LOC_HOST, LOC_EMU = "wsl", "host", "emu"
+LOC_WSL, LOC_HOST, LOC_EMU, LOC_RIG = "wsl", "host", "emu", "rig"
+#: Rows in this order, top to bottom.
+LOCS = (LOC_WSL, LOC_RIG, LOC_HOST, LOC_EMU)
 LOC_LABEL = {
     LOC_WSL: "WSL staging",
+    LOC_RIG: "Emulators' files in WSL",
     LOC_HOST: "Windows temp (%TEMP%)",
     LOC_EMU: "Spike 2 emulator card cache",
 }
 
 INTRO = ("The tools stage their work in WSL (Chicago Gaming, Dutch Pinball, "
          "Barrels of Fun, Jersey Jack) and in the Windows temp folder "
-         "(Stern, plus render/ffmpeg scratch), and the Spike 2 emulator keeps "
-         "whole cards cached on its own disk. None of them shrinks on its "
-         "own — clean up here.")
+         "(Stern, plus render/ffmpeg scratch); the Emulate tabs keep the "
+         "games they unpacked, their last runs and their own Python in WSL; "
+         "and the Spike 2 emulator keeps whole cards cached on its own disk. "
+         "None of them shrinks on its own — clean up here.")
 TREE_NOTE = ("Select rows to remove, or use “Clean all”. Finished runs clean "
              "up after themselves, so the staging rows here are from crashed "
-             "or cancelled runs. Cached emulator cards are different: they are "
-             "meant to be there, and deleting one costs a re-copy the next "
-             "time that card boots.")
+             "or cancelled runs. The emulators' files and cached cards are "
+             "different: they are meant to be there, and deleting one costs "
+             "time on the next Start (the game is unpacked again, the "
+             "emulator's Python installed again). An emulator whose game is "
+             "running is left alone; saved settings and high scores are never "
+             "listed.")
 RESIZE_NOTE = ("Set how large the WSL virtual disk may grow. Increase it when "
                "an extract needs more room than WSL has (the biggest titles "
                "can need 20+ GiB); the disk only uses real space as it fills. "
@@ -131,7 +138,8 @@ class DiskMixin:
     def disk_open(self):
         """The window opened: its first scan."""
         self._disk = {
-            "busy": False, "entries": [], "size_by": {}, "wsl_ok": False,
+            "busy": False, "entries": [], "size_by": {}, "live": set(),
+            "wsl_ok": False,
             "wsl_msg": "", "usage": {LOC_WSL: None, LOC_HOST: None,
                                      LOC_EMU: None},
             "vhdx": None,
@@ -204,6 +212,12 @@ class DiskMixin:
                 except Exception as e:                  # noqa: BLE001
                     data["wsl_ok"] = False
                     data["wsl_msg"] = str(e)
+            if data["wsl_ok"]:
+                try:
+                    data["rig_entries"] = wsl_disk.scan_rigs()
+                except Exception:                       # noqa: BLE001
+                    log.exception("scanning the emulators' WSL folders")
+                    data["rig_entries"] = []
             helpers = _emu_helpers() if allowed else None
             if helpers:
                 data["emu_entries"], data["emu_usage"] = helpers[0]()
@@ -257,7 +271,7 @@ class DiskMixin:
         rows = []
         d["size_by"] = {(e["location"], e["path"]): e["size"]
                         for e in d["entries"]}
-        for loc in (LOC_WSL, LOC_HOST, LOC_EMU):
+        for loc in LOCS:
             loc_items = [e for e in d["entries"] if e["location"] == loc]
             if not loc_items:
                 continue
@@ -286,7 +300,10 @@ class DiskMixin:
                                 reverse=True):
                     rows.append({
                         "id": "I:%s:%s" % (loc, e["path"]), "level": 2,
-                        "text": e["detail"], "size": _fmt(e["size"]),
+                        "text": e["detail"] + (
+                            "  —  in use: stop its game first"
+                            if e.get("live") else ""),
+                        "size": _fmt(e["size"]),
                         "leaves": [[loc, e["path"]]]})
         return rows
 
@@ -319,23 +336,34 @@ class DiskMixin:
         entries = []
         for e in data.get("wsl_entries", []) or []:
             entries.append(dict(e, location=LOC_WSL))
+        for e in data.get("rig_entries", []) or []:
+            entries.append(dict(e, location=LOC_RIG))
         for e in data.get("host_entries", []) or []:
             entries.append(dict(e, location=LOC_HOST))
         for e in data.get("emu_entries", []) or []:
             entries.append(dict(e, location=LOC_EMU))
         d["entries"] = entries
+        d["live"] = {(e["location"], e["path"]) for e in entries
+                     if e.get("live")}
         d["vhdx"] = data.get("vhdx")
-        staging = [e for e in entries if e["location"] != LOC_EMU]
+        staging = [e for e in entries if e["location"] in (LOC_WSL, LOC_HOST)]
+        rigs = [e for e in entries if e["location"] == LOC_RIG]
         cached = [e for e in entries if e["location"] == LOC_EMU]
         parts = []
         if staging:
             parts.append("%d staging item%s using %s" % (
                 len(staging), "" if len(staging) == 1 else "s",
                 _fmt(sum(e["size"] for e in staging))))
+        if rigs:
+            parts.append("%d emulator item%s using %s" % (
+                len(rigs), "" if len(rigs) == 1 else "s",
+                _fmt(sum(e["size"] for e in rigs))))
         if cached:
             parts.append("%d cached card%s using %s" % (
                 len(cached), "" if len(cached) == 1 else "s",
                 _fmt(sum(e["size"] for e in cached))))
+        if len(parts) > 1:
+            parts = [", ".join(parts[:-1]), parts[-1]]
         status = ("Found " + " and ".join(parts) + ".") if parts else \
             "No leftover staging and no cached cards."
         self._disk_view(bars=self._bar_texts(), rows=self._disk_rows(),
@@ -360,14 +388,24 @@ class DiskMixin:
             if (loc, path) not in seen:
                 seen.add((loc, path))
                 uniq.append((loc, path))
+        # an emulator whose game is running keeps its files
+        busy = [m for m in uniq if m in d["live"]]
+        uniq = [m for m in uniq if m not in d["live"]]
         if not uniq:
+            if busy:
+                _mb().showinfo(
+                    "In use",
+                    "Those files belong to an emulator whose game is "
+                    "running. Stop the game on its Emulate tab first.")
             return False
         wsl_paths = [p for loc, p in uniq if loc == LOC_WSL]
+        rig_paths = [p for loc, p in uniq if loc == LOC_RIG]
         host_paths = [p for loc, p in uniq if loc == LOC_HOST]
         emu_labels = [p for loc, p in uniq if loc == LOC_EMU]
         staging_n = len(wsl_paths) + len(host_paths)
         staging_sz = sum(d["size_by"].get((loc, p), 0)
-                         for loc, p in uniq if loc != LOC_EMU)
+                         for loc, p in uniq if loc in (LOC_WSL, LOC_HOST))
+        rig_sz = sum(d["size_by"].get((LOC_RIG, p), 0) for p in rig_paths)
         emu_sizes = {lb: d["size_by"].get((LOC_EMU, lb), 0)
                      for lb in emu_labels}
         emu_sz = sum(emu_sizes.values())
@@ -377,6 +415,17 @@ class DiskMixin:
                          "files only." % (staging_n,
                                           "" if staging_n == 1 else "s",
                                           _fmt(staging_sz)))
+        if rig_paths:
+            lines.append("%d emulator item%s in WSL (%s) — an unpacked game "
+                         "is unpacked again on its next Start, an emulator's "
+                         "Python is installed again when next needed."
+                         % (len(rig_paths),
+                            "" if len(rig_paths) == 1 else "s",
+                            _fmt(rig_sz)))
+        if busy:
+            lines.append("Left alone: %d item%s of an emulator whose game is "
+                         "running." % (len(busy),
+                                       "" if len(busy) == 1 else "s"))
         if emu_labels:
             lines.append("%d cached emulator card%s (%s) — each one re-copies "
                          "the next time that card boots."
@@ -386,8 +435,8 @@ class DiskMixin:
         if not _mb().askyesno(
                 "Delete staging",
                 "Delete:\n\n  • " + "\n  • ".join(lines)
-                + "\n\nYour extracted assets and built images are not "
-                  "touched."):
+                + "\n\nYour extracted assets, built images, saved settings "
+                  "and high scores are not touched."):
             return False
         deleted = set(uniq)
         self._disk_busy(True, "Deleting %s…" % label)
@@ -398,8 +447,8 @@ class DiskMixin:
             wsl_freed = host_freed = emu_freed = 0
             err = None
             try:
-                if wsl_paths:
-                    wsl_freed = wsl_disk.delete(wsl_paths)
+                if wsl_paths or rig_paths:
+                    wsl_freed = wsl_disk.delete(wsl_paths + rig_paths)
                 if host_paths:
                     host_freed = host_temp.delete(host_paths)
                 if emu_labels and helpers:

@@ -313,7 +313,7 @@ function DiskSpaceDialog({ close }) {
       </div>`)}
     </div>
     <div class="stack" style="gap:4px">
-      <span class="h2">Leftover staging and caches</span>
+      <span class="h2">Leftover staging, caches and emulator files</span>
       <span class="small muted">${d ? d.tree_note : ""}</span>
     </div>
     <div class="card sx-tree" role="tree" aria-label="Location / manufacturer / item">
