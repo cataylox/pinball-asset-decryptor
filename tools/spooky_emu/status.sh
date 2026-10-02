@@ -18,7 +18,9 @@ if spk_game_alive; then
     echo "title=$T"
     echo "title_name=$(python3 "$SPK_TOOLS/spktitles.py" get "$T" name)"
     echo "build=$(basename "$B")"
-    echo "version=$(head -1 "$B/version.txt" 2>/dev/null | tr -d '')"
+    # Halloween and Ultraman have no version.txt: the build's name has it
+    V=$(head -1 "$B/version.txt" 2>/dev/null | tr -d '')
+    echo "version=${V:-$(basename "$B" | sed 's/^[^_]*_//')}"
     echo "pid=$P"
     echo "rss_kb=$(awk '/^VmRSS/ {print $2}' "/proc/$P/status" 2>/dev/null)"
     echo "uptime_s=$(ps -o etimes= -p "$P" 2>/dev/null | tr -d ' ')"
