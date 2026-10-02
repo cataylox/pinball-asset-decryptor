@@ -53,7 +53,7 @@ Extract, Write, Mod Pack, Replace Audio, Replace Video, **Emulate** (run the rea
 - **Games:** 4 (ABBA, Alien, Queen, Predator)
 - **Reads:** `.upd`, `.iso` (Clonezilla)
 
-Extract, Write, Apply Delta, Mod Pack, Replace Audio, Replace Video, **Emulate** (the **Emulate PB** tab plays Predator from its update on this PC, with a virtual switch window and live volume)
+Extract, Write, Apply Delta, Mod Pack, Replace Audio, Replace Video, **Emulate** (the **Emulate PB** tab plays Predator, Alien and ABBA from their files on this PC, with a virtual switch window; Queen is not supported yet)
 
 ## Sega (Whitestar DMD)
 
