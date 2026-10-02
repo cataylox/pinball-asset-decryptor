@@ -22,8 +22,9 @@ Spooky tab (webui/tabs/emulate_spooky.py), whose rig is the closest:
   game is in attract, reopens on request, and closes on Stop (its stdin is
   the tab's pipe) or when the game ends.
 * Sound is always on; Volume / Mute follow live through the control file
-  every Emulate tab shares (``tools/pb_emu/pbvol.py`` holds the game's
-  stream at that level).
+  every Emulate tab shares (``tools/pb_emu/pbvol.py`` holds Predator's
+  stream at that level; ``tools/pbio_emu/pbioaudio.py`` plays Alien's and
+  ABBA's at it, PAD-322).
 * A Cache window (AP's) shows and deletes the builds unpacked in the app's
   Linux, and the one-time setup.
 
@@ -68,8 +69,7 @@ PENDING_NOTE = ("Queen can't be emulated yet: it needs its restore image from "
 
 VOLUME_TIP = ("The game's sound on this PC - Volume and Mute follow at once, "
               "while the game plays (the same knob every Emulate tab shares). "
-              "The game's own volume is in its service menu. Predator only "
-              "so far: Alien and ABBA run silent.")
+              "The game's own volume is in its service menu.")
 
 SWITCHES_TIP = ("The virtual playfield, as on the American Pinball and Stern "
                 "Emulate tabs: every switch, the keyboard, the service "
@@ -630,18 +630,15 @@ class EmulatePBTab(RigTabMixin, TabService):
         self._started_here = True
         self._set_go("Cancel", True)
 
+        # sound always on, on both rigs: Volume / Mute follow live through
+        # the control file (Predator: pbvol.py; Alien and ABBA:
+        # pbioaudio.py, PAD-322), so unmuting a game started muted works
+        env = ["PAD_VISIBLE=1", "PAD_AUDIO=1",
+               "PAD_AUDIO_CTL=%s" % _rig.wsl_path(audio_ctl_file())]
         if kind == "pbio":
-            # Alien and ABBA: no sound yet (the game's SDL 1.2 speaks ALSA
-            # only), so no volume control to pass
-            env = ["PAD_VISIBLE=1"]
             first = ("a first start restores the machine's Linux from its "
                      "image and unpacks the update - a few minutes")
         else:
-            # sound always on: Volume / Mute follow live through the
-            # control file (pbvol.py), so unmuting a game started muted
-            # works
-            env = ["PAD_VISIBLE=1", "PAD_AUDIO=1",
-                   "PAD_AUDIO_CTL=%s" % _rig.wsl_path(audio_ctl_file())]
             first = ("a first start sets up the emulator and unpacks the "
                      "update - a few minutes")
         # the rig board names the run by its title (PAD-296)

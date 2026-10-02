@@ -177,7 +177,7 @@ _RIG_FILES = {
     "pbio": ("watch.sh", "stop.sh", "status.sh", "cancel.sh", "cache.sh",
              "ctl.sh", "prepare.sh", "run_game.sh", "killgame.sh",
              "pbiopath.sh", "pbioboard.py", "pbioctl.py", "pbiotitles.py",
-             "pbiofiles.py", "pbioswitches.py"),
+             "pbiofiles.py", "pbioswitches.py", "pbioaudio.py", "pbioshim.so"),
 }
 
 

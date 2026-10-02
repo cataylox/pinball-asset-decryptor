@@ -40,11 +40,11 @@ pbio_game_alive() {
     local p; p=$(pbio_game_pid)
     [ -n "$p" ] && [ -d "/proc/$p" ]
 }
-# Every process of this slot: the namespace holder, the board, Xvfb, pinprog,
-# vidprog and anything they started.
+# Every process of this slot: the namespace holder, the board, the sound
+# relay, Xvfb, pinprog, vidprog and anything they started.
 pbio_slot_pids() {
     local p
-    for p in $(pgrep -f 'pinprog|vidprog|pbioboard\.py|Xvfb|pbio_ns'); do
+    for p in $(pgrep -f 'pinprog|vidprog|pbioboard\.py|pbioaudio\.py|Xvfb|pbio_ns'); do
         tr '\0' '\n' 2>/dev/null < "/proc/$p/environ" | grep -qx "PBIO_MARK=$PBIO_RIG" && echo "$p"
     done
 }

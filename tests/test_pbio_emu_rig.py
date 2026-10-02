@@ -333,3 +333,99 @@ def test_the_playfield_table_is_predators_format(key):
     assert not lettered & set(prof["trough"])
     actions = {k["action"] for k in t["keymap"] if k["action"]}
     assert actions == {"plunge", "drain", "pause"}
+
+
+# ------------------------------------------- sound, window, pace (PAD-322)
+audio = _load("audio", RIG / "pbioaudio.py")
+
+
+def test_the_chroots_alsa_writes_the_relays_format_into_the_fifo():
+    """pinprog's SDL 1.2 speaks ALSA only: the default device converts to
+    48 kHz 16-bit stereo and writes it raw into the FIFO pbioaudio.py reads,
+    over ALSA's null device (no sound card in the chroot)."""
+    conf = audio.asound_conf("/mnt/log/audio.fifo")
+    assert "pcm.!default" in conf and "type plug" in conf
+    assert 'pcm "padfifo" format S16_LE rate 48000 channels 2' in conf
+    assert "type file" in conf and 'slave.pcm "null"' in conf
+    assert 'file "/mnt/log/audio.fifo"' in conf and 'format "raw"' in conf
+
+
+def test_volume_scales_the_samples_and_mute_is_silence():
+    import array
+    pcm = array.array("h", [1000, -1000, 32767, -32768]).tobytes()
+    assert audio.scale(pcm, 1.0, False) == pcm
+    half = array.array("h")
+    half.frombytes(audio.scale(pcm, 0.5, False))
+    assert list(half) == [500, -500, 16383, -16384]
+    assert audio.scale(pcm, 1.0, True) == bytes(len(pcm))
+    assert audio.scale(pcm, 0.0, False) == bytes(len(pcm))
+    assert audio.levels(pcm)[0] == 32768
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs a FIFO (Linux)")
+def test_the_relay_keeps_the_games_clock_without_pulseaudio_and_ends_with_it(tmp_path):
+    """No PulseAudio: the FIFO is still drained at the real-time rate (the
+    game never stalls, nor races ahead), and the relay ends with the game."""
+    import subprocess
+    import time
+    game = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        (tmp_path / "game.pid").write_text(str(game.pid))
+        ctl = tmp_path / "audio_ctl.json"
+        ctl.write_text(json.dumps({"gain": 0.3, "muted": True}))
+        fifo = tmp_path / "audio.fifo"
+        relay = subprocess.Popen(
+            [sys.executable, "-u", str(RIG / "pbioaudio.py"), "--fifo", str(fifo),
+             "--rig", str(tmp_path), "--ctl", str(ctl), "--pulse", "unix:/nonexistent"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        end = time.time() + 10
+        while not fifo.exists() and time.time() < end:
+            time.sleep(0.05)
+        t0 = time.time()
+        with open(fifo, "wb") as w:            # 0.6 s of sound
+            w.write(bytes(audio.BYTES_PER_S * 6 // 10))
+        took = time.time() - t0
+        assert 0.25 < took < 5, took
+        game.kill()
+        game.wait()
+        out = relay.communicate(timeout=10)[0]
+        assert relay.returncode == 0
+        assert "level 30%, MUTED" in out and "the game is gone" in out
+    finally:
+        if game.poll() is None:
+            game.kill()
+
+
+def test_run_game_wires_the_sound_the_window_and_the_renderer():
+    run = (RIG / "run_game.sh").read_text()
+    # --audio: the chroot's asound.conf, the relay as this slot's, ALSA for SDL
+    assert '--conf "$U/etc/asound.conf"' in run
+    assert 'mkfifo -m 666 "$PBIO_RIG/audio.fifo"' in run
+    assert "SDLAUDIO=alsa" in run and "SDL_AUDIODRIVER=$SDLAUDIO" in run
+    assert 'CTLARG=(--ctl "$PAD_AUDIO_CTL")' in run
+    # vidprog: the window shim, on the desktop by default, and SDL's
+    # software renderer (the chroot's GL is softpipe: ~9 fps)
+    assert "LD_PRELOAD=/usr/lib/pbioshim.so PBIO_WINDOWED=$WINDOWED" in run
+    assert "WINDOWED=${PBIO_WINDOWED:-$VISIBLE}" in run
+    assert "RENDER=${PBIO_RENDER:-software}" in run and "SDL_RENDER_DRIVER=$RENDER" in run
+    # the relay is one of the slot's processes: killgame.sh stops it
+    assert r"pbioaudio\.py" in (RIG / "pbiopath.sh").read_text()
+
+
+def test_the_window_shim_moves_resizes_and_scales():
+    src = (RIG / "pbioshim.c").read_text()
+    assert "flags &= ~(SDL_FULLSCREEN_DESKTOP | SDL_FULLSCREEN | SDL_BORDERLESS);" in src
+    assert "flags |= SDL_RESIZABLE;" in src
+    assert "SDL_TEXTUREACCESS_TARGET" in src and "SDL_RenderCopy_p(renderer, wn->canvas" in src
+
+
+def test_the_window_shim_loads_on_the_machines_glibc_230():
+    """Built (build.sh) for the chroot's glibc 2.30: no newer symbol version,
+    and dlsym from libdl.so.2."""
+    import re
+    so = (RIG / "pbioshim.so").read_bytes()
+    assert so[:4] == b"\x7fELF"
+    vers = {tuple(int(x) for x in v.split(b".")[1:])
+            for v in re.findall(rb"GLIBC_(2\.\d+(?:\.\d+)?)", so)}
+    assert vers and max(vers) <= (30,), sorted(vers)
+    assert b"libdl.so.2" in so

@@ -23,6 +23,8 @@
  *     shared-memory pool among them ("mmap() failed: Resource temporarily
  *     unavailable"), so SDL_mixer opened no sound and the game was silent
  *     (PAD-313).
+ *   - every 5 s the frames vidprog presented a second go to $PB_FPS_LOG
+ *     (PAD-322: the proof the screen keeps its pace).
  *   - on the desktop (PB_WINDOWED=1, run_game.sh --visible) vidprog's window
  *     gets a title bar: its SDL_CreateWindow flags lose BORDERLESS and
  *     FULLSCREEN and gain RESIZABLE, and it opens near the top left.  The
@@ -44,6 +46,7 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 
 #define PATHMAX 4096
@@ -225,4 +228,29 @@ SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, int index,
         }
     }
     return r;
+}
+
+/* Frames presented a second, every 5 s, to $PB_FPS_LOG (run_game.sh:
+ * $PB_RIG/fps.log) - the proof the screen keeps its pace (PAD-322). */
+void SDL_RenderPresent(SDL_Renderer *renderer);
+void SDL_RenderPresent(SDL_Renderer *renderer) {
+    REAL(SDL_RenderPresent);
+    static double since;
+    static long frames;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    double t = ts.tv_sec + ts.tv_nsec / 1e9;
+    if (since == 0) since = t;
+    frames++;
+    if (t - since >= 5.0) {
+        const char *path = getenv("PB_FPS_LOG");
+        FILE *f = path ? fopen(path, "a") : NULL;
+        if (f) {
+            fprintf(f, "%.0f fps %.1f (over %.1f s)\n", t, frames / (t - since), t - since);
+            fclose(f);
+        }
+        since = t;
+        frames = 0;
+    }
+    if (real_SDL_RenderPresent) real_SDL_RenderPresent(renderer);
 }

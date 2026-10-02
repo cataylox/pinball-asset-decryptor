@@ -47,10 +47,11 @@ in a chroot of it:
 | `/game/<title>/nvram` (settings, audits, scores) | `$PBIO_NV/<title>`, kept between runs (`PBIO_FRESH=1` starts over from the image's) |
 | `/mnt/log` (sda3: pinprog.log) | `$PBIO_RIG` |
 | the I/O boards on `/dev/ttyACM0` + `/dev/ttyUSB0` | `pbioboard.py`'s two ptys, bind-mounted there |
-| X on the two LCDs | a hidden 2166x768 Xvfb (`:200 + slot`), or WSLg with `--visible` |
+| X on the two LCDs | a hidden 2166x768 Xvfb (`:200 + slot`), or WSLg with `--visible`: windows with title bars that move and resize (`pbioshim.so`, below) |
+| the LCDs' GPU | none: SDL's own software renderer (`SDL_RENDER_DRIVER=software`; `PBIO_RENDER` overrides) |
 | TCP 5555 between the two programs | the slot's own network namespace (loopback only), so slots do not collide; its Xvfb runs inside it |
 | `date -s`, `hwclock -w`, reboot, init scripts, `firmware-update.sh` | logging no-ops (`$PBIO_RIG/shell.log`); the game also runs without CAP_SYS_TIME / SYS_BOOT, so a service-menu clock change cannot touch WSL's |
-| sound | none: `SDL_AUDIODRIVER=dummy` (rigs are always muted) |
+| sound (SDL 1.2 + SDL_mixer over ALSA, a softvol `Master` on the board's card) | with `--audio`: the chroot's `/etc/asound.conf` writes 48 kHz stereo into `$PBIO_RIG/audio.fifo` and `pbioaudio.py` plays it through WSLg's PulseAudio at the app's Volume / Mute; else `SDL_AUDIODRIVER=dummy` |
 | fonts the factory image installed and no update carries | the same file from another title in the OS image, else a stand-in (`prepare.sh`, listed in `<build>/fonts`) |
 
 Per title (`pbiotitles.py`): the firmware version the board reports, the
@@ -166,8 +167,27 @@ credit.  Presses closer than ~1 s apart are debounced away by the game.
   window is Predator's (`tools/pb_emu/pbpf.py --rig pbio`) on
   `pbioswitches.py`'s table; the Cache window lists `cache.sh --list`
   (the restored OS images and unpacked updates) beside Predator's.
-* **No sound** (`--audio` is refused politely): SDL 1.2 in the image
-  speaks ALSA only and PAD-Runtime has no ALSA device.
+* **Sound, window, pace (PAD-322).**  SDL 1.2 in the image speaks ALSA
+  only and has no PulseAudio client, so with `--audio` (the app always
+  passes it) the chroot's ALSA default is `plug` -> `file` (raw, into
+  `/mnt/log/audio.fifo`) -> `null`, and `pbioaudio.py` reads the FIFO on
+  the host and plays it with libpulse-simple, scaling the samples to the
+  app's control file (Mute = silence from the first sample).  The FIFO is
+  the game's clock: the relay drains it at the speakers' pace, and at the
+  real-time rate if PulseAudio is gone, so the game never stalls.
+  `pbioaudio.log` logs the level and, every 10 s, the peak of what came
+  in - proof sound flows on a muted run.  The game's own volume (the
+  service menu's, through `amixer` on the board's card) is not modelled.
+  The window: `pbioshim.so` (built by `build.sh` for the image's glibc
+  2.30) gives vidprog's borderless LCD slabs title bars and RESIZABLE,
+  scales the cabinet's whole screen into 1600x900 with one factor (Alien's
+  two windows side by side), and draws each LCD into a texture that every
+  present scales into the window - so any window size shows the whole
+  picture.  The pace: vidprog drew through the image's Mesa `swrast`
+  (softpipe, no LLVM) at ~9 frames a second on a whole core; SDL's
+  software renderer draws the same at the game's 30 a window for a fifth
+  of one.  `fps.log` (the shim) has the frames each window presented a
+  second, every 5 s.
 * **No physics** beyond the trough, the shooter lane and the kickers:
   ramps, orbits, locks and the tongue's ball-grab are switches you press.
   The magnets, posts and drop-bank reset fire into nothing.
