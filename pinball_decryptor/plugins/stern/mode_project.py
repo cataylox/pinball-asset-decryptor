@@ -294,6 +294,7 @@ MULTIBALL_PROVEN = frozenset({
     "star_wars_elg-1.10",              # 2026-09-26 mb_batch.sh: served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left)
     "munsters_le-1.28",                # 2026-09-26 mb_batch.sh (a switch pressed between drains): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left)
     "metallica_spike-1.03",            # 2026-09-26 mb_batch.sh: served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left)
+    "metallica_spike-1.04",            # 2026-10-01 PAD-306 mb_e2e flow (rig 3, stock card): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left), then the game's own ball end
     "led_zeppelin_pro-1.22",           # 2026-09-26 mb_batch.sh: served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left)
     "led_zeppelin_le-1.22",            # 2026-09-26 mb_batch.sh: served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left)
     "king_kong_le-0.97",               # 2026-09-26 mb_batch.sh: served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left)
@@ -368,6 +369,7 @@ BALL_SAVE_PROVEN = frozenset({
     "led_zeppelin_pro-1.22",            # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
     "mando_le-1.44",                    # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
     "metallica_spike-1.03",             # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "metallica_spike-1.04",             # 2026-10-01 PAD-306 bs_job flow (rig 3, stock card): saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
     "munsters_le-1.28",                 # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
     "rush_le-1.18",                     # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
     "star_wars_elg-1.10",               # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
@@ -403,6 +405,8 @@ STACK_BALLS_PROVEN = frozenset({
     "beatles-1.29", "james_bond_60th_le-1.11", "james_bond_le-1.06", "metallica_spike-1.03",
     "star_wars_elg-1.10", "stranger_things_le-1.12", "uncanny_xmen_le-0.98", "batman-1.13",
     "guardians_le-1.14", "aerosmith_le-1.15", "elvira3-1.13", "jurassic_park_the_pin-1.05",
+    "metallica_spike-1.04",           # PAD-306 2026-10-01: the framework's serve asked for two (0x3e3008), the
+                                      # stack no mode refused ("a multiball"); one drained, started
 })
 
 
@@ -444,6 +448,9 @@ STACK_RECORDS_PROVEN = frozenset({
     # Aerosmith 235..236, Guardians 230..231) was named and held the mode back, and was gone after its kill
     "metallica_spike-1.03",           # a song mode (Battery's first start 0xc5248 creates 182): named and
                                       # refused; the framework's kill 182..184 -> nothing, started
+    "metallica_spike-1.04",           # PAD-306 2026-10-01: Battery's first start 0xc5718 creates 182 (and 0xc7d4c
+                                      # 187): named and refused; the framework's kill 0x1fd9bc 182..184 (187..189)
+                                      # -> nothing, started
     "james_bond_60th_le-1.11",        # a Villain Mode (its start 0x9bb10 runs game timer 2, records 137..138):
                                       # named and refused; the framework's kill 137..138 -> nothing, started
 })
@@ -582,8 +589,14 @@ SWITCH_SHOTS_PROVEN = frozenset({"beatles-1.29"})
 #: flipper 59 - one hit per press on the press edge (the game's mode mask is 0 in play), a mode scored the
 #: flipper buttons +1M and +2M and served its multiball on the Action button, and the shim's LED view had
 #: the Action button solid red for the whole run of the mode (the game's own animation before it).
+#: PAD-306 (2026-10-01, rig 3): Metallica Remastered 1.04, the stock card, the Modes tab's Check this game
+#: (modes/gamecheck.sh play) and the switches it leaves out pressed after it: 37 of its 40 switch lines gave exactly
+#: one shot per press, in play, each on its own bit (the outlanes 59 and 62 too); Coffin lock 1-3 (89-91) gave none,
+#: even held 2.5 s - their descriptor flags are 0x0020 (the playfield's 0x0003), which the drain does not pass in
+#: play, the same switch table as 1.03's.
 SWITCH_EDGE_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10", "batman-1.13", "rush_le-1.18",
-                                "godzilla_pro-1.15", "godzilla_pro-1.16", "godzilla_le-1.16"})
+                                "godzilla_pro-1.15", "godzilla_pro-1.16", "godzilla_le-1.16",
+                                "metallica_spike-1.04"})
 
 
 def _core_names(port):
@@ -649,6 +662,7 @@ TITLE_SCENES = {
     "king_kong_le-0.97": dict(screen_proven=True, hud="cf8da03fa56cd71e414702db70b6aa3d", bank="ed379c6514e73bead614fee25e93d862", clip_proven=True),   # item 164: our clip seen on the glass
     "led_zeppelin_pro-1.22": dict(screen_proven=True, hud="b8745c86480a44976d95068a7dc773f2", bank="549616e1c38dbf636eae575c75f376ff", clip_proven=True),   # item 164: our clip seen on the glass, on the background bank 914f6bd9
     "metallica_spike-1.03": dict(screen_proven=True, hud="809cbf843c36555ddbda41c3b4909543", bank="809cbf843c36555ddbda41c3b4909543", clip_proven=True),   # item 164: our clip seen on the glass, in a Video grafted into the HUD
+    "metallica_spike-1.04": dict(screen_proven=True, hud="5fa968f413d7e188cac4045da9e76781", bank="5fa968f413d7e188cac4045da9e76781", clip_proven=True),   # PAD-306: screen and clip seen on the glass, in a Video grafted into the HUD
     "turtles_le-1.59": dict(screen_proven=True, hud="a337459aee72b3ec5dc9b0a50981e16d", bank="cf92bc5a7a4bb06fcd90a3bb90d55baa", clip_proven=True),   # item 164: our clip seen on the glass
     "uncanny_xmen_le-0.98": dict(screen_proven=True, hud="0d31df0d25052d0ec251c18d5b8b33a1", bank="4c5e3bd248dc09f1373c91111543f92e", clip_proven=True),   # item 164: our clip seen on the glass
     "aerosmith_le-1.15": dict(screen_proven=True, hud="53c9a69e39abf2dbb54fd134afe68b01", bank="dab80a17b8977c603e9094be6f072a58", clip_proven=True),   # item 164: our clip seen on the glass
@@ -1045,6 +1059,11 @@ LAMPS_PROVEN = frozenset((
     "led_zeppelin_le-1.22", "led_zeppelin_pro-1.22", "metallica_spike-1.03", "munsters_le-1.28",
     "star_wars_elg-1.10", "star_wars_le-1.30", "turtles_le-1.59", "turtles_pro-1.59",
     "uncanny_xmen_le-0.98", "venom_le-1.07",
+    # PAD-306 (2026-10-01, rig 3): the stock Metallica 1.04 card - light_all ff00ff held its 200 named inserts (1.03's
+    # 198 and 1.04's two sling skulls, whose lights it names -R/-G/-B), and the shim's LED view had every playfield RGB
+    # insert magenta while the mode ran (18 of 18 with the skulls), none before or after, and 85 of 85 single-colour
+    # inserts lit (18-20 before and after); the expressive-lighting strip (node 2) took no colour, another output path
+    "metallica_spike-1.04",
     # the SWELF generation, item 165 (2026-09-26): the lamp lines are LIGHT-table ids now (the earlier
     # device indices lit the wrong inserts, and the topper), and the proof is id-exact - light_all held
     # every insert in magenta AND light_insert held three named ones in grey, and the shim's LED view

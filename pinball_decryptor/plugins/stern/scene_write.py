@@ -315,6 +315,18 @@ PROFILES = {
         root_frames=6, root_count_at=0x63D32B, root_count=30,
         insert_at=0x65973C, insert_before=(0x80000E1E, 'Balls_Instance_ConcertMode'),
         first_free_id=0xF00, in_game=True, video=(6, 174), words_font=(1, 175)),
+    # PAD-306: 1.04's file is 1.03's size and differs only in texture pixels below 0x58e331;
+    # every byte from there to the end (the tree, the root count, the insert point) is 1.03's
+    "5fa968f413d7e188cac4045da9e76781": SceneProfile(
+        label='Metallica Remastered 1.04 in-game 9d578751 (PAD-306, read statically)',
+        scene_id='9d57875196c613785a1eee010c55223a0f1aa821', tree='auto_loaded',
+        md5='5fa968f413d7e188cac4045da9e76781', size=6658819,
+        poly={'bitmap': 2, 'sprite': 3, 'text': 4},
+        symbol={'sprite': 10, 'bitmap': 6, 'text': 18},
+        font=(860, 'Stern_DharmaGothicPBold_Glyphs_StoneLighten'), text_align=2, text_spacing=(2.0, -2.0), text_tail=(0, 0),
+        root_frames=6, root_count_at=0x63D32B, root_count=30,
+        insert_at=0x65973C, insert_before=(0x80000E1E, 'Balls_Instance_ConcertMode'),
+        first_free_id=0xF00, in_game=True, video=(6, 174), words_font=(1, 175)),
     "9869621883a18ce97bd3446d67dfbbff": SceneProfile(
         label='The Munsters LE 1.28 in-game 9d578751 (item 164, read statically)',
         scene_id='9d57875196c613785a1eee010c55223a0f1aa821', tree='auto_loaded',

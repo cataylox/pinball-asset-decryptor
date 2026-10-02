@@ -145,3 +145,41 @@ def test_bc1_non_multiple_of_four_dims():
 def test_bc1_decode_rejects_short_data():
     with pytest.raises(ValueError):
         dds.decode_bc1(b"\x00" * 8, 512, 512)
+
+
+def _psnr(a, b):
+    mse = ((a[..., :3].astype(float) - b[..., :3]) ** 2).mean()
+    return 99.0 if mse == 0 else 10 * np.log10(255 ** 2 / mse)
+
+
+def _yellow_on_magenta():
+    """PAD-306: a mode screen's yellow title on a magenta panel - colours whose green and
+    blue run against each other, which the bounding box's main diagonal cannot draw."""
+    img = np.zeros((32, 32, 4), dtype=np.uint8)
+    img[:] = (255, 0, 255, 255)
+    yy, xx = np.mgrid[0:32, 0:32]
+    img[(xx // 3 + yy // 5) % 2 == 0] = (255, 230, 0, 255)
+    return img
+
+
+def test_colours_running_against_each_other_keep_their_own_colours():
+    img = _yellow_on_magenta()
+    assert _psnr(dds.decode_bc3(dds.encode_bc3(img), 32, 32), img) > 35
+    assert _psnr(dds.decode_bc1(dds.encode_bc1(img), 32, 32), img) > 35
+    # every texel decodes to (near) yellow or magenta, never the red / pale pink the main
+    # diagonal made of them
+    out = dds.decode_bc3(dds.encode_bc3(img), 32, 32).astype(int)
+    near = np.minimum(np.abs(out[..., :3] - (255, 230, 0)).sum(axis=2),
+                      np.abs(out[..., :3] - (255, 0, 255)).sum(axis=2))
+    assert near.max() <= 24
+
+
+def test_a_premultiplied_picture_stays_premultiplied():
+    """The game's textures are premultiplied: a clear texel's colour is ADDED on the glass,
+    so the fit may never leave colour where there is no alpha."""
+    img = _yellow_on_magenta()
+    yy, xx = np.mgrid[0:32, 0:32]
+    clear = (xx + yy) % 7 < 2
+    img[clear] = 0
+    out = dds.decode_bc3(dds.encode_bc3(img), 32, 32).astype(int)
+    assert out[clear][:, :3].max() <= 16

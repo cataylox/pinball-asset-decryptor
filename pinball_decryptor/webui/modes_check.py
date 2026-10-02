@@ -103,10 +103,17 @@ class GameCheckMixin:
         self._check_set(self._check["state"], text)
 
     # ---- rig commands ---------------------------------------------------------------------
-    def check_play_cmd(self, game):
+    def check_play_cmd(self, game, as_root=False):
+        # PAD-306: as root whenever the run is root's. A user cannot read a root game's
+        # environment, so padslot.sh's pad_pids counts it as slot 0's: on any other rig the
+        # play saw no game and gave up at once ("the game stopped before a game could start").
+        if as_root:
+            return self._rig_cmd_root("modes/gamecheck.sh", "play", game)
         return self._rig_cmd("modes/gamecheck.sh", "play", game)
 
-    def check_log_cmd(self):
+    def check_log_cmd(self, as_root=False):
+        if as_root:
+            return self._rig_cmd_root("modes/gamecheck.sh", "log")
         return self._rig_cmd("modes/gamecheck.sh", "log")
 
     # ---- the button -----------------------------------------------------------------------
@@ -222,7 +229,8 @@ class GameCheckMixin:
                                       % self._rig_sentence(out)[-400:])
         if self._check_cancelled():
             return self._check_refuse("the check was cancelled; nothing was started.")
-        self._check.update(game=game_dir, port=port, label=label, run=self._run_id_fn())
+        self._check.update(game=game_dir, port=port, label=label, run=self._run_id_fn(),
+                           as_root=as_root)
         self._check_set("starting", "starting %s in the emulator…" % label)
         return ["PAD_MODE_SO=%s" % MT.GUEST_OBJECT]
 
@@ -256,8 +264,10 @@ class GameCheckMixin:
         game, port, label = self._check["game"], self._check["port"], self._check["label"]
 
         def work():
-            ok, out = self._run(self.check_play_cmd(game), timeout=self.CHECK_PLAY_TIMEOUT)
-            _lok, log = self._run(self.check_log_cmd(), timeout=60)
+            as_root = bool(self._check.get("as_root"))
+            ok, out = self._run(self.check_play_cmd(game, as_root=as_root),
+                                timeout=self.CHECK_PLAY_TIMEOUT)
+            _lok, log = self._run(self.check_log_cmd(as_root=as_root), timeout=60)
             self.ctx.loop.post(self._check_done, port, label, ok, out, log)
         threading.Thread(target=work, daemon=True, name="modes-check").start()
 

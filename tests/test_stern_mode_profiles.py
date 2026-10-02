@@ -46,6 +46,7 @@ PORTS = {
     "led_zeppelin_le-1.22": (31, 32, True, set(), ("callout", "screens", "clips", "own-sound")),
     "led_zeppelin_pro-1.22": (30, 32, True, set(), ("callout", "screens", "clips", "own-sound")),
     "metallica_spike-1.03": (40, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
+    "metallica_spike-1.04": (40, 64, True, set(), ("callout", "screens", "clips", "own-sound")),   # PAD-306: drafted from 1.03, proven in the emulator
     "munsters_le-1.28": (27, 32, True, set(), ("callout", "screens", "clips", "own-sound")),
     "rush_le-1.18": (38, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
     "star_wars_elg-1.10": (30, 64, True, set(), ("callout", "screens", "clips", "own-sound")),

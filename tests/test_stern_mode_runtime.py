@@ -47,6 +47,7 @@ PORTS = [
     ("led_zeppelin_pro", "1.22"),
     ("mando_le", "1.44"),
     ("metallica_spike", "1.03"),
+    ("metallica_spike", "1.04"),
     ("munsters_le", "1.28"),
     ("rush_le", "1.18"),
     ("star_wars_elg", "1.10"),
