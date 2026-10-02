@@ -887,14 +887,12 @@ static void draw_panel(struct gfx *g, const struct layout *L, const struct media
     if (!L->art_h) return;
     panel_rect(L, slot, &px, &py, &pw, &ph);
     gfx_rect(g, px, py, pw, ph, on ? TH(L, CARD_HL) : TH(L, CARD));
-    /* THE SETTINGS TILE'S PICTURE is the test card its Color correction
-     * shows, as built - a picture says "this is where the colours are set"
-     * where a word in a picture-sized hole would not (PAD-307) */
+    /* THE SETTINGS TILE'S PICTURE is the menu gear (PAD-307; David,
+     * 2026-10-01: "it should have a default 'menu gear' icon on it"), drawn
+     * here in the card's own title colour, so it needs no file on the card */
     if (i == m->settings_card) {
-        int th = ph * 9 / 10, tw = th * 640 / 400;
-        if (tw > pw * 9 / 10) { tw = pw * 9 / 10; th = tw * 400 / 640; }
-        if (tw > 8 && th > 8)
-            colour_test_card(g->px, g->w * 4, px + (pw - tw) / 2, py + (ph - th) / 2, tw, th);
+        int r = (ph < pw ? ph : pw) * 2 / 5;
+        gfx_gear(g, px + pw / 2, py + ph / 2, r, on ? TH(L, TITLE_HL) : TH(L, TITLE));
         return;
     }
     pic = card_picture(m, i);
@@ -1003,6 +1001,14 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
     if (!L->art_h) {
         /* the v1 picture, byte for byte (bar the dropped caption) */
         base = top + (int)((t.tl == 2 ? 0.36f : 0.42f) * ch);
+        /* ...except the SETTINGS tile, which has no picture panel here and
+         * carries its gear anyway: the gear in the top half, the words below */
+        if (conf_card_is_settings(c, i)) {
+            int r = (int)(0.15f * ch);
+            if (r > cw * 3 / 10) r = cw * 3 / 10;
+            gfx_gear(g, x + cw / 2, top + (int)(0.30f * ch), r, on ? TH(L, TITLE_HL) : TH(L, TITLE));
+            base = top + (int)(0.62f * ch);
+        }
         for (k = 0; k < t.tl; k++) {
             gfx_ellipsize(f, t.tpx, t.tlines[k], inner, cut, sizeof cut);
             gfx_text_center(g, f, t.tpx, x + cw / 2, base + (int)(k * t.tpx * 1.15f), cut,

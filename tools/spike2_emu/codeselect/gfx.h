@@ -29,6 +29,9 @@ void gfx_round_rect(struct gfx *g, int x, int y, int w, int h, int r, unsigned r
  * in fill_rgb */
 void gfx_round_frame(struct gfx *g, int x, int y, int w, int h, int r, int t,
                      unsigned frame_rgb, unsigned fill_rgb);
+/* the menu gear (PAD-307): an anti-aliased eight-tooth gear of outer radius r
+ * centred on cx, cy, in rgb; its hole shows what is under it */
+void gfx_gear(struct gfx *g, int cx, int cy, int r, unsigned rgb);
 /* alpha-blend a w x h RGBA image (tightly packed rows) at x, y; clipped */
 void gfx_blit(struct gfx *g, int x, int y, const unsigned char *rgba, int w, int h);
 

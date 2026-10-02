@@ -23,6 +23,10 @@ correction on the machine (PAD-307)". This page is the plan and what is owed.
 
 ## Decisions
 
+- **Optional, on by default.** David: "the settings section can be optional when setting up the
+  multi-boot menu". A tick in Menu settings (Stern only) writes `settings=on|off` to the card.
+- **A menu gear on the tile.** David: "it should have a default 'menu gear' icon on it". The
+  selector draws it (`gfx_gear`), so no picture file is needed and every card layout has it.
 - **Per image, with "Save for every game".** Each image starts from what it was built with; a
   black-and-white edition stays black and white unless the operator says otherwise.
 - **Nothing on the games partition is written.** The adjusted program is a RAM copy bound over

@@ -530,10 +530,18 @@ David, 2026-10-01: "someone would not like the color correction that we've appli
 slightly tweak it on the machine ... a settings tile at the end of the multi-boot menu ... one of
 the items would be color correction and in that they could navigate around and change the values
 and see how they are affected on the screen itself" - and then, "each game image can have its own
-color profile", "or optionally a 'set to all'".
+color profile", "or optionally a 'set to all'".  Later the same day: "the settings section can be
+optional when setting up the multi-boot menu. and it should have a default 'menu gear' icon on it".
 
-**What the operator sees.**  The last card is SETTINGS (its picture is the test card) whenever
-an image's game can be adjusted.  START on it opens a list - COLOR CORRECTION, BACK TO THE GAMES -
+**Optional, and on by default.**  Menu settings in the Multi-boot tab has the tick "End the menu
+with a SETTINGS card" (Stern only; `settings_tile` in the form, `--settings on|off` to
+mkmulticard, `settings=` in images.conf, recorded in build.json and read back from a card).
+Unticked, the menu never shows the card, whatever the images carry.
+
+**What the operator sees.**  The last card is SETTINGS whenever an image's game can be adjusted.
+Its picture is a menu gear the selector draws itself (`gfx_gear`: eight teeth, anti-aliased, in
+the card's title colour, so no file rides on the card): in the picture panel when the menu has
+artwork, above the words when it does not.  START on it opens a list - COLOR CORRECTION, BACK TO THE GAMES -
 and Color correction shows, per game, the Color profile tab's own controls: START FROM (As built,
 Recommended, No change, Black and white), MIDDLE SHADES and COLOR LEVEL for red, green and blue,
 COLOR STRENGTH, DARKEST SHADES; then SAVE FOR THIS GAME, SAVE FOR EVERY GAME (two or more

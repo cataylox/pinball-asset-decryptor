@@ -1004,7 +1004,7 @@ def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
     d = json.loads(json.dumps(man))
     assert set(d) == {"tool", "version", "written", "layout", "images", "timeout", "default",
                       "volume", "machine_volume", "mixer_volume", "sound_move", "sound_confirm",
-                      "heading", "text_size", "counter", "countdown_word", "footer",
+                      "heading", "text_size", "counter", "settings", "countdown_word", "footer",
                       "theme", "colors", "groups"}
     # a card that never set one records null, not the selector's own line
     assert d["heading"] is None
@@ -1520,6 +1520,21 @@ def test_conf_for_plan_takes_colours_from_the_trees_else_the_card(mk):
     assert "color_profile" not in mk.conf_for_plan(plan, argparse.Namespace(), existing=ex, colours={})
     # plan_colours keeps the records that carry one
     assert mk.plan_colours([{"index": 0, "colour": None}, {"index": 1, "colour": REC}]) == {1: REC}
+
+
+def test_conf_for_plan_takes_the_settings_card_from_the_flag_else_the_card(mk):
+    """PAD-307: --settings on|off is the whole answer; without it the card keeps its own,
+    and a card that never said writes no key (the selector then has the card)."""
+    plan = _two_image_plan(mk)
+    plain = mk.parse_images_conf(_menu_conf(mk, plan, colours={1: REC}))
+    assert "settings=" not in mk.conf_for_plan(plan, argparse.Namespace(), existing=plain)
+    off = mk.conf_for_plan(plan, argparse.Namespace(settings="off"), existing=plain)
+    assert "settings=off\n" in off
+    # the card's own word rides through an inject without the flag, and the flag turns it back
+    ex = mk.parse_images_conf(off)
+    assert "settings=off\n" in mk.conf_for_plan(plan, argparse.Namespace(), existing=ex)
+    assert "settings=on\n" in mk.conf_for_plan(plan, argparse.Namespace(settings="on"), existing=ex)
+    assert mk.build_manifest(plan, ex, None)["settings"] == "off"
 
 
 def test_tree_colour_reads_only_the_adjustable_shape(mk):

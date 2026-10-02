@@ -751,6 +751,27 @@ def test_the_instructions_line_is_set_in_menu_settings(tmp_path):
         assert s["footer"] == "FLIPPERS choose    START boots"
 
 
+def test_the_settings_card_is_a_tick_in_menu_settings(tmp_path):
+    """PAD-307: "the settings section can be optional when setting up the
+    multi-boot menu".  Ticked as it comes; the tick off is saved, summarised,
+    and Cancel puts it back like every other menu field."""
+    a = _raw(tmp_path, "a_pro-1_59_0.Release.8G.sdcard.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _add(w, a)
+        assert _st(w)["w"]["settings_tile"] is True
+        w.call("multiboot.menu_settings")
+        s = _st(w)
+        assert s["settings_tile"] is True and "no settings card" not in s["summary"]
+        w.call("ui.set", "multiboot", "settings_tile", False)
+        assert "no settings card" in _st(w)["summary"]
+        w.call("multiboot.menu_ok")
+        assert _panel(w).state()["menu"]["settings_tile"] is False
+        w.call("multiboot.menu_settings")
+        w.call("ui.set", "multiboot", "settings_tile", True)
+        w.call("multiboot.menu_cancel")
+        assert _st(w)["settings_tile"] is False
+
+
 def test_menu_settings_number_bounds_are_published(tmp_path):
     a = _raw(tmp_path, "a_pro-1_59_0.Release.8G.sdcard.raw")
     b = _raw(tmp_path, "b_pro-1_59_0.Other.8G.sdcard.raw")

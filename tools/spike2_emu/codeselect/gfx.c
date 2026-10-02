@@ -162,6 +162,68 @@ void gfx_blit(struct gfx *g, int x, int y, const unsigned char *rgba, int w, int
     }
 }
 
+/* ------------------------------------------------------------------ gear */
+
+/* THE MENU GEAR (PAD-307): eight teeth narrowing toward the tip, a body and a
+ * hole, one tooth pointing straight up - the "settings" mark every phone and
+ * PC uses.  Its coverage is worked out once per size (4 x 4 samples a pixel)
+ * and kept, so the menu's once-a-second repaint costs a blend, not the
+ * geometry. */
+#define GEAR_TEETH 8
+#define GEAR_SS    4
+
+static float gear_inside(float dx, float dy, float r)
+{
+    float rr = sqrtf(dx * dx + dy * dy), root = 0.76f * r, hole = 0.30f * r;
+    float phase, d, t, w;
+    if (rr < hole || rr > r) return 0.0f;
+    if (rr <= root) return 1.0f;
+    phase = atan2f(dx, -dy) * (float)GEAR_TEETH / 6.2831853f;
+    d = fabsf(phase - roundf(phase));
+    t = (rr - root) / (r - root);
+    w = 0.23f + (0.15f - 0.23f) * t;      /* half a tooth, in periods: wide at the root */
+    return d < w ? 1.0f : 0.0f;
+}
+
+void gfx_gear(struct gfx *g, int cx, int cy, int r, unsigned rgb)
+{
+    static unsigned char *mask;
+    static int mask_r;
+    int n, x, y;
+    if (r < 4) return;
+    n = 2 * r + 2;
+    if (mask_r != r) {
+        free(mask);
+        mask = malloc((size_t)n * (size_t)n);
+        mask_r = mask ? r : 0;
+        if (!mask) return;
+        for (y = 0; y < n; y++)
+            for (x = 0; x < n; x++) {
+                float cover = 0.0f;
+                int sx, sy;
+                for (sy = 0; sy < GEAR_SS; sy++)
+                    for (sx = 0; sx < GEAR_SS; sx++)
+                        cover += gear_inside(x - (r + 1) + (sx + 0.5f) / GEAR_SS,
+                                             y - (r + 1) + (sy + 0.5f) / GEAR_SS, (float)r);
+                mask[(size_t)y * n + x] = (unsigned char)(cover * 255.0f / (GEAR_SS * GEAR_SS) + 0.5f);
+            }
+    }
+    mark(g, cx - r - 1, cy - r - 1, cx + r + 1, cy + r + 1);
+    for (y = 0; y < n; y++) {
+        int py = cy - (r + 1) + y;
+        if (py < 0 || py >= g->h) continue;
+        for (x = 0; x < n; x++) {
+            int px = cx - (r + 1) + x;
+            unsigned a = mask[(size_t)y * n + x];
+            unsigned char *d;
+            if (!a || px < 0 || px >= g->w) continue;
+            d = g->px + ((size_t)py * g->w + px) * 4;
+            if (a == 255) { d[0] = rgb >> 16; d[1] = (rgb >> 8) & 0xff; d[2] = rgb & 0xff; d[3] = 0xff; }
+            else blend(d, rgb, a);
+        }
+    }
+}
+
 /* ------------------------------------------------------------------ font */
 
 struct glyph {

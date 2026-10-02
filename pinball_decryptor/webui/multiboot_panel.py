@@ -805,6 +805,7 @@ class WebMultibootPanel(_Base):
             "compact": bool(be.compact),
             "groups": bool(be.groups),
             "machine_volume": bool(be.machine_volume),
+            "settings_tile": bool(be.settings_tile),
             "volume_max": int(be.volume_max),
             "max_cards": min(mt.MAX_IMAGES, be.max_cards),
             "about": self.ABOUT_TIP_JJP if jjp else self.ABOUT_TIP,

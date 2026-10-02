@@ -3472,13 +3472,18 @@ def conf_for_plan(plan, args, existing=None, media=None, colours=None):
         footer = ex.get("footer")
     if colours is None:
         colours = dict(ex.get("colours") or {}) if same_n else {}
+    # THE SETTINGS CARD, on the counter's rule: --settings is the whole answer, and without
+    # it the card keeps whatever it says (a card that never said has the card)
+    settings = getattr(args, "settings", None)
+    if settings is None:
+        settings = ex.get("settings")
     return render_images_conf(plan.devices(), titles, subtitles, default, timeout, font,
                               rows, move, confirm, volume, mixer, theme=theme, colors=colors,
                               machine_volume=mv, debug_log=bool(getattr(args, "debug_log", False)),
                               groups=groups, default_card=default_card, heading=heading,
                               text_size=text_size, counter=counter,
                               countdown_word=countdown_word, footer=footer, scores=scores,
-                              colours=colours, settings=ex.get("settings"))
+                              colours=colours, settings=settings)
 
 
 # ============================================================================= the JSON sidecars
@@ -3543,6 +3548,8 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
         ("heading", conf.get("heading")),
         ("text_size", conf.get("text_size")),
         ("counter", conf.get("counter")),
+        # PAD-307: the SETTINGS card's switch (null = the card never said: it is on)
+        ("settings", conf.get("settings")),
         ("countdown_word", conf.get("countdown_word")),
         ("footer", conf.get("footer")),
         ("theme", conf.get("theme")),
@@ -7527,6 +7534,10 @@ def inspect_card(card, media_out=None):
         # the card asking for no word in front of the title at all
         ("counter", conf.get("counter")),
         ("countdown_word", conf.get("countdown_word")),
+        # PAD-307: null = the card never said, and it has the SETTINGS card whenever an
+        # image can be adjusted; "off" = the owner left it out.  ...and which images can
+        ("settings", conf.get("settings")),
+        ("colours", {str(k): v for k, v in sorted((conf.get("colours") or {}).items())}),
         # null = the card never set one, and the selector draws its own instructions
         # line (the one that follows the buttons); "" = the card asked for no line
         ("footer", conf.get("footer")),
@@ -9146,6 +9157,10 @@ def _add_conf_flags(s):
                    help="images.conf counter= - whether the '<  N / M  >' line under the cards "
                         "is drawn (only a carousel of five cards or more has one); an existing "
                         "card's is kept when absent, and a card that says neither draws it")
+    s.add_argument("--settings", choices=list(SETTINGS_WORDS),
+                   help="images.conf settings= - whether the SETTINGS card (color correction on "
+                        "the machine) ends the menu when an image can be adjusted (PAD-307); an "
+                        "existing card's is kept when absent, and a card that says neither has it")
     s.add_argument("--countdown-word", metavar="TEXT",
                    help="images.conf countdown_word=TEXT - the first word of the countdown line "
                         "(the selector's own '%s <title> in 9 s' when no card ever set one; "

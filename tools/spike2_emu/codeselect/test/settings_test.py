@@ -236,7 +236,23 @@ def main():
     rc, o = apply(1, old)
     if rc != 2 or "in the adjustable shape" not in o or os.path.exists(out):
         fail("(apply) the old shape: rc %d" % rc, o)
-    print("settings_test: OK (walk, save for every game, a held flipper, the idle exit, --apply-color)")
+    # 6. settings=off: the owner left the card out - the menu has the images' cards alone
+    off = os.path.join(t, "off.conf")
+    with open(off, "w") as f:
+        f.write(CONF + "settings=off\n")
+    snaps = []
+    for name, c in (("on", conf), ("off", off)):
+        r = subprocess.run([qemu, "-L", root, binp, "--snapshot", os.path.join(t, "tile_%s.ppm" % name),
+                            "--conf", c, "--font", font, "--media", media, "--no-invert",
+                            "--highlight-card", "3"],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        snaps.append((r.returncode, r.stdout))
+    if snaps[0][0] != 0 or "card 4/4 (settings)" not in snaps[0][1]:
+        fail("(off) with the card on, card 4 is not the settings card", snaps[0][1])
+    if snaps[1][0] == 0 or "out of range (3 cards)" not in snaps[1][1]:
+        fail("(off) settings=off still has a fourth card", snaps[1][1])
+    print("settings_test: OK (walk, save for every game, a held flipper, the idle exit, --apply-color, "
+          "settings=off)")
 
 
 if __name__ == "__main__":

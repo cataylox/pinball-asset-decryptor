@@ -1886,6 +1886,8 @@ def test_a_half_written_state_costs_the_tab_its_state_not_the_startup():
                     # instructions line described a menu drawing the
                     # selector's own (the tick on, the box empty)
                     "show_footer": True, "footer": "",
+                    # ...and PAD-307: one from before the SETTINGS card offers it
+                    "settings_tile": True,
                     "theme": "midnight", "colors": {}}
     assert "bypass" not in menu_from_state(None)     # always on: not a setting
     assert menu_from_state({"volume": 900})["volume"] == 100
@@ -2483,6 +2485,43 @@ def test_the_counter_and_the_countdown_word_reach_every_command_and_the_preview(
     assert "countdown_word=" in write_preview_conf(form).splitlines()
     # the preview is keyed on the conf, so neither can show a stale frame
     assert preview_fingerprint(_form(tmp_path, 2)) != preview_fingerprint(form)
+
+
+# ---- the SETTINGS card (PAD-307) ----------------------------------------------
+def test_the_settings_card_is_a_tick_that_reaches_every_command(monkeypatch, tmp_path):
+    """David, 2026-10-01: "the settings section can be optional when setting up the
+    multi-boot menu".  On by default (the card ends the menu whenever an image can
+    be adjusted); off reaches the card as settings=off; spelled out either way, on
+    the heading's rule.  JJP has no such card and no flag."""
+    from pinball_decryptor.webui.multiboot_core import (
+        diff_forms, inject_args, menu_summary, settings_args, update_args,
+        write_preview_conf)
+    form = _form(tmp_path, 2)
+    assert form.settings_tile is True
+    assert settings_args(form) == ["--settings", "on"]
+    for argv in (build_args(form), inject_args(form, form.out), update_args(form, form.out)):
+        assert argv[argv.index("--settings") + 1] == "on"
+    assert "settings=off" not in write_preview_conf(form).splitlines()
+    assert "no settings card" not in menu_summary(form)
+    off = _form(tmp_path, 2, settings_tile=False)
+    for argv in (build_args(off), inject_args(off, off.out), update_args(off, off.out)):
+        assert argv[argv.index("--settings") + 1] == "off"
+    assert "settings=off" in write_preview_conf(off).splitlines()
+    assert "no settings card" in menu_summary(off)
+    # taking it off is a change to the menu alone: an inject, never a rebuild
+    menu, rebuild = diff_forms(form, off)
+    assert menu == ["settings card"] and not rebuild
+    jjp = _form(tmp_path, 2, platform="jjp", settings_tile=False)
+    assert settings_args(jjp) == []
+    assert "settings=off" not in write_preview_conf(jjp).splitlines()
+    assert "no settings card" not in menu_summary(jjp)
+    # a card read back: null (never said) is on, "off" is off
+    _win(monkeypatch)
+    info = _rich_report(tmp_path)
+    card = str(tmp_path / "multi" / "card.multi.raw")
+    assert form_from_inspect(info, card, "")[0].settings_tile is True
+    info["settings"] = "off"
+    assert form_from_inspect(info, card, "")[0].settings_tile is False
 
 
 def test_the_instructions_line_reaches_every_command_and_the_preview(tmp_path):
