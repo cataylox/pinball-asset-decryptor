@@ -1667,7 +1667,9 @@ HELP_CONTENT = {
          "boards: the emulator answers the game the way the FAST controller, "
          "its lighting boards and (on Dune and Winchester) BoF's own mechanism "
          "board would, so it boots through its hardware check into attract "
-         "mode."),
+         "mode. Bon Jovi can't be emulated yet: its .fun is a signed disk "
+         "image and the emulator has no board profile for it; Image Info "
+         "says how an owner can help."),
         ("Which file to pick",
          "The .fun update file - the one the machine installs from a USB "
          "stick. That can be the official file, or one the Write tab built "
