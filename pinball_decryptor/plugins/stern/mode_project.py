@@ -1442,6 +1442,13 @@ def project_profile(project, probe=False):
 # ---- a mode, as the person authors it ----------------------------------------------
 CLIP_KINDS = ("none", "title", "file")
 CLIP_WHEN = ("start", "end")
+#: PAD-314: a mode started by shots made in ORDER (``starts_on "sequence"``): how many at least and
+#: at most (mode_file.c's SEQ_MAX)
+SEQUENCE_MIN, SEQUENCE_MAX = 2, 8
+#: PAD-314: ``end_shot`` meaning every playfield shot that is not one of the mode's own (the shots
+#: that score, and in a multiball the shot that adds a ball and the one the balls come on); the
+#: cabinet buttons are never "other". Bracketed so it can never be a port's shot name.
+END_SHOT_OTHERS = "(any shot that does not score)"
 
 
 @dataclass
@@ -1501,14 +1508,16 @@ class ModeSpec:
     # item 141, the Advanced section: every other parameter the runtime has
     award_ladder: str = "rising"         # rising: the Nth shot pays N x; fixed: every shot x 1
     shot_award: list = field(default_factory=list)   # [[shot name, points]]: pays instead of award
-    end_shot: str = ""                   # a shot name that ends the mode; "" = the clock only
+    end_shot: str = ""                   # a shot name that ends the mode, or END_SHOT_OTHERS (PAD-314:
+    #                                      any playfield shot that is not the mode's own); "" = none
     clip_both: dict = field(default_factory=dict)    # {} = one clip; else a second clip at the
     #                                      other end: {clip: same|title|file, title, file, seconds}
     callout_at: list = field(default_factory=list)   # [[seconds left, callout id]], on top of
     #                                      the countdown's own
     restore_after: int = 6               # seconds the screen stays up after the mode ends
-    # what starts and ends it (item 147): "shot" (start_shot x start_count) or "event <name>";
-    # "drain" (its clock or the ball ending), "clock" (its clock only) or "event <name>"
+    # what starts and ends it (item 147): "shot" (start_shot x start_count), "event <name>" or
+    # "sequence" (PAD-314: start_sequence made in order); "drain" (its clock or the ball ending),
+    # "clock" (its clock only) or "event <name>"
     starts_on: str = "shot"
     ends_on: str = "drain"
     #: keys a newer editor wrote that this one does not know - kept, never dropped
@@ -1539,6 +1548,11 @@ class ModeSpec:
     start_also: list = field(default_factory=list)   # [[shot name, count]]: hit these too, in one ball
     after: str = ""                      # another mode's NAME: starts only once that one has run; "" = none
     after_when: str = "game"             # ball | game: ... this ball, or this game
+    # PAD-314: with starts_on "sequence", the shots to make in THIS order, in one ball (2-8 names;
+    # MODE_PARAMETERS.md `trigger_seq`). A shot of the sequence made out of turn starts the player
+    # over; sequence_reset_any makes every other playfield shot do so too (`trigger_seq_reset`)
+    start_sequence: list = field(default_factory=list)
+    sequence_reset_any: bool = False
 
     # ---- JSON ----------------------------------------------------------------
     def to_json(self):
@@ -1787,6 +1801,10 @@ def retarget(spec, p):
                 continue
             kept.append(row)
         out.start_also = kept
+    if isinstance(out.start_sequence, list):         # PAD-314: the shots in order, matched by name
+        gone = [s for s in out.start_sequence if isinstance(s, str) and s not in names]
+        dropped += [s for s in gone if s not in dropped]
+        out.start_sequence = [s for s in out.start_sequence if s not in gone]
     _retarget_advanced(out, spec.title, p, names, dropped)
     out.title = p.key
     return out, dropped
@@ -1822,7 +1840,8 @@ def _retarget_advanced(out, old_key, p, names, dropped):
                 continue
             kept.append(row)
         out.shot_award = kept
-    if isinstance(out.end_shot, str) and out.end_shot and out.end_shot not in names:
+    if isinstance(out.end_shot, str) and out.end_shot and out.end_shot not in names \
+            and out.end_shot != END_SHOT_OTHERS:        # PAD-314: "any other shot" names no shot
         if out.end_shot not in dropped:
             dropped.append(out.end_shot)
         out.end_shot = ""
@@ -1886,6 +1905,12 @@ def retarget_words(old, new, dropped, p):
     gone = [s for s in old.scoring_shots if s in dropped]
     if gone:
         words.append("%s %s not on %s, so %s left out of the shots that score" % (
+            ", ".join(gone), "is" if len(gone) == 1 else "are", p.label,
+            "it is" if len(gone) == 1 else "they are"))
+    seq = old.start_sequence if isinstance(old.start_sequence, list) else []
+    gone = sorted({s for s in seq if s in dropped}, key=seq.index)   # PAD-314
+    if gone:
+        words.append("%s %s not a shot on %s, so %s left out of the shots that start the mode in order" % (
             ", ".join(gone), "is" if len(gone) == 1 else "are", p.label,
             "it is" if len(gone) == 1 else "they are"))
     words += retarget_advanced_words(old, new, dropped, p)
@@ -2360,6 +2385,30 @@ def starts_on_event(spec):
     return words[1] if len(words) >= 2 and words[0] == "event" else None
 
 
+def starts_on_sequence(spec):
+    """True when the mode starts on its ``start_sequence`` made in order (PAD-314)."""
+    words = (spec.starts_on or "shot").split()
+    return bool(words) and words[0] == "sequence"
+
+
+def playfield_shots(p):
+    """The title's shot names that are shots on the playfield: the cabinet buttons the port's
+    `switch` lines add (``switch_shots``) are left out."""
+    buttons = set(getattr(p, "switch_shots", ()) or ())
+    return [n for n, _m in p.shots if n not in buttons]
+
+
+def other_shots(spec, p):
+    """The shots :data:`END_SHOT_OTHERS` means on title ``p``: every playfield shot that is not
+    one of the mode's own - the shots that score and, in a multiball, the shot that adds a ball
+    and the one the balls come on. The shots that start it are not its own: once it runs they are
+    shots like any other."""
+    own = set(spec.scoring_shots if isinstance(spec.scoring_shots, list) else ())
+    if spec.multiball:
+        own |= {spec.add_ball_shot, spec.multiball_on_shot}
+    return [n for n in playfield_shots(p) if n not in own]
+
+
 def ends_on_parts(spec):
     """``("drain" | "clock" | "event", event name or None)`` (item 147)."""
     words = (spec.ends_on or "drain").split()
@@ -2372,8 +2421,21 @@ def _validate_starts_ends(spec, p):
     out = []
     words = (spec.starts_on or "shot").split()
     events = tuple(getattr(p, "events", ()) or ())
-    if words[0] not in ("shot", "event"):
-        out.append("A mode starts on a shot or on one of the game's events.")
+    if words[0] not in ("shot", "event", "sequence"):
+        out.append("A mode starts on a shot, on shots made in order, or on one of the game's events.")
+    elif words[0] == "sequence":                    # PAD-314
+        seq = spec.start_sequence
+        names = dict(p.shots)
+        if not isinstance(seq, list) or not all(isinstance(s, str) for s in seq):
+            out.append("The shots that start the mode in order are a list of shot names.")
+        elif len(seq) < SEQUENCE_MIN:
+            out.append("Pick at least two shots, in order, that start the mode.")
+        elif len(seq) > SEQUENCE_MAX:
+            out.append("A mode starts on at most %d shots in order." % SEQUENCE_MAX)
+        else:
+            for s in seq:
+                if s not in names:
+                    out.append("%s has no shot called %r in the shots that start it." % (p.label, s))
     elif words[0] == "event":
         name = starts_on_event(spec)
         if not name:
@@ -2471,7 +2533,7 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
     lines += parameter_lines(spec, slug, p)
     lines += display_light_lines(spec)
     lines += more_to_start_lines(spec, p)    # PAD-227: nothing unless the mode has them
-    lines = _starts_ends_lines(spec, lines)
+    lines = _starts_ends_lines(spec, lines, p)
     return "\n".join(lines) + "\n"
 
 
@@ -2790,7 +2852,10 @@ def validate_parameters(spec, p, folder=None):
             elif getattr(p, "score_bits", 64) == 32 and n > SCORE32_AWARD_MAX:
                 out.append("%s's own points can be at most %s: %s keeps its scores in 32 bits."
                            % (shot, format(SCORE32_AWARD_MAX, ","), p.label))
-    if spec.end_shot and (not isinstance(spec.end_shot, str) or spec.end_shot not in names):
+    if spec.end_shot == END_SHOT_OTHERS:             # PAD-314
+        if not other_shots(spec, p):
+            out.append("Every shot scores, so no shot is left to end the mode.")
+    elif spec.end_shot and (not isinstance(spec.end_shot, str) or spec.end_shot not in names):
         out.append("%s has no shot called %r to end the mode." % (p.label, spec.end_shot))
     both = spec.clip_both
     if not isinstance(both, dict):
@@ -2851,7 +2916,9 @@ def parameter_lines(spec, slug, p):
         lines.append("award_ladder   fixed")
     for shot, points in spec.shot_award:
         lines.append("shot_award     0x%08x %d" % (p.mask([shot]), _int_or_none(points)))
-    if spec.end_shot:
+    if spec.end_shot == END_SHOT_OTHERS:      # PAD-314: one mask of every shot that is not the mode's own
+        lines.append("end_shot       0x%08x" % p.mask(other_shots(spec, p)))
+    elif spec.end_shot:
         lines.append("end_shot       0x%08x" % p.mask([spec.end_shot]))
     if spec.clip_both and spec.clip != "none" and p.can("clip"):   # item 148 (j): no clip, no second
         other = "clip_end" if spec.clip_when == "start" else "clip_start"
@@ -2862,15 +2929,26 @@ def parameter_lines(spec, slug, p):
     return lines
 
 
-def _starts_ends_lines(spec, lines):
+def _starts_ends_lines(spec, lines, p):
     """Item 147: an event start REPLACES the trigger line (so a mode.so older than events
     logs the file NOT VALID rather than starting it on a shot); a start on a shot and an
-    end on the drain write exactly what they wrote before."""
+    end on the drain write exactly what they wrote before. PAD-314: a start on shots in
+    order replaces it the same way, with one ``trigger_seq`` line per shot and, when any
+    other shot starts the sequence over, a ``trigger_seq_reset`` of every playfield shot
+    not in it."""
     event = starts_on_event(spec)
     out = list(lines)
     if event:
         out = [line for line in out if not line.startswith("trigger ")]
         out.insert(2, "starts_on      event %s" % event)
+    elif starts_on_sequence(spec):
+        out = [line for line in out if not line.startswith("trigger ")]
+        seq = ["%-14s 0x%08x" % ("trigger_seq", p.mask([s])) for s in spec.start_sequence]
+        if spec.sequence_reset_any:
+            others = [n for n in playfield_shots(p) if n not in spec.start_sequence]
+            if others:
+                seq.append("%-14s 0x%08x" % ("trigger_seq_reset", p.mask(others)))
+        out[2:2] = ["starts_on      sequence"] + seq
     kind, name = ends_on_parts(spec)
     if kind == "clock":
         out.append("ends_on        clock")

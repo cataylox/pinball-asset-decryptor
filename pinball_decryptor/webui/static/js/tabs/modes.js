@@ -24,6 +24,8 @@ const T = {
   startShot: "The shot that starts the mode.",
   itsShot: "The mode starts when its shot is made that many times in one ball.",
   alsoShot: "Another shot the player has to make as well, that many times in the same ball, before the mode starts. The shots can be made in any order.",
+  sequence: "The mode starts when the player makes these shots in this order, in one ball: a combo of your own. A shot of the sequence made out of turn sends the player back to the start (it counts as the first shot again if it is the first). Pick a shot in the next list to add one; up to 8.",
+  seqReset: "On: every other shot of the game made out of turn sends the player back to the start too, so only the sequence, cleanly, starts the mode. Off: other shots do not matter, only the order of these.",
   afterMode: "The mode can only start once this other mode has run for the same player. Until then its shots do not count toward starting it. Only one of your modes runs at a time, so if this one is ready while the other still runs, the next start shot after it ends starts it.",
   startEvent: "Something the game itself does: a ball starting, a multiball starting, the skill shot being made. The mode starts the moment the game does it.",
   drain: "The mode ends when its time runs out, or sooner if the ball drains.",
@@ -47,7 +49,7 @@ const T = {
   film: "Cut this mode's clip, its sound or its screen's picture from a video file of your own (a film, an episode, anything): pick the video, a start time and a length (up to 30 seconds), and whether to keep its letterbox or fill the frame. The mode keeps only the cut (clip.mp4, end.wav, art.png), never the video.",
   rising: "The Nth scoring shot pays N times its points: 1x, 2x, 3x...",
   fixed: "Every scoring shot pays its points once.",
-  endShot: "A shot that ends the mode at once. It pays first if it is a scoring shot.",
+  endShot: "A shot that ends the mode at once, before its clock: a sniper's mode. It pays first if it is a scoring shot. \"Any shot that does not score\" is every shot of the game but the ones that score (and, in a multiball, the shots that add a ball or bring the balls); the cabinet buttons never end it.",
   secondClip: "A clip at the OTHER end from the one under Clip: at the end when that one plays at the start, and the other way round.",
   clip2Title: "The second title card's words. Empty uses the mode's name.",
   callouts: "One of the game's own callouts, by number, when that many seconds are left. Pick names the ones measured to play on this game; the countdown under Sound adds its own.",
@@ -331,6 +333,14 @@ function ModePage({ s, f, off, dis, rs }) {
   const balls = (prof.ball_shots || ["(none)"]).map((x) => ({ value: x, label: x }));
   const ballOpts = f.add_ball_shot && !balls.some((o) => o.value === f.add_ball_shot) ? [{ value: f.add_ball_shot, label: f.add_ball_shot }, ...balls] : balls;
   const mbOnOpts = withValue((prof.mb_on_shots || ["(when it starts)"]).map((x) => ({ value: x, label: x })), f.mb_on_shot);
+  // PAD-314: the shots in order (one list each; the next list appears as the last one is filled), and
+  // the shot that ends the mode early (moved here from Scoring, with "any shot that does not score")
+  const SEQ_NONE = "(no more shots)", SEQ_MAX = 8;
+  const seqOpts = (v) => withValue([{ value: SEQ_NONE, label: SEQ_NONE }, ...shots.map((x) => ({ value: x, label: x }))], v);
+  const seqSet = Array.from({ length: SEQ_MAX }, (_, i) => !!f["seq_shot_" + i] && f["seq_shot_" + i] !== SEQ_NONE);
+  const seqRows = Math.min(SEQ_MAX, Math.max(2, seqSet.lastIndexOf(true) + 2));
+  const seqOn = f.starts_kind === "sequence";
+  const endOpts = withValue((prof.end_shots || ["(no shot)"]).map((x) => ({ value: x, label: x })), f.end_shot);
   return html`<div class="modes-grid2">
       <div class="stack">
         <label class="lbl" for="m-name">Name</label>
@@ -342,7 +352,7 @@ function ModePage({ s, f, off, dis, rs }) {
       </div>
       <${Sec} title="Starts on" reason=${rs.events}>
         <div class="row wrap">
-          <${Radio} name="m-starts" value="shot" label="its shot" checked=${f.starts_kind !== "event"} disabled=${off} title=${T.itsShot} onChange=${(v) => setF("starts_kind", v, true)} />
+          <${Radio} name="m-starts" value="shot" label="its shot" checked=${f.starts_kind !== "event" && !seqOn} disabled=${off} title=${T.itsShot} onChange=${(v) => setF("starts_kind", v, true)} />
           <${Select} value=${f.start_shot} options=${shotOpts} ns="modes" k="f:start_shot" disabled=${off || !shots.length} width=${180} title=${T.startShot} />
           <span class="row nw" style="gap:8px"><${Num} k="start_count" value=${f.start_count} disabled=${off} width=${64} />
           <span class="dim nw">times in one ball</span></span>
@@ -350,6 +360,13 @@ function ModePage({ s, f, off, dis, rs }) {
         <div class="row wrap">
           <${Radio} name="m-starts" value="event" label="an event" checked=${f.starts_kind === "event"} disabled=${evOff} onChange=${(v) => setF("starts_kind", v, true)} />
           <${Select} value=${f.start_event} options=${withBlank(events, f.start_event)} ns="modes" k="f:start_event" disabled=${evOff} width=${230} title=${T.startEvent} />
+        </div>
+        <div class="row wrap">
+          <${Radio} name="m-starts" value="sequence" label="these shots, in order" checked=${seqOn} disabled=${off} title=${T.sequence} onChange=${(v) => setF("starts_kind", v, true)} />
+          ${Array.from({ length: seqRows }, (_, i) => html`<${Select} key=${"seq" + i} value=${f["seq_shot_" + i] || SEQ_NONE} options=${seqOpts(f["seq_shot_" + i])} ns="modes" k=${"f:seq_shot_" + i} disabled=${off || !seqOn || !shots.length} width=${150} title=${T.sequence} />`)}
+        </div>
+        <div class="row wrap" style="padding-left:26px">
+          <${Check} label="any other shot starts the sequence over" checked=${f.seq_reset_any} disabled=${off || !seqOn} title=${T.seqReset} ns="modes" k="f:seq_reset_any" />
         </div>
         ${[0, 1].map((i) => html`<div class="row wrap">
           <span class="dim nw">and also</span>
@@ -372,6 +389,10 @@ function ModePage({ s, f, off, dis, rs }) {
         <div class="row wrap">
           <${Radio} name="m-ends" value="event" label="an event" checked=${f.ends_kind === "event"} disabled=${evOff} onChange=${(v) => setF("ends_kind", v, true)} />
           <${Select} value=${f.end_event} options=${withBlank(events, f.end_event)} ns="modes" k="f:end_event" disabled=${evOff} width=${230} title=${T.endEvent} />
+        </div>
+        <div class="row wrap">
+          <span class="dim nw">and sooner, on</span>
+          <${Select} value=${f.end_shot} options=${endOpts} ns="modes" k="f:end_shot" disabled=${off || !shots.length} width=${260} title=${T.endShot} />
         </div>
       <//>
       <${Sec} title="How often it can start" tipText=${T.starts}>
@@ -609,8 +630,6 @@ function ScoringPage({ s, f, off }) {
   const prof = s.profile || {};
   const shots = prof.shots || [];
   const awards = s.awards || {};
-  const ends = (prof.end_shots || ["(only when time runs out)"]).map((x) => ({ value: x, label: x }));
-  const endOpts = f.end_shot && !ends.some((o) => o.value === f.end_shot) ? [{ value: f.end_shot, label: f.end_shot }, ...ends] : ends;
   return html`<div class="modes-grid2">
     <div class="stack" style="gap:14px">
       <${Sec} title="First shot pays">
@@ -622,9 +641,6 @@ function ScoringPage({ s, f, off }) {
           <${Radio} name="m-ladder" value="rising" label="Rising" checked=${f.award_ladder === "rising"} disabled=${off} title=${T.rising} onChange=${(v) => setF("award_ladder", v, true)} />
           <${Radio} name="m-ladder" value="fixed" label="Fixed" checked=${f.award_ladder === "fixed"} disabled=${off} title=${T.fixed} onChange=${(v) => setF("award_ladder", v, true)} />
         </div>
-      <//>
-      <${Sec} title="Ends early when hit">
-        <${Select} value=${f.end_shot} options=${endOpts} ns="modes" k="f:end_shot" disabled=${off} width=${260} title=${T.endShot} />
       <//>
     </div>
     <${Sec} title="Points per shot">

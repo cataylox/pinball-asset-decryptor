@@ -1751,7 +1751,7 @@ def test_modes_tab_advanced_and_the_games_call_follow_the_title(tmp_path):
         slug = w.call("modes.new")
         st = _st(w)
         assert list(st["awards"]) == names
-        assert st["profile"]["end_shots"] == [svc.PARAM_NEVER] + names
+        assert st["profile"]["end_shots"] == [svc.PARAM_NEVER, MP.END_SHOT_OTHERS] + names   # PAD-314
         assert st["profile"]["callouts"] == [] and "TMNT Pro 1.59" in st["profile"]["callouts_none"]
         assert st["dis"]["end_game"]                            # "The game's own call" greyed
         assert "nothing plays when time is up" in st["reasons"]["sound"]

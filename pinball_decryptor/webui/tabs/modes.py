@@ -46,7 +46,8 @@ SAVE_DELAY_MS = 500
 
 #: the form's fields (the Tk tab's ``self.v`` keys) and their kind
 _BOOL_FIELDS = ("screen", "countdown", "lights", "advanced", "stack", "light_shots_on", "multiball",
-                "start_save")                                                      # PAD-225
+                "start_save",                                                      # PAD-225
+                "seq_reset_any")                                                   # PAD-314
 _STR_FIELDS = (
     "name", "start_shot", "start_count", "seconds", "award", "screen_title", "panel_color",
     "title_color", "clip", "clip_title", "clip_when", "light_color", "light_on_raw",
@@ -59,7 +60,9 @@ _STR_FIELDS = (
     "callout_secs_2", "callout_id_2", "callout_secs_3", "callout_id_3",
     "balls", "ball_save", "add_ball_shot", "add_ball_max", "mb_on_shot",       # item 167, PAD-228
     "also_shot_0", "also_count_0", "also_shot_1", "also_count_1", "after_mode", "after_when",  # PAD-227
-    "start_save_s")  # PAD-225
+    "start_save_s",  # PAD-225
+    "seq_shot_0", "seq_shot_1", "seq_shot_2", "seq_shot_3",                           # PAD-314
+    "seq_shot_4", "seq_shot_5", "seq_shot_6", "seq_shot_7")
 _DEFAULTS = {
     "screen": True, "countdown": True, "lights": False, "advanced": False, "stack": True,
     "light_shots_on": False, "panel_color": "#000000", "title_color": "#000000",
@@ -68,13 +71,15 @@ _DEFAULTS = {
     "start_sound_mode": "none", "shot_sound_mode": "none", "music_mode": "none",
     "sound_shot_every": "1", "starts_policy": "unlimited", "starts_count": "2",
     "cooldown": "0", "light_shots_pattern": "Blink", "priority": "0", "starts_kind": "shot",
-    "ends_kind": "drain", "award_ladder": "rising", "end_shot": "(only when time runs out)",
+    "ends_kind": "drain", "award_ladder": "rising", "end_shot": "(no shot)",
     "clip_both": "none", "clip_both_seconds": "4", "restore_after": "6",
     "multiball": False, "balls": "3", "ball_save": "10", "add_ball_shot": "(none)", "add_ball_max": "1",
     "start_save": False, "start_save_s": "10",
     "mb_on_shot": "(when it starts)",
     "also_shot_0": "(nothing else)", "also_count_0": "1", "also_shot_1": "(nothing else)",
     "also_count_1": "1", "after_mode": "(any time)", "after_when": "game",
+    "seq_reset_any": False,                                                        # PAD-314
+    **{"seq_shot_%d" % i: "(no more shots)" for i in range(8)},
 }
 
 
@@ -100,7 +105,8 @@ _PROBLEM_PAGES = tuple((re.compile(rx), page) for rx, page in (
     (r"^The first shot has to be worth something", "scoring"),
     (r"^The award ladder", "scoring"),
     (r"^The per-shot awards|^A per-shot award|own points", "scoring"),
-    (r"to end the mode\.$", "scoring"),
+    # Mode: the shot that ends it sits under Ends on since PAD-314
+    (r"to end the mode\.$|^Every shot scores", "mode"),
     # Sounds: the end sound, the mode's own sounds, the callouts, a sound cut from a film
     (r"^The (end sound|start sound|shot sound|music) file", "sounds"),
     (r"^The shot sound plays", "sounds"),
@@ -119,6 +125,7 @@ _PROBLEM_PAGES = tuple((re.compile(rx), page) for rx, page in (
     (r"^How often it can start|^The wait after it ends", "mode"),
     (r"^A mode (starts|ends) on|^Pick the event that|has no event ", "mode"),
     (r"other shots?\b|^A mode cannot wait for itself|starts only after|^The mode it starts after", "mode"),
+    (r"in order|^Pick at least two shots", "mode"),                                # PAD-314
 ))
 
 
@@ -233,7 +240,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     _FILM_PARTS = (("clip", "clip", "a clip"), ("still", "screen", "a picture for the screen"),
                    ("sound", "own_sound", "a sound"))
     PARAM_CALLOUT_ROWS = 4
-    PARAM_NEVER = "(only when time runs out)"
+    PARAM_NEVER = "(no shot)"                  # PAD-314: was "(only when time runs out)" under Scoring
     #: item 167: the add-a-ball list's first entry
     BALL_NONE = "(none)"
     #: PAD-228: the multiball's balls come when the mode starts, not on a shot
@@ -242,6 +249,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     ALSO_NONE = "(nothing else)"
     AFTER_NONE = "(any time)"
     ALSO_ROWS = 2
+    #: PAD-314: the "these shots in order" lists' first entry, and the rows the form has
+    SEQ_NONE = "(no more shots)"
+    SEQ_ROWS = MP.SEQUENCE_MAX
     PARAM_SECOND_CLIP = (("none", "None"), ("same", "The same clip"), ("title", "A title card"),
                          ("file", "My video…"))
     CODE_EXAMPLE_SUFFIX = " (code mode)"
@@ -1111,11 +1121,17 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         by_name = {n: label for label, n in self._event_choices()}
         by_name.update({n: label for n, label in MP.EVENT_LABELS.items() if n not in by_name})
         start = MP.starts_on_event(spec)
-        self.f["starts_kind"] = "event" if start else "shot"
+        self.f["starts_kind"] = "event" if start else "sequence" if MP.starts_on_sequence(spec) else "shot"
         self.f["start_event"] = by_name.get(start, start or "")
         kind, name = MP.ends_on_parts(spec)
         self.f["ends_kind"] = kind if kind in ("drain", "clock", "event") else "drain"
         self.f["end_event"] = by_name.get(name, name or "")
+        # PAD-314: the shots in order, one list each; a hand-edited 9th and beyond are kept
+        seq = spec.start_sequence if isinstance(spec.start_sequence, list) else []
+        for i in range(self.SEQ_ROWS):
+            self.f["seq_shot_%d" % i] = str(seq[i]) if i < len(seq) else self.SEQ_NONE
+        self._seq_beyond = list(seq[self.SEQ_ROWS:])
+        self.f["seq_reset_any"] = bool(spec.sequence_reset_any)
 
     def _collect_trigger(self, spec):
         by_label = {label: n for n, label in MP.EVENT_LABELS.items()}
@@ -1127,8 +1143,13 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
 
         if self.f["starts_kind"] == "event":
             spec.starts_on = ("event %s" % name_of("start_event")).strip()
+        elif self.f["starts_kind"] == "sequence":        # PAD-314
+            spec.starts_on = "sequence"
         else:
             spec.starts_on = "shot"
+        rows = [str(self.f["seq_shot_%d" % i]).strip() for i in range(self.SEQ_ROWS)]
+        spec.start_sequence = [s for s in rows if s and s != self.SEQ_NONE] + list(self._seq_beyond)
+        spec.sequence_reset_any = bool(self.f["seq_reset_any"])
         kind = self.f["ends_kind"]
         spec.ends_on = ("event %s" % name_of("end_event")).strip() if kind == "event" \
             else (kind or "drain")
@@ -1155,9 +1176,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 self._params_kept_awards.append(r)
         self._shot_awards = {n: ("" if n not in shown else str(shown[n]))
                              for n in self._shot_names}
-        if spec.end_shot and not named(spec.end_shot):
+        if spec.end_shot and not named(spec.end_shot) and spec.end_shot != MP.END_SHOT_OTHERS:
             raw["end_shot"] = spec.end_shot
-        self.f["end_shot"] = spec.end_shot if named(spec.end_shot) else self.PARAM_NEVER
+        self.f["end_shot"] = spec.end_shot if named(spec.end_shot) or spec.end_shot == MP.END_SHOT_OTHERS \
+            else self.PARAM_NEVER                                                  # PAD-314
         both = spec.clip_both if isinstance(spec.clip_both, dict) else {}
         kind = both.get("clip") if both.get("clip") in MP.SECOND_CLIP_KINDS else "none"
         if spec.clip_both and kind == "none":
@@ -1259,7 +1281,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "callouts": choices,
                 "callouts_none": ("" if choices else
                                   "(no callouts measured on %s: type an id)" % p.label),
-                "events": events, "end_shots": [self.PARAM_NEVER] + names,
+                "events": events, "end_shots": [self.PARAM_NEVER, MP.END_SHOT_OTHERS] + names,  # PAD-314
                 "ball_shots": [self.BALL_NONE] + names,
                 "mb_on_shots": [self.MB_ON_START] + names}
 
