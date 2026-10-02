@@ -27,7 +27,7 @@ const CLEAR_TIP = "Drop every replacement picked on this tab in one go — for s
 const KEEP_TIP = "Off: the replacement is scaled to the original picture's size, which squeezes a longer name. On: it keeps its own width and height, and the build grows the scene to fit it. The game draws it from the same top-left corner, so a wider picture reaches further right. Needs an image build (not a direct SD write). A picture nothing in its scene draws by size is fitted instead, and the log says so.";
 const REP_TIP = "Click to choose a replacement for this image (double-click the row does the same).";
 // PAD-312: the chosen-files color profile, baked into this picture as it is staged
-const COLOR_TIP = "On: the Color profile tab's chosen-files profile is baked into this picture when you build, so it looks on the machine the way it looks on your PC. Off: it goes on the card in its own colors. The game's own pictures are never touched. A box you click is this picture's own setting; the Color profile tab's \"every replaced picture\" box sets the rest.";
+const COLOR_TIP = "On: the Color profile tab's individual files profile is baked into this picture when you build, so it looks on the machine the way it looks on your PC. Off: it goes on the card in its own colors. The game's own pictures are never touched. A box you click is this picture's own setting; the Color profile tab's Every replaced picture box sets the rest.";
 
 const TAG_CLS = { assigned: "img-picked", changed: "img-ondisk", foreign: "img-stray" };
 

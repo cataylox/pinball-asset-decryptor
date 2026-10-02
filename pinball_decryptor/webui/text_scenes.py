@@ -86,6 +86,14 @@ TIPS = {
              "scene's own rate looks wrong: how long each individual frame "
              "is held is still undecoded, so a sequence with held frames "
              "plays faster here than on the machine.",
+    "machine": "Drawn the way the machine's screen will show it: through the "
+               "whole screen overlay, if one is set, and then through the "
+               "screen itself, which shows middle shades too bright and too "
+               "blue (the Color profile tab's individual files profile, "
+               "undone). A picture with that profile switched on comes back "
+               "to what your PC shows; the game's own art, and a file left "
+               "in its own colors, look the way the machine really shows "
+               "them. Untick to see every picture in the PC's own colors.",
     "behind": "What the scene is laid over.\n\nThe machine draws on BLACK, "
               "so that is the true picture — but a black outline on a black "
               "frame is as invisible here as it is there. Pick a light "
@@ -332,6 +340,7 @@ class TextScenesService(TreeEditMixin):
                  screens=[], screen=_ALL_SCREENS, animated=False,
                  fps_choice=_FPS_FROM_FILE, fps_choices=list(_FPS_CHOICES),
                  bg=self._bg, bgs=self._bg_names(), bg_rgb=self._bg_rgb(),
+                 machine_look=getattr(self, "_mlook", True),
                  exporting=False, bulk=False, rebuilding=False,
                  rebuild_msg="", layout_dialog=None, tips=TIPS,
                  tree=False, tree_view=None, tree_layers=None, tree_busy=False,
@@ -1248,6 +1257,7 @@ class TextScenesService(TreeEditMixin):
         self.set(caption=short, caption_full=text)
 
     def _render_layout(self, layout, **kw):
+        kw.setdefault("view", self._machine_view())
         from ..plugins.stern import scene_render
         return scene_render.render_layout(self.assets_dir, layout, **kw)
 

@@ -262,8 +262,8 @@ function Controls({ s, p, update }) {
 }
 
 const MODES = [
-  { value: "display", label: "Whole screen", title: "One correction for everything the game draws: its own art, videos, mode screens, text and your replacements. No file is changed." },
-  { value: "assets", label: "Chosen files", title: "A correction baked into the replaced pictures and videos you switch on (and pictures added in Scenes). The game's own art is left as Stern made it." },
+  { value: "display", label: "Adjust whole screen overlay", title: "One correction drawn over everything the game shows: its own art, videos, mode screens, text and your replacements. No file is changed." },
+  { value: "assets", label: "Adjust individual files", title: "A correction baked into the replaced pictures and videos you switch on (and pictures added in Scenes). The game's own art is left as Stern made it." },
 ];
 
 function countWords(n) {
@@ -296,7 +296,7 @@ function Explainer({ s }) {
     ${assets ? html`<p>This profile corrects the files you choose, and only those. When you build, PAD shifts the colors of each switched-on picture or video the opposite way as it is staged, so the machine's screen shifts them back to what you made. The game's own art is left as Stern made it for this screen.</p>
     <ul class="cp-facts">
       <li><${Icon} name="check" />Your own files are never changed. The correction is made fresh from them every time you build, so it can never be applied twice.</li>
-      <li><${Icon} name="check" />The Whole screen profile still applies on top, if you set one: the game draws these files through it like everything else.</li>
+      <li><${Icon} name="check" />The whole screen overlay still applies on top, if you set one: the game draws these files through it like everything else.</li>
       <li><${Icon} name="check" />The Scenes preview shows a switched-on picture the way it will be written, so you can judge it in place.</li>
       <li><${Icon} name="check" />Different machines need different profiles. Save a copy for each one and load the one you're building for.</li>
     </ul>`
@@ -306,7 +306,7 @@ function Explainer({ s }) {
       <li><${Icon} name="check" />Pick No change and build again for the game's own colors.</li>
       <li><${Icon} name="check" />Different machines need different profiles. Save a copy for each one and load the one you're building for.</li>
       <li><${Icon} name="check" />See it in the emulator to check it in the game. The colors are set when the game starts, so each change restarts it.</li>
-      <li><${Icon} name="check" />Only your own new pictures and videos need it? Switch to Chosen files above: that profile is baked into the files you pick, and the game's own art is left alone.</li>
+      <li><${Icon} name="check" />Only your own new pictures and videos need it? Adjust individual files above: that profile is baked into the files you pick, and the game's own art is left alone.</li>
     </ul>` : html`<p>A color profile corrects for that. When you build, PAD shifts the colors of your replacement pictures and videos the opposite way, so the machine's screen shifts them back to what you made.</p>
     <ul class="cp-facts">
       <li><${Icon} name="check" />Your own files are never changed. The correction is made fresh from them every time you build, so it can never be applied twice.</li>
@@ -348,13 +348,13 @@ export default function ColorTab() {
     : assets
       ? (s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into " + countWords(s.asset_counts || {})
             + " when you build; the game's own art is not touched. Pick No change to send the files as they are."}<//>`
-        : !s.asset_active ? html`<${Note} kind="info">No change on the chosen files: they go onto the card as you made them. Pick a starting point or move a slider to correct them.<//>`
+        : !s.asset_active ? html`<${Note} kind="info">No change on the individual files: they go onto the card as you made them. Pick a starting point or move a slider to correct them.<//>`
         : html`<${Note} kind="info">${"“" + (s.name || "My profile") + "” is ready, but no file is switched on yet: tick a box under Which files, or switch on pictures on the Images tab, videos on the Video tab, or layers in Scenes."}<//>`)
       : s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is staged for this project: the next build "
           + (s.on_display ? "corrects everything the game draws." : "corrects your replaced pictures and videos.")
           + " Pick No change to take it off."}<//>`
       : html`<${Note} kind="info">${s.on_display
-          ? "No whole-screen color profile on this project: the game draws in its own colors. Pick a starting point or move a slider to stage one."
+          ? "No whole screen overlay on this project: the game draws in its own colors. Pick a starting point or move a slider to stage one."
           : "No color profile on this project: your pictures and videos go onto the card as they are. Pick a starting point or move a slider to stage one."}<//>`;
   return html`<div class="page cp-page">
     <${PageHead} title="Color profile" sub=${INTRO}>
@@ -364,8 +364,13 @@ export default function ColorTab() {
     <//>
     ${s.per_file ? html`<div class="row cp-modes">
       <${Seg} value=${s.mode || "display"} options=${MODES} onChange=${(v) => call("color.set_mode", v)} />
-      <span class="small muted">${assets ? "Baked into the replaced files you switch on; the game's own art is left alone." : "Everything the game draws, the game's own art included; no file is changed."}${nFiles && !assets ? ` · Chosen files: ${nFiles} switched on.` : ""}</span>
-    </div>` : null}
+      <span class="small muted">${assets ? "Baked into the replaced files you switch on; the game's own art is left alone." : "Drawn over everything the game shows, its own art included; no file is changed."}</span>
+    </div>
+    <${Note} kind="info" cls="cp-both"><b>Both can be on at once.</b> ${assets
+      ? (s.display_active ? `The whole screen overlay “${s.display_name}” is on too: the game draws these files through it like everything else.`
+        : "No whole screen overlay is set: only the files you switch on here are corrected.")
+      : (nFiles ? `The individual files profile “${s.asset_name}” is on too, baked into ${countWords(s.asset_counts || {})}; the overlay is drawn over those as well.`
+        : "No individual file is switched on; switch files on under Adjust individual files to correct only your own art.")}<//>` : null}
     ${note}
     ${s.try_note ? html`<div class="small muted">${s.try_note}</div>` : null}
     <div class="cp-grid">

@@ -223,6 +223,7 @@ class TreeEditMixin:
         split = self._tree_split(draws, sels) if sels else set()
         job = {"token": token, "rev": self._trev, "card": card, "man": man, "frame": frame,
                "pins": pins, "draws": draws, "bg": self._bg, "sel": sel if split else None,
+               "view": self._machine_view(),
                "split": split, "text_edits": self._pending_texts(card, None),
                "colors": self._pending_colors(card), "tmp": self._tmpdir(),
                "cache": self._tcache, "assets": self.assets_dir,
@@ -422,6 +423,30 @@ class TreeEditMixin:
         from ..plugins.stern import scene_render
         return scene_render.pending_pictures(self.assets_dir)
 
+    def _machine_view(self):
+        """How the machine's screen will show the frame (PAD-312: DragonRR, "with no
+        colour profile selected all images in scenes should look like they would do if
+        installed on the table"), or None with the As on the machine tick off."""
+        if not getattr(self, "_mlook", True):
+            return None
+        try:
+            from ..core import colour_profile
+            return colour_profile.machine_view(self.assets_dir)
+        except Exception:                            # noqa: BLE001
+            log.exception("machine view")
+            return None
+
+    @rpc
+    def set_machine_look(self, on):
+        """As on the machine: draw the preview the way the machine's screen will show it
+        (the whole-screen profile, then the screen's own distortion), or in the PC's own
+        colours.  The scene is drawn again either way."""
+        self._mlook = bool(on)
+        self.set(machine_look=self._mlook)
+        if self._sel:
+            self._render_preview(self._sel)
+        return True
+
     def _tree_sizes(self):
         from ..plugins.stern import scene_render
         if getattr(self, "_tsizes", None) is None or self._tsizes[0] != self.assets_dir:
@@ -477,6 +502,7 @@ class TreeEditMixin:
                "hidden": set(self._tree_view_hidden(card)),
                "text_edits": self._pending_texts(card, None), "colors": self._pending_colors(card),
                "pictures": self._tree_pictures(), "sizes": self._tree_sizes(),
+               "view": self._machine_view(),
                "tmp": self._tmpdir(), "assets": self.assets_dir, "cache": self._tcache}
         self.set(tree_play={"run": "p%d" % id(state), "fps": fps, "frames": frames,
                             "map": [], "srcs": [], "done": False})
@@ -513,7 +539,8 @@ class TreeEditMixin:
                         job["assets"], small, draws=scaled, fonts=self._fonts,
                         background=job["bg"], colors=job["colors"],
                         text_edits=job["text_edits"], cache=job["cache"],
-                        pictures=job["pictures"], sizes=job["sizes"], inks=inks)
+                        pictures=job["pictures"], sizes=job["sizes"], inks=inks,
+                        view=job.get("view"))
                     path = os.path.join(job["tmp"], "%s_%d.png" % (tag, len(srcs)))
                     if img is not None:
                         img.save(path, compress_level=1)
@@ -580,7 +607,7 @@ class TreeEditMixin:
                 job["assets"], job["man"], job["frame"], pins=job["pins"], fonts=self._fonts,
                 background=job["bg"], colors=job["colors"], text_edits=job["text_edits"],
                 draws=job["draws"], cache=job["cache"], split=job["split"] or None,
-                pictures=job.get("pictures"), sizes=job.get("sizes"))
+                pictures=job.get("pictures"), sizes=job.get("sizes"), view=job.get("view"))
         except Exception:                            # noqa: BLE001
             log.exception("scene tree render")
         if got is None:
@@ -1456,7 +1483,9 @@ class TreeEditMixin:
                 images.color_all_changed()
             except Exception:                            # noqa: BLE001
                 pass
-            self.pictures_changed()
+        # drawn again here, whichever way the switch was recorded (DragonRR: the palette and
+        # the picture only changed after a tab switch)
+        self.pictures_changed()
         return True
 
     def pictures_changed(self):

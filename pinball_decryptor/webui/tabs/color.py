@@ -176,6 +176,9 @@ class ColorTab(TabService):
             lift=max(p.lift), saturation=p.saturation, rev=self._rev,
             active=active, mode=self._mode if self._on_display else "display",
             per_file=self._on_display,
+            display_active=self._prof is not None,
+            display_name=self._prof.label() if self._prof is not None else "",
+            asset_name=(self._asset or cp.PRESETS[0][1]).label(),
             project=assets,
             **state,
             has_project=bool(assets and os.path.isdir(assets)),
@@ -225,6 +228,7 @@ class ColorTab(TabService):
             self._rev += 1
         self._publish(problems=[])
         self._changed()
+        self._tell_tabs()
         return True
 
     def _tell_tabs(self):
@@ -232,7 +236,7 @@ class ColorTab(TabService):
         chosen-files switches and the corrected pictures."""
         for ns, name in (("images", "color_all_changed"),
                          ("video", "color_all_changed"),
-                         ("text_scenes", "pictures_changed")):
+                         ("text", "scenes_pictures_changed")):
             try:
                 fn = getattr(self.window.service(ns), name, None)
             except Exception:                           # noqa: BLE001

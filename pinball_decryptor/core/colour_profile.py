@@ -157,6 +157,49 @@ class Profile:
             out.append("lutrgb=" + ":".join(exprs))
         return out
 
+    def apply_array(self, rgb):
+        """*rgb* (uint8 ``(h, w, 3)``) corrected, the same maths as
+        :meth:`apply_image`."""
+        import numpy as np
+        out = np.asarray(rgb, np.uint8)
+        if self.saturation != 1.0:
+            m = np.asarray(self.matrix(), np.float32)
+            out = np.clip(out.astype(np.float32) @ m.T + 0.5, 0, 255).astype(
+                np.uint8)
+        luts = [np.asarray(self.table(c), np.uint8) for c in range(3)]
+        return np.stack([luts[c][out[..., c]] for c in range(3)], axis=-1)
+
+    def undo_table(self, channel):
+        """The inverse of :meth:`table` on *channel*: what the machine's
+        screen does to a value this profile corrects (PAD-312).  Where the
+        correction clips, the inverse holds at the edge."""
+        g, k, lo = self.gamma[channel], self.gain[channel], self.lift[channel]
+        out = []
+        for v in range(256):
+            y = v / 255.0
+            x = (y - lo) / (1.0 - lo) if lo < 1.0 else y
+            x = min(max(x, 0.0), 1.0) ** (1.0 / g)
+            if k > 0:
+                x = x / k
+            out.append(int(min(max(x * 255.0 + 0.5, 0), 255)))
+        return out
+
+    def undo_array(self, rgb):
+        """*rgb* (uint8 ``(h, w, 3)``) as the machine's screen would show
+        it, taking this profile as the correction measured for that screen:
+        the inverse of :meth:`apply_array`.  Black and white (saturation 0)
+        cannot be undone and is left as it is."""
+        import numpy as np
+        src = np.asarray(rgb, np.uint8)
+        luts = [np.asarray(self.undo_table(c), np.uint8) for c in range(3)]
+        out = np.stack([luts[c][src[..., c]] for c in range(3)], axis=-1)
+        if self.saturation not in (0.0, 1.0):
+            m = np.asarray(Profile(saturation=1.0 / self.saturation).matrix(),
+                           np.float32)
+            out = np.clip(out.astype(np.float32) @ m.T + 0.5, 0, 255).astype(
+                np.uint8)
+        return out
+
     def apply_image(self, im):
         """*im* (any Pillow mode) corrected; alpha passes through untouched.
         Returns a new RGB or RGBA image."""
@@ -437,6 +480,30 @@ def added_picture_colour(assets_dir, op, settings=None, prof=None):
     on = asset_applies(settings, "images", op.get("image") or "",
                        own=op.get("color"))
     return prof if on else None
+
+
+def machine_view(assets_dir):
+    """A function ``rgb uint8 array -> rgb uint8 array`` showing a frame of
+    *assets_dir* the way the machine's screen will (PAD-312): through the
+    whole-screen profile, as the game's shaders draw it, then through the
+    screen itself, taken as the inverse of the chosen-files profile (that
+    profile is the correction measured for the screen, so undoing it IS the
+    screen).  A picture baked with the chosen-files profile comes back to
+    what the PC shows; the game's own art and an uncorrected file come out
+    as the machine really shows them.  ``None`` when there is nothing to
+    show (no whole-screen profile, and No change on the chosen files)."""
+    display = active(assets_dir)
+    screen = asset_active(assets_dir)
+    if display is None and screen is None:
+        return None
+
+    def view(rgb):
+        if display is not None:
+            rgb = display.apply_array(rgb)
+        if screen is not None:
+            rgb = screen.undo_array(rgb)
+        return rgb
+    return view
 
 
 def asset_counts(assets_dir):

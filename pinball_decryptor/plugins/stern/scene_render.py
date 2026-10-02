@@ -319,6 +319,24 @@ def flatten_over_background(img, name):
     return Image.alpha_composite(back, img.convert("RGBA")).convert("RGB")
 
 
+def viewed(canvas, view):
+    """*canvas* (uint8 RGBA, colour premultiplied by coverage, as the frame is
+    accumulated) seen through *view* (``rgb -> rgb``, core.colour_profile
+    ``machine_view``): the colour is taken straight, viewed, and multiplied
+    back, so a soft edge keeps its edge (PAD-312).  *view* None: unchanged."""
+    if view is None:
+        return canvas
+    import numpy as np
+    a = canvas[..., 3:4].astype(np.float32)
+    cov = np.maximum(a, 1.0)
+    straight = np.clip(canvas[..., :3].astype(np.float32) * 255.0 / cov + 0.5,
+                       0, 255).astype(np.uint8)
+    shown = np.asarray(view(straight), np.float32)
+    out = canvas.copy()
+    out[..., :3] = np.clip(shown * a / 255.0 + 0.5, 0, 255).astype(np.uint8)
+    return out
+
+
 def _over_background(canvas, spec):
     """Lay the accumulated frame over *spec* and return an RGB ``PIL.Image``.
 
@@ -460,7 +478,7 @@ def _layout_edit(layout_edits, text):
 
 def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
                   colors=None, state=0, group=None, layout_edits=None,
-                  text_edits=None):
+                  text_edits=None, view=None):
     """Composite *layout* into an RGB ``PIL.Image``, or ``None`` if nothing
     could be drawn.  Pass *fonts* (``fontrender.load_fonts`` output) to render
     many scenes without re-reading the glyph manifest each time, and *frame* to
@@ -599,7 +617,7 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
             drew = True
     if not drew:
         return None
-    return _over_background(canvas, background_spec(background))
+    return _over_background(viewed(canvas, view), background_spec(background))
 
 
 def render_scene(assets_dir, card_path, fonts=None, layouts=None,
@@ -871,7 +889,7 @@ def text_lines(text, width, wrap, measure):
 
 def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
                 background=None, colors=None, text_edits=None, draws=None, cache=None,
-                split=None, pictures=None, sizes=None, inks=None):
+                split=None, pictures=None, sizes=None, inks=None, view=None):
     """The scene in manifest *man* (:func:`scene_eval.manifest`) at root *frame* as an RGB
     ``PIL.Image`` - every picture with its own place, scale, tilt and fade, in draw order, from
     the project folder's CURRENT PNGs and glyph slices.  *pins* / *hidden* are
@@ -888,7 +906,10 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
     *inks*, a dict, keeps every line of text drawn (its glyphs read off disk and laid out) for
     the next call: a caller drawing many frames of one scene passes the same dict to them all
     (PAD-261: the Godzilla credits' 98 lines read ~17,000 glyph files per ten frames).  It is
-    the caller's to drop when the glyphs may have changed; without it nothing is kept."""
+    the caller's to drop when the glyphs may have changed; without it nothing is kept.
+
+    *view* (core.colour_profile ``machine_view``) shows the frame as the machine's screen
+    will: applied to the finished frame before the backdrop, and to each layer (PAD-312)."""
     try:
         import numpy as np
         from PIL import Image
@@ -987,7 +1008,7 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
     def flat(c):
         out = c.copy()
         out[..., 3] = c[..., 3] * 255.0
-        return out.clip(0, 255).astype("uint8")
+        return viewed(out.clip(0, 255).astype("uint8"), view)
 
     if not split:
         return _over_background(flat(layers[0]), spec)
@@ -999,8 +1020,11 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
     def straight(c):
         a = c[..., 3:4]
         rgb = np.where(a > 1e-6, c[..., :3] / np.maximum(a, 1e-6), 0.0)
-        out = np.concatenate([rgb, a * 255.0], axis=2)
-        return Image.fromarray(out.clip(0, 255).astype("uint8"), "RGBA")
+        out = np.concatenate([rgb, a * 255.0], axis=2).clip(0, 255).astype("uint8")
+        if view is not None:
+            out = out.copy()
+            out[..., :3] = view(out[..., :3])
+        return Image.fromarray(out, "RGBA")
 
     return {"full": _over_background(flat(full), spec),
             "under": _over_background(flat(under), spec),
