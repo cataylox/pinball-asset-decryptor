@@ -65,7 +65,10 @@ def name_of(n, t, svc):
 
 
 def group_of(n, t):
-    if n < t.get("first_playfield_switch", 24) and n not in t["trough_switches"]:
+    if "cabinet_switches" in t:         # a profile that lists them (pbio)
+        if n in t["cabinet_switches"]:
+            return "Cabinet"
+    elif n < t.get("first_playfield_switch", 24) and n not in t["trough_switches"]:
         return "Cabinet"
     if (n in t["trough_switches"] or n == t.get("jam_switch")
             or n == t["shooter_switch"]):
@@ -73,9 +76,11 @@ def group_of(n, t):
     return "Playfield"
 
 
-def table(title=None, key=None):
-    key = key or title_key()
-    t = pbtitles.TITLES[key]
+def table(title=None, key=None, t=None):
+    """The window's table for Predator (*key*), or for the profile *t* in
+    pbtitles' shape - tools/pbio_emu/pbioswitches.py's Alien and ABBA."""
+    if t is None:
+        t = pbtitles.TITLES[key or title_key()]
     optos = set(t.get("optos", []))
     cab = _cab(t)
     svc = {cab[k]: k for k in SERVICE_CODES if k in cab}

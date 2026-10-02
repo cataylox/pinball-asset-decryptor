@@ -384,9 +384,11 @@ class Board:
         if p[0] == "state":
             with self.lock:
                 sw = {str(k): 1 for k, v in sorted(self.state.items()) if v}
+                # the lit LEDs, for the virtual playfield's lights grid
+                lights = {str(k): list(v) for k, v in sorted(self.leds.items())}
             return json.dumps({
                 "up": True, "switches": sw, "balls": self.balls_state(),
-                "lights": {}, "paused": self.paused,
+                "lights": lights, "paused": self.paused,
                 "connected": self.connected, "title": self.title["name"],
                 "key": self.title_key, "frames": self.frames_in,
                 "leds_lit": len(self.leds),

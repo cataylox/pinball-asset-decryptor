@@ -1,5 +1,8 @@
 """Emulate PB tab: run a Pinball Brothers game on this PC from its update
-file - Predator only, so far, and the page says so.
+file - Predator on its rig (tools/pb_emu), Alien and ABBA on the I/O-board
+rig (tools/pbio_emu, PAD-315); the file picked says which
+(``emulate_pb_core.kind_of``), and the rest of the tab is the same.  Queen
+is recognised and refused with the reason.
 
 Built on the American Pinball tab (webui/tabs/emulate_ap.py), the template
 every maker's Emulate tab follows (David, PAD-271: "modeled off the same look
@@ -44,21 +47,29 @@ from ..emulate_jjp_common import (RigTabMixin, rig_off, audio_ctl_file,
                                   share_distro)
 from .base import TabService, rpc
 
-INTRO = ("Run a Pinball Brothers game on this PC. Supported so far: %s - "
-         "the other Pinball Brothers games can't be emulated yet. The "
-         "emulator stands in for the machine's FAST controller boards and "
-         "gives the game its screen, sound and every switch.\n"
+INTRO = ("Run a Pinball Brothers game on this PC. Supported: %s. The "
+         "emulator stands in for the machine's controller boards and gives "
+         "the game its screen and every switch.\n"
          "Pick the update for the version you want to play; a smaller "
-         "follow-up update (1_0_1) needs the full one (1_0) beside it."
-         % ", ".join(pb.supported_names()))
+         "follow-up update needs the full one it builds on in the same "
+         "folder. Alien can also start from its restore image "
+         "(clonezilla-live-alien40.iso), which Alien and ABBA need beside "
+         "their updates the first time." % ", ".join(pb.supported_names()))
 
-FILE_TIP = ("A Predator update file (pbpp_predator_game_….upd). It is only "
+FILE_TIP = ("A game's update file (pbpp_predator_game_….upd, pbap….upd) or "
+            "Alien's restore image (clonezilla-live-alien40.iso). It is only "
             "read: the emulator unpacks it once (a few minutes) and keeps "
             "it, so the next start is quicker.")
 
+#: the Supported games card: the games not run yet, and why
+PENDING = ["Queen"]
+PENDING_NOTE = ("Queen can't be emulated yet: it needs its restore image from "
+                "Pinball Brothers, which we don't have.")
+
 VOLUME_TIP = ("The game's sound on this PC - Volume and Mute follow at once, "
               "while the game plays (the same knob every Emulate tab shares). "
-              "The game's own volume is in its service menu.")
+              "The game's own volume is in its service menu. Predator only "
+              "so far: Alien and ABBA run silent.")
 
 SWITCHES_TIP = ("The virtual playfield, as on the American Pinball and Stern "
                 "Emulate tabs: every switch, the keyboard, the service "
@@ -96,6 +107,10 @@ class EmulatePBTab(RigTabMixin, TabService):
         super().__init__(window)
         self.pb_emulate_file_var = self.var("file")
         self._init_rig_state()
+        #: the rig the tab polls and drives: "pb" (Predator) or "pbio"
+        #: (Alien, ABBA) - the picked file's, except while a game runs
+        #: (``_poll_kind``)
+        self._kind = "pb"
         self._starting = False
         self._cancelling = False
         self._setting_up = False
@@ -108,7 +123,8 @@ class EmulatePBTab(RigTabMixin, TabService):
         ok = pb.rig_available()
         if not ok:
             note = ("The Pinball Brothers emulator is missing from "
-                    "tools/pb_emu - this install looks incomplete.")
+                    "tools/pb_emu or tools/pbio_emu - this install looks "
+                    "incomplete.")
         elif not pb.platform_ok():
             ok = False
             note = ("The Pinball Brothers emulator runs through WSL, so it is "
@@ -117,6 +133,7 @@ class EmulatePBTab(RigTabMixin, TabService):
             note = ""
         self.set(intro=INTRO, file_tip=FILE_TIP, volume_tip=VOLUME_TIP,
                  switches_tip=SWITCHES_TIP, supported=pb.supported_names(),
+                 pending=PENDING, pending_note=PENDING_NOTE, title_note="",
                  platform=sys.platform, rig_ok=ok,
                  go_label="Start", go_enabled=ok, busy=False, go_busy=False,
                  starting=False,
@@ -167,15 +184,24 @@ class EmulatePBTab(RigTabMixin, TabService):
             path = ""
         return path if pb.supported_file(path) else ""
 
+    def _poll_kind(self):
+        """The rig to poll: the running game's while one runs (or starts),
+        else the picked file's - Predator's when nothing is picked."""
+        if not (self._last_up or self._busy):
+            self._kind = pb.kind_of(self.file_path()) or "pb"
+        return self._kind
+
     # ------------------------------------------------------------------
     # the page's calls
     # ------------------------------------------------------------------
     @rpc
     def browse(self):
         path = self.window.ask_open(
-            "pb_emulate_file", "Select a Predator update file",
-            [("Predator update", "pbpp_predator_game_*.upd"),
-             ("Pinball Brothers update", "*.upd"), ("All files", "*.*")],
+            "pb_emulate_file", "Select a Pinball Brothers update file",
+            [("Pinball Brothers update or restore image", "*.upd *.iso"),
+             ("Predator update", "pbpp_predator_game_*.upd"),
+             ("Alien or ABBA update", "pbap*.upd"),
+             ("Restore image", "clonezilla-live-*.iso"), ("All files", "*.*")],
             initialdir=self.window._initialdir_for(self.file_path()))
         if path:
             self.pb_emulate_file_var.set(os.path.normpath(path))
@@ -196,7 +222,7 @@ class EmulatePBTab(RigTabMixin, TabService):
 
     @rpc
     def cancel(self):
-        """End the start in flight: tools/pb_emu/cancel.sh ends watch.sh and
+        """End the start in flight: the rig's cancel.sh ends watch.sh and
         everything it started, drops a half-unpacked build and stops any
         game that had come up."""
         if not self._starting or self._cancelling:
@@ -204,11 +230,12 @@ class EmulatePBTab(RigTabMixin, TabService):
         self._cancelling = True
         self._set_go("Cancelling…", False)
         self._log("PB: cancelling the start…")
+        kind = self._kind
 
         def work():
             try:
                 out = subprocess.run(
-                    pb.rig_cmd_root("cancel.sh"),
+                    pb.rig_cmd_root("cancel.sh", kind=kind),
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     timeout=120, creationflags=_rig.CREATE_FLAGS)
                 self._log("PB: " + out.stdout.decode("utf-8", "replace")
@@ -258,14 +285,19 @@ class EmulatePBTab(RigTabMixin, TabService):
             self._log("PB: the game is running - stop it first.")
             return False
         rt = (self._info or {}).get("_rt")
+        # only Predator's rig has libraries to download: Alien and ABBA run
+        # on the machine's own, restored from its image
+        libs = self._poll_kind() == "pb"
         steps = []
         if rt in ("absent", "stale") and _runtime_ui.can_install():
             steps.append("%s the Linux this app runs its emulators in "
                          "(PAD-Runtime, a one-time download)"
                          % ("Install" if rt == "absent" else "Update"))
-        steps.append("Download the libraries the Pinball Brothers games run "
-                     "on (sound, video), inside that Linux (about 700 MB, "
-                     "once)")
+        if libs:
+            steps.append("Download the libraries Predator runs on (sound, "
+                         "video), inside that Linux (about 700 MB, once)")
+        if not steps:
+            return False
         if not compat.messagebox.askyesno(
                 "Set up the emulator",
                 "This will:\n\n" + "\n\n".join("  •  " + x for x in steps)
@@ -299,6 +331,9 @@ class EmulatePBTab(RigTabMixin, TabService):
                         say("the emulator's Linux is not set up, so the "
                             "libraries were not downloaded either.")
                         return
+                if not libs:
+                    say("the emulator is set up.")
+                    return
                 say("downloading the libraries the game runs on (about "
                     "700 MB, a few minutes)…")
                 rc = self._run_streaming(pb.rig_cmd_root("setup.sh"),
@@ -367,15 +402,25 @@ class EmulatePBTab(RigTabMixin, TabService):
             return True
 
         def work():
-            try:
-                out = subprocess.run(
-                    pb.rig_cmd_root("cache.sh", "--list"),
-                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                    timeout=120, creationflags=_rig.CREATE_FLAGS)
-                text = out.stdout.decode("utf-8", "replace")
-            except Exception:                              # noqa: BLE001
-                text = ""
-            self._post(self._cache_show, pb.parse_cache(text))
+            # both rigs' caches in one list: the I/O-board rig's names carry
+            # "pbio:" (cache_delete sends each name to its own rig)
+            entries, disk = [], None
+            for kind in ("pb", "pbio"):
+                try:
+                    out = subprocess.run(
+                        pb.rig_cmd_root("cache.sh", "--list", kind=kind),
+                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                        timeout=120, creationflags=_rig.CREATE_FLAGS)
+                    text = out.stdout.decode("utf-8", "replace")
+                except Exception:                          # noqa: BLE001
+                    text = ""
+                got, d = pb.parse_cache(text)
+                for e in got:
+                    if kind == "pbio":
+                        e["name"] = "pbio:" + e["name"]
+                    entries.append(e)
+                disk = disk or d
+            self._post(self._cache_show, (entries, disk))
 
         threading.Thread(target=work, daemon=True,
                          name="pad-pb-cache").start()
@@ -432,19 +477,26 @@ class EmulatePBTab(RigTabMixin, TabService):
             return False
         self._cache_patch(busy=True, hint="Deleting…")
 
+        by_rig = {"pb": [n for n in names if not n.startswith("pbio:")],
+                  "pbio": [n[5:] for n in names if n.startswith("pbio:")]}
+
         def work():
-            try:
-                out = subprocess.run(
-                    pb.rig_cmd_root("cache.sh", "--drop", *names),
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    timeout=600, creationflags=_rig.CREATE_FLAGS)
-                for line in out.stdout.decode("utf-8", "replace").splitlines():
-                    if line.startswith("refused="):
-                        self._log("PB: cache: kept %s" % line[8:])
-                    elif line.startswith("dropped "):
-                        self._log("PB: cache: deleted %s" % line[8:])
-            except Exception as exc:                       # noqa: BLE001
-                self._log("PB: cache delete failed: %s" % exc)
+            for kind, drop in by_rig.items():
+                if not drop:
+                    continue
+                try:
+                    out = subprocess.run(
+                        pb.rig_cmd_root("cache.sh", "--drop", *drop, kind=kind),
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        timeout=600, creationflags=_rig.CREATE_FLAGS)
+                    for line in out.stdout.decode("utf-8",
+                                                  "replace").splitlines():
+                        if line.startswith("refused="):
+                            self._log("PB: cache: kept %s" % line[8:])
+                        elif line.startswith("dropped "):
+                            self._log("PB: cache: deleted %s" % line[8:])
+                except Exception as exc:                   # noqa: BLE001
+                    self._log("PB: cache delete failed: %s" % exc)
             self._post(self.cache_refresh)
 
         threading.Thread(target=work, daemon=True,
@@ -466,6 +518,8 @@ class EmulatePBTab(RigTabMixin, TabService):
                "--slot", info.get("slot") or "0",
                # the status bar's VOL / Mute: the same control file as this tab's
                "--audio-ctl", audio_ctl_file()]
+        if (info.get("_kind") or self._kind) == "pbio":
+            cmd += ["--rig", "pbio"]        # Alien's, ABBA's board
         # the default distro's name when the app's runtime is not in use
         distro = share_distro(pb.rig_distro())
         if distro:
@@ -548,19 +602,25 @@ class EmulatePBTab(RigTabMixin, TabService):
         if not path:
             compat.messagebox.showinfo(
                 "Emulate",
-                "Pick a Predator update file first "
-                "(pbpp_predator_game_….upd).\n\n"
-                "Supported so far: %s." % ", ".join(pb.supported_names()))
+                "Pick a game's update file first (pbpp_predator_game_….upd, "
+                "pbap….upd) or Alien's restore image "
+                "(clonezilla-live-alien40.iso).\n\n"
+                "Supported: %s." % ", ".join(pb.supported_names()))
             return
         if not os.path.isfile(path):
             compat.messagebox.showinfo("Emulate", "There is no file at\n%s"
                                        % path)
+            return
+        if pb.is_queen(path):
+            compat.messagebox.showinfo("Emulate", pb.QUEEN_TEXT)
             return
         if not pb.supported_file(path):
             compat.messagebox.showinfo("Emulate", pb.EXIT_TEXT[4])
             return
         if self._refuse_off():
             return
+        kind = self._kind = pb.kind_of(path)
+        title = pb.title_of(path)
         self._busy = True
         # No spinner on the button while starting: it is the Cancel button
         # now, and the footer ladder shows the progress.
@@ -570,31 +630,41 @@ class EmulatePBTab(RigTabMixin, TabService):
         self._started_here = True
         self._set_go("Cancel", True)
 
+        if kind == "pbio":
+            # Alien and ABBA: no sound yet (the game's SDL 1.2 speaks ALSA
+            # only), so no volume control to pass
+            env = ["PAD_VISIBLE=1"]
+            first = ("a first start restores the machine's Linux from its "
+                     "image and unpacks the update - a few minutes")
+        else:
+            # sound always on: Volume / Mute follow live through the
+            # control file (pbvol.py), so unmuting a game started muted
+            # works
+            env = ["PAD_VISIBLE=1", "PAD_AUDIO=1",
+                   "PAD_AUDIO_CTL=%s" % _rig.wsl_path(audio_ctl_file())]
+            first = ("a first start sets up the emulator and unpacks the "
+                     "update - a few minutes")
+        # the rig board names the run by its title (PAD-296)
+        env += (["PAD_TITLE=%s" % title] + rigslot.board_env()
+                + rigslot.quiet_env())
+
         def work():
             try:
-                self._log("PB: starting %s (a first start sets up the "
-                          "emulator and unpacks the update - a few minutes; "
-                          "then the game loads in under a minute)."
-                          % os.path.basename(path))
+                self._log("PB: starting %s %s (%s; then the game loads in "
+                          "under a minute)." % (title, os.path.basename(path),
+                                                first))
+                if pb.TITLE_NOTES.get(title):
+                    self._log("PB: " + pb.TITLE_NOTES[title])
                 rc = self._run_streaming(
-                    pb.rig_cmd_root(
-                        "watch.sh", _rig.wsl_path(path),
-                        # sound always on: Volume / Mute follow live through
-                        # the control file (pbvol.py), so unmuting a game
-                        # started muted works
-                        # the rig board names the run by its title
-                        # (PAD-296)
-                        env=["PAD_VISIBLE=1", "PAD_AUDIO=1",
-                             "PAD_AUDIO_CTL=%s" % _rig.wsl_path(audio_ctl_file()),
-                             "PAD_TITLE=%s" % pb.title_of(path)]
-                        + rigslot.board_env() + rigslot.quiet_env()),
+                    pb.rig_cmd_root("watch.sh", _rig.wsl_path(path),
+                                    kind=kind, env=env),
                     timeout=3600, on_line=self._footer_line)
                 if self._cancelling:
                     self._started_here = False
                     self._log("PB: start cancelled.")
                 elif rc not in (0, None):
                     self._log("PB: start failed (exit %d). %s"
-                              % (rc, pb.EXIT_TEXT.get(rc, "")))
+                              % (rc, pb.exit_text(kind, rc)))
                 else:
                     self._open_switches()
             except Exception as exc:                       # noqa: BLE001
@@ -625,11 +695,12 @@ class EmulatePBTab(RigTabMixin, TabService):
         self._started_here = False
         self._set_go("Stopping…", False)
         self._close_switches()
+        kind = self._kind
 
         def work():
             try:
                 out = subprocess.run(
-                    pb.rig_cmd_root("stop.sh"),
+                    pb.rig_cmd_root("stop.sh", kind=kind),
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     timeout=120, creationflags=_rig.CREATE_FLAGS)
                 self._log("PB: " + out.stdout.decode("utf-8", "replace")
@@ -656,7 +727,9 @@ class EmulatePBTab(RigTabMixin, TabService):
     # polling
     # ------------------------------------------------------------------
     def _read_status(self):
-        info = self._run_status(pb.rig_cmd("status.sh"))
+        kind = self._poll_kind()
+        info = self._run_status(pb.rig_cmd("status.sh", kind=kind))
+        info["_kind"] = kind
         # the app's own Linux, for the setup notice: on this worker, since a
         # cold answer costs wsl.exe calls (cached after that)
         try:
@@ -687,7 +760,8 @@ class EmulatePBTab(RigTabMixin, TabService):
             "warn" if label == "WSL not answering" else "")
         rss = int(info.get("rss_kb") or 0)
         secs = int(info.get("uptime_s") or 0)
-        name = info.get("title_name") or "Predator"
+        name = info.get("title_name") or (
+            "Predator" if info.get("_kind", "pb") == "pb" else "—")
         balls = "—"
         if up and info.get("balls"):
             try:
@@ -716,7 +790,8 @@ class EmulatePBTab(RigTabMixin, TabService):
                   cells=[{"label": lbl, "key": k, "value": values.get(k, "—")}
                          for lbl, k in CELLS],
                   note="" if pb.rig_available() else self.get("note"),
-                  up=up, ready=ready, game=name if up else "")
+                  up=up, ready=ready, game=name if up else "",
+                  title_note=pb.TITLE_NOTES.get(name, "") if up else "")
         if not self._busy:
             kw["go_label"] = "Stop" if up else "Start"
             kw["go_enabled"] = pb.rig_available()
@@ -740,7 +815,8 @@ class EmulatePBTab(RigTabMixin, TabService):
         if not self._started_here or not (self._last_up or self._busy):
             return
         try:
-            subprocess.run(pb.rig_cmd_root("stop.sh"), timeout=120,
+            subprocess.run(pb.rig_cmd_root("stop.sh", kind=self._kind),
+                           timeout=120,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                            creationflags=_rig.CREATE_FLAGS)
         except Exception:                                  # noqa: BLE001

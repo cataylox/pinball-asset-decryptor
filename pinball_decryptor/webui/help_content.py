@@ -1820,15 +1820,18 @@ HELP_CONTENT = {
          "playfield? \"Playfield window\" beside Stop brings it back."),
         ("Volume",
          "Volume and Mute on this tab (and the VOL bar in the playfield "
-         "window) set the game's sound live, as on every Emulate tab. The "
-         "game's own volume is in its service menu."),
+         "window) set Predator's sound live, as on every Emulate tab. The "
+         "game's own volume is in its service menu. Alien and ABBA have no "
+         "sound in the emulator yet."),
         ("Cancel and Stop",
          "While a game is starting the Start button is Cancel; it stops the "
          "start and throws a half-unpacked copy away. Stop ends the game and "
          "closes its playfield window; so does closing the game's window."),
         ("Starting takes a while",
-         "The first Start on a file unpacks it (about 5 GB) inside the app's "
-         "Linux, which takes a few minutes; the build is kept, so starting "
+         "The first Start on a file unpacks it (Predator about 5 GB, Alien's "
+         "restore image about 3.5 GB, a full Alien or ABBA update about "
+         "2.5 GB) inside the app's Linux, which takes a few minutes; the "
+         "result is kept, so starting "
          "the same file again skips that. Cache... beside Browse... shows "
          "what is kept and deletes it. Loading the game itself then takes a "
          "minute or two, as it does on the machine. It draws on this PC's "
@@ -1840,13 +1843,17 @@ HELP_CONTENT = {
     ],
     "Emulate PB": [
         ("What it does",
-         "Runs the real Pinball Brothers game on this PC, in its own window, "
-         "with its sound. Supported so far: Predator. Alien, Queen and ABBA "
-         "run on different boards and can't be emulated yet. Predator is two "
-         "native Linux programs (the rules and the screen), so nothing is "
-         "emulated but the machine's FAST controller boards: the emulator "
-         "answers the game the way those boards would, with six balls in "
-         "the trough, and gives you a way to press every switch."),
+         "Runs the real Pinball Brothers game on this PC, in its own window. "
+         "Supported: Predator, Alien and ABBA. Each game is two native Linux "
+         "programs (the rules and the screen), so nothing is emulated but "
+         "the machine's controller boards - Predator's FAST boards, or the "
+         "I/O boards Alien and ABBA share: the emulator answers the game "
+         "the way those boards would, with six balls in the trough, and "
+         "gives you a way to press every switch. Predator has its sound; "
+         "Alien and ABBA run silent for now. ABBA's screens stay dark: its "
+         "update files carry the program and the sound, not the pictures "
+         "and videos the factory installed. Queen can't be emulated yet: "
+         "it needs its restore image from Pinball Brothers."),
         ("Which file to pick",
          "The .upd update file for the version you want to play - the one "
          "the machine installs from a USB stick. Pinball Brothers ships one "
@@ -1854,16 +1861,22 @@ HELP_CONTENT = {
          "follow-ups that carry only what changed "
          "(pbpp_predator_game_1_0_1.upd). Pick the follow-up to play that "
          "version; the full update must be in the same folder, and the "
-         "emulator uses both. The files are only read."),
+         "emulator uses both. Alien and ABBA work the same way (pbap411.upd "
+         "then pbap412.upd for Alien, pbap141.upd then pbap145.upd for "
+         "ABBA), and also need Alien's restore image "
+         "(clonezilla-live-alien40.iso) in that folder the first time: it "
+         "is the machine's own Linux, which both games run on. Pick the "
+         "restore image itself to play Alien as it left the factory. The "
+         "files are only read."),
         ("Setting up",
-         "The first time, the emulator downloads the libraries the game "
+         "The first time, the emulator downloads the libraries Predator "
          "needs for its sound and video (about 700 MB) into the app's "
-         "Linux. \"Set up emulator...\" does that ahead of time; otherwise "
+         "Linux; Alien and ABBA need none. \"Set up emulator...\" does that ahead of time; otherwise "
          "the first Start does it."),
         ("Playing",
          "When the game reaches attract mode its virtual playfield opens "
          "beside it - the same window as the American Pinball and Stern "
-         "Emulate tabs'. Predator ships no playfield picture, so its "
+         "Emulate tabs'. These games ship no playfield picture, so their "
          "switches are a list; a green dot is a switch the game sees made, "
          "and the lights are the LEDs the game has lit. Hold a switch with "
          "the mouse; hold the right button on one to rip it (a spinner "
@@ -1878,15 +1891,18 @@ HELP_CONTENT = {
          "\"Playfield window\" on this tab brings it back."),
         ("Volume",
          "Volume and Mute on this tab (and the VOL bar in the playfield "
-         "window) set the game's sound live, as on every Emulate tab. The "
-         "game's own volume is in its service menu."),
+         "window) set Predator's sound live, as on every Emulate tab. The "
+         "game's own volume is in its service menu. Alien and ABBA have no "
+         "sound in the emulator yet."),
         ("Cancel and Stop",
          "While a game is starting the Start button is Cancel; it stops the "
          "start and throws a half-unpacked copy away. Stop ends the game and "
          "closes its playfield window."),
         ("Starting takes a while",
-         "The first Start on a file unpacks it (about 5 GB) inside the app's "
-         "Linux, which takes a few minutes; the build is kept, so starting "
+         "The first Start on a file unpacks it (Predator about 5 GB, Alien's "
+         "restore image about 3.5 GB, a full Alien or ABBA update about "
+         "2.5 GB) inside the app's Linux, which takes a few minutes; the "
+         "result is kept, so starting "
          "the same file again skips that. Cache... beside Browse... shows "
          "what is kept and deletes it."),
         ("Settings and high scores",
