@@ -2174,10 +2174,11 @@ class EmulateTab(TabService):
         self.start()
 
     def try_it(self, prepare):
+        """PAD-314 (Ales): the page stays on Modes, where the mode being tried is open and
+        the Try it footer shows the run; its "Emulate tab" button goes there on purpose."""
         if not self.launch_with(prepare):
             return False, str(self.last_refusal or
                               "the Emulate tab did not start the run")
-        self.window.select_tab(self.ns)
         return True, ""
 
     def run_card(self, path):

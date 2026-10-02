@@ -212,3 +212,19 @@ def test_grafted_clips_go_in_the_hud_beside_the_screens(tmp_path, monkeypatch):
     new = written[prof.lcd("hud") + "/scene.radium"]
     assert SW.string(MP.asset_names(alpha)["clip"]) + struct.pack("<I", SW.FLAG | (_p.first_free_id + 7 + 5)) in new
     assert SW.string("PadMode_Clips") in new and SW.string("S") in new
+
+
+# ---- PAD-314 (Ales's Metallica picture): where a mode's screen goes on the glass ---------------------------
+def test_the_generated_panel_sits_where_it_always_has_and_a_big_picture_stays_on_the_glass():
+    import numpy as np
+    from pinball_decryptor.plugins.stern import mode_assets as MA
+    panel = np.zeros((160, 640, 4), dtype=np.uint8)
+    assert MA.screen_place(panel) == (360.0, 200.0, None)
+    # a picture capped by load_art (1360x768 at most): from the top-left corner, words on its bottom band
+    big = np.zeros((756, 1360, 4), dtype=np.uint8)
+    assert MA.screen_place(big) == (0.0, 0.0, (20.0, 742.0))
+    # a middling picture is centred on the panel's band, words under it as before
+    mid = np.zeros((300, 800, 4), dtype=np.uint8)
+    assert MA.screen_place(mid) == (280.0, 130.0, None)
+    # a code mode's words on its own band are kept
+    assert MA.screen_place(big, (20.0, 700.0)) == (0.0, 0.0, (20.0, 700.0))

@@ -278,3 +278,15 @@ def test_minus_points_per_shot_become_a_penalty_line():
     assert "Building's own points must be a whole number, not 0 (a minus number takes points away)." in MP.validate(spec)
     spec.shot_award = [["Left ramp", -1000]]
     assert "Left ramp scores, so it cannot take points away too: untick it under Shots that score." in MP.validate(spec)
+
+
+def test_the_total_at_the_end_is_net_of_the_penalties(harness, tmp_path):
+    """Ales (PAD-314 thread): 3 loops for 1M and 6 lanes at -500k showed TOTAL 3,000,000; he expected 0."""
+    cfg = "name SNIPER\ntrigger 0x1 1\nseconds 5\nshots 0x30\naward 100\naward_ladder fixed\nshot_penalty 0x8 100\n"
+    out = _run(harness, tmp_path, cfg, "shot", "0x1", "shot", "0x10", "shot", "0x10", "shot", "0x8", "shot", "0x8",
+               "tick", "400")
+    assert "SNIPER END (time ran out): 2 shots, awarded 200, lost 200, total 0," in out
+    out = _run(harness, tmp_path, cfg, "shot", "0x1", "shot", "0x10", "shot", "0x8", "shot", "0x8", "tick", "400")
+    assert "awarded 100, lost 200, total -100," in out
+    out = _run(harness, tmp_path, cfg, "shot", "0x1", "shot", "0x10", "shot", "0x10", "tick", "400")
+    assert "awarded 200, lost 0, total 200," in out
