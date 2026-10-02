@@ -128,13 +128,14 @@ def main():
             print("dis screen/clip/show_order:", dis.get("screen"), dis.get("clip"),
                   dis.get("show_order"), flush=True)
             print("show_all reason:", (st.get("reasons") or {}).get("show_all"), flush=True)
-            show = page.locator("text=Show").first
+            tab = os.environ.get("PAD306_PAGE", "Show")
+            show = page.get_by_role("tab", name=tab).or_(page.locator("text=%s" % tab)).first
             try:
                 show.click(timeout=5000)
                 time.sleep(2)
             except Exception as e:                    # noqa: BLE001
                 print("no Show tab to click:", e, flush=True)
-            out = os.path.join(out_dir, "%s_show.png" % prefix)
+            out = os.path.join(out_dir, "%s_%s.png" % (prefix, tab.lower()))
             page.screenshot(path=out)
             print("shot", out, flush=True)
             if not with_rig:
