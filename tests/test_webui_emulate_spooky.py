@@ -46,9 +46,11 @@ def test_spooky_shows_the_tab_and_says_what_it_runs(rig, tmp_path):
         s = w.state(NS)
         assert s["supported"] == [
             "Beetlejuice", "Scooby-Doo", "Texas Chainsaw Massacre",
-            "Evil Dead", "Looney Tunes", "Halloween", "Ultraman"]
+            "Evil Dead", "Looney Tunes", "Halloween", "Ultraman",
+            "Rick and Morty", "Alice Cooper's Nightmare Castle"]
         assert ("Supported: Beetlejuice, Scooby-Doo, Texas Chainsaw "
-                "Massacre, Evil Dead, Looney Tunes, Halloween, Ultraman."
+                "Massacre, Evil Dead, Looney Tunes, Halloween, Ultraman, "
+                "Rick and Morty, Alice Cooper's Nightmare Castle."
                 in s["intro"])
         assert s["go_label"] == "Start" and s["go_enabled"]
         assert [c["label"] for c in s["cells"]] == [
@@ -77,7 +79,8 @@ def test_the_shipped_rig_is_complete():
     import os
     from pinball_decryptor.webui import emulate_spooky_core as core
     for s in ("watch.sh", "stop.sh", "status.sh", "cancel.sh", "ctl.sh",
-              "spkshim.so", "spkwarden.py", "spkpf.py"):
+              "spkshim.so", "spkwarden.py", "spkpf.py", "proc/watch.sh",
+              "proc/sppctl.py", "proc/sppswitches.py"):
         assert os.path.isfile(os.path.join(core.DEFAULT_RIG_DIR, s)), s
 
 
@@ -264,9 +267,12 @@ def test_while_starting_the_button_is_cancel(rig, monkeypatch, tmp_path):
     ("code_H78.pkg", "Halloween"),
     (r"C:\mods\code_H78-modified.pkg", "Halloween"),
     ("code_UM.pkg", "Ultraman"),
-    # P-ROC games, a key nobody has, restore images, DMD games: not yet
-    ("rm-gamecode-20220902.pkg", ""),
+    # the P-ROC games (PAD-319)
+    ("rm-gamecode-20220902.pkg", "Rick and Morty"),
+    (r"D:\Pinball\images\Spooky\AC-GAMECODE.pkg", "Alice Cooper's Nightmare Castle"),
+    # a key nobody has, restore images, DMD games: not yet
     ("tna-gamecode.pkg", ""),
+    ("rm-gamecode-20220902.zip", ""),
     ("ED_clonezilla_base_image_2025_02_27.iso", ""),
     ("Jetsons_Code.zip", ""),
     ("v2026.09.15.11.beetlejuice.zip", ""),
@@ -281,6 +287,7 @@ def test_supported_file_is_by_name(name, title):
 def test_every_supported_title_is_one_the_rig_runs():
     """The tab's list and the rig's profiles (spktitles.py) agree."""
     import os
+    import pathlib
     import sys
     from pinball_decryptor.webui import emulate_spooky_core as core
     sys.path.insert(0, core.DEFAULT_RIG_DIR)
@@ -288,9 +295,19 @@ def test_every_supported_title_is_one_the_rig_runs():
         import spktitles
     finally:
         sys.path.remove(core.DEFAULT_RIG_DIR)
+    rig = pathlib.Path(core.DEFAULT_RIG_DIR) / "proc"
+    run = (rig / "run_game.sh").read_text()
     for name, key, _pats in core.SUPPORTED:
-        assert spktitles.TITLES[key]["name"] == name
-    assert {k for _n, k, _p in core.SUPPORTED} == set(spktitles.TITLES)
+        if key in core.PROC_KEYS:
+            # the P-ROC rig's profile names it (run_game.sh NAME=)
+            assert 'NAME="%s"' % name in run, key
+        else:
+            assert spktitles.TITLES[key]["name"] == name
+    assert {k for _n, k, _p in core.SUPPORTED} == \
+        set(spktitles.TITLES) | set(core.PROC_KEYS)
+    assert set(core.PROC_KEYS) == {"rm", "ac"}
+    assert "        rm-gamecode*|ac-gamecode*|tna-gamecode*)" in \
+        (rig.parent / "spkpath.sh").read_text()
 
 
 def test_start_refuses_a_file_it_does_not_run(rig, monkeypatch, tmp_path):
@@ -351,6 +368,10 @@ def test_the_cache_window_lists_and_names_builds(rig, tmp_path):
     assert core.cache_label({"name": "um_v1_18"}) == "Ultraman v1_18"
     assert core.cache_label({"name": "tcm_TCM_V1.00"}) == \
         "Texas Chainsaw Massacre TCM_V1.00"
+    assert core.cache_label({"name": "rm_20220902"}) == \
+        "Rick and Morty 20220902"
+    assert core.cache_label({"name": "ac_1.1.0.5"}) == \
+        "Alice Cooper's Nightmare Castle 1.1.0.5"
     assert core.cache_label({"name": "odd"}) == "odd"
     with web_app(tmp_path, mfr="spooky") as w:
         _spooky(w)
