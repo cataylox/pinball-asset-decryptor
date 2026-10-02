@@ -659,6 +659,19 @@ static int own_sounds_time_up(struct slot *M)
     return 1;
 }
 
+/* PAD-306: one of the mode's own calls - its countdown, its time-up call, a callout_at. On
+ * Metallica Remastered they are in the game's music class (priority 1), and the music rule
+ * below faded the mode's own countdown out under its own music. */
+static int mode_call(struct slot *M, unsigned request)
+{
+    unsigned i;
+    if (!request) return 0;
+    if (request == cfg.callout_count || request == cfg.callout_end) return 1;
+    for (i = 0; i < cfg.n_at; i++)
+        if (request == cfg.at_id[i]) return 1;
+    return 0;
+}
+
 static void own_sounds_tick(struct slot *M, unsigned ticks)
 {
     struct own_sounds *S = &own_sounds[M->index];
@@ -672,10 +685,10 @@ static void own_sounds_tick(struct slot *M, unsigned ticks)
     if (ticks % POLL_TICKS != 0) return;
     if (music.swap) pm_sound_swap(S->music, music.swap, music.swap + 8, -1, 0);   /* held while the mode runs */
     /* the mode's music is the only music: any request of the game's music class (priority 1)
-     * playing on any channel under it is faded out */
+     * playing on any channel under it is faded out - but never the mode's own calls */
     n = pm_sound_playing(reqs, buses, 8);
     for (i = 0; i < n && i < 8; i++) {
-        if (reqs[i] == S->music || request_prio(reqs[i]) != 1) continue;
+        if (reqs[i] == S->music || mode_call(M, reqs[i]) || request_prio(reqs[i]) != 1) continue;
         pm_sound_fade(reqs[i], 250);
         for (k = 0; k < 4 && music.silenced[k] && music.silenced[k] != reqs[i]; k++) ;
         if (k < 4 && !music.silenced[k]) {
