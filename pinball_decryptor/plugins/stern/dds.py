@@ -51,6 +51,62 @@ def _pack565(r, g, b):
             | (b.astype(np.uint16) >> 3)).astype(np.uint16)
 
 
+def _palette4(c0, c1):
+    """The 4-colour palette (r, g, b), each ``(nb, 4)``, two RGB565 endpoints decode to."""
+    r0, g0, b0 = _unpack565(c0)
+    r1, g1, b1 = _unpack565(c1)
+    return tuple(np.stack([x0, x1, (2 * x0 + x1) // 3, (x0 + 2 * x1) // 3], axis=1)
+                 for x0, x1 in ((r0, r1), (g0, g1), (b0, b1)))
+
+
+def _endpoints(R, G, B, seen=None, alpha=None):
+    """``(c0, c1)`` RGB565 endpoints per block, for the 4-colour palette.
+
+    PAD-306: the corners of the block's RGB bounding box, along the ONE of its four
+    diagonals that fits the block best. The (max, max, max) - (min, min, min) diagonal
+    alone puts colours whose channels run against each other on a line through neither:
+    yellow (255, 230, 0) and magenta (255, 0, 255) became red and pale pink, so a mode
+    screen's yellow title on its magenta panel came out speckled and stair-stepped.
+
+    *seen* ``(nb, 16)`` bool leaves texels out of the fit: BC1's punch-through texels, which
+    decode transparent whatever the endpoints are. Never BC3's clear texels: the game's
+    textures are premultiplied, so a clear texel's colour is added on the glass and has to
+    stay black. *alpha* (BC3's) makes that a rule of the fit: colour decoded on a clear
+    texel costs far more than any colour error, so a block that cannot hold its clear
+    texels' black and its two colours keeps the black (the main diagonal's low corner, as
+    before)."""
+    if seen is None:
+        w = np.ones(R.shape, dtype=bool)
+    else:
+        w = np.where(seen.any(axis=1)[:, None], seen, True)   # a fully clear block: all of it
+    big = np.int32(1 << 20)
+    lo = [np.where(w, X, big).min(axis=1) for X in (R, G, B)]
+    hi = [np.where(w, X, -big).max(axis=1) for X in (R, G, B)]
+    best, best_err = None, None
+    for flip_g in (False, True):
+        for flip_b in (False, True):
+            e0 = (hi[0], lo[1] if flip_g else hi[1], lo[2] if flip_b else hi[2])
+            e1 = (lo[0], hi[1] if flip_g else lo[1], hi[2] if flip_b else lo[2])
+            c0, c1 = _pack565(*e0), _pack565(*e1)
+            cR, cG, cB = _palette4(c0, c1)
+            dist = ((R[:, :, None] - cR[:, None, :]) ** 2
+                    + (G[:, :, None] - cG[:, None, :]) ** 2
+                    + (B[:, :, None] - cB[:, None, :]) ** 2)
+            err = np.where(w, dist.min(axis=2), 0).sum(axis=1)
+            if alpha is not None:
+                pick = dist.argmin(axis=2)
+                lit = sum(np.take_along_axis(cX, pick, axis=1) ** 2 for cX in (cR, cG, cB))
+                err = err + 64 * np.where(alpha == 0, lit, 0).sum(axis=1)
+            if best is None:
+                best, best_err = (c0, c1), err
+            else:
+                take = err < best_err
+                best = (np.where(take, c0, best[0]).astype(np.uint16),
+                        np.where(take, c1, best[1]).astype(np.uint16))
+                best_err = np.where(take, err, best_err)
+    return best
+
+
 # --------------------------------------------------------------------------
 # Decode
 # --------------------------------------------------------------------------
@@ -225,18 +281,10 @@ def encode_bc3(rgba):
     for i in range(6):
         out[:, 2 + i] = ((aidx >> np.uint64(8 * i)) & np.uint64(0xFF)).astype(np.uint8)
 
-    # ---- colour block: bounding-box endpoints, 4-colour palette ----
-    rmax, rmin = R.max(axis=1), R.min(axis=1)
-    gmax, gmin = G.max(axis=1), G.min(axis=1)
-    bmax, bmin = B.max(axis=1), B.min(axis=1)
-    c0 = _pack565(rmax, gmax, bmax)
-    c1 = _pack565(rmin, gmin, bmin)
+    # ---- colour block: the best bounding-box diagonal, 4-colour palette ----
+    c0, c1 = _endpoints(R, G, B, alpha=A)
     # decode endpoints back to 8-bit (so indices match what the decoder sees)
-    r0, g0, b0 = _unpack565(c0)
-    r1, g1, b1 = _unpack565(c1)
-    cR = np.stack([r0, r1, (2 * r0 + r1) // 3, (r0 + 2 * r1) // 3], axis=1)
-    cG = np.stack([g0, g1, (2 * g0 + g1) // 3, (g0 + 2 * g1) // 3], axis=1)
-    cB = np.stack([b0, b1, (2 * b0 + b1) // 3, (b0 + 2 * b1) // 3], axis=1)
+    cR, cG, cB = _palette4(c0, c1)
     # nearest of 4 palette entries (squared distance)
     dist = ((R[:, :, None] - cR[:, None, :]) ** 2
             + (G[:, :, None] - cG[:, None, :]) ** 2
@@ -290,9 +338,11 @@ def encode_bc1(rgba):
 
     transp = A < 128                                   # (nb,16) punch-through
     has_alpha = transp.any(axis=1)                     # (nb,) -> 3-colour mode
-    # bounding box over RGB (max corner packs >= min corner, monotone per field)
-    hi = _pack565(R.max(axis=1), G.max(axis=1), B.max(axis=1))
-    lo = _pack565(R.min(axis=1), G.min(axis=1), B.min(axis=1))
+    # the best bounding-box diagonal over the texels that show (_endpoints), ordered so hi
+    # packs >= lo: the mode is chosen by the order below, and indices are fitted after it
+    e0, e1 = _endpoints(R, G, B, seen=~transp)
+    hi = np.maximum(e0, e1).astype(np.uint16)
+    lo = np.minimum(e0, e1).astype(np.uint16)
     # 4-colour opaque wants c0 > c1 (= hi, lo); 3-colour wants c0 <= c1 (= lo, hi)
     c0 = np.where(has_alpha, lo, hi).astype(np.uint16)
     c1 = np.where(has_alpha, hi, lo).astype(np.uint16)
