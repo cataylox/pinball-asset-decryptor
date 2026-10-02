@@ -2,9 +2,11 @@
 // - Beetlejuice only so far, which the page says up front.  Python half:
 // webui/tabs/emulate_spooky.py.  Laid out as the American Pinball tab is
 // (the template every maker's Emulate tab follows): the game file with
-// Cache…, Start / Switches window / Volume, and the status.  The virtual
+// Cache…, Start / Playfield window / Volume, and the status.  The virtual
 // playfield is AP's window (tools/spooky_emu/spkpf.py -> tools/ap_emu/appf.py);
-// it opens by itself when the game reaches attract.
+// it opens by itself when the game reaches attract.  "Playfield window" is a
+// real button, as on the AP and PB tabs: as ghost text beside Stop it read as
+// a label, and a player never found the window (PAD-295, PAD-313).
 
 import { html, PageHead, Card, Button, PathField, Chip, Note, call } from "../core/ui.js";
 import { useNs } from "../core/store.js";
@@ -26,8 +28,8 @@ export default function EmulateSpooky() {
   const footer = html`
     <${Button} kind=${goKind} size="big" icon=${stopish ? "stop" : "play"} busy=${s.go_busy}
       disabled=${!s.go_enabled} onClick=${() => call("emulate_spooky.toggle")}>${s.go_label || "Start"}<//>
-    ${up ? html`<${Button} kind="ghost" title=${s.switches_tip}
-      onClick=${() => call("emulate_spooky.switches")}>Switches window<//>` : null}
+    ${up ? html`<${Button} icon="external" title=${s.switches_tip}
+      onClick=${() => call("emulate_spooky.switches")}>Playfield window<//>` : null}
     <span class="emu-sp"></span>
     <${VolumeControl} ns="emulate_spooky" s=${s} title=${s.volume_tip} />`;
   return html`<div class="page emu-page">

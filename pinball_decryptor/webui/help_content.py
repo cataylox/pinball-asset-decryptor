@@ -1790,7 +1790,7 @@ HELP_CONTENT = {
          "drains, Backspace, -, = and Enter are the service buttons, and "
          "Pause or F9 freezes the game. The game's own window has its own "
          "keys: Enter starts, Space launches, the arrows flip. Closed the "
-         "playfield? \"Switches window\" on this tab brings it back."),
+         "playfield? \"Playfield window\" beside Stop brings it back."),
         ("Volume",
          "Volume and Mute on this tab (and the VOL bar in the playfield "
          "window) set the game's sound live, as on every Emulate tab. The "
