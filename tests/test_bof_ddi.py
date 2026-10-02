@@ -153,8 +153,17 @@ def test_bonjovi_status_shown_in_app(tmp_path):
     sections = m.image_info(str(fun))
     assert sections and sections[0][0] == "Bon Jovi"
     rows = dict(sections[0][1])
-    assert "Not available yet" in rows["Installable update"]
+    # Extraction works; building/applying edits does not (must not be oversold).
+    assert "Works now" in rows["Extract assets"]
+    assert "Not available yet" in rows["Apply edits / build update"]
     assert "help" in rows["How you can help"].lower()
+    # No surface should claim editing is a supported, usable feature.
+    from pinball_decryptor.plugins.bof.manufacturer import (
+        BONJOVI_BADGE, BONJOVI_EMU)
+    assert "edit assets works" not in BONJOVI_BADGE
+    blob = (m.extract_input_help() + m.write_install_help()
+            + BONJOVI_BADGE + BONJOVI_EMU)
+    assert "extract and edit" not in blob.lower()
     # a GPG title gets no Bon Jovi section
     assert m.image_info("dune.fun") == []
     # the emulate guard message exists and names emulation; Bon Jovi is not in

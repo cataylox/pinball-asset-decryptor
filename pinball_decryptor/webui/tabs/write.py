@@ -790,15 +790,15 @@ class WriteTab(TabService):
         if game:
             caps = mfr.capabilities
             if getattr(game, "key", None) == "bonjovi":
-                # Bon Jovi can extract/edit assets, but building an installable
-                # update is blocked (signed disk image); point at Image Info
-                # for the full explanation and the volunteer call-to-action.
+                # Bon Jovi assets extract, but building an installable update is
+                # blocked (signed disk image), so edits can't be applied yet;
+                # point at Image Info for the full explanation and the CTA.
                 try:
                     from ...plugins.bof.manufacturer import BONJOVI_BADGE
                     text = BONJOVI_BADGE
                 except Exception:
-                    text = ("Bon Jovi: extract and edit assets works; building "
-                            "an installable update is not available yet.")
+                    text = ("Bon Jovi: you can extract assets, but changes "
+                            "can't be built into an update yet.")
             elif hasattr(mfr, "set_era") and not caps.write and not (
                     caps.replace_audio or caps.replace_video
                     or caps.replace_image or caps.replace_text):

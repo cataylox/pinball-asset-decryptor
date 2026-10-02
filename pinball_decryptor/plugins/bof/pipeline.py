@@ -1833,14 +1833,16 @@ class ModifyPipeline(_BasePipeline):
             # Bon Jovi: building an installable update is not possible yet.
             # The .fun is a signed systemd disk image (GPT + dm-verity +
             # vendor signature); re-signing it needs information we can only
-            # get from a physical machine (see the Write tab help).  Extract
-            # and edit assets freely; this step is what is blocked.
+            # get from a physical machine (see the Write tab help).  Extraction
+            # works; this build step is what is blocked, so edits can't be
+            # applied yet.
             raise PipelineError(
                 "Build",
                 "Building an installable Bon Jovi update isn't supported yet.\n\n"
                 "Bon Jovi ships as a signed disk image, and rebuilding it needs "
-                "details we can only get from a physical machine. You can still "
-                "extract and edit its assets. If you own a Bon Jovi machine and "
+                "details we can only get from a physical machine, so changes to "
+                "its assets can't be applied yet. You can still extract its "
+                "assets to view or reuse. If you own a Bon Jovi machine and "
                 "want to help unlock image building, see the Write tab for what "
                 "we need.")
         passphrase = game_info["passphrase"]

@@ -2,10 +2,11 @@
 
 Bon Jovi (released Oct 2026) is the first Barrels of Fun title to drop the old
 GPG-symmetric `.fun` (a passphrase-protected gzip tarball) for a **signed
-systemd Discoverable Disk Image**. Extracting and editing its assets works
-fully; building an *installable* update does not, and cannot without either the
-vendor's signing key or physical access to a machine. This note records the
-format, what the plugin now does, and the realistic path to asset mods.
+systemd Discoverable Disk Image**. Extracting its assets works fully; building
+an *installable* update does not, and cannot without either the vendor's signing
+key or physical access to a machine, so edits can't be applied back yet. This
+note records the format, what the plugin now does, and the realistic path to
+asset mods.
 
 ## Container format
 
@@ -58,14 +59,19 @@ Dune's encrypted v3 directory but with two changes that made
 From the recovered binary onward the existing `may_extractor` (directory path)
 + `source_converter` chain is unchanged.
 
-## What works: extract + edit
+## What works: extract (to view or reuse)
 
 Proven end-to-end on the real image: DDI unwrap -> largest binary -> RHBP
 directory -> **2980 files (5.78 GB) extracted, 2916 md5-verified** ->
-**970 editable assets, 0 conversion failures** (560 `.wav`, 376 `.webp`,
+**970 decoded assets, 0 conversion failures** (560 `.wav`, 376 `.webp`,
 21 `.ogg`, 13 `.ttf`), plus 52 standalone `.ogv` mode videos. (64 directory
 entries fail their md5 — all `.gd`/`.gd.uid` script/uid sidecars, not media;
 the media verify and convert cleanly.)
+
+The decoded files are editable, but there is nothing to apply them to yet: the
+Write/build step is walled (below), so for now extraction is useful for viewing
+and reusing assets (for example the video library) or staging mods for when
+image building is unlocked, not for modding a running machine.
 
 Detection: `bon-jovi_*.fun` by name, with a GPT+EROFS content sniff as a
 fallback for a renamed file.
