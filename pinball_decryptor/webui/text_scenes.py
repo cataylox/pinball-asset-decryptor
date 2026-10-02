@@ -24,6 +24,7 @@ import threading
 
 from . import compat
 from .rpc import rpc
+from .scene_mode_layout import ModeLayoutMixin
 from .text_scenes_tree import TreeEditMixin
 
 log = logging.getLogger(__name__)
@@ -282,7 +283,7 @@ def glyph_atlas_rel(assets, rel):
     return None
 
 
-class TextScenesService(TreeEditMixin):
+class TextScenesService(ModeLayoutMixin, TreeEditMixin):
     ns = "text_scenes"
 
     def __init__(self, tab):
@@ -345,7 +346,7 @@ class TextScenesService(TreeEditMixin):
                  rebuild_msg="", layout_dialog=None, tips=TIPS,
                  tree=False, tree_view=None, tree_layers=None, tree_busy=False,
                  tree_loading=False, tree_img_rev=0, preparing=None, tree_live=None,
-                 card_note="", pic_note="", tree_play=None)
+                 card_note="", pic_note="", tree_play=None, mode_layout=None)
 
     def is_open(self):
         return self._alive
@@ -372,6 +373,8 @@ class TextScenesService(TreeEditMixin):
                         break
             except Exception:                        # noqa: BLE001
                 pass
+        if self._mlay is not None and self._mlay["assets"] != assets:
+            self._mlay = None                  # PAD-323: another project's scenes
         if self._alive:
             if self.assets_dir != assets:
                 self.assets_dir = assets
@@ -424,6 +427,7 @@ class TextScenesService(TreeEditMixin):
             self._bulk["cancel"] = True
         self._live_layout = None
         self._cancel_live_job()
+        self._mlay = None
         self._token += 1
         self._alive = False
         self._sel = None
