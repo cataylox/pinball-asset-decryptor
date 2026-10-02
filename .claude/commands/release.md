@@ -81,7 +81,9 @@ foreground-block on a CI run, and never poll in a sleep loop.
 
 5b. **Audit README content** (separate from the version-string scan above).  The README is user-facing documentation — when a release adds a new plugin, pipeline, capability, or changes a workflow, the README description of *what the app does* needs to follow.  This is NOT just find-and-replace.
 
-   Walk through the README and ask, for each section:
+   **The README is a short front page (PAD-317, 2026-10-02) - keep it one.**  It says what the app is, what it supports (one row per manufacturer, a few words of capabilities), how to install, a five-step quick start, and links.  Feature detail never goes in it: a new tab, option or behaviour goes in the matching page under `docs/guide/` (`using-the-app.md`, `emulate.md`, `multi-boot.md`, `manufacturers.md`, `install.md`), and the README changes only if the one-line summary or the capability table changes.  Version history ("From v1.2.3 ...") belongs in the release notes, not in any doc: describe what the app does NOW.  If a release would add more than a line or two to the README, the text belongs in a guide page instead.
+
+   Walk through the README and the `docs/guide/` pages and ask, for each section:
    - **Title / one-liner:** still accurate?  Adding a major manufacturer often means the tagline ("decrypts X, Y, Z files") needs the new format added.
    - **Supported games / manufacturers:** new plugin since last release?  Add it to the picker / capability matrix.
    - **Quick Start / Usage:** new GUI surface (e.g. new tabs, new checkboxes, new modes)?  Update the screenshots or step-by-step.
@@ -96,8 +98,8 @@ foreground-block on a CI run, and never poll in a sleep loop.
    When in doubt, ask the user: *"The README hasn't changed since vN.N.N-1 but the code added <feature>; want me to update §X to mention it?"*
 
 5c. **Verify the README screenshots are fresh — regeneration at release
-   time is the fallback, not the norm.**  The README's "What it looks
-   like" section embeds `docs/screenshots/*.png` captured from the live
+   time is the fallback, not the norm.**  The README and the
+   `docs/guide/` pages embed `docs/screenshots/*.png` captured from the live
    app by `scripts/take_screenshots.py`.  **Convention (since
    2026-07-21): screenshots are regenerated when the GUI change itself
    is committed** — as part of the smoke-test-before-push beat, in the
