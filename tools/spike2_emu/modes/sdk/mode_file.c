@@ -58,6 +58,8 @@ struct mode_cfg {
     /* item 141: what each shot pays, a shot that ends the mode, and the award ladder */
     uint64_t sa_bits[SHOT_AWARD_MAX], sa_points[SHOT_AWARD_MAX];
     unsigned n_sa;
+    uint64_t pen_bits[SHOT_AWARD_MAX], pen_points[SHOT_AWARD_MAX];   /* PAD-314: `shot_penalty` lines */
+    unsigned n_pen;
     uint64_t end_shot_bits;
     unsigned award_fixed;           /* 0 = rising (the default: the Nth shot pays N x) */
     unsigned params_set;            /* one of the item 141 keys was in the file */
@@ -109,6 +111,7 @@ static struct {
     struct slot *slot;
     unsigned player, ticks_left, secs_shown, hits;
     uint64_t total, score_at_start;
+    uint64_t lost;                    /* PAD-314: what the penalty shots took this run */
     unsigned long started_ms;
     unsigned restore_ticks;
     /* item 167: a multiball of the mode's own */
@@ -1103,8 +1106,12 @@ static void starts_watch_game(void)
  *                                  scoring shot, and the mode ends on the next tick
  *   award_ladder fixed|rising      rising (the default, and what a file without the key
  *                                  gets): the Nth scoring shot pays N x its value; fixed: x 1
+ *   shot_penalty <bits> <points>   PAD-314: a shot in <bits> TAKES <points> away while the mode
+ *                                  runs (pm_score_sub: flat, never below 0; repeatable, 16). A
+ *                                  shot that also scores pays and takes nothing
  * An older mode.so logs "unknown key, skipped" for each and pays as before. */
 static struct slot *end_pending;    /* the slot whose end shot was hit, until the next tick */
+static uint64_t scoring_bits(struct slot *M);   /* below; PAD-314's load-time note needs it */
 
 static int params_line(struct slot *M, const char *line)
 {
@@ -1124,6 +1131,18 @@ static int params_line(struct slot *M, const char *line)
     if ((a = key_is(line, "end_shot")) != 0) {
         cfg.end_shot_bits = num(&a);
         cfg.params_set = 1;
+        return 1;
+    }
+    if ((a = key_is(line, "shot_penalty")) != 0) {      /* PAD-314 */
+        uint64_t bits = num(&a), points = num(&a);
+        cfg.params_set = 1;
+        if (!bits || !points) pm_log("shot_penalty needs shot bits and points - ignored");
+        else if (cfg.n_pen >= SHOT_AWARD_MAX) pm_log("more than %d shot_penalty lines - ignored", SHOT_AWARD_MAX);
+        else {
+            cfg.pen_bits[cfg.n_pen] = bits;
+            cfg.pen_points[cfg.n_pen] = points;
+            cfg.n_pen++;
+        }
         return 1;
     }
     if ((a = key_is(line, "award_ladder")) != 0) {
@@ -1147,6 +1166,28 @@ static void params_loaded(struct slot *M)
     for (i = 0; i < cfg.n_sa; i++)
         pm_log("params: shot %08x_%08x pays %llu", (unsigned)(cfg.sa_bits[i] >> 32), (unsigned)cfg.sa_bits[i],
                (unsigned long long)cfg.sa_points[i]);
+    for (i = 0; i < cfg.n_pen; i++)                     /* PAD-314 */
+        pm_log("params: shot %08x_%08x takes %llu away%s", (unsigned)(cfg.pen_bits[i] >> 32), (unsigned)cfg.pen_bits[i],
+               (unsigned long long)cfg.pen_points[i],
+               (cfg.pen_bits[i] & scoring_bits(M)) ? " - but it scores, so it takes nothing" : "");
+}
+
+/* PAD-314: every bit that costs: each shot_penalty's bits, less the ones that score */
+static uint64_t penalty_bits(struct slot *M)
+{
+    uint64_t bits = 0;
+    unsigned i;
+    for (i = 0; i < cfg.n_pen; i++) bits |= cfg.pen_bits[i];
+    return bits & ~scoring_bits(M);
+}
+
+/* what a penalty shot takes: the first shot_penalty it matches (flat, no ladder) */
+static uint64_t penalty_value(struct slot *M, uint64_t mask)
+{
+    unsigned i;
+    for (i = 0; i < cfg.n_pen; i++)
+        if (mask & cfg.pen_bits[i]) return cfg.pen_points[i];
+    return 0;
 }
 
 /* every bit that scores: `shots`, and each shot_award's bits */
@@ -1726,6 +1767,7 @@ static void mode_start(struct slot *M, const char *why)
     run.secs_shown = cfg.seconds;
     run.hits = 0;
     run.total = 0;
+    run.lost = 0;                            /* PAD-314 */
     run.score_at_start = pm_score(run.player);
     run.started_ms = pm_ms();
     if (run.player <= 4) M->trig[run.player] = 0;
@@ -1786,8 +1828,8 @@ static void mode_end(const char *why)
         if (cfg.total_msg) pm_award_screen(cfg.screen_type, cfg.total_msg, run.total);
         run.restore_ticks = cfg.restore_after * TICKS_PER_S;
     }
-    pm_log("%s END (%s): %u shots, awarded %llu, score %llu -> %llu, %lu ms wall", cfg.name, why,
-           run.hits, (unsigned long long)run.total, (unsigned long long)run.score_at_start,
+    pm_log("%s END (%s): %u shots, awarded %llu, lost %llu, score %llu -> %llu, %lu ms wall", cfg.name, why,
+           run.hits, (unsigned long long)run.total, (unsigned long long)run.lost, (unsigned long long)run.score_at_start,
            (unsigned long long)pm_score(run.player), pm_ms() - run.started_ms);
 }
 
@@ -1998,6 +2040,14 @@ static void on_shot(uint64_t mask)
                (unsigned)(mask >> 32), (unsigned)mask, (unsigned long long)got,
                (unsigned long long)asked, run.hits, (unsigned long long)run.total);
         own_sounds_shot(M, run.hits);
+    }
+    if (run.active && (M = run.slot) != 0 && p == run.player && (mask & penalty_bits(M)) && end_pending != M) {
+        uint64_t asked = penalty_value(M, mask), lost = pm_score_sub(p, asked);   /* PAD-314 */
+        run.lost += lost;
+        if (own_screen(M)) words(M, "-", lost, "");
+        pm_log("penalty shot %08x_%08x: -%llu (asked %llu), %llu lost, score %llu",
+               (unsigned)(mask >> 32), (unsigned)mask, (unsigned long long)lost,
+               (unsigned long long)asked, (unsigned long long)run.lost, (unsigned long long)pm_score(p));
     }
     if (run.active && (M = run.slot) != 0 && p == run.player && run.mball_on) multiball_shot(M, mask);
     else if (run.active && (M = run.slot) != 0 && p == run.player && run.mball_wait && end_pending != M)

@@ -111,6 +111,12 @@ int pm_running(void);      /* your mode is the one running */
  * divided by the multiplier (the port's data score_mult): the score stops at the top
  * instead of wrapping, and at the top an award adds 0. */
 uint64_t pm_score_add(unsigned player, uint64_t points);
+/* PAD-314: takes points away. The loss is written straight into the game's score table (the
+ * same u64[4] / u32[4] pm_score reads), cut to the player's score so it never passes 0 - the
+ * scores are unsigned, so below 0 would read as an enormous number - and the game's scoring
+ * call is then given 0 points so whatever it does on a change (its score display) runs. No
+ * multiplier: a loss is the flat number asked for. Returns what was taken (can be 0). */
+uint64_t pm_score_sub(unsigned player, uint64_t points);
 
 /* ---- sound --------------------------------------------------------------------------
  * A callout is one of the game's own speech/sound requests, by id. The port names the

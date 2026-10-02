@@ -2867,9 +2867,11 @@ def validate_parameters(spec, p, folder=None):
                 out.append("%s has its own points twice." % shot)
             seen.add(shot)
             n = _int_or_none(points)
-            if n is None or n < 1:
-                out.append("%s's own points must be a whole number above 0." % shot)
-            elif getattr(p, "score_bits", 64) == 32 and n > SCORE32_AWARD_MAX:
+            if n is None or n == 0:                  # PAD-314: a minus number is a penalty
+                out.append("%s's own points must be a whole number, not 0 (a minus number takes points away)." % shot)
+            elif n < 0 and shot in spec.scoring_shots:
+                out.append("%s scores, so it cannot take points away too: untick it under Shots that score." % shot)
+            elif getattr(p, "score_bits", 64) == 32 and abs(n) > SCORE32_AWARD_MAX:
                 out.append("%s's own points can be at most %s: %s keeps its scores in 32 bits."
                            % (shot, format(SCORE32_AWARD_MAX, ","), p.label))
     if spec.end_shot == END_SHOT_OTHERS:             # PAD-314
@@ -2944,7 +2946,11 @@ def parameter_lines(spec, slug, p):
     if spec.award_ladder == "fixed":
         lines.append("award_ladder   fixed")
     for shot, points in spec.shot_award:
-        lines.append("shot_award     0x%08x %d" % (p.mask([shot]), _int_or_none(points)))
+        n = _int_or_none(points)
+        if n < 0:                                    # PAD-314: a minus number takes points away
+            lines.append("shot_penalty   0x%08x %d" % (p.mask([shot]), -n))
+        else:
+            lines.append("shot_award     0x%08x %d" % (p.mask([shot]), n))
     if spec.end_shot == END_SHOT_OTHERS:      # PAD-314: one mask of every shot that is not the mode's own
         lines.append("end_shot       0x%08x" % p.mask(other_shots(spec, p)))
     elif end_shot_list(spec):                 # one shot, or (PAD-314) any of a list: one mask

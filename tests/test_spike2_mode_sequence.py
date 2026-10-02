@@ -240,3 +240,41 @@ def test_any_of_a_list_of_shots_ends_it():
     assert new.end_shot == ["Left ramp"] and {"Building", "Godzilla target"} <= set(dropped)
     assert "Building, Godzilla target are not on %s, so they are left out of the shots that end the mode early" \
         % jaws.label in MP.retarget_words(spec, new, dropped, jaws)
+
+
+# ---- the P.S.: wrong shots cost points -------------------------------------------------------------------
+PEN = ("name SNIPER\ntrigger 0x1 1\nseconds 5\nshots 0x30\naward 100\nshot_penalty 0x8 250\n"
+       "shot_penalty 0x10 50\n")
+
+
+def test_a_penalty_shot_takes_points_away_never_below_zero(harness, tmp_path):
+    """The harness's pm_score_sub has a score of 300 to lose: the first hit takes 250, the second only 50."""
+    out = _run(harness, tmp_path, PEN, "shot", "0x1", "shot", "0x8", "shot", "0x8", "shot", "0x10", "tick", "400")
+    assert "unknown key" not in out
+    assert "params: shot 00000000_00000008 takes 250 away" in out
+    assert "params: shot 00000000_00000010 takes 50 away - but it scores, so it takes nothing" in out
+    assert "penalty shot 00000000_00000008: -250 (asked 250), 250 lost" in out
+    assert "penalty shot 00000000_00000008: -250 (asked 250), 500 lost" in out   # the stub takes up to 300 each time
+    assert "penalty shot 00000000_00000010" not in out                           # it scores instead
+    assert "shot 00000000_00000010: +100" in out
+    assert "SNIPER END (time ran out): 1 shots, awarded 100, lost 500" in out
+
+
+def test_a_penalty_shot_does_nothing_before_the_mode_or_after_its_end_shot(harness, tmp_path):
+    out = _run(harness, tmp_path, PEN + "end_shot 0x40\n", "shot", "0x8", "shot", "0x1", "shot", "0x40", "shot", "0x8",
+               "tick", "2")
+    assert "penalty shot" not in out
+    assert "SNIPER END (end shot)" in out
+
+
+def test_minus_points_per_shot_become_a_penalty_line():
+    p = MP.GODZILLA_PRO_1_15
+    spec = MP.ModeSpec(name="X", shot_award=[["Building", -250000], ["Maser target", 5000000]])
+    assert MP.validate(spec) == []
+    keys = _keys(MP.runtime_cfg(spec, "x"))
+    assert keys["shot_penalty"] == ["0x%08x 250000" % p.mask(["Building"])]
+    assert keys["shot_award"] == ["0x%08x 5000000" % p.mask(["Maser target"])]
+    spec.shot_award = [["Building", 0]]
+    assert "Building's own points must be a whole number, not 0 (a minus number takes points away)." in MP.validate(spec)
+    spec.shot_award = [["Left ramp", -1000]]
+    assert "Left ramp scores, so it cannot take points away too: untick it under Shots that score." in MP.validate(spec)

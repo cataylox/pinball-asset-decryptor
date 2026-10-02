@@ -64,7 +64,8 @@ const T = {
   countsAs: "A shot of your choosing counts as one of this mode's own while it runs: a Left ramp can reach the battle vs Ebirah as a left spin (its points, and the count down by one). One ramp is one spin, so a ramp standing in for a spinner needs the spinner's count of hits. Saved with this project and put on the card by Write with the modes; with no rows the mode plays as it always did.",
   rewrite: "This mode is compiled into the game. A rewrite is a mode in C of this project whose code runs INSTEAD of this mode's shot handling: which shots, in what order and what they pay is yours, while its start, clock, screens and ending stay the game's own. It starts from the SDK's example for the mode; delete it and the mode plays as it always did.",
   leaveOut: "Build this Try it without the modes' own sounds: the game's own calls play, and the sound bank is not grown (the slow part of a build). A card Written from the project still carries them.",
-  pointsFor: (n) => `What ${n} pays instead of the first shot's points. Blank = the usual points. A shot with its own points scores even when it is not ticked under Shots that score.`,
+  pointsFor: (n) => `What ${n} pays instead of the first shot's points. Blank = the usual points. A shot with its own points scores even when it is not ticked under Shots that score. A minus number takes that many points away each time ${n} is hit while the mode runs: a wrong shot costs the player, never below 0.`,
+  penalty: "A minus number takes points away: a wrong shot costs the player that much each time, as a flat amount, and the score stops at 0. A shot with a minus number cannot also be one that scores.",
 };
 
 const PAGES = [["mode", "Mode"], ["show", "Show"], ["lights", "Lights"], ["sounds", "Sounds"], ["scoring", "Scoring"]];
@@ -655,6 +656,7 @@ function ScoringPage({ s, f, off }) {
         ${shots.map((n) => html`<label class="lbl ellip" key=${"l" + n} title=${n}>${n}</label>
           <${Field} key=${"f" + n} ns="modes" k=${"award:" + n} value=${awards[n] || ""} disabled=${off} sm mono placeholder="usual" title=${T.pointsFor(n)} />`)}
       </div>` : html`<div class="small muted">(no shots)</div>`}
+      <div class="small muted wrap">${T.penalty}</div>
     <//>
   </div>`;
 }

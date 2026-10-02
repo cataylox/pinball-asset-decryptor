@@ -1,6 +1,9 @@
 """PAD-314 proof shots: the Modes tab's Mode page, "Starts on" and "Ends on".
 
-    python scripts/shot_pad314.py <out.png> [<repo>]
+    python scripts/shot_pad314.py <out.png> [<repo>] [<page>]
+
+<page> is the editor page to show: mode (the default) or scoring (the penalty
+shots of the P.S.).
 
 The server runs from <repo> (default: this tree) against a scratch settings
 folder. The project is a scratch folder holding the Godzilla Pro 1.15 example
@@ -48,6 +51,8 @@ if hasattr(sniper, "start_sequence"):     # the after tree: the shots in order, 
     sniper.start_sequence = ["Left ramp", "Right ramp", "Left ramp", "Right ramp", "Building"]
     sniper.sequence_reset_any = True
     sniper.end_shot = ["Building", "Godzilla target", "Maser target", "Shield target left", "Shield target right"]
+    # the P.S.: wrong shots cost points (a minus number under Points per shot); the before tree refuses it
+    sniper.shot_award = [["Powerline left", -250000], ["Powerline center", -250000], ["Powerline right", -250000]]
 specs.append(("SNIPER LOOPS", sniper))
 for i, (_n, spec) in enumerate(specs):
     MP.save(%(project)r, "%%d_%%s" %% (i + 1, MP.slugify(spec.name)), spec)
@@ -57,6 +62,7 @@ for i, (_n, spec) in enumerate(specs):
 def main():
     out = os.path.abspath(sys.argv[1])
     repo = os.path.abspath(sys.argv[2]) if len(sys.argv) > 2 else HERE
+    page_name = sys.argv[3] if len(sys.argv) > 3 else "mode"
     webui_shot.REPO = repo
     scratch = tempfile.mkdtemp(prefix="pad314-")
     project = os.path.join(scratch, "gz project")
@@ -96,6 +102,9 @@ def main():
             if rows.count():
                 rows.first.click()
                 time.sleep(2)
+            if page_name != "mode":
+                page.get_by_role("tab", name=page_name.capitalize()).first.click() if page.get_by_role("tab").count()                     else page.get_by_text(page_name.capitalize(), exact=True).first.click()
+                time.sleep(1.5)
             page.screenshot(path=out)
             browser.close()
         print("shot", out, os.path.getsize(out), flush=True)

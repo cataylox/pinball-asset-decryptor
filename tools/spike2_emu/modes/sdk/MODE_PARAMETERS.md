@@ -56,6 +56,7 @@ app generates it.
 | `award` | points | 0 | what a scoring shot pays: the Nth pays N x this (see `award_ladder`) | Mode > First shot pays | items 125-134 (+1M, +2M); 133 (+18M = 2 x 9M after a reload) |
 | `shot_award` | `<bits> <points>`, repeatable (16) | none | the shots in `bits` pay `points` instead of `award`, and score even when they are not in `shots`. The first matching line wins. The ladder still applies | Advanced > Points per shot | item 141 runs 1, 2: Building +10M (5M x 2), Godzilla target +9M (3M x 3), Shield target left +10M (2M x 5, not in `shots`) |
 | `end_shot` | bits | 0 | a shot in `bits` ends the mode. It scores first if it is a scoring shot, and no shot after it pays; the mode ends on the next tick: `END (end shot)`, `clip_end` 500 ms later from the tick, no time-up callout. PAD-314: the tab's "any shot that does not score" is one mask of every playfield shot that is not the mode's own | Mode > Ends on > and sooner, on (Advanced > Ends early when hit before PAD-314) | item 141 runs 1-3: Shield target left +10M, then `END (end shot)` 16 ms later (the next tick), with the second clip. Run 3: Shield target left and Building pressed together reached the mode Building first (+5M, then Shield +4M, `END`, 2 shots); a scoring shot AFTER the end shot in one frame paying nothing is desk only (`endpay.script`) |
+| `shot_penalty` | `<bits> <points>`, repeatable (16) | none | PAD-314: a shot in `bits` TAKES `points` away each time it is hit while the mode runs, as a flat amount (no ladder, no multiplier), through `pm_score_sub`: never below 0 (`penalty shot <bits>: -N (asked M), L lost, score S`). A shot that also scores pays and takes nothing (said at load). The END line carries `lost L`. An older `mode.so` logs the key `unknown key, skipped` and takes nothing | Scoring > Points per shot, a minus number | PAD-314, desk only (tests/test_spike2_mode_sequence.py); the score table write and the 0-point add that follows it are NOT measured in the emulator |
 | `award_ladder` | `fixed` or `rising` | rising | rising: the Nth scoring shot pays N x its value (what every file before item 141 does). fixed: every shot pays its value once. Anything else logs and means rising | Advanced > Award ladder | item 141 runs 1, 2: rising +1M, +10M, +9M, +4M, +10M; fixed 1M, 1M, 5M |
 | `screen_type` | number | 0 | the game's award-screen family for the borrowed-message screen (122 on Godzilla) | no | item 125 run 5. Superseded by own screens (item 131) |
 | `title_msg` | message id | 0 | a stock message whose words are replaced by `title_words` at the start, and the award screen each shot shows. Used only without `screen_node` | no | item 125 run 5 |
@@ -151,7 +152,7 @@ becomes. A key a newer editor wrote is kept in `extra` and written back, never d
 | `light_color` | #00ff00 | Lights > Colour | the sweep command's colour |
 | `light_on_raw`, `light_off_raw` | "" | Lights > Advanced | `light_on`, `light_off` verbatim |
 | `award_ladder` | "rising" | Advanced > Award ladder | `award_ladder fixed` (nothing when rising) |
-| `shot_award` | [] | Advanced > Points per shot (blank = the usual award) | `shot_award <bits> <points>` per row |
+| `shot_award` | [] | Scoring > Points per shot (blank = the usual award; PAD-314: a minus number takes points away) | `shot_award <bits> <points>` per row, or `shot_penalty <bits> <points>` for a minus number. `validate` refuses 0, and a minus number on a shot that scores |
 | `end_shot` | "" | Mode > Ends on > and sooner, on: (no shot) / (any shot that does not score) / (these shots) + a tick per shot (Advanced > Ends early when hit, one shot, before PAD-314) | `end_shot <bits>`: a single name's mask (files from before PAD-314), the OR of a LIST of names (`end_shot_list`: the ticks; `[]` is refused as "tick a shot"), or (`END_SHOT_OTHERS`) the OR of every playfield shot that is not the mode's own (`other_shots`: not the shots that score, nor in a multiball the add-a-ball shot and the shot the balls come on; never the cabinet buttons). `validate` refuses it when every shot scores; `retarget` keeps it, it names no shot |
 | `clip_both` | {} | Advanced > Second clip: none / the same clip / a title card / my video | the other end's `clip_start` / `clip_end`; a title card or video is built as `PadMode_<folder>_Clip2`. The same clip does not play again at the end while its start is still playing (item 141 run 3: FIXED TEST stopped 3 s into its 4 s clip; the clip ran on to its end, no second play, the HUD 1.2 to 2.5 s after `END`). A second clip of its own has its own name and plays |
 | `callout_at` | [] | Advanced > Callouts at chosen seconds (seconds left, id, Pick) | `callout_at <seconds> <id>` per row, after the countdown's |
@@ -230,7 +231,7 @@ lacks a function switches off only its own flag (the boot log's `armed: ... can 
 Kinds, for `pm_stock_mode_running()` (item 140): `PM_STOCK_ANY`, `PM_STOCK_MULTIBALL`,
 `PM_STOCK_BATTLE`.
 
-The 88 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
+The 89 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
 F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 
 | Call | What | Used by | Measured |
@@ -249,6 +250,7 @@ F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 | `pm_end()` | this mode stopped | T P F | items 133, 134 |
 | `pm_running()` | this mode is the one running | none | not measured |
 | `pm_score_add(player, points)` | through the game's scoring and its multiplier; returns what was added | T P F | items 125-134; the multiplier's effect not measured separately |
+| `pm_score_sub(player, points)` | PAD-314: takes points away - written into the game's score table, cut to the score (never below 0: the scores are unsigned, so below 0 would read as an enormous number), then the game's add is called with 0 points for its on-change work; returns what was taken | F | not measured (desk only: the harness stubs it) |
 | `pm_callout_id(role)` | `ten_seconds`, `countdown`, `time_up` from the port | T P | item 134; ids on Jaws read from its code (136); TMNT has none |
 | `pm_callout(id)` | one of the game's own callouts; 0 does nothing | T P F | item 125 (1291, 1295); item 141 runs 1, 2 (each `callout_at` logged at its second; muted) |
 | `pm_callout_nth(id, n)` | a numbered variant | T P F | variants 0..4 (item 125); others not measured |
