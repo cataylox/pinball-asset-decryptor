@@ -649,6 +649,7 @@ TITLE_SCENES = {
     "king_kong_le-0.97": dict(screen_proven=True, hud="cf8da03fa56cd71e414702db70b6aa3d", bank="ed379c6514e73bead614fee25e93d862", clip_proven=True),   # item 164: our clip seen on the glass
     "led_zeppelin_pro-1.22": dict(screen_proven=True, hud="b8745c86480a44976d95068a7dc773f2", bank="549616e1c38dbf636eae575c75f376ff", clip_proven=True),   # item 164: our clip seen on the glass, on the background bank 914f6bd9
     "metallica_spike-1.03": dict(screen_proven=True, hud="809cbf843c36555ddbda41c3b4909543", bank="809cbf843c36555ddbda41c3b4909543", clip_proven=True),   # item 164: our clip seen on the glass, in a Video grafted into the HUD
+    "metallica_spike-1.04": dict(screen_proven=True, hud="5fa968f413d7e188cac4045da9e76781", bank="5fa968f413d7e188cac4045da9e76781", clip_proven=True),   # PAD-306: screen and clip seen on the glass, in a Video grafted into the HUD
     "turtles_le-1.59": dict(screen_proven=True, hud="a337459aee72b3ec5dc9b0a50981e16d", bank="cf92bc5a7a4bb06fcd90a3bb90d55baa", clip_proven=True),   # item 164: our clip seen on the glass
     "uncanny_xmen_le-0.98": dict(screen_proven=True, hud="0d31df0d25052d0ec251c18d5b8b33a1", bank="4c5e3bd248dc09f1373c91111543f92e", clip_proven=True),   # item 164: our clip seen on the glass
     "aerosmith_le-1.15": dict(screen_proven=True, hud="53c9a69e39abf2dbb54fd134afe68b01", bank="dab80a17b8977c603e9094be6f072a58", clip_proven=True),   # item 164: our clip seen on the glass

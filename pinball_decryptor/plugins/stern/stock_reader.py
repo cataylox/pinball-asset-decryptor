@@ -74,6 +74,7 @@ KNOWN_STOCK = {
     "c7d18db97aa783fc1af2e8ce1a4c646f4ecdbb9a": "led_zeppelin_pro 1.22.0",
     "1027924b12c1673e5d8f7e1b3df00485c2b5fc1f": "mando_le 1.44.0",
     "f5d1b36550b44555ff7467ab7ac38e67ab0c874d": "metallica_spike 1.03.0",
+    "db62753b2f8a70806633d08f0faf4f306221ac55": "metallica_spike 1.04.0",   # PAD-306
     "aad880bbb91d1d4989dd17c5fd795cfe0170ed59": "munsters_le 1.28.0",
     "60c8026e56b0123b9300934405e990fda4d6b500": "rush_le 1.18.0",
     "ee9ca85b9e074b02ab9d6a54af226c8073c43bf9": "star_wars_elg 1.10.0",
