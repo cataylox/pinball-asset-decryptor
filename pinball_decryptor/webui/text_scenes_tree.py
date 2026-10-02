@@ -659,6 +659,12 @@ class TreeEditMixin:
         layers = []
         index = scene_edit._man_index(man)
         have, memo = {}, {}
+        # PAD-312: each picture's colour switch (the chosen-files profile baked into it)
+        from ..core import colour_profile as _cp
+        settings = _cp.asset_settings(self.assets_dir)
+        picks = self._tree_pictures()
+        added_ops = {int(op["id"]): op for op in ops
+                     if op.get("op") == "add_picture" and op.get("id") is not None}
         for n, _parent, depth in _walk_man(man):
             kind = _kind_of(man, n)
             pics = []
@@ -670,6 +676,8 @@ class TreeEditMixin:
                     pics.append(rel)
             layers.append({"id": n["id"], "name": n["name"], "depth": depth, "kind": kind,
                            "pics": ["images/" + rel for rel in pics],
+                           "color": _colour_switch(n, kind, pics, picks, settings,
+                                                   added_ops.get(n["id"])),
                            "drawn": n["id"] in drawn or n["id"] in self._tworlds,
                            "state_off": n["id"] in self._teye_off,
                            "part_off": n["id"] in self._tpart_off,
@@ -1408,6 +1416,59 @@ class TreeEditMixin:
         return self._tree_add({"op": "visible", "node": node, "on": False})
 
     @rpc
+    def tree_color(self, node, on):
+        """A layer's colour switch (PAD-312): the chosen-files profile is baked into its
+        picture (an added one, or an Images-tab replacement), or the picture goes on the card
+        in its own colours.  The game's own pictures have no switch: Stern made them for the
+        machine's screen; replace one on the Images tab to correct it."""
+        from ..plugins.stern import scene_edit
+        card, man = self._tree_card()
+        if card is None:
+            return False
+        node = int(node)
+        ops = self._tree_ops(card)
+        if any(op.get("op") == "add_picture" and op.get("id") == node for op in ops):
+            new = [dict(op) for op in ops]
+            for op in new:
+                if op.get("op") == "add_picture" and op.get("id") == node:
+                    op["color"] = bool(on)
+            scene_edit.set_ops(self.assets_dir, card, new)
+            self._tree_refresh()
+            return True
+        index = scene_edit._man_index(man)
+        if node not in index:
+            return False
+        pics = _pics_of(man, index[node][0], {})
+        if len(pics) != 1:
+            return False
+        rel = "images/" + pics[0]
+        images = self.window.service("images")
+        done = False
+        try:
+            done = bool(images.set_color(rel, bool(on)))
+        except Exception:                                # noqa: BLE001
+            log.exception("scene colour switch")
+        if not done:
+            # the Images tab has not scanned this folder: its own record is the file
+            from ..core import colour_profile as _cp
+            _cp.set_asset_slot(self.assets_dir, "images", rel, bool(on))
+            try:
+                images.color_all_changed()
+            except Exception:                            # noqa: BLE001
+                pass
+            self.pictures_changed()
+        return True
+
+    def pictures_changed(self):
+        """The Images tab moved a picture's colour switch: this scene is drawn again
+        (the preview shows a switched-on file the way the Write bakes it)."""
+        if not getattr(self, "_alive", False) or not self._sel:
+            return
+        self._trev += 1
+        if self._tree_available(self._sel):
+            self._render_tree_preview(self._sel)
+
+    @rpc
     def tree_order(self, node, where):
         from ..plugins.stern import scene_edit
         if where not in _ORDER:
@@ -1755,6 +1816,29 @@ def _file_size(path):
             return im.size
     except Exception:                                # noqa: BLE001
         return None
+
+
+def _colour_switch(n, kind, pics, picks, settings, added_op):
+    """A layer's colour switch for the Layers list (PAD-312): ``{"on", "own"}`` for a
+    picture the chosen-files profile can reach (an added one, or one with an Images-tab
+    replacement), ``{"locked": True}`` for the game's own picture, ``None`` for a layer that
+    draws no single picture."""
+    from ..core import colour_profile as _cp
+    if added_op is not None:
+        own = added_op.get("color")
+        return {"on": _cp.asset_applies(settings, "images", added_op.get("image") or "",
+                                        own=own),
+                "own": own is not None, "added": True}
+    if len(pics) != 1:
+        return None
+    rel = pics[0]
+    if (picks.get(rel) or {}).get("path"):
+        full = "images/" + rel
+        return {"on": _cp.asset_applies(settings, "images", full),
+                "own": settings["images"].get(full) is not None, "rel": full}
+    if kind in ("Bitmap", "Shape", "StreamingFlipbook"):
+        return {"locked": True}
+    return None
 
 
 def _kept_size(pick):

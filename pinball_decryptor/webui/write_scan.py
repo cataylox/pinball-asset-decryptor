@@ -278,6 +278,7 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
     rows.extend(mode_rows(mfr, assets_path, direct=direct))
     rows.extend(stock_mode_rows(mfr, assets_path))
     rows.extend(colour_rows(mfr, assets_path))
+    rows.extend(chosen_files_rows(mfr, assets_path))
     return rows
 
 
@@ -301,6 +302,38 @@ def colour_rows(mfr, assets_path):
         prof.label(), "everything the game draws" if wide
         else "your replaced pictures and videos"),
         "color", "Pending (color profile)", "pending")]
+
+
+def chosen_files_rows(mfr, assets_path):
+    """PAD-312: the chosen-files profile, as one pending row counting the
+    replaced pictures, videos and added pictures it is baked into."""
+    if not assets_path or mfr is None:
+        return []
+    from ..core import colour_profile
+    try:
+        if not mfr.colour_profile_on_display():
+            return []
+        prof = colour_profile.asset_active(assets_path)
+        if prof is None:
+            return []
+        n = colour_profile.asset_counts(assets_path)
+    except Exception:                                   # noqa: BLE001
+        return []
+    parts = []
+    if n["images"]:
+        parts.append("%d replaced picture%s" % (n["images"],
+                                                "" if n["images"] == 1 else "s"))
+    if n["videos"]:
+        parts.append("%d replaced video%s" % (n["videos"],
+                                              "" if n["videos"] == 1 else "s"))
+    if n["added"]:
+        parts.append("%d picture%s added in Scenes"
+                     % (n["added"], "" if n["added"] == 1 else "s"))
+    if not parts:
+        return []
+    return [("color profile on chosen files  —  %s, baked into %s"
+             % (prof.label(), ", ".join(parts)),
+             "color", "Pending (color profile)", "pending")]
 
 
 def stock_mode_rows(mfr, assets_path):
@@ -447,6 +480,7 @@ def fingerprint(window, assets_path, epoch, grow_on):
         # PAD-305: the project's color profile (the Color profile tab)
         from ..core import colour_profile
         parts.append(colour_profile.signature(assets_path))
+        parts.append(colour_profile.asset_signature(assets_path))
     except Exception:                                   # noqa: BLE001
         parts.append(None)
     try:

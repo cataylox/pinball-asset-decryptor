@@ -194,8 +194,8 @@ def test_scan_lists_every_slot_with_metadata(scanned):
     assert st["preview"]["rel"] == ALL[0]
     assert st["preview"]["orig"].endswith(os.path.basename(ALL[0]))
     assert st["preview"]["hdr"] == "Original"
-    # nothing picked: keep column not offered until a pick exists
-    assert st["cols"] == {"n": False, "keep": True}
+    # nothing picked: the Color column is not offered until a pick exists
+    assert st["cols"] == {"n": False, "keep": True, "color": False}
     log = " ".join(l["text"] for l in w.window._log["stern"])
     assert "Images scan started." in log and "Images scan finished" in log
 
@@ -593,7 +593,8 @@ def test_thumb_and_export_csv(scanned, tmp_path):
     with open(out, encoding="utf-8-sig", newline="") as f:
         rows = list(csv.reader(f))
     assert rows[0] == ["Original Image", "Resolution", "Format", "Source",
-                       "Replacement", "Changed On Disk", "Keep Size"]
+                       "Replacement", "Changed On Disk", "Keep Size",
+                       "Color Profile"]
     assert len(rows) == 7
 
 

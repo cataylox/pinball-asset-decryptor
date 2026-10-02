@@ -21,11 +21,13 @@ VERSION = 1
 #: The sidecar sections each media tab owns.  Maps are ``{rel: value}``,
 #: lists are rels, anything else is one tab-wide option.
 SECTIONS = {
-    "images": ("image", "image_keep_size", "image_group_tags"),
+    "images": ("image", "image_keep_size", "image_group_tags",
+               "image_color_slots", "color_all_images"),
     "audio": ("audio", "audio_loop", "audio_keep", "audio_levels",
               "grow_keep_whole", "audio_trim"),
     "video": ("video", "video_asis_slots", "video_length_slots",
-              "video_trim", "video_no_conversion", "video_best_quality"),
+              "video_trim", "video_no_conversion", "video_best_quality",
+              "video_color_slots", "color_all_videos"),
 }
 #: The section holding each media tab's replacement picks.
 PICKS = {"images": "image", "audio": "audio", "video": "video"}

@@ -62,6 +62,8 @@
 .img-rep.img-stray { color: var(--warn); }
 .img-keepcell { display: flex; justify-content: center; }
 .img-keep { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; margin: 0; }
+/* PAD-312: the colour switch; a box the user set for this picture itself is ringed */
+.img-color.own { outline: 2px solid var(--accent-line); outline-offset: 1px; }
 
 /* before / after: one grid, so the two pictures stay level whether or not
    the "shared by N scenes" note or the keep-size row is showing */
@@ -83,6 +85,8 @@
 /* the keep-size tick sits right under the Replacement heading, so it is on
    screen whenever the preview is */
 .img-keeprow { display: flex; flex-wrap: wrap; align-items: center; column-gap: 12px; min-width: 0; }
+/* PAD-312: the keep-size and colour switches stack in the one grid cell */
+.img-opts { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .img-keeprow .chk { min-height: 26px; }
 .img-keeprow > .small { line-height: 1.4; padding-bottom: 2px; }
 /* sized against the page's own height (the log drawer included), not the

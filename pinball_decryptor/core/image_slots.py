@@ -176,6 +176,12 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
     colour = colour_profile.active(assets_dir) if assets_dir else None
     items = [(rel, rep) for rel, rep in assignments.items()
              if rep and rel in slots_by_rel]
+    # The chosen-files profile (PAD-312), baked into the pictures switched
+    # on; where the display-wide profile corrects the files itself (not
+    # Spike 2, *colour* set) it wins, so a picture is never corrected twice.
+    chosen = ({} if colour is not None
+              else colour_profile.asset_map(assets_dir, "images",
+                                            [rel for rel, _r in items]))
     total = len(items)
     staged = 0
     failures: List = []
@@ -200,7 +206,8 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
             if snap:
                 original = detect_image_info(snap)
         ok, detail = stage_replacement(slot, rep, keep_size=rel in keep_size,
-                                       original_info=original, colour=colour)
+                                       original_info=original,
+                                       colour=colour or chosen.get(rel))
         if ok:
             staged += 1
             if log_cb:

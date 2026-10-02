@@ -429,7 +429,8 @@ def describe(op):
     if k == "order":
         return "layer %d" % op["index"]
     if k == "add_picture":
-        return "added picture %s" % os.path.basename(op["image"])
+        return "added picture %s%s" % (os.path.basename(op["image"]),
+                                       " (colors corrected)" if op.get("color") else "")
     if k == "add_text":
         return 'added text "%s"' % op["text"]
     if k == "rotate":
@@ -647,14 +648,17 @@ def _max_id(scene):
     return max(ids)
 
 
-def _texture_from_png(path, premultiply=True):
+def _texture_from_png(path, premultiply=True, colour=None):
     """``(w, h, fmt, BC3 blob)`` of the PNG at *path*, padded to the block grid, premultiplied
-    as the card's own art is.  (The color profile reaches it on the machine through the
-    game's drawing shaders, PAD-305, like everything else it draws.)"""
+    as the card's own art is.  (The display-wide color profile reaches it on the machine
+    through the game's drawing shaders, PAD-305, like everything else it draws; *colour*, the
+    chosen-files profile, is baked in here when the picture is switched on, PAD-312.)"""
     import numpy as np
     from PIL import Image
     from . import dds as _dds
     img = Image.open(path).convert("RGBA")
+    if colour is not None:
+        img = colour.apply_image(img)
     w, h = img.size
     pw, ph = (w + 3) // 4 * 4, (h + 3) // 4 * 4
     arr = np.zeros((ph, pw, 4), np.uint8)
@@ -779,8 +783,10 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
                         notes.append("add_picture: this scene draws no picture of its own to "
                                      "take the kind from; not added")
                         continue
+                    from ...core import colour_profile
                     w, h, fmt, blob = _texture_from_png(
-                        os.path.join(assets_dir, "images", *op["image"].split("/")))
+                        os.path.join(assets_dir, "images", *op["image"].split("/")),
+                        colour=colour_profile.added_picture_colour(assets_dir, op))
                     tid = alloc()
                     scene.textures[tid] = dict(w=w, h=h, fmt=fmt, name="", blob=blob,
                                                data_off=None)

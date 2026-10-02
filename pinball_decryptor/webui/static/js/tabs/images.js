@@ -26,6 +26,8 @@ const FOLDER_TIP = "Pick a folder of your own files and each one becomes the rep
 const CLEAR_TIP = "Drop every replacement picked on this tab in one go — for starting a project over without clearing 48 rows one at a time. It only drops the picks: your own files are untouched, and a slot already built into the project folder keeps the bytes it has (use “Revert all changes…” on the Write tab for those). To clear only some, select the rows — click, then Shift-click or Ctrl-click — and right-click the selection.";
 const KEEP_TIP = "Off: the replacement is scaled to the original picture's size, which squeezes a longer name. On: it keeps its own width and height, and the build grows the scene to fit it. The game draws it from the same top-left corner, so a wider picture reaches further right. Needs an image build (not a direct SD write). A picture nothing in its scene draws by size is fitted instead, and the log says so.";
 const REP_TIP = "Click to choose a replacement for this image (double-click the row does the same).";
+// PAD-312: the chosen-files color profile, baked into this picture as it is staged
+const COLOR_TIP = "On: the Color profile tab's chosen-files profile is baked into this picture when you build, so it looks on the machine the way it looks on your PC. Off: it goes on the card in its own colors. The game's own pictures are never touched. A box you click is this picture's own setting; the Color profile tab's \"every replaced picture\" box sets the rest.";
 
 const TAG_CLS = { assigned: "img-picked", changed: "img-ondisk", foreign: "img-stray" };
 
@@ -35,8 +37,8 @@ const TAG_CLS = { assigned: "img-picked", changed: "img-ondisk", foreign: "img-s
 // Image and Replacement share what is left, as the design has it.
 const AUTOSIZE_MAX = 480;
 // the Tk tree's minwidths
-const MIN_W = { th: 36, "#0": 160, n: 50, res: 70, fmt: 80, src: 70, keep: 64, rep: 110 };
-const FIT_COLS = [["n", "Images"], ["res", "Resolution"], ["fmt", "Format"], ["src", "Source"], ["keep", "Keep size"]];
+const MIN_W = { th: 36, "#0": 160, n: 50, res: 70, fmt: 80, src: 70, keep: 64, color: 56, rep: 110 };
+const FIT_COLS = [["n", "Images"], ["res", "Resolution"], ["fmt", "Format"], ["src", "Source"], ["keep", "Keep size"], ["color", "Color"]];
 let measureCtx = null;
 function textWidth(font, text, spacing = 0) {
   if (!measureCtx) measureCtx = document.createElement("canvas").getContext("2d");
@@ -138,6 +140,7 @@ export default function ImagesTab() {
   const p = s.preview || {};
   const grouped = !!(s.cols && s.cols.n);
   const keepCol = !!(s.cols && s.cols.keep);
+  const colorCol = !!(s.cols && s.cols.color);
   const running = !!(s.running || shell.running);
   const [sel, setSel] = useState(() => new Set());
   const [cur, setCur] = useState(null);
@@ -237,6 +240,7 @@ export default function ImagesTab() {
     out.fmt = Math.max(out.fmt, widest(`13.5px ${f.sans}`, fmt));
     out.src = Math.max(out.src, widest(`13.5px ${f.sans}`, src));
     out.keep = Math.max(out.keep, 22);
+    out.color = Math.max(out.color, 22);
     return out;
   }, [fontsReady, ...chunks]);
   const groupCounts = grouped ? view.filter((e) => typeof e !== "number").map((e) => e.c) : [];
@@ -326,6 +330,23 @@ export default function ImagesTab() {
         }} />`;
     },
   };
+  // PAD-312: the chosen-files color profile, per picture (the same click rules)
+  const colorColDef = {
+    key: "color", label: "Color", sort: "color", width: autoW("color"), cls: "img-keepcell", title: COLOR_TIP,
+    render: (e) => {
+      if (typeof e !== "number") return "";
+      const row = slotAt(s, e);
+      if (!row || row.c == null) return "";
+      return html`<input type="checkbox" class=${cx("img-keep img-color", row.co && "own")} checked=${!!row.c}
+        aria-label="Correct this picture's colors for the machine"
+        ...${tip(COLOR_TIP)} onClick=${(ev) => {
+          ev.stopPropagation();
+          if (ev.detail > 1) { ev.preventDefault(); return; }
+          if (cur !== row.r) selectOnly(row.r);
+          call("images.set_color", row.r, !row.c);
+        }} />`;
+    },
+  };
   // One picker per click: the second click of a double-click is ignored
   // and the double-click stops here (Tk's picker was modal and took the
   // grab, so there was only ever one)
@@ -345,7 +366,7 @@ export default function ImagesTab() {
         }}>${row.p}</button>`;
     },
   };
-  const columns = [thumbCol, nameCol, grouped && countCol, resCol, fmtCol, srcCol, keepCol && keepColDef, repCol].filter(Boolean);
+  const columns = [thumbCol, nameCol, grouped && countCol, resCol, fmtCol, srcCol, keepCol && keepColDef, colorCol && colorColDef, repCol].filter(Boolean);
 
   // the dragged widths (never below the Tk tree's minwidths); the last
   // column always takes what is left
@@ -449,10 +470,17 @@ export default function ImagesTab() {
           ${prevRel && p.clearable ? html`<${Button} size="sm" kind="ghost" onClick=${() => call("images.clear_one", prevRel)}>Clear replacement<//>` : null}
         </div>
         ${p.hdr_note ? html`<div class="small img-shared img-on">${p.hdr_note}</div>` : null}
-        ${p.keep ? html`<div class="img-keeprow img-rk">
-          <${Check} checked=${!!p.keep.on} onChange=${(v) => call("images.set_keep", prevRel, v)}
-            label="Keep this picture's own size" title=${KEEP_TIP} />
-          <span class="small muted">${p.keep.text}</span>
+        ${p.keep || p.color ? html`<div class="img-rk img-opts">
+          ${p.keep ? html`<div class="img-keeprow">
+            <${Check} checked=${!!p.keep.on} onChange=${(v) => call("images.set_keep", prevRel, v)}
+              label="Keep this picture's own size" title=${KEEP_TIP} />
+            <span class="small muted">${p.keep.text}</span>
+          </div>` : null}
+          ${p.color ? html`<div class="img-keeprow img-colorrow">
+            <${Check} checked=${!!p.color.on} onChange=${(v) => call("images.set_color", prevRel, v)}
+              label="Correct its colors for the machine" title=${COLOR_TIP} />
+            <span class="small muted">${p.color.own ? "Set for this picture" : p.color.all ? "Follows the Color profile tab (every replaced picture)" : "Follows the Color profile tab (no replaced picture)"}${p.color.on ? ` · “${p.color.name}” is baked in when you build.` : "."}</span>
+          </div>` : null}
         </div>` : null}
         <${Thumb} cls="img-op" path=${p.orig} ver=${p.ver} label="Original" />
         <${Thumb} cls="img-rp" path=${p.rep} ver=${p.ver} empty=${p.empty} label="Replacement" />

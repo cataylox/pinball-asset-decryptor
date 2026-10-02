@@ -686,6 +686,13 @@ HELP_CONTENT = {
          "the original's pixel dimensions and converted to the slot's "
          "format (transparency is kept where the original has it). Keep "
          "the original resolution for best results."),
+        ("Color column (Spike 2)",
+         "Each replaced picture has a Color box: ticked, the Color profile "
+         "tab's chosen-files profile is baked into it when you build, so it "
+         "looks on the machine the way it looks here; unticked, it goes on "
+         "the card in its own colors. The box under the preview is the "
+         "same switch. The Color profile tab's 'Every replaced picture' "
+         "sets every picture that has no box of its own."),
         ("A bigger picture than the original",
          "Stern Spike 2: a picture inside a game scene (Source \"Radium\", "
          "not a font) can keep its OWN size instead, e.g. a longer name "
@@ -1046,6 +1053,17 @@ HELP_CONTENT = {
          "The profile is a staged change of this project: Write lists it as "
          "pending, Revert all clears it, and Save a copy / Load move it "
          "between projects."),
+        ("Chosen files (Spike 2)",
+         "The whole-screen profile reaches the game's own art too, which "
+         "Stern already made for that screen. Switch the tab to Chosen "
+         "files for a second profile that is baked into only the replaced "
+         "pictures and videos (and pictures added in Scenes) you switch on: "
+         "tick 'Every replaced picture' or 'Every replaced video' here, or "
+         "one file at a time in the Color column of the Images and Video "
+         "tabs and the palette in the Scenes layers. It starts from "
+         "Recommended; the Scenes preview shows a switched-on picture the "
+         "way it will be written. The game's own pictures have no switch "
+         "(a blue lock in Scenes)."),
     ],
     # The Modes tab's own tips are in PREVIEW_HELP: a copy of the app without a
     # preview code shows none of them (sections_for).  The key stays so every

@@ -7,6 +7,13 @@
 // mix toward Rec.601 grey, then per channel lift + (1 - lift) * (in * gain)
 // ^ gamma), so a slider moves the picture while it is dragged.  Python is
 // told the numbers a moment after the last move and saves them to the file.
+//
+// PAD-312: on Spike 2 the tab has two modes.  "Whole screen" is the profile
+// the game draws everything through; "Chosen files" is a second profile
+// baked into the replaced pictures and videos (and pictures added in
+// Scenes) that are switched on: the two boxes here for every file of a
+// kind, and each file's own box on the Images and Video tabs and in the
+// Scenes layers.  The same sliders and preview serve whichever is showing.
 
 import { html, useState, useEffect, useRef, useCallback, PageHead, Card, Button, Field, Select, Seg, Note, Check,
          Icon, tip, call, cx, mediaUrl } from "../core/ui.js";
@@ -254,15 +261,52 @@ function Controls({ s, p, update }) {
   <//>`;
 }
 
+const MODES = [
+  { value: "display", label: "Whole screen", title: "One correction for everything the game draws: its own art, videos, mode screens, text and your replacements. No file is changed." },
+  { value: "assets", label: "Chosen files", title: "A correction baked into the replaced pictures and videos you switch on (and pictures added in Scenes). The game's own art is left as Stern made it." },
+];
+
+function countWords(n) {
+  const parts = [];
+  if (n.images) parts.push(`${n.images} replaced picture${n.images === 1 ? "" : "s"}`);
+  if (n.videos) parts.push(`${n.videos} replaced video${n.videos === 1 ? "" : "s"}`);
+  if (n.added) parts.push(`${n.added} picture${n.added === 1 ? "" : "s"} added in Scenes`);
+  return parts.join(", ");
+}
+
+// PAD-312: which files the chosen-files profile reaches
+function WhichFiles({ s }) {
+  const n = s.asset_counts || {};
+  const words = countWords(n);
+  return html`<${Card} title="Which files" cls="cp-which">
+    <${Check} checked=${!!s.all_images} label="Every replaced picture"
+      title="Every picture picked on the Images tab gets this profile baked in when you build, unless its own box there says otherwise."
+      onChange=${(v) => call("color.set_all", "images", v)} />
+    <${Check} checked=${!!s.all_videos} label="Every replaced video"
+      title="Every clip picked on the Video tab gets this profile baked in when you build (each is re-encoded for it), unless its own box there says otherwise."
+      onChange=${(v) => call("color.set_all", "videos", v)} />
+    <p class="small muted cp-which-now">${words ? `Now: ${words}.` : "No file is switched on yet."} One file at a time: its box in the Color column of the Images or Video tab, or its palette in the Scenes layers. The game's own pictures and clips have no box: Stern made them for this screen.</p>
+  <//>`;
+}
+
 function Explainer({ s }) {
+  const assets = s.per_file && s.mode === "assets";
   return html`<${Card} title="What this does" cls="cp-explain">
     <p>A pinball machine's screen doesn't show colors the way your PC monitor does. On a Stern Godzilla, for example, middle greys come out too bright and too blue, and the darkest shades all sink into the same black.</p>
-    ${s.on_display ? html`<p>A color profile corrects for that. When you build, PAD teaches the game to shift every color it draws the opposite way, so the machine's screen shifts them back to what you made. It covers everything on the screen: the game's own art, videos, mode screens, text, and your replacements.</p>
+    ${assets ? html`<p>This profile corrects the files you choose, and only those. When you build, PAD shifts the colors of each switched-on picture or video the opposite way as it is staged, so the machine's screen shifts them back to what you made. The game's own art is left as Stern made it for this screen.</p>
+    <ul class="cp-facts">
+      <li><${Icon} name="check" />Your own files are never changed. The correction is made fresh from them every time you build, so it can never be applied twice.</li>
+      <li><${Icon} name="check" />The Whole screen profile still applies on top, if you set one: the game draws these files through it like everything else.</li>
+      <li><${Icon} name="check" />The Scenes preview shows a switched-on picture the way it will be written, so you can judge it in place.</li>
+      <li><${Icon} name="check" />Different machines need different profiles. Save a copy for each one and load the one you're building for.</li>
+    </ul>`
+    : s.on_display ? html`<p>A color profile corrects for that. When you build, PAD teaches the game to shift every color it draws the opposite way, so the machine's screen shifts them back to what you made. It covers everything on the screen: the game's own art, videos, mode screens, text, and your replacements.</p>
     <ul class="cp-facts">
       <li><${Icon} name="check" />No picture or video file is changed, yours or the game's. The correction lives in the game program itself, so it can never be applied twice.</li>
       <li><${Icon} name="check" />Pick No change and build again for the game's own colors.</li>
       <li><${Icon} name="check" />Different machines need different profiles. Save a copy for each one and load the one you're building for.</li>
       <li><${Icon} name="check" />See it in the emulator to check it in the game. The colors are set when the game starts, so each change restarts it.</li>
+      <li><${Icon} name="check" />Only your own new pictures and videos need it? Switch to Chosen files above: that profile is baked into the files you pick, and the game's own art is left alone.</li>
     </ul>` : html`<p>A color profile corrects for that. When you build, PAD shifts the colors of your replacement pictures and videos the opposite way, so the machine's screen shifts them back to what you made.</p>
     <ul class="cp-facts">
       <li><${Icon} name="check" />Your own files are never changed. The correction is made fresh from them every time you build, so it can never be applied twice.</li>
@@ -297,19 +341,32 @@ export default function ColorTab() {
   };
 
   const samples = [...(s.samples || []), { value: "browse", label: "Another picture..." }];
+  const assets = s.per_file && s.mode === "assets";
+  const nFiles = Object.values(s.asset_counts || {}).reduce((a, b) => a + (b || 0), 0);
+  const note = !s.has_project
+    ? html`<${Note} kind="warn">There is no project folder yet: choose or extract one on the Extract tab, and the profile you set here is saved with it.<//>`
+    : assets
+      ? (s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into " + countWords(s.asset_counts || {})
+            + " when you build; the game's own art is not touched. Pick No change to send the files as they are."}<//>`
+        : !s.asset_active ? html`<${Note} kind="info">No change on the chosen files: they go onto the card as you made them. Pick a starting point or move a slider to correct them.<//>`
+        : html`<${Note} kind="info">${"“" + (s.name || "My profile") + "” is ready, but no file is switched on yet: tick a box under Which files, or switch on pictures on the Images tab, videos on the Video tab, or layers in Scenes."}<//>`)
+      : s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is staged for this project: the next build "
+          + (s.on_display ? "corrects everything the game draws." : "corrects your replaced pictures and videos.")
+          + " Pick No change to take it off."}<//>`
+      : html`<${Note} kind="info">${s.on_display
+          ? "No whole-screen color profile on this project: the game draws in its own colors. Pick a starting point or move a slider to stage one."
+          : "No color profile on this project: your pictures and videos go onto the card as they are. Pick a starting point or move a slider to stage one."}<//>`;
   return html`<div class="page cp-page">
     <${PageHead} title="Color profile" sub=${INTRO}>
       <${Button} kind="primary" icon="emulate" onClick=${() => call("color.try_emulator")}
         disabled=${!s.has_project}
         title="Run this project in the emulator with this profile (a running game restarts, since the colors are set when the game starts)">See it in the emulator<//>
     <//>
-    ${!s.has_project ? html`<${Note} kind="warn">There is no project folder yet: choose or extract one on the Extract tab, and the profile you set here is saved with it.<//>`
-      : s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is staged for this project: the next build "
-          + (s.on_display ? "corrects everything the game draws." : "corrects your replaced pictures and videos.")
-          + " Pick No change to take it off."}<//>`
-      : html`<${Note} kind="info">${s.on_display
-          ? "No color profile on this project: the game draws in its own colors. Pick a starting point or move a slider to stage one."
-          : "No color profile on this project: your pictures and videos go onto the card as they are. Pick a starting point or move a slider to stage one."}<//>`}
+    ${s.per_file ? html`<div class="row cp-modes">
+      <${Seg} value=${s.mode || "display"} options=${MODES} onChange=${(v) => call("color.set_mode", v)} />
+      <span class="small muted">${assets ? "Baked into the replaced files you switch on; the game's own art is left alone." : "Everything the game draws, the game's own art included; no file is changed."}${nFiles && !assets ? ` · Chosen files: ${nFiles} switched on.` : ""}</span>
+    </div>` : null}
+    ${note}
     ${s.try_note ? html`<div class="small muted">${s.try_note}</div>` : null}
     <div class="cp-grid">
       <div class="cp-main">
@@ -322,6 +379,7 @@ export default function ColorTab() {
         <${Explainer} s=${s} />
       </div>
       <div class="cp-side">
+        ${assets ? html`<${WhichFiles} s=${s} />` : null}
         <${Controls} s=${s} p=${p} update=${update} />
       </div>
     </div>

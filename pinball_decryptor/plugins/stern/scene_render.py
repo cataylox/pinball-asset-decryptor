@@ -705,21 +705,46 @@ def picture_sizes(assets_dir):
 
 def pending_pictures(assets_dir):
     """The Images tab's picks, as a scene render uses them: ``{picture rel: {"path":
-    replacement file or None, "keep": keep its own size}}``.  A pick not built yet is drawn
-    from its own file, so a replacement shows in the Scenes tab the moment it is picked."""
+    replacement file or None, "keep": keep its own size, "colour": the chosen-files profile
+    baked into it, or None}}``.  A pick not built yet is drawn from its own file, so a
+    replacement shows in the Scenes tab the moment it is picked.  Pictures added in Scenes
+    are listed too, for their colour (PAD-312): the preview shows a switched-on file the way
+    the Write bakes it."""
     try:
-        from ...core import staged_changes
+        from ...core import staged_changes, colour_profile
         data = staged_changes.load(assets_dir) or {}
     except Exception:
         return {}
     keep = set(data.get("image_keep_size") or ())
+    try:
+        prof = colour_profile.asset_active(assets_dir)
+        settings = colour_profile.asset_settings(assets_dir) if prof else None
+    except Exception:
+        prof, settings = None, None
     out = {}
     for rel, src in (data.get("image") or {}).items():
         if not isinstance(rel, str) or not rel.startswith("images/"):
             continue
+        on = bool(prof and src
+                  and colour_profile.asset_applies(settings, "images", rel))
         out[rel[len("images/"):]] = {
             "path": src if isinstance(src, str) and os.path.isfile(src) else None,
-            "keep": rel in keep}
+            "keep": rel in keep, "colour": prof if on else None}
+    if prof is not None:
+        try:
+            from . import scene_edit
+            for ops in scene_edit.load(assets_dir).values():
+                for op in ops or ():
+                    if not (isinstance(op, dict) and op.get("op") == "add_picture"):
+                        continue
+                    rel = op.get("image") or ""
+                    c = colour_profile.added_picture_colour(assets_dir, op, settings, prof)
+                    if c is not None and rel and rel not in out:
+                        path = os.path.join(assets_dir, "images", *rel.split("/"))
+                        if os.path.isfile(path):
+                            out[rel] = {"path": path, "keep": True, "colour": c}
+        except Exception:
+            pass
     return out
 
 
@@ -730,6 +755,17 @@ def _picture(assets_dir, rel, cache, pictures=None, sizes=None):
     pick = (pictures or {}).get(rel) or {}
     src = pick.get("path")
     img = _load_file(src, "pick:" + src, cache) if src else _load_png(assets_dir, rel, cache)
+    colour = pick.get("colour")
+    if img is not None and colour is not None:
+        # the chosen-files profile, as the Write bakes it in (PAD-312)
+        ck = ("colour", src or rel, colour.gamma, colour.gain, colour.lift, colour.saturation)
+        got = cache.get(ck)
+        if got and got[0] is img:
+            img = got[1]
+        else:
+            corrected = colour.apply_image(img)
+            cache[ck] = (img, corrected)
+            img = corrected
     img = _premultiplied(img, src or rel, cache)
     want = (sizes or {}).get(rel)
     if img is None or not want or pick.get("keep") or tuple(img.size) == tuple(want):
