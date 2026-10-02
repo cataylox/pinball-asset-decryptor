@@ -326,11 +326,24 @@ class ModeLayoutMixin:
         build places the group.  What a mode's screen cannot take is said, not done."""
         from ..plugins.stern import scene_edit
         card, _man = self._tree_card()
+        if self._tman is None:
+            return False
+        group = scene_edit._man_index(self._tman).get(GROUP_ID)
+        a, b, c, d = (group[0]["tr"][0][1][:4] if group and group[0]["tr"]
+                      else (1.0, 0.0, 0.0, 1.0))
         mine = []
         for op in ops:
             k = op.get("op")
             node = op.get("node")
-            if k in ("move", "scale"):
+            if k == "move" and node == ART_ID:
+                # the drag came in the picture's parent's units (the group's own, scaled):
+                # the group moves in ITS parent's, so the step is put through the group's matrix
+                dx, dy = op["dx"], op["dy"]
+                mine.append(dict(op, node=GROUP_ID, dx=round(a * dx + c * dy, 3),
+                                 dy=round(b * dx + d * dy, 3)))
+            elif k in ("move", "scale"):
+                # a size about a point of the picture is about the same point of the group:
+                # the picture sits at the group's origin, unscaled
                 mine.append(dict(op, node=GROUP_ID if node == ART_ID else node))
             elif k == "order" and node == GROUP_ID:
                 mine.append(op)
@@ -339,7 +352,7 @@ class ModeLayoutMixin:
             else:
                 compat.messagebox.showinfo("Mode screen", _ONLY % self._mlay["mode"])
                 return False
-        if not mine or self._tman is None:
+        if not mine:
             return False
         man, notes = scene_edit.apply_manifest(self._tman, mine)
         if notes:

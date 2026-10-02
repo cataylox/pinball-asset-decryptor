@@ -43,6 +43,7 @@ CARD = r"D:\Pinball\images\Stern\spike2\godzilla_le-1_16_0_spike2.Release.8G.sdc
 HUD_DIR = "/godzilla_le/assets/lcd/auto_loaded/32e6ae280ddaec08e203a02289bb39a04968e7b0"
 RIGSH = "/mnt/c/tmp/pad323_rig.sh"
 SLOT = "3"
+RIG_LAYOUT = {"x": 20.0, "y": 300.0, "scale": 0.7, "order": 0}
 
 
 def rig(*args, timeout=120):
@@ -84,10 +85,13 @@ def magenta(png):
     return sum(1 for r, g, b in im.getdata() if r > 220 and b > 120 and g < 110)
 
 
-def project_copy(scratch, repo):
+def project_copy(scratch, repo, layout=None):
+    """The scratch project. With *layout* (the rig run) it is the card's record and the mode
+    alone, laid out as given: the extract's own edits change the HUD scene, and a build
+    refuses modes beside another edit of the scene they go into."""
     project = os.path.join(scratch, "Godzilla LE 1.16 Extract")
     os.makedirs(project)
-    for name in ("images", "text"):
+    for name in (("images", "text") if layout is None else ()):
         shutil.copytree(os.path.join(SOURCE, name), os.path.join(project, name))
     shutil.copy2(os.path.join(SOURCE, ".extract_source.json"), project)
     sys.path.insert(0, repo)
@@ -99,6 +103,7 @@ def project_copy(scratch, repo):
     wall_picture(os.path.join(folder, "wall.png"))
     spec = MP.load(os.path.join(folder, MP.MODE_FILE))
     spec.screen_art = "wall.png"
+    spec.screen_layout = dict(layout or {})
     MP.save(project, slug, spec)
     return project, slug
 
@@ -110,7 +115,8 @@ def main():
     with_rig = "--rig" in sys.argv[4:]
     os.makedirs(out_dir, exist_ok=True)
     scratch = tempfile.mkdtemp(prefix="pad323-")
-    project, slug = project_copy(scratch, repo)
+    # the rig run: the layout the editor shot makes (scripts/shot_pad323.py without --rig)
+    project, slug = project_copy(scratch, repo, RIG_LAYOUT if with_rig else None)
     print("project", project, "mode", slug, flush=True)
     real = os.path.expandvars(r"%APPDATA%\pinball_decryptor\settings.json")
     with open(real, encoding="utf-8") as f:
@@ -149,57 +155,66 @@ def main():
             page = browser.new_page(viewport={"width": 1500, "height": 1250})
             page.goto(url)
             page.wait_for_function("window.__padReady === true", timeout=60000)
-            webui_shot.api(url, "ui.select_tab", "modes")
-            time.sleep(3)
-            webui_shot.api(url, "modes.select", slug, "form")
-            time.sleep(2)
-            page.get_by_role("tab", name="Show").first.click()
-            time.sleep(2)
-            out = os.path.join(out_dir, "%s_show.png" % prefix)
-            page.screenshot(path=out)
-            print("shot", out, flush=True)
-
-            button = page.get_by_role("button", name="Lay out on the screen…")
-            if button.count():
-                button.first.click()
-                # the editor draws the HUD with the mode's screen; then it is laid out with the
-                # editor's own calls, as a drag, a size and Send to back would make them
-                ready = lambda: ((webui_shot.state(url).get("text_scenes") or {})
-                                 .get("tree_view") or {}).get("layers")
-                for _ in range(120):
-                    if ready():
-                        break
-                    time.sleep(0.5)
-                from pinball_decryptor.webui import scene_mode_layout as ML
-                webui_shot.api(url, "text_scenes.tree_set_scale", ML.ART_ID, 70)
-                time.sleep(1)
-                box = (webui_shot.state(url)["text_scenes"]["tree_view"]["props"] or {})
-                webui_shot.api(url, "text_scenes.tree_move", ML.ART_ID,
-                               10 - (box.get("x") or 0), 290 - (box.get("y") or 0))
-                time.sleep(1)
-                webui_shot.api(url, "text_scenes.tree_order", ML.GROUP_ID, "back")
-                time.sleep(1)
-                webui_shot.api(url, "text_scenes.tree_select", ML.GROUP_ID)
-                time.sleep(4)
-                with open(os.path.join(project, "modes", slug, "mode.json"), encoding="utf-8") as f:
-                    print("screen_layout", json.load(f).get("screen_layout"), flush=True)
-            else:
-                webui_shot.api(url, "ui.select_tab", "scenes")
-                time.sleep(4)
-                webui_shot.api(url, "text_scenes.select", HUD_DIR)
-                for _ in range(120):
-                    if (webui_shot.state(url).get("text_scenes") or {}).get("tree_view"):
-                        break
-                    time.sleep(0.5)
-                time.sleep(4)
-            out = os.path.join(out_dir, "%s_scenes_editor.png" % prefix)
-            page.screenshot(path=out)
-            print("shot", out, flush=True)
             if not with_rig:
+                webui_shot.api(url, "ui.select_tab", "modes")
+                time.sleep(3)
+                webui_shot.api(url, "modes.select", slug, "form")
+                time.sleep(2)
+                page.get_by_role("tab", name="Show").first.click()
+                time.sleep(2)
+                out = os.path.join(out_dir, "%s_show.png" % prefix)
+                page.screenshot(path=out)
+                print("shot", out, flush=True)
+
+                button = page.get_by_role("button", name="Lay out on the screen…")
+                if button.count():
+                    button.first.click()
+                    # the editor draws the HUD with the mode's screen; then it is laid out with the
+                    # editor's own calls, as a drag, a size and Send to back would make them
+                    ready = lambda: ((webui_shot.state(url).get("text_scenes") or {})
+                                     .get("tree_view") or {}).get("layers")
+                    for _ in range(120):
+                        if ready():
+                            break
+                        time.sleep(0.5)
+                    from pinball_decryptor.webui import scene_mode_layout as ML
+                    mode_json = os.path.join(project, "modes", slug, "mode.json")
+
+                    def layout():
+                        with open(mode_json, encoding="utf-8") as f:
+                            return json.load(f).get("screen_layout") or {}
+                    webui_shot.api(url, "text_scenes.tree_set_scale", ML.ART_ID, 70)
+                    time.sleep(1)
+                    # over the HUD's slide-out badges at the left, so "under the HUD" shows
+                    lay = layout()
+                    webui_shot.api(url, "text_scenes.tree_move", ML.ART_ID,
+                                   20 - lay.get("x", 0.0), 300 - lay.get("y", 0.0))
+                    time.sleep(1)
+                    webui_shot.api(url, "text_scenes.tree_order", ML.GROUP_ID, "back")
+                    time.sleep(1)
+                    # nothing selected: a selected layer is drawn on top to drag it, and the shot
+                    # is of the scene as the game draws it
+                    webui_shot.api(url, "text_scenes.tree_select", None)
+                    time.sleep(4)
+                    print("screen_layout", layout(), flush=True)
+                else:
+                    webui_shot.api(url, "ui.select_tab", "scenes")
+                    time.sleep(4)
+                    webui_shot.api(url, "text_scenes.select", HUD_DIR)
+                    for _ in range(120):
+                        if (webui_shot.state(url).get("text_scenes") or {}).get("tree_view"):
+                            break
+                        time.sleep(0.5)
+                    time.sleep(4)
+                out = os.path.join(out_dir, "%s_scenes_editor.png" % prefix)
+                page.screenshot(path=out)
+                print("shot", out, flush=True)
                 browser.close()
                 return
 
-            webui_shot.api(url, "text_scenes.mode_layout_done")
+            webui_shot.api(url, "ui.select_tab", "modes")
+            time.sleep(3)
+            webui_shot.api(url, "modes.select", slug, "form")
             time.sleep(2)
             print("rig before:", rig("ps")[1].strip() or "(nothing running)", flush=True)
             webui_shot.api(url, "modes.tryit")
