@@ -766,6 +766,30 @@ def test_modes_tab_run_ended_lands_ended_and_drops_the_live_record(tmp_path, mon
 
 
 @pytest.mark.usefixtures("preview_modes_on")
+def test_check_this_game_plays_and_reads_as_root_when_the_launch_is_root(tmp_path, monkeypatch):
+    """PAD-306: a user cannot read a root game's environment, so the rig's pad_pids counts it as
+    slot 0's; on any other rig gamecheck.sh run as the user saw no game and failed at once. A
+    check prepared for a root launch plays and reads its log as root too."""
+    import time as _time
+    with web_app(tmp_path, mfr="stern") as w:
+        svc, ran, _handed, _card = _tryit_setup(w, tmp_path, monkeypatch)
+        assert svc.check_play_cmd("gz") == ["RIG", "modes/gamecheck.sh", "play", "gz"]
+        assert svc.check_play_cmd("gz", as_root=True) == ["ROOT", "modes/gamecheck.sh", "play", "gz"]
+        assert svc.check_log_cmd(as_root=True) == ["ROOT", "modes/gamecheck.sh", "log"]
+        for root, who in ((True, "ROOT"), (False, "RIG")):
+            del ran[:]
+            done = []
+            svc._check_done = lambda *a: done.append(a)
+            svc._check.update(game="gz", port="p", label="GZ", as_root=root)
+            w.run(svc._check_play)
+            end = _time.time() + 10
+            while len(ran) < 2 and _time.time() < end:
+                _time.sleep(0.05)
+            assert [c[:3] for c in ran] == [[who, "modes/gamecheck.sh", "play"],
+                                            [who, "modes/gamecheck.sh", "log"]]
+
+
+@pytest.mark.usefixtures("preview_modes_on")
 def test_modes_tab_try_it_installs_as_root_when_the_launch_is_root(tmp_path, monkeypatch):
     """feature/emulate-prepare: the Emulate tab's Start with save states is a root launch,
     and an install made as the user is refused by the root-owned dump it leaves. When the
