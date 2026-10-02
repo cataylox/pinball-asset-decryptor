@@ -12091,9 +12091,27 @@ static void led_publish(const unsigned char *p, int n)
          * first, whatever the title verdict (led_node_wide_publish's header) */
         if (wide && n >= 6 && led_node_wide_publish(node, cmd, p + 3, (unsigned)n - 5))
             return;
+        /* ★ AND ON A TITLE THAT PROVED THE DIALECT, THE GODZILLA COMMANDS TOO
+         * (PAD-311). "For the commands the godzilla shapes do not own" kept
+         * 97/a2..a6/b4/b5 on an insert board with the shapes below even after
+         * the title's own 200-of-200 vote had said every board speaks the
+         * swelf grammar - and those shapes read a swelf body as theirs whenever
+         * the lengths happen to fit. Metallica Remastered 1.04 (PAD-306, a
+         * mode holding five inserts): `b5 17 a4 03` is lamps 23 and 36 to
+         * 0xff (M list, A=1, one channel-B byte) and the range-fade shape
+         * below read it as lamps 23..36 fading DOWN - GRAVE LANE TARGET-L and
+         * LEFT OUTLANE dark in the view while lit on the wire; `a2 2d ae ff
+         * 00 03 02` is lamp 45 to 0xff and 46 to 0x00 and the blen-6 pulse
+         * shape read it as an overlay that never moved val[] - RIGHT RAMP
+         * TARGET-LEFT dark until a later frame. Over that run every one of the
+         * insert boards' 3460 frames closed exactly under the walk, 412 of
+         * them godzilla commands the shapes had been given first. On a
+         * title whose verdict is in, one builder made every frame, so the
+         * walk is asked first about all of them and the shapes see only what
+         * it refuses. A title the vote refused (godzilla_pro) or has not
+         * decided is read exactly as before. */
         if (wide && n >= 6
-            && (!led_insert_node(node)
-                || (!led_gz_cmd(cmd) && led_wide_settled()))
+            && (!led_insert_node(node) || led_wide_settled())
             && led_wide_publish(node, cmd, p + 3, (unsigned)n - 5))
             return;
     }
