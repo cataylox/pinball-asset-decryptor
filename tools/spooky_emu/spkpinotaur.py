@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """spkpinotaur.py - the rig's Pinotaur: the playfield board of Spooky's
-Halloween (and Ultraman), on the same pty, control socket and logs as the
+Halloween and Ultraman, on the same pty, control socket and logs as the
 Warden (spkwarden.py starts it for a title whose profile says
 "board": "pinotaur").
 
@@ -25,7 +25,8 @@ timeout.  The wire protocol, from Halloween v1.18.1's Pinotar.cs:
                        then sets report type 1 and the board pushes these)
                   0x28 <32 bytes>   reply to read_row - the row at 8064
                        says which game the board is set up for (0 0 =
-                       Halloween); any reply lets the game go on
+                       Halloween, 0 1 = Ultraman); any reply lets the
+                       game go on
                   0x6F <coil> <hi> <lo>   boot fault check: FF FF FF = none
                   0x20 <5 bytes> bank info, 0x0F <coil> <mA> last coil
                        current, 0x25 row erased, 0x2B page written
@@ -58,9 +59,9 @@ SYSTEM_NAME = b"Pinotaur\0"         # 9 bytes
 FIRMWARE = b"PAD 1"                 # 5 bytes each
 API = b"PAD 1"
 NO_CHANGE = 0x7F
-#: read_row's game-name row, and what a Halloween board holds there.
+#: read_row's game-name row; a board holds 0 0 there for Halloween, 0 1
+#: for Ultraman (firmware.cs GameSetting) - the profile's "game_row".
 GAME_ROW = 8064
-GAME_ROW_DATA = bytes([0, 0]) + b"\xff" * 30
 #: Colour messages: opcode -> (first, r, g, b, count) positions in the args.
 LED_OPS = {48: (0, 1, 2, 3, 4), 49: (0, 1, 2, 3, 5), 50: (0, 1, 2, 3, 5),
            51: (0, 1, 2, 3, 4), 55: (0, 1, 2, 3, None)}
@@ -145,7 +146,9 @@ class Pinotaur(spkwarden.Board):
             self.reply(111, [255, 255, 255])
         elif op == 40:                                  # read_row
             addr = spkwarden.u32(a[:4])
-            self.reply(40, GAME_ROW_DATA if addr == GAME_ROW else b"\xff" * 32)
+            row = (bytes(self.title.get("game_row", [0, 0]))
+                   if addr == GAME_ROW else b"")
+            self.reply(40, row + b"\xff" * (32 - len(row)))
         elif op == 37:
             self.reply(37)
         elif op == 43:                  # a page is two halves

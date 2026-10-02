@@ -1,5 +1,6 @@
 """Emulate Spooky tab: run a Spooky Pinball game on this PC from its update
-file - Beetlejuice only, so far, and the page says so.
+file - the games the rig runs (``emulate_spooky_core.SUPPORTED``), which the
+page names.
 
 Built on the American Pinball tab (webui/tabs/emulate_ap.py), the template
 every maker's Emulate tab follows (David, PAD-266: "We want the volume and the
@@ -39,17 +40,18 @@ from ..emulate_jjp_common import (RigTabMixin, rig_off, audio_ctl_file,
                                   share_distro)
 from .base import TabService, rpc
 
-INTRO = ("Run a Spooky Pinball game on this PC. Supported so far: %s - "
-         "the other Spooky games can't be emulated yet. The emulator stands "
-         "in for the machine's controller board and gives the game a window, "
-         "sound and every switch.\n"
+INTRO = ("Run a Spooky Pinball game on this PC. Supported: %s. The "
+         "emulator stands in for the machine's controller board and gives the "
+         "game a window, sound and every switch.\n"
          "Pick the machine's update file, or one the Write tab built, to play "
          "a mod before it goes on a USB stick."
          % ", ".join(spk.supported_names()))
 
-FILE_TIP = ("A Beetlejuice update file (.beetlejuice). It is only read: the "
-            "emulator unpacks it once (a few minutes) and keeps it, so the "
-            "next start is quicker.")
+FILE_TIP = ("The game's update file, named as the machine wants it "
+            "(v….beetlejuice, v….scooby, ….ed, ….looney, tcm-….pkg, "
+            "code_H78.pkg, code_UM.pkg). It is only read: the emulator "
+            "unpacks it once (a few minutes) and keeps it, so the next start "
+            "is quicker.")
 
 VOLUME_TIP = ("The game's sound on this PC - Volume and Mute follow at once, "
               "while the game plays (the same knob every Emulate tab shares). "
@@ -163,8 +165,8 @@ class EmulateSpookyTab(RigTabMixin, TabService):
     @rpc
     def browse(self):
         path = self.window.ask_open(
-            "spooky_emulate_file", "Select a Beetlejuice update file",
-            [("Beetlejuice update", "*.beetlejuice"), ("All files", "*.*")],
+            "spooky_emulate_file", "Select a Spooky game update file",
+            [("Spooky game update", spk.FILE_PATTERNS), ("All files", "*.*")],
             initialdir=self.window._initialdir_for(self.file_path()))
         if path:
             self.spooky_emulate_file_var.set(os.path.normpath(path))
@@ -455,9 +457,17 @@ class EmulateSpookyTab(RigTabMixin, TabService):
         if not path:
             compat.messagebox.showinfo(
                 "Emulate",
-                "Pick a Beetlejuice update file first - the machine's own "
-                "(.beetlejuice), or one the Write tab built.\n\n"
-                "Supported so far: %s." % ", ".join(spk.supported_names()))
+                "Pick a game's update file first - the machine's own, or one "
+                "the Write tab built.\n\n"
+                "Supported: %s." % ", ".join(spk.supported_names()))
+            return
+        if not spk.supported_file(path):
+            compat.messagebox.showinfo(
+                "Emulate",
+                "%s is not an update of a Spooky game the emulator runs - "
+                "it tells them apart by the file's name, as the machine "
+                "does.\n\nSupported: %s."
+                % (os.path.basename(path), ", ".join(spk.supported_names())))
             return
         if not os.path.isfile(path):
             compat.messagebox.showinfo("Emulate", "There is no file at\n%s"
@@ -486,12 +496,10 @@ class EmulateSpookyTab(RigTabMixin, TabService):
                         # the control file (spkvol.py), so unmuting a game
                         # started muted works
                         # the rig board names the run by its title
-                        # (PAD-296); the file's extension says which
+                        # (PAD-296); the file's name says which
                         env=["PAD_VISIBLE=1", "PAD_AUDIO=1",
                              "PAD_AUDIO_CTL=%s" % _rig.wsl_path(audio_ctl_file()),
-                             "PAD_TITLE=%s" % next(
-                                 (t for t, ext in spk.SUPPORTED
-                                  if path.lower().endswith(ext)), "")]
+                             "PAD_TITLE=%s" % spk.title_of(path)]
                         + rigslot.board_env() + rigslot.quiet_env()),
                     timeout=1800, on_line=self._footer_line)
                 if self._cancelling:
@@ -584,8 +592,9 @@ class EmulateSpookyTab(RigTabMixin, TabService):
             "warn" if label == "WSL not answering" else "")
         rss = int(info.get("rss_kb") or 0)
         secs = int(info.get("uptime_s") or 0)
+        game = spk.game_name(info) if up else ""
         values = {
-            "title": "Beetlejuice" if up else "—",
+            "title": game or "—",
             "version": (info.get("version") or "—") if up else "—",
             "switches": (info.get("switches") or "—") if up else "—",
             "window": (info.get("window") or "—").replace("x", " × ")
@@ -598,7 +607,7 @@ class EmulateSpookyTab(RigTabMixin, TabService):
                   cells=[{"label": lbl, "key": k, "value": values.get(k, "—")}
                          for lbl, k in CELLS],
                   note="" if spk.rig_available() else self.get("note"),
-                  up=up, ready=ready, game="Beetlejuice" if up else "")
+                  up=up, ready=ready, game=game)
         if not self._busy:
             kw["go_label"] = "Stop" if up else "Start"
             kw["go_enabled"] = spk.rig_available()

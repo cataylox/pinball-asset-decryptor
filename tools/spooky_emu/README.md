@@ -1,12 +1,12 @@
-# Spooky Pinball PC emulator rig (the Warden games and Halloween)
+# Spooky Pinball PC emulator rig (the Warden games, Halloween and Ultraman)
 
 Runs Spooky's **Warden-era** games on this PC from their update files, the
 way `tools/bof_emu` runs a Barrels of Fun game and `tools/ap_emu` an
 American Pinball one, on an emulated **Warden** - Spooky's playfield
 controller board - that answers the real protocol, so switches, coils, LEDs,
-servos and the stepper behave. **Halloween** runs the same way on an
-emulated **Pinotaur**, the board before the Warden (`spkpinotaur.py`,
-PAD-268; below).
+servos and the stepper behave. **Halloween** and **Ultraman** run the
+same way on an emulated **Pinotaur**, the board before the Warden
+(`spkpinotaur.py`, PAD-268, PAD-316; below).
 
 | title | update | engine | status (2026-09-30) |
 |---|---|---|---|
@@ -16,16 +16,16 @@ PAD-268; below).
 | Evil Dead | `2026.07.15.ed` (tar.gz) | Unity 2022.3 | attract, played (PAD-267) |
 | Looney Tunes | `2025.10.08.looney` (plain tar) | Godot 4.1 | attract, played (PAD-267) |
 | Halloween | `code_H78.pkg` v1.18.1 (GPG-symmetric tar.gz) | Unity 2022.3 | attract, played (PAD-268) - Pinotaur board |
+| Ultraman | `code_UM.pkg` v1.18 (GPG-symmetric tar.gz) | Unity 2022.3 | attract, played (PAD-316, 2026-10-02) - Pinotaur board |
 
 "Played" = coins, Start, the ball served by the game's own trough-eject
 coil into the shooter lane, launched by its own launch coil, switches hit
-and scoring, all hidden on a private display. All six were run from
+and scoring, all hidden on a private display. All seven were run from
 `D:\Pinball\images\Spooky`. `bootcheck.sh` passes each; Spooky's restore
 images are not needed.
 
-Refused by `prepare.sh` with the reason (exit 4): Ultraman (`code_UM.pkg`),
-the other Pinotaur game - same board, not profiled yet; Rick and Morty,
-Alice Cooper and Total Nuclear Annihilation are P-ROC games: `proc/` runs the
+Refused by `prepare.sh` with the reason (exit 4): Rick and Morty, Alice
+Cooper and Total Nuclear Annihilation are P-ROC games: `proc/` runs the
 first two on tools/proc_emu's board (PAD-269, its README).
 
 **In the app** (PAD-266): Spooky Pinball has an **Emulate** tab
@@ -37,9 +37,9 @@ attract, the **virtual playfield** opens: AP's window (`tools/ap_emu/appf.py`,
 the Stern page) pointed at this rig by `spkpf.py`, fed `switches.json`
 (`spkswitches.py`, apswitches.py's format, from the running title's
 profile) - the same keys, service buttons, BALLS (Plunge, Drain, Reset
-balls), Pause and VOL bar. The tab still takes `.beetlejuice` files only;
-offering the other four there is a follow-up. The rig itself runs all five
-by hand (below).
+balls), Pause and VOL bar. Since PAD-316 the tab takes every title in the
+table above, told apart by the update file's name
+(`emulate_spooky_core.SUPPORTED`, held to `spktitles.TITLES` by a test).
 
 **The board keeps up** (PAD-266, second pass): Beetlejuice gives each serial
 write 20 ms and after ten late ones resets its board link and ignores
@@ -157,7 +157,14 @@ Halloween (`code_H78.pkg`, v1.18.1) is a Unity 2022.3 Mono game laid out
 like Texas Chainsaw (`uptest/`, `assets/`, `config/` under `/game/code`),
 encrypted with a GPG passphrase that `prepare.sh` reads from the app's own
 Spooky plugin (`spktitles.py passphrase`). It is told apart from Ultraman
-(same `VideoServer` product) by the update name its code carries. It has no
+(same `VideoServer` product) by the update name its code carries.
+
+**Ultraman** (`code_UM.pkg`, v1.18, PAD-316) is the same code base
+(`H78UM`): its `SwitchConfig.cs`, `CoilConfig.cs` and `VirtualCoil.cs` wire
+the trough, the cabinet, the drop bank and every coil the profile names
+exactly as Halloween's do, so its profile is Halloween's with one
+difference - the board's game-name row (8064) says `0 1`, Ultraman
+(`firmware.cs` GameSetting; the game reads it but goes on whatever it says). It has no
 licence check; its board is the **Pinotaur** (USB `cafe:4001`, udev's
 `/dev/pinheck`, Mono's SerialPort with a 1 ms read timeout), which
 `spkshim.so` maps onto the rig's pty as it does `/dev/WARDEN`.
@@ -238,9 +245,8 @@ the board's `$SPK_RIG/warden.log`, the no-op'd shell calls
 
 ## What is open
 
-* **The app offers Beetlejuice only.** The Emulate Spooky tab's file picker,
-  supported-games card and labels are Beetlejuice's; the rig runs the
-  other five (Halloween: offering it in the tab is a follow-up to PAD-268).
+* **The P-ROC games are not in the app.** Rick and Morty and Alice Cooper
+  run by hand on `proc/`; the Emulate Spooky tab does not offer them yet.
 * **Halloween's plunger**: sw.py `plunge` presses its Launch button (84);
   the game fires its launch coil for ball saves and multiballs, and
   otherwise the rig lets the ball go after 1.5 s as a manual shooter would.

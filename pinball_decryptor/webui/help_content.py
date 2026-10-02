@@ -1788,25 +1788,33 @@ HELP_CONTENT = {
     "Emulate Spooky": [
         ("What it does",
          "Runs the real Spooky Pinball game on this PC, in its own window, "
-         "with its sound. Supported so far: Beetlejuice. The other Spooky "
-         "games can't be emulated yet. Beetlejuice is a native Linux "
-         "program, so nothing is emulated but the machine's controller "
-         "board: the emulator answers the game the way that board would, "
-         "with a full trough, and gives you a way to press every switch."),
+         "with its sound. Supported: Beetlejuice, Scooby-Doo, Texas "
+         "Chainsaw Massacre, Evil Dead, Looney Tunes, Halloween and Ultraman. "
+         "Not yet: Rick and Morty, Alice Cooper's Nightmare Castle and Total "
+         "Nuclear Annihilation, which run on a different board, and the DMD "
+         "games (America's Most Haunted, Rob Zombie, Domino's, Jetsons). "
+         "These games are native Linux programs, so nothing is emulated but "
+         "the machine's controller board: the emulator answers the game the "
+         "way that board would, with a full trough, and gives you a way to "
+         "press every switch."),
         ("Which file to pick",
-         "The .beetlejuice update file - the one the machine installs from a "
-         "USB stick. That can be the official file, or one the Write tab "
+         "The game's update file - the one the machine installs from a USB "
+         "stick, named as the machine wants it: v….beetlejuice, v….scooby, "
+         "….ed, ….looney, tcm-….pkg (Texas Chainsaw), code_H78.pkg "
+         "(Halloween) or code_UM.pkg (Ultraman). The emulator tells the "
+         "games apart by that name. It can be the official file, or one the "
+         "Write tab "
          "built from your edits: emulating it first is the quick way to check "
          "a mod before it goes on a stick. The file is only read."),
         ("Playing",
          "When the game reaches attract mode its virtual playfield opens "
          "beside it - the same window as the American Pinball and Stern "
-         "Emulate tabs'. Beetlejuice ships no playfield picture, so its "
-         "switches are a list; a green dot is a switch the game sees made. "
+         "Emulate tabs'. The Spooky games ship no playfield picture, so "
+         "their switches are a list; a green dot is a switch the game sees made. "
          "Hold a switch with the mouse; hold the right button on one to rip "
          "it (a spinner spinning). There is no ball physics: Start serves a "
          "ball to the shooter lane, Plunge presses the Launch button and the "
-         "game fires the ball into play (Beetlejuice has no manual plunger), "
+         "game fires the ball into play, "
          "you press the switches it would hit, and Drain sends it back to "
          "the trough, ending the ball - unless the game's ball save is still "
          "running, when it serves the ball again, as the machine would. With "
@@ -1815,8 +1823,8 @@ HELP_CONTENT = {
          "the letters beside the playfield switches press them, F plunges, D "
          "drains, Backspace, -, = and Enter are the service buttons, and "
          "Pause or F9 freezes the game. The same keys work in the game's own "
-         "window, except the ones the game uses there itself: Enter starts, "
-         "Space launches, the arrows flip. Closed the "
+         "window, except the ones the game uses there itself (Beetlejuice: "
+         "Enter starts, Space launches, the arrows flip). Closed the "
          "playfield? \"Playfield window\" beside Stop brings it back."),
         ("Volume",
          "Volume and Mute on this tab (and the VOL bar in the playfield "

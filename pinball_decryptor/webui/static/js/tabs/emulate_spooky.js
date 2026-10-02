@@ -1,5 +1,5 @@
 // Emulate (Spooky Pinball): run a Spooky game on this PC from its update file
-// - Beetlejuice only so far, which the page says up front.  Python half:
+// - the games the rig runs, which the page names up front.  Python half:
 // webui/tabs/emulate_spooky.py.  Laid out as the American Pinball tab is
 // (the template every maker's Emulate tab follows): the game file with
 // Cache…, Start / Playfield window / Volume, and the status.  The virtual
@@ -38,9 +38,9 @@ export default function EmulateSpooky() {
       <div class="stack emu-col">
         <${Card} title="Game" cls="emu-src"
           extra=${s.game ? html`<${Chip} kind="ok" dot>${s.game}<//>` : null} footer=${footer}>
-          <label class="small">Update file (.beetlejuice)</label>
+          <label class="small">Update file</label>
           <${PathField} ns="emulate_spooky" k="file" value=${s.file} title=${s.file_tip} history=${hist}
-            placeholder="v2026.09.15.11.beetlejuice - or a build from Write" onBrowse=${() => call("emulate_spooky.browse")}
+            placeholder="v2026.09.15.11.beetlejuice, code_UM.pkg… - or a build from Write" onBrowse=${() => call("emulate_spooky.browse")}
             extra=${html`<${Button} kind="ghost" disabled=${!s.rig_ok} onClick=${() => call("emulate_spooky.open_cache")}
               title="Shows and manages what the emulator keeps in the app's Linux: each game unpacked from its update file. Deleting frees the space now; it is unpacked again on the next Start.">Cache…<//>`} />
           <span class="small muted">${s.file_tip}</span>
@@ -58,7 +58,7 @@ export default function EmulateSpooky() {
           <div class="spk-games">
             ${supported.map((g) => html`<${Chip} kind="ok" dot>${g}<//>`)}
           </div>
-          <span class="small muted">Other Spooky games can't be emulated yet.</span>
+          <span class="small muted">Not yet: Rick and Morty, Alice Cooper's Nightmare Castle and Total Nuclear Annihilation (a different board), or the DMD games (America's Most Haunted, Rob Zombie, Domino's, Jetsons).</span>
         <//>
       </div>
     </div>
