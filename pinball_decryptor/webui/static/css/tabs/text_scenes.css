@@ -127,7 +127,15 @@
 .tree-states-hint { margin: 6px 0; }
 .tree-state { display: grid; grid-template-columns: 22px minmax(0, 1fr) 150px; gap: 6px; align-items: center; margin: 3px 0; }
 .tree-state-n { text-align: right; }
-.ly-item { grid-template-columns: 20px minmax(0, 1.2fr) minmax(0, 1fr) 16px 20px; cursor: pointer; }
+.ly-item { grid-template-columns: 20px minmax(0, 1.2fr) minmax(0, 1fr) 16px 16px 20px; cursor: pointer; }
+/* PAD-312: the picture's colour switch - green corrected, red its own colours, blue lock for
+   the game's own picture (no switch) */
+.ly-color { all: unset; cursor: pointer; display: inline-flex; color: var(--ink-3); }
+.ly-color.on { color: #3fb950; }
+.ly-color.off { color: #e5534b; opacity: .85; }
+.ly-color.locked { color: #539bf5; cursor: default; opacity: .75; }
+.ly-color:hover:not(.locked) { opacity: 1; filter: brightness(1.2); }
+.ly-color:focus-visible { outline: 2px solid var(--accent); }
 .ly-img { all: unset; cursor: pointer; display: inline-flex; color: var(--ink-3); border-radius: 4px; }
 .ly-img:hover { color: var(--accent); }
 .ly-img:focus-visible, .ly-eye:focus-visible { outline: 2px solid var(--accent); }

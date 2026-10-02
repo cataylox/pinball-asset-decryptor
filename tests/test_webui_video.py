@@ -379,7 +379,7 @@ def test_export_csv(tmp_path):
         rows = list(csv.reader(out.open(encoding="utf-8-sig")))
         assert rows[0] == ["Original Video", "Length", "Resolution",
                            "Format", "Audio", "Replacement", "Convert",
-                           "Changed On Disk"]
+                           "Changed On Disk", "Color Profile"]
         assert [r[0] for r in rows[1:]] == ["video/attract.mp4",
                                             "video/intro.mp4",
                                             "video/sub/boss.mp4"]

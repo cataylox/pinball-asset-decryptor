@@ -87,6 +87,8 @@ class VideoTab(BestQualityMixin, TabService):
         self._assign = {}                # rel -> replacement file path
         self._asis = {}                  # rel -> per-clip as-is override
         self._length = {}                # rel -> per-clip length choice
+        self._color = {}                 # rel -> per-clip colour switch (PAD-312)
+        self._color_all = False          # the Color profile tab's "every replaced video"
         self._scan_id = 0
         self._scan_dir = ""
         self._scan_dir_prev = ""
@@ -150,6 +152,8 @@ class VideoTab(BestQualityMixin, TabService):
         self._assign = {}
         self._asis = {}
         self._length = {}
+        self._color = {}
+        self._color_all = False
         self._scan_dir = ""
         self._changed = set()
         self._foreign = set()
@@ -340,6 +344,7 @@ class VideoTab(BestQualityMixin, TabService):
         self._assign = {}
         self._asis = {}
         self._length = {}
+        self._color = {}
         kept = {}
         try:
             from ...plugins.stern import stock_modes
@@ -487,6 +492,11 @@ class VideoTab(BestQualityMixin, TabService):
                     rel: v for rel, v in
                     (staged.get("video_length_slots") or {}).items()
                     if rel in self._by_rel and _length_ok(v)}
+                self._color = {
+                    rel: bool(v) for rel, v in
+                    (staged.get("video_color_slots") or {}).items()
+                    if rel in self._by_rel}
+                self._color_all = bool(staged.get("color_all_videos"))
                 val = staged.get("video_change_filter")
                 if val in vh.CHANGE_FILTER_VALUES:
                     self.video_change_filter_var.set(val)
@@ -503,6 +513,8 @@ class VideoTab(BestQualityMixin, TabService):
                           if rel in self._by_rel}
             self._length = {rel: v for rel, v in self._length.items()
                             if rel in self._by_rel}
+            self._color = {rel: v for rel, v in self._color.items()
+                           if rel in self._by_rel}
         folder_changed = scan_dir != self._scan_dir
         self._scan_dir = scan_dir
         self._changed = set()
@@ -908,7 +920,67 @@ class VideoTab(BestQualityMixin, TabService):
                 "len": self._length_cell(rel, length), "res": res,
                 "fmt": fmt, "fmt_bad": fmt.endswith("⚠"), "aud": aud,
                 "rep": rep_disp, "rep_cls": cls, "conv": conv,
-                "conv_cls": self._conv_cls(conv)}
+                "conv_cls": self._conv_cls(conv),
+                "col": self._color_state(rel), "col_own": rel in self._color}
+
+    # -- the chosen-files colour profile (PAD-312) ------------------------
+    def _per_file_colour(self):
+        """Offered only where the display-wide profile does not correct the
+        files itself (Spike 2)."""
+        mfr = self.mfr
+        try:
+            return bool(mfr is not None and mfr.colour_profile_on_display())
+        except Exception:                               # noqa: BLE001
+            return False
+
+    def _color_state(self, rel):
+        if not (rel and self._assign.get(rel) and self._per_file_colour()):
+            return None
+        own = self._color.get(rel)
+        return bool(self._color_all if own is None else own)
+
+    def color_all_changed(self):
+        """The Color profile tab moved its "every replaced video" box."""
+        from ...core import staged_changes
+        folder = self._assets_path()
+        self._color_all = bool(folder and staged_changes.load(folder).get(
+            "color_all_videos"))
+        self._refresh_list()
+
+    def _color_changed(self):
+        for ns, name in (("color", "asset_switches_changed"),
+                         ("write", "_maybe_rescan_write_preview")):
+            try:
+                fn = getattr(self.window.service(ns), name, None)
+            except Exception:                           # noqa: BLE001
+                fn = None
+            if fn is not None:
+                try:
+                    fn()
+                except Exception:                       # noqa: BLE001
+                    log.exception("video colour %s.%s", ns, name)
+
+    @rpc
+    def set_color(self, rel, value):
+        """This clip's own colour switch (PAD-312): True / False, or None
+        to follow the Color profile tab's box again."""
+        if not (rel in self._by_rel and self._assign.get(rel)
+                and self._per_file_colour()):
+            return False
+        if value is None:
+            self._color.pop(rel, None)
+            self.log("Replace Video: %s follows the Color profile tab's box "
+                     "again (%s)." % (rel, "corrected" if self._color_all
+                                      else "not corrected"), "info")
+        else:
+            self._color[rel] = bool(value)
+            self.log("Replace Video: %s %s." % (
+                rel, "gets the chosen-files color profile" if value
+                else "goes on the card in its own colors"), "info")
+        self._save_staged()
+        self._refresh_list()
+        self._color_changed()
+        return True
 
     def _put_row(self, i, row):
         if 0 <= i < len(self._rows) and self._rows[i] != row:
@@ -1152,6 +1224,11 @@ class VideoTab(BestQualityMixin, TabService):
         data["video_asis_slots"] = {rel: bool(v)
                                     for rel, v in self._asis.items()}
         data["video_length_slots"] = dict(self._length)
+        slots = {rel: v for rel, v in self._color.items() if rel in self._assign}
+        if slots:
+            data["video_color_slots"] = slots
+        else:
+            data.pop("video_color_slots", None)
         data["video_change_filter"] = self.video_change_filter_var.get()
         names = dict(data.get("replacement_names") or {})
         for rel, path in self._assign.items():
@@ -1341,6 +1418,7 @@ class VideoTab(BestQualityMixin, TabService):
             return 0
         for rel in picks:
             del self._assign[rel]
+            self._color.pop(rel, None)
         restored = self._put_back(applied)
         self._save_staged()
         gone = list(dict.fromkeys(picks + restored))
@@ -1617,7 +1695,7 @@ class VideoTab(BestQualityMixin, TabService):
                 w = csv.writer(f)
                 w.writerow(["Original Video", "Length", "Resolution",
                             "Format", "Audio", "Replacement", "Convert",
-                            "Changed On Disk"])
+                            "Changed On Disk", "Color Profile"])
                 for s in sorted(self._slots, key=lambda q: q.rel_path):
                     rel = s.rel_path
                     rep = self._assign.get(rel, "")
@@ -1629,6 +1707,7 @@ class VideoTab(BestQualityMixin, TabService):
                         self._conv_cache.get(self._conv_key(rel, rep), "")
                         if rep else "",
                         "yes" if rel in self._changed else "",
+                        "yes" if self._color_state(rel) else "",
                     ])
         except OSError as e:
             compat.messagebox.showerror("Export CSV",
@@ -1668,6 +1747,10 @@ class VideoTab(BestQualityMixin, TabService):
             "length_secs": length_seconds(self._length.get(rel)),
             "length_follow": ("stock length" if self.video_trim_var.get()
                               else "full length"),
+            "color": (None if self._color_state(rel) is None else
+                      {None: "box", True: "on", False: "off"}[
+                          self._color.get(rel)]),
+            "color_follow": "corrected" if self._color_all else "own colors",
             "reveal": vh.reveal_menu_label(),
             "partition": bool(self.window.tab_visible("Partition Explorer")
                               and getattr(self.window, "find_in_partition",
@@ -2224,7 +2307,7 @@ class VideoTab(BestQualityMixin, TabService):
     # content; the page fits the others, as _autosize_tree_columns did)
     # ==================================================================
     _WIDTHS_KEY = "video_web"
-    _WIDTH_COLS = ("rel", "len", "res", "fmt", "aud", "rep", "conv")
+    _WIDTH_COLS = ("rel", "len", "res", "fmt", "aud", "rep", "col", "conv")
 
     def _all_widths(self):
         s = getattr(self.app, "_settings", None) if self.app else None

@@ -707,6 +707,11 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
 
     items = [(rel, rep) for rel, rep in assignments.items()
              if rep and rel in slots_by_rel]
+    # The chosen-files profile (PAD-312), baked into the clips switched on;
+    # the display-wide one wins where it corrects the files itself.
+    chosen = ({} if colour is not None
+              else colour_profile.asset_map(assets_dir, "videos",
+                                            [rel for rel, _r in items]))
     total = len(items)
     staged = 0
     failures: List = []
@@ -772,9 +777,11 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
             gop = {"keyint": k}
         # A clip converted under one colour profile is made again under
         # another (PAD-305); with none the recipe is exactly what it was.
-        if colour is not None:
-            gop["colour"] = "%s|%s|%s|%s" % (colour.gamma, colour.gain,
-                                             colour.lift, colour.saturation)
+        clip_colour = colour or chosen.get(rel)
+        if clip_colour is not None:
+            gop["colour"] = "%s|%s|%s|%s" % (
+                clip_colour.gamma, clip_colour.gain, clip_colour.lift,
+                clip_colour.saturation)
         recipe = cache.recipe(slot, rep, orig, trim=slot_trim,
                               length=seconds or 0,
                               noconv=slot_noconv, budget=budget,
@@ -797,8 +804,8 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
                                        byte_budget=budget,
                                        match_bitrate=rate,
                                        best_quality=best_quality,
-                                       **({"colour": colour}
-                                          if colour is not None else {}))
+                                       **({"colour": clip_colour}
+                                          if clip_colour is not None else {}))
         if ok:
             staged += 1
             cache.record(slot, recipe)

@@ -583,6 +583,19 @@ const gameTip = (l) => ({
     ["Delete", "hide it in the game and the preview (with the preview focused)"],
     `The preview is not changed; the eye hides it here.${l.part_off ? " It shows only when the look it sits in is on." : ""}`,
   ] });
+// PAD-312: a picture's colour switch - the chosen-files profile baked into it (green), its
+// own colours (red), or the game's own picture, which has no switch (blue lock)
+const colorTip = (l) => {
+  const c = l.color || {};
+  if (c.locked) return { head: "Color: the game's own picture", lines: [
+    "Stern made it for the machine's screen, so the chosen-files profile is not offered on it.",
+    "Replace it on the Images tab to correct a picture of your own." ] };
+  return { head: c.on ? "Color: corrected for the machine" : "Color: its own colors", lines: [
+    ["Click", c.on ? "keep its own colors" : "correct its colors for the machine"],
+    c.on ? "The Color profile tab's chosen-files profile is baked into this picture when you build; the preview shows it."
+      : "It goes on the card in its own colors.",
+    c.own ? "Set for this picture." : "Follows the Color profile tab's box for every replaced picture." ] };
+};
 const rowTip = (l) => ({
   head: `${l.name}${l.added ? " (added)" : ""}`,
   lines: [
@@ -675,6 +688,10 @@ function TreeLayers({ t }) {
         aria-pressed=${l.hidden ? "true" : "false"} ...${tip(gameTip(l))}
         onClick=${(e) => { e.stopPropagation(); call("text_scenes.tree_visible", l.id, l.hidden); }}>
         <${Icon} name="sd" /></button>
+      ${l.color ? html`<button type="button" class=${cx("ly-color", l.color.locked ? "locked" : l.color.on ? "on" : "off")}
+        aria-label="Color profile on this picture" aria-pressed=${l.color.on ? "true" : "false"} ...${tip(colorTip(l))}
+        onClick=${(e) => { e.stopPropagation(); if (!l.color.locked) call("text_scenes.tree_color", l.id, !l.color.on); }}>
+        <${Icon} name=${l.color.locked ? "lock" : "palette"} /></button>` : html`<span></span>`}
       ${(l.pics || []).length ? html`<button type="button" class="ly-img"
         aria-label="Show on the Images tab" ...${tip(l.pics.length === 1 ? "Show this picture on the Images tab"
           : `Show one of the ${l.pics.length} pictures it draws on the Images tab`)}

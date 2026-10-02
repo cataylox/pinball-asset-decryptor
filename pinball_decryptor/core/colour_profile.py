@@ -33,6 +33,21 @@ GLSL the shaders get:
 A COPY is plain ``key = value`` text (:func:`to_text`, :func:`read_file`), so
 a user can keep one per machine, share it, or edit it in any text editor and
 Load it back.  Unknown keys and bad values are skipped and named, never fatal.
+
+A SECOND PROFILE, FOR CHOSEN FILES (PAD-312).  The display-wide profile
+reaches the game's own art too, which Stern already made for that screen;
+a field report wanted only the NEW pictures and videos corrected, and each
+one switchable.  So a project also carries a chosen-files profile
+(:data:`ASSET_KEY`, the Recommended one until the user changes it) that is
+baked into a replacement picture or video as it is staged, and into a
+picture added in Scenes, when that file is switched on: a tab-wide box per
+kind (:data:`ALL_IMAGES_KEY`, :data:`ALL_VIDEOS_KEY`) that every file
+follows unless it has a switch of its own (:data:`IMAGE_SLOTS_KEY`,
+:data:`VIDEO_SLOTS_KEY`, ``{rel: bool}``; an added picture's switch is the
+``color`` key of its own scene edit).  The two profiles are independent and
+compose: the game then draws the baked file through the display-wide one.
+Where the display-wide profile corrects the files itself (not Spike 2) it
+wins, and the chosen-files switches are not offered.
 """
 
 import contextlib
@@ -41,6 +56,13 @@ from dataclasses import dataclass
 
 #: The project's profile in its ``.staged_changes.json``.
 KEY = "color_profile"
+
+#: The chosen-files profile (PAD-312) and its switches, in the same file.
+ASSET_KEY = "asset_color_profile"
+ALL_IMAGES_KEY = "color_all_images"
+ALL_VIDEOS_KEY = "color_all_videos"
+IMAGE_SLOTS_KEY = "image_color_slots"
+VIDEO_SLOTS_KEY = "video_color_slots"
 
 #: Rec.601 luma weights: the grey a pixel is desaturated toward.
 _LUMA = (0.299, 0.587, 0.114)
@@ -229,9 +251,7 @@ def store(assets_dir, prof):
     if prof is None or prof.is_identity():
         data.pop(KEY, None)
     else:
-        data[KEY] = {"name": prof.name, "gamma": list(prof.gamma),
-                     "gain": list(prof.gain), "lift": list(prof.lift),
-                     "saturation": prof.saturation}
+        data[KEY] = _profile_dict(prof)
     staged_changes.save(assets_dir, data)
 
 
@@ -274,6 +294,192 @@ def signature(assets_dir):
     if prof is None:
         return ""
     return "%s|%s|%s|%s" % (prof.gamma, prof.gain, prof.lift, prof.saturation)
+
+
+# -- the chosen-files profile (PAD-312) ---------------------------------------
+
+def _profile_dict(prof):
+    return {"name": prof.name, "gamma": list(prof.gamma),
+            "gain": list(prof.gain), "lift": list(prof.lift),
+            "saturation": prof.saturation}
+
+
+def asset_profile(assets_dir):
+    """The profile baked into the chosen files of *assets_dir*: the one
+    stored, else the Recommended starting point (a new project corrects the
+    files it is told to the way the test card said to)."""
+    from . import staged_changes
+    d = staged_changes.load(assets_dir).get(ASSET_KEY)
+    prof = _from_dict(d) if isinstance(d, dict) else None
+    return prof if prof is not None else PRESETS[0][1]
+
+
+def asset_stored(assets_dir):
+    """Has the user set the chosen-files profile, or is it still the default?"""
+    from . import staged_changes
+    return isinstance(staged_changes.load(assets_dir).get(ASSET_KEY), dict)
+
+
+def store_asset_profile(assets_dir, prof):
+    """Set the chosen-files profile of *assets_dir* (``None`` = back to the
+    default).  A profile that changes nothing IS stored: it is how the
+    switches stay as they are while the files go on uncorrected."""
+    from . import staged_changes
+    data = staged_changes.load(assets_dir)
+    if prof is None:
+        data.pop(ASSET_KEY, None)
+    else:
+        data[ASSET_KEY] = _profile_dict(prof)
+    staged_changes.save(assets_dir, data)
+
+
+def asset_active(assets_dir):
+    """The chosen-files profile when it changes something, else ``None``."""
+    prof = asset_profile(assets_dir)
+    return None if prof.is_identity() else prof
+
+
+_KIND = {"images": (ALL_IMAGES_KEY, IMAGE_SLOTS_KEY),
+         "videos": (ALL_VIDEOS_KEY, VIDEO_SLOTS_KEY)}
+
+
+def _kind_keys(kind):
+    try:
+        return _KIND[kind]
+    except KeyError:
+        raise ValueError("kind must be images or videos, not %r" % (kind,))
+
+
+def asset_settings(assets_dir):
+    """The switches: ``{"all_images", "all_videos", "images": {rel: bool},
+    "videos": {rel: bool}}`` (a file with no switch of its own follows its
+    kind's box)."""
+    from . import staged_changes
+    data = staged_changes.load(assets_dir) if assets_dir else {}
+
+    def _slots(key):
+        m = data.get(key)
+        return ({str(r): bool(v) for r, v in m.items()}
+                if isinstance(m, dict) else {})
+    return {"all_images": bool(data.get(ALL_IMAGES_KEY)),
+            "all_videos": bool(data.get(ALL_VIDEOS_KEY)),
+            "images": _slots(IMAGE_SLOTS_KEY),
+            "videos": _slots(VIDEO_SLOTS_KEY)}
+
+
+def set_asset_all(assets_dir, kind, on):
+    """The tab-wide box of *kind* ("images" / "videos"): every replaced file
+    of that kind without a switch of its own follows it."""
+    all_key, _slots_key = _kind_keys(kind)
+    from . import staged_changes
+    data = staged_changes.load(assets_dir)
+    if on:
+        data[all_key] = True
+    else:
+        data.pop(all_key, None)
+    staged_changes.save(assets_dir, data)
+
+
+def set_asset_slot(assets_dir, kind, rel, value):
+    """One file's own switch: ``True`` / ``False``, or ``None`` to follow
+    its kind's box again."""
+    _all_key, slots_key = _kind_keys(kind)
+    from . import staged_changes
+    data = staged_changes.load(assets_dir)
+    m = dict(data.get(slots_key) or {}) if isinstance(
+        data.get(slots_key), dict) else {}
+    if value is None:
+        m.pop(rel, None)
+    else:
+        m[rel] = bool(value)
+    if m:
+        data[slots_key] = m
+    else:
+        data.pop(slots_key, None)
+    staged_changes.save(assets_dir, data)
+
+
+def asset_applies(settings, kind, rel, own=None):
+    """Is *rel* (of *kind*) switched on?  *own*, when not ``None``, is the
+    file's own switch given by the caller (a scene edit's ``color`` key)."""
+    if own is None:
+        own = settings.get(kind, {}).get(rel)
+    if own is not None:
+        return bool(own)
+    return bool(settings.get("all_" + kind))
+
+
+def asset_map(assets_dir, kind, rels):
+    """``{rel: Profile}`` for the files among *rels* that get the
+    chosen-files profile baked in as they are staged; empty when the
+    profile changes nothing or no file is switched on."""
+    if not assets_dir:
+        return {}
+    prof = asset_active(assets_dir)
+    if prof is None:
+        return {}
+    settings = asset_settings(assets_dir)
+    return {rel: prof for rel in rels if asset_applies(settings, kind, rel)}
+
+
+def added_picture_colour(assets_dir, op, settings=None, prof=None):
+    """The profile a picture added in Scenes (*op*, an ``add_picture``
+    edit) is written with, or ``None``: its own ``color`` key, else the
+    pictures box."""
+    if not assets_dir:
+        return None
+    if prof is None:
+        prof = asset_active(assets_dir)
+    if prof is None:
+        return None
+    if settings is None:
+        settings = asset_settings(assets_dir)
+    on = asset_applies(settings, "images", op.get("image") or "",
+                       own=op.get("color"))
+    return prof if on else None
+
+
+def asset_counts(assets_dir):
+    """How many files the chosen-files profile reaches now: ``{"images",
+    "videos", "added"}`` (replaced pictures, replaced videos, pictures
+    added in Scenes), by the switches alone (the profile may still be No
+    change)."""
+    from . import staged_changes
+    out = {"images": 0, "videos": 0, "added": 0}
+    if not assets_dir:
+        return out
+    data = staged_changes.load(assets_dir)
+    settings = asset_settings(assets_dir)
+    for kind, key in (("images", "image"), ("videos", "video")):
+        picks = data.get(key) or {}
+        if isinstance(picks, dict):
+            out[kind] = sum(1 for rel, src in picks.items()
+                            if src and asset_applies(settings, kind, rel))
+    try:
+        from ..plugins.stern import scene_edit
+        for ops in scene_edit.load(assets_dir).values():
+            for op in ops or ():
+                if (isinstance(op, dict) and op.get("op") == "add_picture"
+                        and asset_applies(settings, "images",
+                                          op.get("image") or "",
+                                          own=op.get("color"))):
+                    out["added"] += 1
+    except Exception:                                   # noqa: BLE001
+        pass
+    return out
+
+
+def asset_signature(assets_dir):
+    """A short text that changes whenever what the chosen-files profile
+    would bake into which file changes ("" when nothing)."""
+    prof = asset_active(assets_dir)
+    if prof is None:
+        return ""
+    s = asset_settings(assets_dir)
+    return "%s|%s|%s|%s|%s|%s|%s|%s" % (
+        prof.gamma, prof.gain, prof.lift, prof.saturation,
+        s["all_images"], s["all_videos"], sorted(s["images"].items()),
+        sorted(s["videos"].items()))
 
 
 def _fmt(nums):

@@ -11,6 +11,15 @@ Save a copy / Load move a profile between projects (one per machine).
 with the profile, restarting a running game.  (Never "Try it": that is the
 preview-gated mode maker's word, and this tab is public.)
 
+TWO PROFILES ON SPIKE 2 (PAD-312).  Where the game draws everything through
+the profile, the tab has two modes: "Whole screen" (the profile above) and
+"Chosen files", a second profile (core/colour_profile.py ``asset_profile``,
+Recommended until changed) baked into the replaced pictures and videos and
+the pictures added in Scenes that are switched on.  The mode's switches are
+the two tab-wide boxes here; each file's own switch is on the Images and
+Video tabs and in the Scenes layers.  The same sliders, preview, Save a
+copy and Load serve whichever mode is showing.
+
 The PREVIEW is drawn by the page itself (static/js/tabs/color.js) with the
 same maths, so a slider moves the picture as it is dragged; this side only
 says which picture: a test card PAD draws, or one of the user's own.
@@ -92,12 +101,18 @@ class ColorTab(TabService):
     def __init__(self, window):
         super().__init__(window)
         self._prof = None            # the project's profile (None = No change)
+        self._asset = None           # the chosen-files profile (PAD-312)
+        self._mode = "display"       # "display" | "assets"
+        self._on_display = False
         self._rev = 0
         self._sample = "card"
         self._project = ""
         self.set(sample="card", sample_url="", sample_path="", samples=[],
                  problems=[], rev=0, active=False, project="",
-                 has_project=False, try_note="")
+                 has_project=False, try_note="", mode="display",
+                 per_file=False, all_images=False, all_videos=False,
+                 asset_counts={"images": 0, "videos": 0, "added": 0},
+                 asset_active=False)
 
     # -- the project ---------------------------------------------------------
     def _assets(self):
@@ -112,26 +127,57 @@ class ColorTab(TabService):
         assets = self._assets()
         self._project = assets
         prof = None
+        asset = None
         if assets and os.path.isdir(assets):
             try:
                 prof = cp.for_project(assets)
+                asset = cp.asset_profile(assets)
             except Exception:                           # noqa: BLE001
                 log.exception("color profile load")
         self._prof = prof
+        self._asset = asset
         self._rev += 1
         self._publish(problems=[])
 
+    def _assets_mode(self):
+        return self._mode == "assets" and self._on_display
+
     def _shown(self):
+        if self._assets_mode():
+            return self._asset or cp.PRESETS[0][1]
         return self._prof or cp.Profile(name="No change")
+
+    def _asset_state(self, assets):
+        """The chosen-files mode's switches and counts for the page."""
+        out = {"all_images": False, "all_videos": False,
+               "asset_counts": {"images": 0, "videos": 0, "added": 0},
+               "asset_active": False}
+        if not (assets and os.path.isdir(assets)):
+            return out
+        try:
+            st = cp.asset_settings(assets)
+            out["all_images"] = st["all_images"]
+            out["all_videos"] = st["all_videos"]
+            out["asset_counts"] = cp.asset_counts(assets)
+            out["asset_active"] = cp.asset_active(assets) is not None
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile switches")
+        return out
 
     def _publish(self, problems=None):
         p = self._shown()
         assets = self._project
+        state = self._asset_state(assets)
+        active = (self._prof is not None if not self._assets_mode()
+                  else bool(state["asset_active"]
+                            and sum(state["asset_counts"].values())))
         values = dict(
             name=p.name, gamma=list(p.gamma), gain=list(p.gain),
             lift=max(p.lift), saturation=p.saturation, rev=self._rev,
-            active=self._prof is not None,
+            active=active, mode=self._mode if self._on_display else "display",
+            per_file=self._on_display,
             project=assets,
+            **state,
             has_project=bool(assets and os.path.isdir(assets)),
             presets=[{"key": k, "label": v.name,
                       "tip": cp.PRESET_TIPS.get(k, "")}
@@ -148,6 +194,24 @@ class ColorTab(TabService):
             self.toast("Choose a project folder on the Extract tab first.",
                        "error")
             return False
+        if self._assets_mode():
+            # the chosen-files profile: No change is stored as itself, so
+            # the switches keep their places while the files go on as made
+            if prof is None:
+                prof = cp.Profile(name="No change")
+            self._asset = prof
+            try:
+                cp.store_asset_profile(assets, prof)
+            except Exception as e:                      # noqa: BLE001
+                self.set(problems=["could not save the project's profile "
+                                   "(%s)" % e])
+                return False
+            if rev:
+                self._rev += 1
+            self._publish(problems=[])
+            self._changed(display=False)
+            self._tell_tabs()
+            return True
         if prof is not None and prof.is_identity():
             prof = None
         self._prof = prof
@@ -163,12 +227,65 @@ class ColorTab(TabService):
         self._changed()
         return True
 
-    def _changed(self):
+    def _tell_tabs(self):
+        """The Images and Video tabs and an open Scenes editor show the
+        chosen-files switches and the corrected pictures."""
+        for ns, name in (("images", "color_all_changed"),
+                         ("video", "color_all_changed"),
+                         ("text_scenes", "pictures_changed")):
+            try:
+                fn = getattr(self.window.service(ns), name, None)
+            except Exception:                           # noqa: BLE001
+                fn = None
+            if fn is not None:
+                try:
+                    fn()
+                except Exception:                       # noqa: BLE001
+                    log.exception("color profile %s.%s", ns, name)
+
+    @rpc
+    def set_mode(self, mode):
+        """Whole screen / Chosen files (Spike 2): which profile the sliders
+        and the preview show."""
+        mode = "assets" if mode == "assets" and self._on_display else "display"
+        if mode != self._mode:
+            self._mode = mode
+            self._rev += 1
+        self._publish(problems=[])
+        return self._mode
+
+    @rpc
+    def set_all(self, kind, on):
+        """The chosen-files mode's tab-wide boxes: every replaced picture
+        ("images") or video ("videos") without a switch of its own."""
+        assets = self._project
+        if not (assets and os.path.isdir(assets)) or kind not in (
+                "images", "videos"):
+            return False
+        try:
+            cp.set_asset_all(assets, kind, bool(on))
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile set_all")
+            return False
+        self._publish(problems=[])
+        self._changed(display=False)
+        self._tell_tabs()
+        return True
+
+    def asset_switches_changed(self):
+        """A file's own switch moved on the Images or Video tab or in
+        Scenes: the counts here follow."""
+        self._publish(problems=[])
+
+    def _changed(self, display=True):
         """The Write tab's pending list, Emulate's offer and a running game's
-        note follow a staged change."""
-        for ns, name in (("emulate", "_refresh_colour_note"),
-                         ("emulate", "colour_live"),
-                         ("write", "_maybe_rescan_write_preview")):
+        note follow a staged change (the Emulate notes are the display-wide
+        profile's)."""
+        hooks = (("write", "_maybe_rescan_write_preview"),)
+        if display:
+            hooks = (("emulate", "_refresh_colour_note"),
+                     ("emulate", "colour_live")) + hooks
+        for ns, name in hooks:
             fn = getattr(self.window.service(ns), name, None)
             if fn is not None:
                 try:
@@ -263,9 +380,12 @@ class ColorTab(TabService):
         return True
 
     def clear_replace_assignments(self, assets_dir):
-        """Revert all: the project's profile goes with its other changes."""
+        """Revert all: the project's profiles go with its other changes."""
         try:
             cp.store(assets_dir, None)
+            cp.store_asset_profile(assets_dir, None)
+            cp.set_asset_all(assets_dir, "images", False)
+            cp.set_asset_all(assets_dir, "videos", False)
         except Exception:                               # noqa: BLE001
             log.exception("color profile revert")
         same = (os.path.normcase(os.path.abspath(assets_dir or ""))
@@ -341,6 +461,9 @@ class ColorTab(TabService):
             on_display = bool(mfr.colour_profile_on_display())
         except Exception:                               # noqa: BLE001
             on_display = False
+        self._on_display = on_display
+        if not on_display:
+            self._mode = "display"
         self.set(on_display=on_display)
         self._load()
 

@@ -16,6 +16,7 @@ it touched.  The filter / sort / grouping rules are the Tk tab's own, run here.
 
 import base64
 import csv
+import logging
 import os
 import queue as queue_mod
 import re
@@ -38,8 +39,9 @@ CHANGE_FILTER_VALUES = ("All", "Changed", "Unchanged")
 SORT_CFG = (("#0", "Original Image", False), ("n", "Images", True),
             ("res", "Resolution", True), ("fmt", "Format", False),
             ("src", "Source", False), ("keep", "Keep size", True),
-            ("rep", "Replacement", False))
+            ("color", "Color", True), ("rep", "Replacement", False))
 CHUNK = 256
+log = logging.getLogger(__name__)
 LABEL = "Replace Images"
 SCAN_LABEL = "Images"
 
@@ -247,6 +249,8 @@ class ImagesTab(TabService):
         self._idx = {}
         self._assignments = {}
         self._keep_size = set()
+        self._color = {}        # rel -> this picture's own colour switch (PAD-312)
+        self._color_all = False  # the Color profile tab's "every replaced picture" box
         self._groups = {}
         self._group_occ = {}
         self._groups_all = {}
@@ -286,7 +290,8 @@ class ImagesTab(TabService):
         self.set(pil_ok=True, note="", scanning=False, view=[], nchunks=0,
                  empty={"text": EMPTY_NO_FOLDER, "busy": False},
                  sort={"key": "#0", "desc": False},
-                 cols={"n": False, "keep": False}, can_clear=False,
+                 cols={"n": False, "keep": False, "color": False},
+                 can_clear=False,
                  running=False, preview=self._empty_preview(), dir="",
                  focus=None, total=0, shown=0,
                  reveal_label=reveal_menu_label(), sources=list(SOURCES),
@@ -330,6 +335,8 @@ class ImagesTab(TabService):
         self._idx = {}
         self._assignments = {}
         self._keep_size = set()
+        self._color = {}
+        self._color_all = False
         self._scan_dir = ""
         self._changed_on_disk = set()
         self._foreign_rels = set()
@@ -494,6 +501,11 @@ class ImagesTab(TabService):
                 self._keep_size = {
                     r for r in (staged.get("image_keep_size") or ())
                     if r in self._assignments}
+                self._color = {
+                    r: bool(v) for r, v in
+                    (staged.get("image_color_slots") or {}).items()
+                    if r in self._assignments}
+                self._color_all = bool(staged.get("color_all_images"))
                 self._warn_dropped_assignments(staged.get("image"),
                                                scan_dir)
                 self._restore_change_filter(staged)
@@ -774,6 +786,12 @@ class ImagesTab(TabService):
             data["image"] = dict(self._assignments)
             data["image_keep_size"] = sorted(
                 r for r in self._keep_size if r in self._assignments)
+            slots = {r: v for r, v in self._color.items()
+                     if r in self._assignments}
+            if slots:
+                data["image_color_slots"] = slots
+            else:
+                data.pop("image_color_slots", None)
             data["image_change_filter"] = self.image_change_filter_var.get()
             data["image_group_by_scene"] = bool(
                 self.image_group_by_scene_var.get())
@@ -932,6 +950,94 @@ class ImagesTab(TabService):
             return None
         return rel in self._keep_size
 
+    # -- the chosen-files colour profile (PAD-312) ------------------------
+    def _per_file_colour(self):
+        """Is the chosen-files profile offered here?  Only where the
+        display-wide profile does not correct the files itself (Spike 2)."""
+        mfr = self.mfr
+        try:
+            return bool(mfr is not None and mfr.colour_profile_on_display())
+        except Exception:                               # noqa: BLE001
+            return False
+
+    def _color_state(self, rel):
+        """``True`` / ``False`` for a replaced picture (its own switch, else
+        the tab-wide box), ``None`` when there is nothing to correct."""
+        if not (rel and self._assignments.get(rel)
+                and self._per_file_colour()):
+            return None
+        own = self._color.get(rel)
+        return bool(self._color_all if own is None else own)
+
+    def _offers_color(self):
+        return bool(self._assignments) and self._per_file_colour()
+
+    def _color_row(self, rel):
+        """The preview pane's switch: ``{on, own, all, name}`` or None."""
+        on = self._color_state(rel)
+        if on is None:
+            return None
+        from ...core import colour_profile as cp
+        try:
+            name = cp.asset_profile(self._assets_dir() or "").label()
+        except Exception:                               # noqa: BLE001
+            name = "colour profile"
+        return {"on": on, "own": rel in self._color, "all": self._color_all,
+                "name": name}
+
+    def color_all_changed(self):
+        """The Color profile tab moved its "every replaced picture" box."""
+        from ...core import staged_changes
+        folder = self._assets_dir()
+        self._color_all = bool(folder and staged_changes.load(folder).get(
+            "color_all_images"))
+        self._publish_chunks()
+        if self._current_rel:
+            self._render_preview(self._current_rel)
+
+    def _color_changed(self):
+        """A switch moved here: the Color profile tab's counts, the Write
+        tab's pending list and an open Scenes editor follow."""
+        for ns, name in (("color", "asset_switches_changed"),
+                         ("write", "_maybe_rescan_write_preview"),
+                         ("text_scenes", "pictures_changed")):
+            try:
+                fn = getattr(self.window.service(ns), name, None)
+            except Exception:                           # noqa: BLE001
+                fn = None
+            if fn is not None:
+                try:
+                    fn()
+                except Exception:                       # noqa: BLE001
+                    log.exception("images colour %s.%s", ns, name)
+
+    @rpc
+    def set_color(self, rel, value):
+        """This picture's own colour switch (PAD-312): True / False, or
+        None to follow the Color profile tab's box again."""
+        if not (rel in self._by_rel and self._assignments.get(rel)
+                and self._per_file_colour()):
+            return False
+        if value is None:
+            self._color.pop(rel, None)
+            self.log("Replace Images: %s follows the Color profile tab's "
+                     "box again (%s)." % (
+                         rel, "corrected" if self._color_all
+                         else "not corrected"), "info")
+        else:
+            self._color[rel] = bool(value)
+            self.log("Replace Images: %s %s." % (
+                rel, "gets the chosen-files color profile" if value
+                else "goes on the card in its own colors"), "info")
+        self._save_staged_changes()
+        i = self._idx.get(rel)
+        if i is not None:
+            self._publish_chunks({i // CHUNK})
+        if rel == self._current_rel:
+            self._render_preview(rel)
+        self._color_changed()
+        return True
+
     def _offers_keep_size(self):
         cache = self._keep_col_cache
         if cache is None or cache[0] is not self._slots:
@@ -960,7 +1066,8 @@ class ImagesTab(TabService):
             else s.resolution_str()
         return {"r": rel, "s": res, "f": s.format_summary(),
                 "o": source_label(rel), "k": self._keep_state(rel),
-                "p": disp, "t": tag}
+                "p": disp, "t": tag, "c": self._color_state(rel),
+                "co": rel in self._color}
 
     def _publish_chunks(self, which=None):
         """Send the rows (all chunks, or the chunk numbers in *which*)."""
@@ -1024,6 +1131,10 @@ class ImagesTab(TabService):
                 return (source_label(s.rel_path), s.rel_path.lower())
             if col == "keep":
                 state = self._keep_state(s.rel_path)
+                return (0 if state is None else 1 + state,
+                        s.rel_path.lower())
+            if col == "color":
+                state = self._color_state(s.rel_path)
                 return (0 if state is None else 1 + state,
                         s.rel_path.lower())
             if col == "rep":
@@ -1095,7 +1206,8 @@ class ImagesTab(TabService):
         self.set(view=view, total=total, shown=len(slots),
                  changed=changed_total,
                  sort={"key": col, "desc": bool(desc)},
-                 cols={"n": grouped, "keep": self._offers_keep_size()},
+                 cols={"n": grouped, "keep": self._offers_keep_size(),
+                       "color": self._offers_color()},
                  empty=empty)
         self._update_clear_all()
 
@@ -1171,7 +1283,8 @@ class ImagesTab(TabService):
         return {"rel": None, "group": None, "hdr": "Original",
                 "hdr_main": "Original", "hdr_note": "", "orig": "",
                 "rep": "", "rep_name": "", "empty": "", "keep": None,
-                "has_pick": False, "clearable": False, "ver": 0}
+                "color": None, "has_pick": False, "clearable": False,
+                "ver": 0}
 
     def _clear_preview(self):
         self._current_rel = None
@@ -1242,6 +1355,7 @@ class ImagesTab(TabService):
             "rep": shown_rep or "",
             "rep_name": os.path.basename(shown_rep) if shown_rep else "",
             "empty": empty, "keep": self._keep_row(rel),
+            "color": self._color_row(rel),
             "has_pick": bool(rep),
             "clearable": bool(self._replacement_targets([rel]))
             if slot else False,
@@ -1409,6 +1523,7 @@ class ImagesTab(TabService):
             return 0
         for rel in picks:
             del assigns[rel]
+            self._color.pop(rel, None)
         restored = self._put_back_originals(applied)
         self._save_staged_changes()
         gone = list(dict.fromkeys(picks + restored))
@@ -1688,7 +1803,7 @@ class ImagesTab(TabService):
                 w = csv.writer(f)
                 w.writerow(["Original Image", "Resolution", "Format",
                             "Source", "Replacement", "Changed On Disk",
-                            "Keep Size"])
+                            "Keep Size", "Color Profile"])
                 for s in sorted(self._slots, key=lambda q: q.rel_path):
                     rel = s.rel_path
                     keep = self._keep_state(rel)
@@ -1697,6 +1812,7 @@ class ImagesTab(TabService):
                         source_label(rel), self._assignments.get(rel, ""),
                         "yes" if rel in self._changed_on_disk else "",
                         "yes" if keep else "",
+                        "yes" if self._color_state(rel) else "",
                     ])
         except OSError as e:
             compat.messagebox.showerror("Export CSV",
@@ -1754,6 +1870,15 @@ class ImagesTab(TabService):
         if self._replacement_targets([iid]):
             items.append({"sep": True})
             items.append({"label": "Clear replacement", "act": "clear_one"})
+        state = self._color_state(iid)
+        if state is not None:
+            items.append({"sep": True})
+            items.append({"label": "Correct its colors for the machine"
+                          if not state else "Keep its own colors",
+                          "act": "color_off" if state else "color_on"})
+            if iid in self._color:
+                items.append({"label": "Colors: follow the Color profile "
+                              "tab's box again", "act": "color_box"})
         src = source_label(iid)
         if src in ("Glyph", "Radium", "Scene texture"):
             items.append({"sep": True})
@@ -1777,6 +1902,9 @@ class ImagesTab(TabService):
         """Run a menu entry from :meth:`menu`."""
         if action == "choose":
             return self.choose(iid)
+        if action in ("color_on", "color_off", "color_box"):
+            return self.set_color(iid, {"color_on": True, "color_off": False,
+                                        "color_box": None}[action])
         if action == "clear_one":
             return self.clear_one(iid)
         if action == "clear_sel":
@@ -2105,7 +2233,8 @@ class ImagesTab(TabService):
     #: A key of its own: Tk's "image" widths are Tk pixels for another font
     #: and a table without the thumbnail column (the Audio port's rule).
     _WIDTHS_KEY = "image_web"
-    _WIDTH_COLS = ("th", "#0", "n", "res", "fmt", "src", "keep", "rep")
+    _WIDTH_COLS = ("th", "#0", "n", "res", "fmt", "src", "keep", "color",
+                   "rep")
 
     def _all_widths(self):
         s = getattr(self.app, "_settings", None) if self.app else None

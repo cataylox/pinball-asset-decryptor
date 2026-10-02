@@ -95,9 +95,11 @@ function clock(pos, dur) {
 // Tk tree's minwidth.  Measured over every slot, not only the filtered view,
 // so typing in Search doesn't make the columns jump.
 const FIT_MAX = 480;
-const COL_MIN = { rel: 160, len: 46, res: 70, fmt: 80, aud: 70, rep: 110, conv: 60 };
+const COL_MIN = { rel: 160, len: 46, res: 70, fmt: 80, aud: 70, rep: 110, col: 56, conv: 60 };
 const HEADS = { rel: "Original Video", len: "Length", res: "Resolution", fmt: "Format",
-                aud: "Audio", rep: "Replacement", conv: "Convert" };
+                aud: "Audio", rep: "Replacement", col: "Color", conv: "Convert" };
+// PAD-312: the chosen-files color profile, baked into this clip as it is converted
+const COLOR_TIP = "On: the Color profile tab's chosen-files profile is baked into this clip when you build (it is re-encoded for that), so it looks on the machine the way it looks on your PC. Off: it goes on the card in its own colors. The game's own clips are never touched. A box you click is this clip's own setting; the Color profile tab's \"every replaced video\" box sets the rest.";
 // The long-named columns share the width that is left over (more or less
 // of it); the others keep the width that fits them, so a narrow window
 // shortens names, never "MP4 h264 30fps" or a length.
@@ -130,7 +132,7 @@ function rowFit(r, f) {
   if (!w) {
     w = { rel: textWidth(r.dir, f.mono) + textWidth(r.name, f.body), len: textWidth(r.len, f.mono),
           res: textWidth(r.res, f.body), fmt: textWidth(r.fmt, f.body), aud: textWidth(r.aud, f.body),
-          rep: textWidth(r.rep, f.body), conv: textWidth(r.conv, f.body) };
+          rep: textWidth(r.rep, f.body), col: 0, conv: textWidth(r.conv, f.body) };
     rowFits.set(r, w);
   }
   return w;
@@ -563,6 +565,11 @@ export default function VideoTab() {
         { label: "Always use my file as-is", checked: info.asis === "asis", onClick: () => call("video.set_asis", rel, true) },
         { label: "Always convert this clip", checked: info.asis === "convert", onClick: () => call("video.set_asis", rel, false) },
       ] },
+      info.color && { label: "This clip's colors", submenu: [
+        { label: `Follow the Color profile tab's box (${info.color_follow})`, checked: info.color === "box", onClick: () => call("video.set_color", rel, null) },
+        { label: "Correct its colors for the machine", checked: info.color === "on", onClick: () => call("video.set_color", rel, true) },
+        { label: "Keep its own colors", checked: info.color === "off", onClick: () => call("video.set_color", rel, false) },
+      ] },
       { label: "This clip's length", submenu: [
         { label: `Follow the Trim / pad box (${info.length_follow})`, checked: info.length === "box", onClick: () => call("video.set_length", rel, null) },
         { label: "Match the stock clip", checked: info.length === "stock", onClick: () => call("video.set_length", rel, "stock") },
@@ -599,8 +606,10 @@ export default function VideoTab() {
   // the last column never takes a drag; it only stretches once every
   // stretching column is one the user sized (Tk _pin_tree_columns)
   const convWidth = flexLeft ? `calc(${fit.conv}px)` : `minmax(${fit.conv}px,1fr)`;
+  const colorCol = allRows.some((r) => r.col != null);
   const minWidth = 30 + ["rel", "len", "res", "fmt", "aud", "rep"].reduce((a, k) =>
-    a + (tuned[k] ? Math.max(36, tuned[k]) : FLEX.includes(k) ? COL_MIN[k] : fit[k]), 0) + fit.conv + 7 * 10 + 20;
+    a + (tuned[k] ? Math.max(36, tuned[k]) : FLEX.includes(k) ? COL_MIN[k] : fit[k]), 0) + fit.conv
+    + (colorCol ? fit.col + 10 : 0) + 7 * 10 + 20;
   const dragFrom = useRef(null);
   const onGripDown = (e) => {
     const t = e.target;
@@ -641,9 +650,13 @@ export default function VideoTab() {
     { key: "rep", label: "Replacement", width: width("rep"), sort: "rep", titleOf: (r) => r.rep,
       render: (r) => html`<button type="button" class=${cx("vid-rep", r.rep_cls || "muted")}
         onClick=${(e) => { e.stopPropagation(); setSel(new Set([r.rel])); anchor.current = r.rel; choose(r.rel); }}>${r.rep}</button>` },
+    colorCol && { key: "col", label: "Color", width: width("col"), cls: "vid-colorcell", title: COLOR_TIP,
+      render: (r) => (r.col == null ? "" : html`<input type="checkbox" class=${cx("vid-color", r.col_own && "own")} checked=${!!r.col}
+        aria-label="Correct this clip's colors for the machine" ...${tip(COLOR_TIP)}
+        onClick=${(e) => { e.stopPropagation(); if (e.detail > 1) { e.preventDefault(); return; } call("video.set_color", r.rel, !r.col); }} />`) },
     { key: "conv", label: "Convert", width: convWidth, sort: "conv", titleOf: (r) => r.conv,
       render: (r) => html`<span class=${r.conv_cls === "bad" ? "err-ink" : r.conv_cls === "stray" ? "warn-ink" : ""}>${r.conv}</span>` },
-  ];
+  ].filter(Boolean);
   const selected = sel.size === 1 ? [...sel][0] : sel;
   const emptyNode = s.scanning
     ? html`<${Empty} icon="film" title=${html`<span class="row" style="gap:10px;justify-content:center"><${Spinner} />${s.empty || "Scanning for video files…"}</span>`} />`
