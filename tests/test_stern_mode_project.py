@@ -436,10 +436,10 @@ def test_advanced_parameters_validate_hand_edited_shapes_without_raising():
     is checked only with the mode's own screen, the only time runtime_cfg writes it."""
     spec = _kaiju()
     spec.shot_award = [[["Building"], 5], [{"a": 1}, 2]]
-    spec.end_shot = ["Shield target left"]
+    spec.end_shot = {"a": 1}                     # PAD-314: a list is a pick of shots now, a dict still is not
     problems = " ".join(MP.validate(spec))
     assert problems.count("A per-shot award is [shot, points].") == 2
-    assert "no shot called ['Shield target left'] to end the mode" in problems
+    assert "no shot called {'a': 1} to end the mode" in problems
     spec = _kaiju()
     spec.restore_after = 0
     assert "1 to 60 seconds" in " ".join(MP.validate(spec))

@@ -35,6 +35,7 @@ static const char *const MODE_DIRS[] = { "/usr/local/padmode/", "/dump/" };
 #define SHOT_AWARD_MAX  16          /* shot_award lines a file may carry (item 141) */
 
 #define ALSO_MAX 3                  /* PAD-227: trigger_also lines a mode may have */
+#define SEQ_MAX 8                   /* PAD-314: trigger_seq lines a mode may have (shots in order) */
 
 struct mode_cfg {
     int valid;
@@ -57,6 +58,8 @@ struct mode_cfg {
     /* item 141: what each shot pays, a shot that ends the mode, and the award ladder */
     uint64_t sa_bits[SHOT_AWARD_MAX], sa_points[SHOT_AWARD_MAX];
     unsigned n_sa;
+    uint64_t pen_bits[SHOT_AWARD_MAX], pen_points[SHOT_AWARD_MAX];   /* PAD-314: `shot_penalty` lines */
+    unsigned n_pen;
     uint64_t end_shot_bits;
     unsigned award_fixed;           /* 0 = rising (the default: the Nth shot pays N x) */
     unsigned params_set;            /* one of the item 141 keys was in the file */
@@ -78,6 +81,10 @@ struct mode_cfg {
     unsigned also_count[ALSO_MAX], n_also;
     char after_name[64];              /* `after ball|game <name>`: "" = no other mode first */
     int after_ball;                   /* 1 = this ball, 0 = this game */
+    /* PAD-314: `starts_on sequence` - the `trigger_seq` shots made in that order, in one ball */
+    int start_on_seq;
+    uint64_t seq_bits[SEQ_MAX], seq_reset_bits;
+    unsigned n_seq;
 };
 
 struct slot {
@@ -93,6 +100,7 @@ struct slot {
     unsigned ev_trig[5], ev_pending;      /* item 147: event start counts; a start waiting for pm_in_game */
     unsigned also[ALSO_MAX][5];           /* PAD-227: each trigger_also line's count, per player */
     int after_said;                       /* PAD-227: its `after` mode is missing, said once */
+    unsigned seq_at[5], seq_done[5];      /* PAD-314: how far along the sequence each player is; it is complete */
 };
 static struct slot slots[MODES_MAX];
 static unsigned poll_n = 1;         /* slots re-read each poll: up to one past the last file */
@@ -103,6 +111,7 @@ static struct {
     struct slot *slot;
     unsigned player, ticks_left, secs_shown, hits;
     uint64_t total, score_at_start;
+    uint64_t lost;                    /* PAD-314: what the penalty shots took this run */
     unsigned long started_ms;
     unsigned restore_ticks;
     /* item 167: a multiball of the mode's own */
@@ -969,6 +978,84 @@ static void more_loaded(struct slot *M)
     M->after_said = 0;
 }
 
+/* ---- PAD-314: a mode started by shots made in ORDER -------------------------------------
+ *   starts_on sequence                the mode starts when one player makes the trigger_seq
+ *                                     shots in that order, in one ball (no `trigger` line)
+ *   trigger_seq <shots>               one line per step, up to SEQ_MAX, in the order to make them
+ *   trigger_seq_reset <shots>         a shot in these, made when it is not the step wanted, sends
+ *                                     the player back to the start (the tab writes every shot of
+ *                                     the game that is not in the sequence: "any other shot")
+ * A step is met by a shot in its mask. A shot of the sequence made out of turn always starts the
+ * player over (it counts as step 1 if it is step 1's shot); a shot in neither mask is ignored.
+ * The progress is per player, cleared at the mode's start and at every end of ball, as the
+ * trigger line's count is. Once the last step is made the sequence is MET: with trigger_also
+ * shots still to make, it stays met until they are (as a met trigger count does), and `after`
+ * gates it as it gates the trigger line. The tab writes no `trigger` line with it, so a mode.so
+ * older than this logs the file NOT VALID instead of starting it on some other rule. A trigger
+ * file starts the mode whatever the sequence says. */
+static int sequence_line(struct slot *M, const char *line)
+{
+    const char *a;
+    if ((a = key_is(line, "trigger_seq_reset")) != 0) {
+        cfg.seq_reset_bits = num(&a);
+        return 1;
+    }
+    if ((a = key_is(line, "trigger_seq")) != 0) {
+        uint64_t bits = num(&a);
+        if (cfg.n_seq >= SEQ_MAX) pm_log("trigger_seq: a mode has up to %d shots in order - skipped", SEQ_MAX);
+        else if (bits) cfg.seq_bits[cfg.n_seq++] = bits;
+        return 1;
+    }
+    return 0;
+}
+
+/* the OR of the sequence's shots */
+static uint64_t seq_all_bits(const struct slot *M)
+{
+    uint64_t out = 0;
+    unsigned i;
+    for (i = 0; i < M->c.n_seq; i++) out |= M->c.seq_bits[i];
+    return out;
+}
+
+static void seq_clear(struct slot *M, unsigned p)
+{
+    if (p <= 4) M->seq_at[p] = M->seq_done[p] = 0;
+}
+
+/* a shot in the sequence's or the reset shots, for player p: step forward, or start over */
+static void sequence_shot(struct slot *M, uint64_t mask, unsigned p)
+{
+    unsigned at = M->seq_at[p], back;
+    if (M->seq_done[p]) return;              /* met already: waiting for its other shots, or refused */
+    if (mask & cfg.seq_bits[at]) {
+        at++;
+        pm_log("%s sequence %u of %u (player %u)", cfg.name, at, cfg.n_seq, p);
+        if (at >= cfg.n_seq) {
+            M->seq_done[p] = 1;
+            at = 0;
+        }
+    } else if (mask & (seq_all_bits(M) | cfg.seq_reset_bits)) {
+        back = (mask & cfg.seq_bits[0]) ? 1 : 0;
+        if (at || back)
+            pm_log("%s sequence: %08x_%08x is not shot %u of %u - back to %s (player %u)", cfg.name,
+                   (unsigned)(mask >> 32), (unsigned)mask, at + 1, cfg.n_seq, back ? "1 of the sequence, this shot" : "the start", p);
+        at = back;
+    }
+    M->seq_at[p] = at;
+}
+
+static void seq_loaded(struct slot *M)
+{
+    unsigned i;
+    for (i = 0; i < cfg.n_seq; i++)
+        pm_log("\"%s\": in order, shot %u is %08x_%08x", cfg.name, i + 1, (unsigned)(cfg.seq_bits[i] >> 32),
+               (unsigned)cfg.seq_bits[i]);
+    if (cfg.seq_reset_bits)
+        pm_log("\"%s\": a shot in %08x_%08x out of turn starts the sequence over", cfg.name,
+               (unsigned)(cfg.seq_reset_bits >> 32), (unsigned)cfg.seq_reset_bits);
+}
+
 /* Every tick, first: log each change of pm_in_game(), pm_player() and whether player 1's
  * score is 0, and clear the game's counts once per new game. A new game is player 1's
  * score falling to 0, or pm_in_game() rising while it is 0; it is recognised once, then
@@ -1019,8 +1106,12 @@ static void starts_watch_game(void)
  *                                  scoring shot, and the mode ends on the next tick
  *   award_ladder fixed|rising      rising (the default, and what a file without the key
  *                                  gets): the Nth scoring shot pays N x its value; fixed: x 1
+ *   shot_penalty <bits> <points>   PAD-314: a shot in <bits> TAKES <points> away while the mode
+ *                                  runs (pm_score_sub: flat, never below 0; repeatable, 16). A
+ *                                  shot that also scores pays and takes nothing
  * An older mode.so logs "unknown key, skipped" for each and pays as before. */
 static struct slot *end_pending;    /* the slot whose end shot was hit, until the next tick */
+static uint64_t scoring_bits(struct slot *M);   /* below; PAD-314's load-time note needs it */
 
 static int params_line(struct slot *M, const char *line)
 {
@@ -1040,6 +1131,18 @@ static int params_line(struct slot *M, const char *line)
     if ((a = key_is(line, "end_shot")) != 0) {
         cfg.end_shot_bits = num(&a);
         cfg.params_set = 1;
+        return 1;
+    }
+    if ((a = key_is(line, "shot_penalty")) != 0) {      /* PAD-314 */
+        uint64_t bits = num(&a), points = num(&a);
+        cfg.params_set = 1;
+        if (!bits || !points) pm_log("shot_penalty needs shot bits and points - ignored");
+        else if (cfg.n_pen >= SHOT_AWARD_MAX) pm_log("more than %d shot_penalty lines - ignored", SHOT_AWARD_MAX);
+        else {
+            cfg.pen_bits[cfg.n_pen] = bits;
+            cfg.pen_points[cfg.n_pen] = points;
+            cfg.n_pen++;
+        }
         return 1;
     }
     if ((a = key_is(line, "award_ladder")) != 0) {
@@ -1063,6 +1166,28 @@ static void params_loaded(struct slot *M)
     for (i = 0; i < cfg.n_sa; i++)
         pm_log("params: shot %08x_%08x pays %llu", (unsigned)(cfg.sa_bits[i] >> 32), (unsigned)cfg.sa_bits[i],
                (unsigned long long)cfg.sa_points[i]);
+    for (i = 0; i < cfg.n_pen; i++)                     /* PAD-314 */
+        pm_log("params: shot %08x_%08x takes %llu away%s", (unsigned)(cfg.pen_bits[i] >> 32), (unsigned)cfg.pen_bits[i],
+               (unsigned long long)cfg.pen_points[i],
+               (cfg.pen_bits[i] & scoring_bits(M)) ? " - but it scores, so it takes nothing" : "");
+}
+
+/* PAD-314: every bit that costs: each shot_penalty's bits, less the ones that score */
+static uint64_t penalty_bits(struct slot *M)
+{
+    uint64_t bits = 0;
+    unsigned i;
+    for (i = 0; i < cfg.n_pen; i++) bits |= cfg.pen_bits[i];
+    return bits & ~scoring_bits(M);
+}
+
+/* what a penalty shot takes: the first shot_penalty it matches (flat, no ladder) */
+static uint64_t penalty_value(struct slot *M, uint64_t mask)
+{
+    unsigned i;
+    for (i = 0; i < cfg.n_pen; i++)
+        if (mask & cfg.pen_bits[i]) return cfg.pen_points[i];
+    return 0;
 }
 
 /* every bit that scores: `shots`, and each shot_award's bits */
@@ -1311,6 +1436,7 @@ static void end_shot_seen(uint64_t mask, unsigned player)
  *   starts_on shot                    the `trigger` line's shots (the default)
  *   starts_on event <name> [N]        the N-th firing of a port event (N = 1 if absent), counted
  *                                     per player across a game (reset by the port's game_start)
+ *   starts_on sequence                the `trigger_seq` shots made in order (PAD-314, above)
  *   ends_on drain                     its clock, or the ball ending (the default)
  *   ends_on clock                     its clock only: it runs on through the end of a ball
  *   ends_on event <name>              that event, its clock, or the ball ending
@@ -1345,8 +1471,10 @@ static int trigger_on_line(struct slot *M, const char *line)
             cfg.start_event_count = (unsigned)num(&a);
             if (!cfg.start_event_count) cfg.start_event_count = 1;
             cfg.start_on_event = 1;
+        } else if (key_is(how, "sequence")) {
+            cfg.start_on_seq = 1;                /* PAD-314: the trigger_seq shots, in order */
         } else if (!key_is(how, "shot")) {
-            pm_log("starts_on \"%.40s\" is not shot or event - the mode starts on its shots", how);
+            pm_log("starts_on \"%.40s\" is not shot, sequence or event - the mode starts on its shots", how);
         }
         return 1;
     }
@@ -1376,6 +1504,20 @@ static void trigger_on_validate(struct slot *M)
             pm_log("ends_on event %s: this game's port has no such event - it ends on the drain", cfg.end_event_name);
             cfg.end_on = END_DRAIN;
         }
+    }
+    if (cfg.start_on_seq) {                  /* PAD-314: the shots in order stand in for the trigger count */
+        if (cfg.start_on_event) {
+            pm_log("starts_on sequence: an event start is ignored");
+            cfg.start_on_event = 0;
+        }
+        if (cfg.trigger_bits) {
+            pm_log("starts_on sequence: the trigger shots are ignored");
+            cfg.trigger_bits = 0;
+        }
+        cfg.valid = (cfg.seconds || cfg.mball_balls) && cfg.n_seq > 0;
+        pm_log("starts on %u shots in order%s", cfg.n_seq, cfg.valid ? "" : "  - NOT VALID, it needs seconds and a trigger_seq line");
+        seq_loaded(M);
+        return;
     }
     if (!cfg.start_on_event) return;
     cfg.start_event = pm_event(cfg.start_event_name);
@@ -1447,6 +1589,7 @@ static void cfg_line(struct slot *M, const char *line)
     if (own_lights_key(M, line)) return;     /* item mode-leds */
     if (display_line(M, line)) return;
     if (more_line(M, line)) return;          /* PAD-227 */
+    if (sequence_line(M, line)) return;      /* PAD-314 */
     pm_log("unknown key, skipped: %.80s", line);
 }
 
@@ -1624,10 +1767,12 @@ static void mode_start(struct slot *M, const char *why)
     run.secs_shown = cfg.seconds;
     run.hits = 0;
     run.total = 0;
+    run.lost = 0;                            /* PAD-314 */
     run.score_at_start = pm_score(run.player);
     run.started_ms = pm_ms();
     if (run.player <= 4) M->trig[run.player] = 0;
     also_clear(M, run.player);               /* PAD-227 */
+    seq_clear(M, run.player);                /* PAD-314 */
     run.restore_ticks = 0;
     display_start(M);                        /* item 154 display: before the screen and the clip */
     if (own_screen(M)) {
@@ -1683,8 +1828,8 @@ static void mode_end(const char *why)
         if (cfg.total_msg) pm_award_screen(cfg.screen_type, cfg.total_msg, run.total);
         run.restore_ticks = cfg.restore_after * TICKS_PER_S;
     }
-    pm_log("%s END (%s): %u shots, awarded %llu, score %llu -> %llu, %lu ms wall", cfg.name, why,
-           run.hits, (unsigned long long)run.total, (unsigned long long)run.score_at_start,
+    pm_log("%s END (%s): %u shots, awarded %llu, lost %llu, score %llu -> %llu, %lu ms wall", cfg.name, why,
+           run.hits, (unsigned long long)run.total, (unsigned long long)run.lost, (unsigned long long)run.score_at_start,
            (unsigned long long)pm_score(run.player), pm_ms() - run.started_ms);
 }
 
@@ -1896,6 +2041,14 @@ static void on_shot(uint64_t mask)
                (unsigned long long)asked, run.hits, (unsigned long long)run.total);
         own_sounds_shot(M, run.hits);
     }
+    if (run.active && (M = run.slot) != 0 && p == run.player && (mask & penalty_bits(M)) && end_pending != M) {
+        uint64_t asked = penalty_value(M, mask), lost = pm_score_sub(p, asked);   /* PAD-314 */
+        run.lost += lost;
+        if (own_screen(M)) words(M, "-", lost, "");
+        pm_log("penalty shot %08x_%08x: -%llu (asked %llu), %llu lost, score %llu",
+               (unsigned)(mask >> 32), (unsigned)mask, (unsigned long long)lost,
+               (unsigned long long)asked, (unsigned long long)run.lost, (unsigned long long)pm_score(p));
+    }
     if (run.active && (M = run.slot) != 0 && p == run.player && run.mball_on) multiball_shot(M, mask);
     else if (run.active && (M = run.slot) != 0 && p == run.player && run.mball_wait && end_pending != M)
         multiball_on_shot(M, mask);          /* PAD-228 */
@@ -1903,14 +2056,28 @@ static void on_shot(uint64_t mask)
     if (p < 1 || p > 4) return;
     for (k = 0; k < MODES_MAX; k++) {
         int hit;
+        uint64_t want;
         M = &slots[k];
-        if (!cfg.valid || running(M) || !(mask & (cfg.trigger_bits | also_bits(M)))) continue;
+        if (!cfg.valid || running(M)) continue;
+        /* PAD-314: a sequence mode listens to its shots in order and to the shots that start it over */
+        want = cfg.start_on_seq ? (seq_all_bits(M) | cfg.seq_reset_bits) : cfg.trigger_bits;
+        if (!(mask & (want | also_bits(M)))) continue;
         if (!after_met(M, p)) {                  /* PAD-227: nothing counts before its `after` mode */
             pm_log("%s: shot not counted - %s has not run this %s (player %u)", cfg.name, cfg.after_name,
                    cfg.after_ball ? "ball" : "game", p);
             continue;
         }
         hit = also_shot(M, mask, p);
+        if (cfg.start_on_seq) {
+            if (mask & want) {
+                sequence_shot(M, mask, p);
+                hit = 1;
+            }
+            if (!hit || !M->seq_done[p]) continue;
+            if (also_met(M, p)) mode_start(M, "shot sequence");
+            else pm_log("%s: its sequence is met - waiting for its other shots (player %u)", cfg.name, p);
+            continue;
+        }
         if (mask & cfg.trigger_bits) {
             M->trig[p]++;
             pm_log("%s trigger %u of %u (player %u)", cfg.name, M->trig[p], cfg.trigger_count, p);
@@ -2023,6 +2190,7 @@ static void on_ball_end(void)
         for (p = 0; p < 5; p++) {
             slots[k].trig[p] = 0;
             also_clear(&slots[k], p);            /* PAD-227 */
+            seq_clear(&slots[k], p);             /* PAD-314 */
         }
     starts_ball_end();
     roster_ball_end();                       /* item 146: a pick not started yet is given back */

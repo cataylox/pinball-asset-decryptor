@@ -73,6 +73,7 @@ static unsigned player_up = 1;
 unsigned pm_player(void) { return player_up; }
 uint64_t pm_score(unsigned p) { return 0; }
 uint64_t pm_score_add(unsigned p, uint64_t v) { return v; }
+uint64_t pm_score_sub(unsigned p, uint64_t v) { return v < 300 ? v : 300; }   /* PAD-314: a score of 300 to lose */
 static int c_mode;              /* a mode written in C holds pm_begin */
 int pm_begin(void) { if (running_mode || c_mode) return 0; running_mode = 1; return 1; }
 void pm_end(void) { running_mode = 0; }

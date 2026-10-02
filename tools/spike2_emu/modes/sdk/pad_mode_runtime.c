@@ -624,6 +624,27 @@ uint64_t pm_score_add(unsigned player, uint64_t points)
     return ((uint64_t (*)(unsigned, uint64_t))(unsigned long)f)(player, points);
 }
 
+/* PAD-314: a loss goes straight into the score table, never below 0, then the game's add is
+ * called with 0 points so its own on-change work (the score on the display) runs. The two's
+ * complement through score_add would be exact too, but the add multiplies by the playfield
+ * multiplier, which a 64-bit port does not name: a loss equal to the score would pass 0. */
+uint64_t pm_score_sub(unsigned player, uint64_t points)
+{
+    unsigned s32 = data("scores32"), s64 = data("scores"), f32 = fn("score_add32"), f = fn("score_add");
+    uint64_t have = pm_score(player), take = points < have ? points : have;
+    if (player < 1 || player > 4 || !take) return 0;
+    if (s32) {                           /* the table pm_score reads: the game's own RW data */
+        if (!maps_has(s32, 16, MAP_R)) return 0;
+        ((unsigned *)(unsigned long)s32)[player - 1] = (unsigned)(have - take);
+        if (f32) ((unsigned (*)(unsigned, unsigned))(unsigned long)f32)(player, 0);
+        return take;
+    }
+    if (!s64 || !maps_has(s64, 32, MAP_R)) return 0;
+    ((uint64_t *)(unsigned long)s64)[player - 1] = have - take;
+    if (f) ((uint64_t (*)(unsigned, uint64_t))(unsigned long)f)(player, 0);
+    return take;
+}
+
 /* ---- shots ------------------------------------------------------------------------------- */
 uint64_t pm_shot(const char *name)
 {
