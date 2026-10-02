@@ -19,10 +19,22 @@ GAME_DB = {
         "passphrase": "winchesterkey",
         "platform": "Arch Linux, FAST hardware, Godot 4.5 custom build",
     },
+    "bonjovi": {
+        "display": "Bon Jovi",
+        # Real update files are version-stamped (bon-jovi_YYYY.MM.DD.fun), so
+        # detection is by filename prefix + content, not an exact name.
+        "fun_file": "bon-jovi.fun",
+        # No GPG passphrase: Bon Jovi ships a signed systemd disk image (DDI),
+        # not a GPG-symmetric tarball.  The container is unwrapped natively.
+        "container": "ddi",
+        "platform": "Arch Linux (systemd DDI), FAST hardware, Godot 4.7.2",
+    },
 }
 
-# .fun filename -> game key
-FUN_FILE_TO_GAME = {info["fun_file"]: key for key, info in GAME_DB.items()}
+# .fun filename -> game key.  Exact-match games only; Bon Jovi is matched by
+# prefix + content in detect_game because its filename carries a version date.
+FUN_FILE_TO_GAME = {info["fun_file"]: key for key, info in GAME_DB.items()
+                    if info.get("container", "gpg") != "ddi"}
 
 
 # Phase names retained for the BOF pipeline's internal logic.  The unified

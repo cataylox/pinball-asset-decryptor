@@ -450,9 +450,26 @@ def check_prerequisites(executor):
 
 
 def detect_game(fun_path):
-    """Return the game key for a given .fun file path, or None if unknown."""
+    """Return the game key for a given .fun file path, or None if unknown.
+
+    The GPG-era titles are matched by exact filename.  Bon Jovi's update
+    files carry a version date (``bon-jovi_YYYY.MM.DD.fun``), so it is matched
+    by filename prefix and, as a fallback for a renamed file, by sniffing the
+    systemd-DDI container (a cheap GPT + EROFS header read)."""
     filename = os.path.basename(fun_path).lower()
-    return FUN_FILE_TO_GAME.get(filename)
+    key = FUN_FILE_TO_GAME.get(filename)
+    if key:
+        return key
+    if filename.endswith(".fun"):
+        if filename.startswith("bon-jovi") or filename.startswith("bonjovi"):
+            return "bonjovi"
+        try:
+            from .ddi_container import is_ddi
+            if is_ddi(fun_path):
+                return "bonjovi"
+        except Exception:
+            pass
+    return None
 
 
 def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
@@ -559,33 +576,42 @@ class DecryptPipeline(_BasePipeline):
         self.unpack_pck = unpack_pck
         self._tmp_dir = None
 
-    def run(self):
-        try:
-            self._run()
-        except PipelineError as e:
-            self._done(False, e.message)
-        except Exception as e:
-            self._done(False, f"Unexpected error: {e}")
+    def _extract_ddi_binaries(self, game_key):
+        """Bon Jovi: the ``.fun`` is a systemd disk image (GPT -> EROFS), not
+        a GPG tarball.  Pull its game binaries into the output dir; the shared
+        PCK-unpack path then runs exactly as it does for the GPG games."""
+        from .ddi_container import extract_game_binaries, DdiError
+        self._set_phase(1)
+        self._log("Reading Barrels of Fun update image (systemd disk image)...",
+                  "info")
+        self._progress(0, 100, "Reading update image...")
 
-    def _run(self):
-        # Phase 0 — Detect
-        self._set_phase(0)
-        self._log("Detecting game...", "info")
-        game_key = detect_game(self.fun_path)
-        if game_key is None:
-            raise PipelineError("Detect",
-                f"Unrecognised file: {os.path.basename(self.fun_path)}\n"
-                f"Expected one of: {', '.join(FUN_FILE_TO_GAME.keys())}")
-        game_info = GAME_DB[game_key]
-        self._log(f"Game detected: {game_info['display']}", "success")
+        def _p(done, total, label):
+            self._progress(int(100 * done / max(total, 1)), 100, label)
+
+        try:
+            written = extract_game_binaries(
+                self.fun_path, self.output_dir,
+                log_cb=self._log, progress_cb=_p)
+        except DdiError as e:
+            raise PipelineError(
+                "Extract",
+                f"Couldn't read the Barrels of Fun update image:\n{e}")
+        except Exception as e:
+            raise PipelineError("Extract",
+                                f"Couldn't read the update image: {e}")
+        if not written:
+            raise PipelineError(
+                "Extract",
+                "No game binaries were found inside the update image.")
+        self._set_phase(2)
+        self._log(
+            f"Extracted {len(written)} game "
+            f"binar{'y' if len(written) == 1 else 'ies'} from the image.",
+            "success")
         self._check_cancel()
 
-        # Verify output path is accessible from executor
-        os.makedirs(self.output_dir, exist_ok=True)
-        ok, msg = self.executor.check_path_accessible(self.output_dir)
-        if not ok:
-            raise PipelineError("Detect", msg)
-
+    def _gpg_decrypt_untar(self, game_key, game_info):
         passphrase = game_info["passphrase"]
         fun_wsl = self.executor.to_exec_path(self.fun_path)
         out_wsl = self.executor.to_exec_path(self.output_dir)
@@ -679,11 +705,50 @@ class DecryptPipeline(_BasePipeline):
         except CommandError as e:
             raise PipelineError("Extract", f"Copy to output failed:\n{e.output}")
 
+    def run(self):
+        try:
+            self._run()
+        except PipelineError as e:
+            self._done(False, e.message)
+        except Exception as e:
+            self._done(False, f"Unexpected error: {e}")
+
+    def _run(self):
+        # Phase 0 — Detect
+        self._set_phase(0)
+        self._log("Detecting game...", "info")
+        game_key = detect_game(self.fun_path)
+        if game_key is None:
+            raise PipelineError("Detect",
+                f"Unrecognised file: {os.path.basename(self.fun_path)}\n"
+                f"Expected one of: {', '.join(FUN_FILE_TO_GAME.keys())}")
+        game_info = GAME_DB[game_key]
+        self._log(f"Game detected: {game_info['display']}", "success")
+        self._check_cancel()
+
+        # Verify output path is accessible from executor
+        os.makedirs(self.output_dir, exist_ok=True)
+        ok, msg = self.executor.check_path_accessible(self.output_dir)
+        if not ok:
+            raise PipelineError("Detect", msg)
+
+        container = game_info.get("container", "gpg")
+        out_wsl = self.executor.to_exec_path(self.output_dir)
+        if container == "ddi":
+            self._extract_ddi_binaries(game_key)
+        else:
+            self._gpg_decrypt_untar(game_key, game_info)
+
         # Find the Godot binary
         binary_name = ""
         try:
+            # Largest .x86_64 is the main game: a Bon Jovi image bundles a
+            # second title (JayAndBob.x86_64, ~140 MB) next to the 5.9 GB
+            # main binary, and `head -1` could otherwise pick the wrong one.
+            # For the single-binary GPG games this is just that one binary.
             binary_name = self.executor.run(
-                f"find {out_wsl!r} -name '*.x86_64' -type f | head -1",
+                f"find {out_wsl!r} -name '*.x86_64' -type f -printf '%s\\t%p\\n' "
+                f"| sort -rn | head -1 | cut -f2-",
                 timeout=15,
             ).strip()
             if binary_name:
@@ -1764,6 +1829,20 @@ class ModifyPipeline(_BasePipeline):
                 f"Choose a destination file name ending in .fun (for example "
                 f"on the Desktop), not an existing folder.")
         game_info = GAME_DB[self.game_key]
+        if game_info.get("container", "gpg") == "ddi":
+            # Bon Jovi: building an installable update is not possible yet.
+            # The .fun is a signed systemd disk image (GPT + dm-verity +
+            # vendor signature); re-signing it needs information we can only
+            # get from a physical machine (see the Write tab help).  Extract
+            # and edit assets freely; this step is what is blocked.
+            raise PipelineError(
+                "Build",
+                "Building an installable Bon Jovi update isn't supported yet.\n\n"
+                "Bon Jovi ships as a signed disk image, and rebuilding it needs "
+                "details we can only get from a physical machine. You can still "
+                "extract and edit its assets. If you own a Bon Jovi machine and "
+                "want to help unlock image building, see the Write tab for what "
+                "we need.")
         passphrase = game_info["passphrase"]
         game_key = self.game_key
         gpg_bin = self._resolve_gpg()

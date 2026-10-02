@@ -209,11 +209,14 @@ def test_launch_lines_move_the_footer(rig, tmp_path):
 def test_title_keys_come_from_the_plugin():
     from pinball_decryptor.webui import emulate_bof_core as core
     from pinball_decryptor.plugins.bof.games import GAME_DB
+    # Only the GPG-symmetric titles have a passphrase and a rig profile; Bon
+    # Jovi ships a signed disk image (no key) and is extract-only, so it is
+    # not part of the emulator rig.
+    keyed = {k: v for k, v in GAME_DB.items() if v.get("passphrase")}
     keys = dict(p.split(":", 1) for p in core.title_keys().split(","))
-    assert keys == {k: v["passphrase"] for k, v in GAME_DB.items()}
-    # every title the plugin knows has a rig profile
+    assert keys == {k: v["passphrase"] for k, v in keyed.items()}
     import os
-    for k in GAME_DB:
+    for k in keyed:
         assert os.path.isfile(os.path.join(core.DEFAULT_RIG_DIR, "profiles",
                                            k + ".json")), k
 

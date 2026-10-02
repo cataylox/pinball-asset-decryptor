@@ -92,10 +92,13 @@ def rig_cmd_root(*args, **kw):
 
 def title_keys():
     """``title:passphrase,...`` for watch.sh, from the BoF plugin's own game
-    table - the rig never hard-codes a passphrase."""
+    table - the rig never hard-codes a passphrase.  Only the GPG-symmetric
+    titles have a passphrase; Bon Jovi ships a signed disk image with no key,
+    so it is skipped here."""
     from pinball_decryptor.plugins.bof.games import GAME_DB
     return ",".join("%s:%s" % (k, v["passphrase"])
-                    for k, v in sorted(GAME_DB.items()))
+                    for k, v in sorted(GAME_DB.items())
+                    if v.get("passphrase"))
 
 
 def title_name(key):
