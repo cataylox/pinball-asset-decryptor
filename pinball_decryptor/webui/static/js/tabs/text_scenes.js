@@ -2,7 +2,7 @@
 // own now, the Scenes tab (tabs/scenes.js hosts ScenesPage); it was a floating window.
 // Python: webui/text_scenes.py (ns "text_scenes").
 
-import { html, useState, useEffect, useLayoutEffect, useRef, Button, Field, Select, Seg, Table, Modal, openMenu, InfoBadge,
+import { html, useState, useEffect, useLayoutEffect, useRef, Button, Field, Select, Seg, Table, Modal, openMenu, InfoBadge, Check,
          Icon, Progress, Spinner, tip, call, mediaUrl, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 
@@ -368,6 +368,11 @@ export function ScenesPage() {
             <${Select} sm value=${s.bg} options=${s.bgs || []} onChange=${(v) => call("text_scenes.set_bg", v)} />
             <${InfoBadge} text=${tips.behind} />
           </div>
+          <div class="scenes-ctl">
+            <${Check} checked=${s.machine_look !== false} label="As on the machine" cls="small"
+              onChange=${(v) => call("text_scenes.set_machine_look", v)} />
+            <${InfoBadge} text=${tips.machine} />
+          </div>
         </div>
         ${layout ? html`<${LayoutEditor} key=${layout.kind + "\u0000" + layout.text} d=${layout} />` : null}
         ${editor || s.preparing ? null : html`<div class="row scenes-bottom">
@@ -583,16 +588,16 @@ const gameTip = (l) => ({
     ["Delete", "hide it in the game and the preview (with the preview focused)"],
     `The preview is not changed; the eye hides it here.${l.part_off ? " It shows only when the look it sits in is on." : ""}`,
   ] });
-// PAD-312: a picture's colour switch - the chosen-files profile baked into it (green), its
+// PAD-312: a picture's colour switch - the individual files profile baked into it (green), its
 // own colours (red), or the game's own picture, which has no switch (blue lock)
 const colorTip = (l) => {
   const c = l.color || {};
   if (c.locked) return { head: "Color: the game's own picture", lines: [
-    "Stern made it for the machine's screen, so the chosen-files profile is not offered on it.",
+    "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
     "Replace it on the Images tab to correct a picture of your own." ] };
   return { head: c.on ? "Color: corrected for the machine" : "Color: its own colors", lines: [
     ["Click", c.on ? "keep its own colors" : "correct its colors for the machine"],
-    c.on ? "The Color profile tab's chosen-files profile is baked into this picture when you build; the preview shows it."
+    c.on ? "The Color profile tab's individual files profile is baked into this picture when you build; the preview shows it."
       : "It goes on the card in its own colors.",
     c.own ? "Set for this picture." : "Follows the Color profile tab's box for every replaced picture." ] };
 };

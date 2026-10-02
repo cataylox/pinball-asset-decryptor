@@ -1000,7 +1000,7 @@ class ImagesTab(TabService):
         tab's pending list and an open Scenes editor follow."""
         for ns, name in (("color", "asset_switches_changed"),
                          ("write", "_maybe_rescan_write_preview"),
-                         ("text_scenes", "pictures_changed")):
+                         ("text", "scenes_pictures_changed")):
             try:
                 fn = getattr(self.window.service(ns), name, None)
             except Exception:                           # noqa: BLE001

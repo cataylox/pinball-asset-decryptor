@@ -9,6 +9,8 @@ one Battle Select portrait replaced by a vivid test picture, and writes:
 - <prefix>_color.png    the Color profile tab
 - <prefix>_images.png   the Images tab on the replaced portrait
 - <prefix>_scenes.png   the Scenes window on Battle Select, Layers open
+- <prefix>_video.png    the Video tab on one replaced clip (a copy of a mode clip, since
+                        the Godzilla project has no video folder of its own)
 
 With --after (the ticket branch) the tab is put on "Chosen files" with every replaced
 picture ticked first, so the pair shows the new toggles in use.
@@ -37,6 +39,7 @@ SOURCE = os.environ.get("PAD312_PROJECT", r"C:\Users\david\OneDrive\Desktop\gzho
 BATTLE = ("/godzilla_le/assets/lcd/auto_loaded/"
           "cac32730af42b9d26d26c4bb6e667b07da53113e")
 PORTRAIT = "images/scene_textures/radimg_530x726_90dbdeb2.png"
+VIDEO = "video/pad312_clip.mp4"
 SKIP = ("audio", "build", "logs", "modes", ".write_cache", ".hashcache.json")
 
 
@@ -68,6 +71,14 @@ def _project(scratch):
         data = {}
     data.pop("color_profile", None)              # the pair starts from no profile
     data["image"] = {PORTRAIT: rep}
+    # one video slot, replaced by a copy of itself (the tab shows the pick and its Color box)
+    clip = os.path.join(SOURCE, "modes", "atomic_breath", "clip.mp4")
+    if os.path.isfile(clip):
+        os.makedirs(os.path.join(dst, "video"), exist_ok=True)
+        shutil.copy2(clip, os.path.join(dst, "video", VIDEO.split("/")[-1]))
+        mine = os.path.join(scratch, "my_clip.mp4")
+        shutil.copy2(clip, mine)
+        data["video"] = {VIDEO: mine}
     with open(side, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     return dst
@@ -131,6 +142,7 @@ def main():
                 time.sleep(1)
                 api("color.set_mode", "assets")
                 api("color.set_all", "images", True)
+                api("color.set_all", "videos", True)
                 time.sleep(1)
                 print("color:", {k: state()["color"].get(k) for k in
                                  ("mode", "all_images", "all_videos", "asset_counts")},
@@ -145,6 +157,12 @@ def main():
             api("images.select", PORTRAIT)
             time.sleep(3)
             page.screenshot(path=os.path.join(out, prefix + "_images.png"))
+            api("ui.select_tab", "video")
+            time.sleep(2)
+            st = _wait_scan(state, "video")
+            print("video rows:", len(st.get("rows") or []), flush=True)
+            time.sleep(2)
+            page.screenshot(path=os.path.join(out, prefix + "_video.png"))
             assert api("images.open_scenes", PORTRAIT)
             time.sleep(2)
             api("text_scenes.select", BATTLE + "/scene.radium") or api("text_scenes.select", BATTLE)

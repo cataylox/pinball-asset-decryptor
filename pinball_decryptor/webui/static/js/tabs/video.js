@@ -99,7 +99,7 @@ const COL_MIN = { rel: 160, len: 46, res: 70, fmt: 80, aud: 70, rep: 110, col: 5
 const HEADS = { rel: "Original Video", len: "Length", res: "Resolution", fmt: "Format",
                 aud: "Audio", rep: "Replacement", col: "Color", conv: "Convert" };
 // PAD-312: the chosen-files color profile, baked into this clip as it is converted
-const COLOR_TIP = "On: the Color profile tab's chosen-files profile is baked into this clip when you build (it is re-encoded for that), so it looks on the machine the way it looks on your PC. Off: it goes on the card in its own colors. The game's own clips are never touched. A box you click is this clip's own setting; the Color profile tab's \"every replaced video\" box sets the rest.";
+const COLOR_TIP = "On: the Color profile tab's individual files profile is baked into this clip when you build (it is re-encoded for that), so it looks on the machine the way it looks on your PC. Off: it goes on the card in its own colors. The game's own clips are never touched. A box you click is this clip's own setting; the Color profile tab's Every replaced video box sets the rest.";
 // The long-named columns share the width that is left over (more or less
 // of it); the others keep the width that fits them, so a narrow window
 // shortens names, never "MP4 h264 30fps" or a length.

@@ -331,7 +331,7 @@ def chosen_files_rows(mfr, assets_path):
                      % (n["added"], "" if n["added"] == 1 else "s"))
     if not parts:
         return []
-    return [("color profile on chosen files  —  %s, baked into %s"
+    return [("color profile on individual files  —  %s, baked into %s"
              % (prof.label(), ", ".join(parts)),
              "color", "Pending (color profile)", "pending")]
 

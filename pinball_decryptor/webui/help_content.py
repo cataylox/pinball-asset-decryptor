@@ -688,7 +688,7 @@ HELP_CONTENT = {
          "the original resolution for best results."),
         ("Color column (Spike 2)",
          "Each replaced picture has a Color box: ticked, the Color profile "
-         "tab's chosen-files profile is baked into it when you build, so it "
+         "tab's individual files profile is baked into it when you build, so it "
          "looks on the machine the way it looks here; unticked, it goes on "
          "the card in its own colors. The box under the preview is the "
          "same switch. The Color profile tab's 'Every replaced picture' "
@@ -1053,17 +1053,25 @@ HELP_CONTENT = {
          "The profile is a staged change of this project: Write lists it as "
          "pending, Revert all clears it, and Save a copy / Load move it "
          "between projects."),
-        ("Chosen files (Spike 2)",
-         "The whole-screen profile reaches the game's own art too, which "
-         "Stern already made for that screen. Switch the tab to Chosen "
-         "files for a second profile that is baked into only the replaced "
-         "pictures and videos (and pictures added in Scenes) you switch on: "
-         "tick 'Every replaced picture' or 'Every replaced video' here, or "
-         "one file at a time in the Color column of the Images and Video "
-         "tabs and the palette in the Scenes layers. It starts from "
-         "Recommended; the Scenes preview shows a switched-on picture the "
-         "way it will be written. The game's own pictures have no switch "
-         "(a blue lock in Scenes)."),
+        ("Individual files (Spike 2)",
+         "The whole screen overlay reaches the game's own art too, which "
+         "Stern already made for that screen. Adjust individual files for "
+         "a second profile that is baked into only the replaced pictures "
+         "and videos (and pictures added in Scenes) you switch on: tick "
+         "'Every replaced picture' or 'Every replaced video' there, or one "
+         "file at a time in the Color column of the Images and Video tabs "
+         "and the palette in the Scenes layers. It starts from Recommended. "
+         "The game's own pictures have no switch (a blue lock in Scenes). "
+         "Both can be on at once: the overlay is drawn over the baked files "
+         "like everything else."),
+        ("As on the machine (Scenes)",
+         "The Scenes preview is drawn the way the machine's screen will show "
+         "it: through the whole screen overlay, then through the screen "
+         "itself (the individual files profile, undone). The game's own art "
+         "and a file left in its own colors look the way the machine really "
+         "shows them; a picture with the profile switched on comes back to "
+         "what your PC shows. Untick As on the machine, beside Behind, for "
+         "the PC's own colors."),
     ],
     # The Modes tab's own tips are in PREVIEW_HELP: a copy of the app without a
     # preview code shows none of them (sections_for).  The key stays so every

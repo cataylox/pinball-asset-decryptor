@@ -62,6 +62,7 @@ html.bp-1020 .cp-grid { grid-template-columns: minmax(0, 1fr); }
 /* PAD-312: the two modes, and the chosen-files boxes */
 .cp-modes { gap: 12px; align-items: center; flex-wrap: wrap; }
 .cp-modes .seg { flex: 0 0 auto; }
+.cp-both b { color: var(--ink); }
 .cp-which .bd { gap: 8px; }
 .cp-which-now { margin: 0; line-height: 1.45; }
 

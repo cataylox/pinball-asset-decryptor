@@ -266,7 +266,7 @@ def test_write_lists_the_chosen_files_as_pending_and_its_fingerprint_moves(tmp_p
     cp.set_asset_slot(str(proj), "videos", "v.mp4", True)
     assert write_scan.fingerprint(None, str(proj), 0, True) != before
     assert write_scan.chosen_files_rows(mfr, str(proj)) == [(
-        "color profile on chosen files  —  Recommended, baked into 2 replaced "
+        "color profile on individual files  —  Recommended, baked into 2 replaced "
         "pictures, 1 replaced video", "color", "Pending (color profile)",
         "pending")]
     cp.store_asset_profile(str(proj), cp.Profile(name="No change"))
@@ -448,3 +448,93 @@ def test_scene_layers_carry_a_colour_switch_for_pictures(tmp_path):
         assert "colors corrected" in next(
             l for l in _tv(w)["layers"] if l["added"])["edits"]
         w.call("text_scenes.close")
+
+
+# -- round two (DragonRR on v1.65.0): the machine's look, and the Scenes refresh -----------
+
+def test_the_machine_view_undoes_the_profile_and_the_overlay_cancels_it():
+    rgb = np.zeros((1, 256, 3), np.uint8)
+    rgb[0, :, 0] = np.arange(256)
+    rgb[0, :, 1] = np.arange(256)[::-1]
+    rgb[0, :, 2] = (np.arange(256) * 3) % 256
+    corrected = RECOMMENDED.apply_array(rgb)
+    assert corrected.tobytes() == np.asarray(
+        RECOMMENDED.apply_image(PIL.fromarray(rgb, "RGB"))).tobytes()
+    back = RECOMMENDED.undo_array(corrected)
+    assert np.abs(back.astype(int) - rgb.astype(int)).max() <= 3
+    # the screen alone brightens the mids; a Black and white profile is not undone
+    screen = RECOMMENDED.undo_array(rgb)
+    assert screen[0, 128, 2] > 128
+    assert BW.undo_array(rgb).tobytes() == rgb.tobytes()
+
+
+def test_machine_view_follows_both_profiles(tmp_path):
+    d = str(tmp_path)
+    cp.store_asset_profile(d, cp.Profile(name="No change"))
+    assert cp.machine_view(d) is None                 # nothing to show
+    cp.store_asset_profile(d, None)                   # Recommended again
+    rgb = np.full((2, 2, 3), 128, np.uint8)
+    view = cp.machine_view(d)
+    assert view(rgb)[0, 0, 2] > 128                   # the screen, bluer and brighter
+    cp.store(d, RECOMMENDED)                          # the overlay corrects for that screen
+    view = cp.machine_view(d)
+    assert np.abs(view(rgb).astype(int) - 128).max() <= 3
+
+
+def test_the_scene_frame_is_viewed_before_the_backdrop(tmp_path):
+    from pinball_decryptor.plugins.stern import scene_render as R
+    canvas = np.zeros((2, 2, 4), np.uint8)
+    canvas[0, 0] = (128, 128, 128, 255)               # opaque mid grey
+    canvas[0, 1] = (64, 64, 64, 128)                  # half-covered mid grey, premultiplied
+    seen = R.viewed(canvas, lambda rgb: np.clip(rgb.astype(int) * 2, 0, 255).astype(np.uint8))
+    assert tuple(seen[0, 0]) == (255, 255, 255, 255)
+    assert tuple(seen[0, 1, :3]) == (128, 128, 128) and seen[0, 1, 3] == 128
+    assert R.viewed(canvas, None) is canvas
+
+
+def test_scenes_editor_draws_as_on_the_machine_and_can_be_told_not_to(tmp_path):
+    from tests.webui_harness import web_app
+    from tests.test_gui_scene_editor import _seed, _open, _wait
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _open(w, folder)
+        assert w.state("text_scenes")["machine_look"] is True
+        assert w.run(svc._machine_view) is not None   # Recommended by default
+        rev = w.state("text_scenes")["tree_img_rev"]
+        assert w.call("text_scenes.set_machine_look", False)
+        assert w.state("text_scenes")["machine_look"] is False
+        assert w.run(svc._machine_view) is None
+        assert _wait(w, lambda: w.state("text_scenes")["tree_img_rev"] != rev
+                     or w.state("text_scenes")["tree_busy"] is False)
+        w.call("text_scenes.close")
+
+
+def test_a_switch_moved_on_the_images_tab_reaches_the_scenes_editor(tmp_path):
+    """DragonRR on v1.65.0: in Scenes the palette and the picture only changed after a
+    tab switch - the Images tab's hook looked the editor up under a name the window
+    never registers.  It goes through the Text tab now."""
+    from tests.webui_harness import web_app
+    from tests.test_webui_images import _project, _set_folder, _wait, _settled, BANNER
+    assets, reps = _project(tmp_path)
+    with web_app(tmp_path, mfr="stern") as w:
+        _set_folder(w, assets)
+        w.call("images.scan")
+        _wait(w, _settled)
+        w.answers = [os.path.join(reps, "SpaceGodzilla.png")]
+        assert w.call("images.choose", BANNER) == BANNER
+        calls = []
+        scenes = w.window.service("text").scenes
+        scenes.pictures_changed = lambda: calls.append("drawn")
+        assert w.call("images.set_color", BANNER, True)
+        w.drain()
+        assert calls == ["drawn"]
+        w.call("ui.select_tab", "color")
+        w.drain()
+        assert w.call("color.set_mode", "assets") == "assets"
+        assert w.call("color.set_all", "images", False)
+        w.drain()
+        assert calls == ["drawn", "drawn"]
+        s = w.state("color")
+        assert s["display_active"] is False and s["asset_name"] == "Recommended"

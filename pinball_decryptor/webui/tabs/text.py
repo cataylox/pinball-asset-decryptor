@@ -169,6 +169,12 @@ class TextTab(TabService):
         self._mirror_folder()
         self._maybe_rescan()
 
+    def scenes_pictures_changed(self):
+        """PAD-312: a picture's colour switch moved on another tab; the Scenes editor
+        draws its scene again (the window registers tab services only, so this is how
+        the other tabs reach the editor)."""
+        self.scenes.pictures_changed()
+
     def on_close(self):
         self.scenes.close()
         self.fonts.close(force=True)
