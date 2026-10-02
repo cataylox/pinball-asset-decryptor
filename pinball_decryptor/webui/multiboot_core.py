@@ -948,6 +948,12 @@ class MultibootForm:
     #: mkmulticard.py) or ``jjp`` (a multi-boot install ISO, mkjjpmulti.py).
     #: The command builders read it; a form that never says is a Stern one.
     platform: str = "stern"
+    #: WHAT THE IMAGES' GAMES WERE BUILT WITH (PAD-307): ``{image index: built
+    #: colour profile}`` for each image whose game the boot menu can adjust,
+    #: read off the images (:func:`adjustable_profile`) - never typed and never
+    #: saved.  The preview needs it to draw the SETTINGS card where the built
+    #: card will have one; the builder reads the same fact off the trees itself.
+    colour_profiles: dict = field(default_factory=dict)
 
 
 _COLOR_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")
@@ -3251,6 +3257,113 @@ def parse_snapshot_frames(text):
     return out
 
 
+#: The biggest game program in the library is rush_le's 190 MB.
+_GAME_MAX = 512 << 20
+
+
+def _split_edits(spec):
+    """``(card, edits folder or None)`` of a source spec: a card image, or a
+    base card + an edits folder joined by '+' (PAD-241; the tools' own
+    editsource.split, which this mirrors so the app needs no tool import)."""
+    if not spec or "+" not in spec or os.path.exists(spec):
+        return spec, None
+    at = len(spec)
+    while True:
+        at = spec.rfind("+", 0, at)
+        if at <= 0:
+            return spec, None
+        base, edits = spec[:at], spec[at + 1:]
+        if os.path.isfile(base) and os.path.isfile(os.path.join(edits, "overrides.json")):
+            return base, edits
+
+
+def _games_title(ci, part):
+    """The title directory of a games partition (the root ``game`` link's
+    target, else the directory holding a ``game``), or None."""
+    entries = ci.list_dir(part, "/")
+    names = {e.name for e in entries}
+    if "usr" in names or "lib" in names:
+        return None
+    link = next((e.link_target for e in entries
+                 if e.name == "game" and e.is_symlink), None)
+    if link and "/" in link:
+        cand = link.split("/", 1)[0]
+        if any(e.name == cand and e.is_dir for e in entries):
+            return cand
+    for e in entries:
+        if not e.is_dir or e.is_symlink or e.name in ("lost+found", "spk"):
+            continue
+        try:
+            if "game" in {k.name for k in ci.list_dir(part, e.path)}:
+                return e.name
+        except Exception:                               # noqa: BLE001
+            continue
+    return None
+
+
+def adjustable_profile(path):
+    """The colour profile the game in *path* (a card image, or a base card +
+    an edits folder) was built with, when the boot menu's Settings can adjust
+    it (PAD-307: plugins/stern/shader_profile.tunable_in) -> ``{"name",
+    "gamma", "gain", "lift", "saturation"}``, else None: a stock game, one
+    built with No change or before the shape was fixed, or a card that cannot
+    be read.  READS THE GAME PROGRAM OFF THE CARD, so never on the UI thread.
+    Never raises."""
+    try:
+        from ..plugins.stern import shader_profile
+        from ..plugins.stern.explorer import CardImage
+        card, edits = _split_edits((path or "").strip().strip('"'))
+        if not card or not os.path.isfile(card):
+            return None
+        ci = CardImage(card)
+        try:
+            for p in ci.partitions():
+                if not p.browsable:
+                    continue
+                try:
+                    title = _games_title(ci, p.index)
+                except Exception:                       # noqa: BLE001
+                    continue
+                if not title:
+                    continue
+                raw = None
+                own = os.path.join(edits, title, "game") if edits else None
+                if own and os.path.isfile(own):
+                    with open(own, "rb") as f:
+                        raw = f.read()
+                if raw is None:
+                    raw = ci.preview(p.index, "/%s/game" % title, cap=_GAME_MAX)
+                got = shader_profile.tunable_in(raw) if raw else None
+                if not got:
+                    return None
+                prof = got[0]
+                return {"name": prof.name or "", "gamma": list(prof.gamma),
+                        "gain": list(prof.gain), "lift": list(prof.lift),
+                        "saturation": prof.saturation}
+        finally:
+            ci.close()
+    except Exception:                                   # noqa: BLE001
+        return None
+    return None
+
+
+def colour_profile_line(img, col):
+    """images.conf's ``color_profile=`` line for image *img* (mkmulticard's
+    conf_colour_line, the same text), or "" for one that cannot be spelled."""
+    try:
+        def three(key):
+            vals = [float(v) for v in col[key]]
+            return " ".join("%.4f" % v for v in vals) if len(vals) == 3 else None
+        g, k, lo = three("gamma"), three("gain"), three("lift")
+        if not (g and k and lo):
+            return ""
+        name = " ".join(str(col.get("name") or "").replace("|", "/").split())
+        return "color_profile=%d|%s|%s|%s|%.4f|%s" % (int(img), g, k, lo,
+                                                      float(col["saturation"]), name)
+    except (KeyError, TypeError, ValueError):
+        return ""
+
+
 def write_preview_conf(form):
     """The images.conf the preview is drawn from, as text: the form's
     titles, subtitles, media names, default, countdown and theme.  The
@@ -3319,9 +3432,16 @@ def write_preview_conf(form):
         lines.append("footer=")
     elif (form.footer or "").strip():
         lines.append("footer=%s" % (form.footer or "").strip())
-    # ...and the SETTINGS card's switch, as the card will carry it (PAD-307)
-    if be.settings_tile and not form.settings_tile:
-        lines.append("settings=off")
+    # ...and the SETTINGS card, as the card will carry it (PAD-307): the
+    # images' built profiles, which are what put the card in the menu, and
+    # the owner's switch
+    if be.settings_tile:
+        for img, col in sorted((form.colour_profiles or {}).items()):
+            line = colour_profile_line(img, col)
+            if line:
+                lines.append(line)
+        if not form.settings_tile:
+            lines.append("settings=off")
     lines += theme_conf_lines(form)
     return "\n".join(lines) + "\n"
 
@@ -6585,6 +6705,11 @@ class MultibootPanel:
         self._play_var = tk.BooleanVar(value=True)
         self._pv_cache = {}
         self._pv_totals = {}
+        #: PAD-307: source path -> the built colour profile its game can be
+        #: adjusted from, or None; and the paths a worker is reading now.  A
+        #: loaded card's own answers are put here as it loads (_seed_colours).
+        self._colour_known = {}
+        self._colour_reading = set()
         #: (fingerprint, highlight) -> {image: (x, y, w, h)}: where the
         #: selector put every visible animated card's picture in its frame
         #: (the snapshot line's ``pictures``), which is where the clips are
@@ -6797,7 +6922,7 @@ class MultibootPanel:
         # rescheduling while one was out left the row silently never
         # updating.
         if (self._busy or self._pv_busy or self._probe_busy
-                or not self._queue.empty()):
+                or self._colour_reading or not self._queue.empty()):
             try:
                 self._drain_job = self._timer().after(self.DRAIN_MS,
                                                       self._drain)
@@ -9292,7 +9417,69 @@ class MultibootPanel:
             selector_dir=self._selector_var.get().strip()
             or self._backend.selector_default,
             platform=self._backend.key,
-            theme=theme, colors=colors)
+            theme=theme, colors=colors,
+            colour_profiles=self._colour_profiles())
+
+    def _colour_profiles(self):
+        """``{image index: built colour profile}`` for the images known to be
+        adjustable (PAD-307) - what the preview needs to draw the SETTINGS card.
+        An image not known yet is read on a worker, and the preview is asked
+        for again when the answer is in; until then it counts as not
+        adjustable.  Only a platform that has the card asks at all."""
+        if not self._backend.settings_tile:
+            return {}
+        probe = MultibootForm(images=[replace(r) for r in self._rows],
+                              platform=self._backend.key)
+        out, missing = {}, []
+        for img, path, _ri, _mi in form_trees(probe):
+            key = _norm(path) if path else ""
+            if not key:
+                continue
+            if key in self._colour_known:
+                if self._colour_known[key]:
+                    out[img] = self._colour_known[key]
+            elif key not in self._colour_reading:
+                missing.append((key, path))
+        if missing:
+            self._read_colours(missing)
+        return out
+
+    def _read_colours(self, wanted):
+        """Read *wanted* (``[(key, path)]``) on a worker: each game program is a
+        few MB off a card image (190 MB for the biggest), which is not a thing
+        the UI thread can wait for."""
+        if self._stopped:
+            return
+        for key, _p in wanted:
+            self._colour_reading.add(key)
+
+        def work():
+            for key, path in wanted:
+                col = self._colour_reader(path)
+
+                def done(key=key, col=col):
+                    self._colour_reading.discard(key)
+                    self._colour_known.setdefault(key, col)
+                    if col:
+                        self.schedule_preview()
+                self._ui(done)
+        threading.Thread(target=work, daemon=True).start()
+        self._kick_drain()
+
+    def _colour_reader(self, path):
+        """One image's answer (:func:`adjustable_profile`), on the worker.  A
+        method so a test can stand in for the card read."""
+        return adjustable_profile(path)
+
+    def _seed_colours(self, info):
+        """A loaded card says itself which of its images can be adjusted (its
+        images.conf, read back by inspect): those answers are final - the
+        sources they were built from need not be on this machine at all."""
+        cols = info.get("colours") or {}
+        for i, im in enumerate(info.get("images") or []):
+            src = host_path(im.get("source") or "")
+            if src:
+                self._colour_known[_norm(src)] = cols.get(str(i)) or cols.get(i) or None
 
     def _validated_form(self, sources=True):
         form = self.form()
@@ -10144,6 +10331,7 @@ class MultibootPanel:
         _ticked, self._armed = bypass_state(info)
         self._loaded_card = card
         self._loaded_info = info
+        self._seed_colours(info)
         pend = getattr(self, "_pending_device", None)
         if pend and _norm(pend[0]) == _norm(card):
             self._card_device, self._card_device_name = pend[1], pend[2]

@@ -1421,3 +1421,155 @@ def test_a_random_group_from_edits_folders(tmp_path):
         row = _panel(w)._rows[1]
         assert [m.title for m in row.members] == ["set_one", "set_two"]
         assert s["compact_locked"]
+
+
+# ------------------------------------------------------------ the SETTINGS card in the preview
+REC = {"name": "Recommended", "gamma": [1.1, 1.2, 1.35], "gain": [1.0, 1.0, 1.0],
+       "lift": [0.0, 0.0, 0.0], "saturation": 0.9}
+REC_LINE = ("color_profile=1|1.1000 1.2000 1.3500|1.0000 1.0000 1.0000|"
+            "0.0000 0.0000 0.0000|0.9000|Recommended")
+
+
+def _colours_settled(w, panel):
+    import time
+    for _ in range(200):
+        w.drain()
+        if not w.run(lambda: bool(panel._colour_reading)):
+            w.drain()
+            return
+        time.sleep(0.02)
+    raise AssertionError("the colour reads never finished")
+
+
+def test_the_preview_draws_the_settings_card_where_the_card_will(tmp_path, monkeypatch):
+    """PAD-307 (David: "make the preview show the settings card too").  Each
+    image's game is read ONCE, off the UI thread; an adjustable one puts the
+    same color_profile= line in the preview's conf as the build puts on the
+    card, which is what makes the selector draw the card.  The tick off keeps
+    the facts and adds settings=off, as the card will."""
+    from pinball_decryptor.webui import multiboot_core as mt
+    a = _raw(tmp_path, "a_pro-1_59_0.Release.8G.sdcard.raw")
+    b = _raw(tmp_path, "b_pro-1_59_0.Release.8G.sdcard.raw")
+    read = []
+
+    def fake(path):
+        read.append(os.path.basename(path))
+        return REC if os.path.basename(path).startswith("b_") else None
+    with web_app(tmp_path, mfr="stern") as w:
+        panel = _panel(w)
+        panel._colour_reader = fake
+        _add(w, a)
+        _add(w, b)
+        w.run(panel.form)
+        _colours_settled(w, panel)
+        form = w.run(panel.form)
+        assert form.colour_profiles == {1: REC}
+        lines = mt.write_preview_conf(form).splitlines()
+        assert REC_LINE in lines and "settings=off" not in lines
+        assert sorted(read) == sorted(os.path.basename(p) for p in (a, b))
+        w.run(panel.form)
+        assert len(read) == 2                     # answered once per image
+        # the sketch the page shows until the selector has drawn counts it too
+        sketch = w.run(panel._sketch, 0)
+        assert [c["title"] for c in sketch["cards"]][-1] == "SETTINGS"
+        w.call("multiboot.menu_settings")
+        w.call("ui.set", "multiboot", "settings_tile", False)
+        w.call("multiboot.menu_ok")
+        lines = mt.write_preview_conf(w.run(panel.form)).splitlines()
+        assert REC_LINE in lines and "settings=off" in lines
+        assert w.run(panel._sketch, 0)["cards"][-1]["title"] != "SETTINGS"
+
+
+def test_a_loaded_card_says_which_images_are_adjustable_itself(tmp_path, monkeypatch):
+    """The card's own images.conf (read back by inspect) is the answer for its
+    images - nothing is read, and the sources need not be on this machine."""
+    from pinball_decryptor.webui import multiboot_core as mt
+    from tests.test_multiboot_tab import _rich_report
+    read = []
+    report = _rich_report(tmp_path, armed=False)
+    report["colours"] = {"1": REC}
+    card = str(tmp_path / "multi" / "card.multi.raw")
+    os.makedirs(os.path.dirname(card), exist_ok=True)
+    with open(card, "wb") as f:
+        f.write(bytes(16))
+    with web_app(tmp_path, mfr="stern") as w:
+        panel = _panel(w)
+        panel._colour_reader = lambda p: read.append(p)
+        w.run(panel.load_inspect, report, card, mt.loaded_media_dir(card))
+        form = w.run(panel.form)
+        assert form.colour_profiles == {1: REC}
+        assert REC_LINE in mt.write_preview_conf(form).splitlines()
+        assert read == []
+
+
+def test_a_jjp_form_never_reads_a_game(tmp_path, monkeypatch):
+    from pinball_decryptor.webui import multiboot_core as mt
+    read = []
+    monkeypatch.setattr(mt, "adjustable_profile", lambda p: read.append(p))
+    form = mt.MultibootForm(images=[mt.ImageRow(path="a.iso")], platform="jjp",
+                            colour_profiles={0: REC})
+    assert "color_profile" not in mt.write_preview_conf(form)
+
+
+def test_adjustable_profile_reads_the_game_off_the_card_or_the_edits(tmp_path, monkeypatch):
+    """The reader, with a stand-in card: the games partition's title directory
+    from the root 'game' link, the program off the card - or, for a base card +
+    edits folder, the edits' own program when they rebuilt it.  Anything it
+    cannot read is None, never an exception."""
+    from pinball_decryptor.core import colour_profile as cp
+    from pinball_decryptor.plugins.stern import explorer, shader_profile as sp
+    from pinball_decryptor.webui import multiboot_core as mt
+    shader = ("precision highp float;uniform sampler2D t;varying vec2 v;uniform vec4 colorTransformAdd;"
+              "void main(){gl_FragColor = texture2D(t, v);}")
+    rec_prog = b"\x7fELF" + sp.patch_source(shader, dict(cp.PRESETS)["recommended"]).encode() + b"\x00"
+    bw_prog = b"\x7fELF" + sp.patch_source(shader, dict(cp.PRESETS)["bw"]).encode() + b"\x00"
+    stock = b"\x7fELF" + shader.encode() + b"\x00"
+
+    class Entry:
+        def __init__(self, name, is_dir=False, link=None):
+            self.name, self.is_dir, self.is_symlink = name, is_dir, link is not None
+            self.link_target, self.path = link, "/" + name
+
+    class Part:
+        index, browsable = 3, True
+
+    programs = {}
+
+    class FakeCard:
+        def __init__(self, path):
+            if path not in programs:
+                raise OSError("not a card")
+            self.prog = programs[path]
+
+        def partitions(self):
+            return [Part()]
+
+        def list_dir(self, part, path):
+            if path == "/":
+                return [Entry("game", link="turtles_pro/game"), Entry("turtles_pro", True),
+                        Entry("spk", True)]
+            return [Entry("game")]
+
+        def preview(self, part, path, cap=None):
+            assert path == "/turtles_pro/game"
+            return self.prog
+
+        def close(self):
+            pass
+    monkeypatch.setattr(explorer, "CardImage", FakeCard)
+    card = tmp_path / "base.raw"
+    card.write_bytes(bytes(16))
+    programs[str(card)] = rec_prog
+    got = mt.adjustable_profile(str(card))
+    assert got["name"] == "Recommended" and got["gamma"] == [1.1, 1.2, 1.35]
+    programs[str(card)] = stock
+    assert mt.adjustable_profile(str(card)) is None
+    # the edits folder's own program wins over the base card's
+    edits = tmp_path / "edits"
+    (edits / "turtles_pro").mkdir(parents=True)
+    (edits / "overrides.json").write_text("{}")
+    (edits / "turtles_pro" / "game").write_bytes(bw_prog)
+    got = mt.adjustable_profile("%s+%s" % (card, edits))
+    assert got["name"] == "Black and white" and got["saturation"] == 0.0
+    assert mt.adjustable_profile(str(tmp_path / "missing.raw")) is None
+    assert mt.adjustable_profile("") is None

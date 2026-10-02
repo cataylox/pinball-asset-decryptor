@@ -1004,6 +1004,13 @@ class WebMultibootPanel(_Base):
                   "sub": (r.subtitle or "").strip(),
                   "label": "IMAGE %d" % (i + 1)}
                  for i, r in enumerate(self._rows)]
+        # THE SETTINGS CARD where the selector will draw one (PAD-307): last,
+        # and counted, because a fifth card turns the row into a carousel
+        if self._settings_var.get() and self._colour_profiles():
+            cards.append({"i": n, "title": "SETTINGS", "sub": "Color correction",
+                          "label": "", "settings": True})
+        rows = n
+        n = len(cards)
         counter = ""
         if n >= 5:
             page = max(0, min(hl, n - 1)) // 3
@@ -1011,7 +1018,7 @@ class WebMultibootPanel(_Base):
             if self._counter_var.get():
                 counter = "<  %d / %d  >" % (min(hl, n - 1) + 1, n)
         d = mt._int(self._default_var, 0)
-        row = self._rows[d] if 0 <= d < n else None
+        row = self._rows[d] if 0 <= d < rows else None
         # THE INSTRUCTIONS LINE as this card will carry it (PAD-190 round 2):
         # the owner's own words, nothing at all, or - an empty box - the
         # menu's own, which the SELECTOR words per machine.  The sketch has to
