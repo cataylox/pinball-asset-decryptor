@@ -171,6 +171,12 @@ _SWAP = {
         (115, 102, 104, 78, 88), "census"),
     ("metallica_spike", "1.03"): (0xFFFF0000, (735, 734, 705, 715, 709, 710, 724, 698, 657, 714, 701, 706, 725, 723, 736, 737, 100, 704, 713, 726, 711),
         (81,), "census"),
+    # Metallica Remastered 1.04: 1.03's carriers, matched record for record (same lengths, channels, request flags and
+    # exclusivity); its request table has one more record before them, so each id is one higher, and its key mask is
+    # its own (descriptors name 2992 of 2992 records under 0xE0001FFF). Census 2026-10-01 (PAD-306, rig 4): none
+    # played; a mode's start sound 712, shot sound 727 and music 82 played through them, each swapped in.
+    ("metallica_spike", "1.04"): (0xE0001FFF, (736, 735, 706, 716, 710, 711, 725, 699, 658, 715, 702, 707, 726, 724, 737, 738, 101, 705, 714, 727, 712),
+        (82,), "census"),
     ("munsters_le", "1.28"): (0xF80003FF, (426, 565, 417, 422, 421, 423, 436, 184, 420, 434, 428, 425, 433, 431, 435, 429, 418, 424, 432, 430, 419),
         (70, 71, 69, 79, 73), "census"),
     ("rush_le", "1.18"): (0xEFFF0000, (257, 309, 248, 308, 346, 350, 305, 291, 279, 306, 304, 301, 277, 300, 324, 278, 256, 271, 310, 352, 255),

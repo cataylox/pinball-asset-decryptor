@@ -262,9 +262,12 @@ switch 99   0x4000000000       Top lane-right
 switch 100  0x8000000000       Lt ramp exit opto
 
 # ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
-callout countdown           572
-callout ten_seconds         591
-callout time_up             663
+# PAD-306: 1.04's request table has one more record than 1.03's before these, so each id is one higher than
+# 1.03's 572 / 591 / 663 (the same records: 11 sids, 3 sids, one mono 59452-byte record); the mode asked for 592
+# at 10 s left, 573 at 5..1 and 664 at the end in the emulator on the stock 1.04 card (rig 4, muted)
+callout countdown           573
+callout ten_seconds         592
+callout time_up             664
 value countdown_first 1
 
 # ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
