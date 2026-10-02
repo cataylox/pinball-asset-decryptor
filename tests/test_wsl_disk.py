@@ -114,6 +114,110 @@ def test_scan_staging_parses_du(monkeypatch):
     assert entries[1]["manufacturer"] == "Barrels of Fun"
 
 
+# --- the emulators' own folders (PAD-318) ----------------------------------
+
+RIG_DU = (
+    "7000000000\t/var/tmp/pad_ap/cache/tank_26.07.27B\t0\n"
+    "3000000000\t/var/tmp/pad_ap/rig2\t0\n"
+    "2000000000\t/var/tmp/pad_ap/mamba\t0\n"
+    "500000\t/var/tmp/pad_ap/rig4\t0\n"            # under 1 MiB: noise
+    "20000000\t/var/tmp/pad_ap/nv1\t0\n"           # settings: never offered
+    "5000000000\t/var/tmp/pad_spooky/cache/bj_v2026.09.15.11\t1\n"
+    "3300000000\t/var/tmp/pad_spkproc/cache/rm_20220902\t0\n"
+    "3300000000\t/var/tmp/pad_spkproc_decomp/rm\t0\n"
+    "3600000000\t/var/tmp/pad_dp/try1\t0\n"
+    "9\t/etc/passwd\t0\n"                          # not ours: ignored
+)
+
+
+def test_scan_rigs_names_and_sizes_every_emulator_folder(monkeypatch):
+    monkeypatch.setattr(wsl_disk, "_wsl_script", lambda *a, **k: RIG_DU)
+    es = {e["path"]: e for e in wsl_disk.scan_rigs()}
+    assert set(es) == {
+        "/var/tmp/pad_ap/cache/tank_26.07.27B", "/var/tmp/pad_ap/rig2",
+        "/var/tmp/pad_ap/mamba", "/var/tmp/pad_spooky/cache/bj_v2026.09.15.11",
+        "/var/tmp/pad_spkproc/cache/rm_20220902",
+        "/var/tmp/pad_spkproc_decomp/rm", "/var/tmp/pad_dp/try1"}
+    tank = es["/var/tmp/pad_ap/cache/tank_26.07.27B"]
+    assert (tank["manufacturer"], tank["detail"], tank["kind"], tank["live"]) \
+        == ("American Pinball", "Unpacked game: tank_26.07.27B", "game", False)
+    assert es["/var/tmp/pad_ap/rig2"]["detail"] == "Last run's folder (rig 2)"
+    assert es["/var/tmp/pad_ap/mamba"]["kind"] == "env"
+    assert es["/var/tmp/pad_spooky/cache/bj_v2026.09.15.11"]["live"] is True
+    rm = es["/var/tmp/pad_spkproc/cache/rm_20220902"]
+    assert rm["manufacturer"] == "Spooky Pinball"
+    assert rm["detail"] == "Unpacked game: rm_20220902 (P-ROC rig)"
+    assert es["/var/tmp/pad_spkproc_decomp/rm"]["kind"] == "leftover"
+    assert es["/var/tmp/pad_dp/try1"]["detail"] == "Leftover: try1"
+    sizes = [e["size"] for e in wsl_disk.scan_rigs()]
+    assert sizes == sorted(sizes, reverse=True)
+
+
+def test_scan_rigs_sizes_each_root_in_one_du_games_first():
+    """A run folder hard-links the game it ran: one du per root, games
+    listed first, counts those files once (for the game)."""
+    script = wsl_disk._RIG_SCAN
+    assert '"$r"/cache/*/ "$r"/*/' in script
+    assert 'du -sxb "${list[@]}"' in script
+    assert "[/]var/tmp/$n/" in script          # never matches its own grep
+
+
+@pytest.mark.parametrize("path,ok", [
+    ("/var/tmp/pad_ap/cache/tank_26.07.27B", True),
+    ("/var/tmp/pad_ap/cache/name with space", True),
+    ("/var/tmp/pad_ap/rig2", True),
+    ("/var/tmp/pad_ap/mamba", True),
+    ("/var/tmp/pad_ap", False),                 # a whole root
+    ("/var/tmp/pad_ap/cache", False),           # every game at once
+    ("/var/tmp/pad_ap/nv1", False),             # settings and high scores
+    ("/var/tmp/pad_ap/cache/..", False),
+    ("/var/tmp/pad_ap/../../etc", False),
+    ("/var/tmp/pad_ap/cache/x/y", False),
+    ("/var/tmp/pad_ap/rig2; rm -rf /", False),
+    ("/var/tmp/pad_ap/$(whoami)", False),
+    ("/tmp/pad_ap/rig2", False),
+])
+def test_rig_paths_the_delete_guard_allows(path, ok):
+    assert wsl_disk._is_safe_staging_path(path) is ok
+
+
+def test_delete_refuses_an_emulator_whose_game_runs(monkeypatch):
+    calls = []
+    monkeypatch.setattr(wsl_disk, "_wsl_script",
+                        lambda script, timeout=120: calls.append(script)
+                        or "pad_spooky\n")
+    monkeypatch.setattr(wsl_disk, "_wsl_bash",
+                        lambda *a, **k: pytest.fail("deleted while running"))
+    with pytest.raises(wsl_disk.WslDiskError, match="Spooky Pinball"):
+        wsl_disk.delete(["/var/tmp/pad_spooky/cache/bj_v2026.09.15.11",
+                         "/tmp/cgc_stage_pulp_fiction_22680"])
+    assert "for n in pad_spooky;" in calls[0]
+
+
+def test_delete_removes_an_idle_emulators_folder(monkeypatch):
+    calls = []
+    monkeypatch.setattr(wsl_disk, "_wsl_script", lambda *a, **k: "\n")
+    monkeypatch.setattr(wsl_disk, "_wsl_bash",
+                        lambda cmd, timeout=120: calls.append(cmd) or "7\n")
+    assert wsl_disk.delete(["/var/tmp/pad_ap/cache/tank_26.07.27B"]) == 7
+    assert "'/var/tmp/pad_ap/cache/tank_26.07.27B'" in calls[-1]
+    assert "rm -rf" in calls[-1]
+
+
+def test_wsl_script_survives_wsls_own_shell(monkeypatch):
+    """wsl.exe expands $vars before bash sees them: the script crosses as
+    base64."""
+    import base64
+    seen = []
+    monkeypatch.setattr(wsl_disk, "_wsl_bash",
+                        lambda cmd, timeout=120: seen.append(cmd) or "")
+    wsl_disk._wsl_script('echo "$HOME"')
+    b64 = seen[0].split()[1]
+    assert "$" not in seen[0]
+    assert base64.b64decode(b64).decode() == 'echo "$HOME"'
+    assert seen[0].endswith("| base64 -d | bash")
+
+
 # --- formatting ------------------------------------------------------------
 
 @pytest.mark.parametrize("n,expected", [

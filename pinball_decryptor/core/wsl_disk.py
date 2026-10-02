@@ -19,6 +19,10 @@ have to touch ``df`` / ``diskpart`` by hand:
   * :func:`scan_staging`  -- every leftover PAD staging artifact under
                              ``/tmp`` + ``/var/tmp``, attributed to a
                              manufacturer/game, with its on-disk size.
+  * :func:`scan_rigs`     -- what the emulators keep under ``/var/tmp/pad_<rig>``:
+                             unpacked games, run folders, their Python setup,
+                             leftovers (PAD-318) - with whether a game of that
+                             emulator is running.
   * :func:`delete`        -- ``rm -rf`` selected staging paths (prefix-guarded).
   * :func:`vhdx_info`     -- the backing ``.vhdx`` path + its size on the
                              Windows drive, and an estimate of how much a
@@ -30,6 +34,7 @@ Everything is a no-op / "unsupported" off Windows -- the GUI only surfaces the
 button there.
 """
 
+import base64
 import os
 import re
 import shutil
@@ -120,6 +125,15 @@ def _wsl_bash(bash_cmd, timeout=120):
         out = (proc.stderr or "") + (proc.stdout or "")
         raise WslDiskError(out.strip() or f"wsl exited {proc.returncode}")
     return proc.stdout
+
+
+def _wsl_script(script, timeout=120):
+    """Run a multi-line bash *script* as :func:`_wsl_bash` does.  wsl.exe
+    hands its command line to a shell of its own first, which expands every
+    ``$var`` and eats the quotes before bash sees them, so the script goes
+    across base64-encoded and is decoded on the Linux side."""
+    b64 = base64.b64encode(script.encode("utf-8")).decode("ascii")
+    return _wsl_bash("echo %s | base64 -d | bash" % b64, timeout=timeout)
 
 
 def available():
@@ -394,10 +408,145 @@ def scan_staging():
 
 
 # ---------------------------------------------------------------------------
+# The emulators' own folders (PAD-318)
+# ---------------------------------------------------------------------------
+# Every emulator rig keeps everything it writes under one root,
+# /var/tmp/pad_<rig> (tools/*_emu/*path.sh): cache/<build> (a game unpacked
+# from its update - the big ones), rig<N> (a slot's last run), its own Python
+# (py27, py3, mamba, env, site...), nv<N> (settings and high scores - never
+# offered) and whatever else a session left there.  None of it shrinks on its
+# own, and the staging scan above never saw it: a full WSL disk showed
+# "Nothing to clean up".
+
+#: /var/tmp/pad_<rig> -> the maker it emulates, as the dialog groups rows.
+RIG_MAKERS = {
+    "pad_ap": "American Pinball", "pad_apav": "American Pinball",
+    "pad_bof": "Barrels of Fun", "pad_cgc": "Chicago Gaming Company",
+    "pad_cgcpf": "Chicago Gaming Company", "pad_dp": "Dutch Pinball",
+    "pad_pb": "Pinball Brothers", "pad_pbio": "Pinball Brothers",
+    "pad_proc": "P-ROC board", "pad_spooky": "Spooky Pinball",
+    "pad_spkproc": "Spooky Pinball", "pad_spkproc_decomp": "Spooky Pinball",
+}
+#: Roots that are a second rig of the same maker: said beside each entry.
+RIG_VARIANTS = {"pad_apav": "A/V rig", "pad_spkproc": "P-ROC rig",
+                "pad_pbio": "I/O-board rig", "pad_cgcpf": "playfield rig"}
+#: A rig's own Python, re-installed when next needed.
+_RIG_ENVS = ("py27", "py3", "mamba", "env", "bin", "site")
+#: Never offered: settings and high scores (nv<N>), a run's home, mount
+#: points and scratch too small to matter.
+_RIG_KEEP_RE = re.compile(r"^(nv\d*|home|lower|loctmp)$")
+_RIG_MIN_BYTES = 1 << 20
+_RIG_PATH_RE = re.compile(
+    r"^/var/tmp/(pad_[a-z0-9_]+)/(cache/)?([A-Za-z0-9_.\- ]+)$")
+
+# One pass as root: for each rig root, whether a game of it is running (a
+# live pid in any of its *.pid files, or a process whose command line names
+# the root - "[/]" keeps grep from matching its own), then the size of each
+# entry: cache/<build>, and every other top-level folder.  ONE du per root,
+# games first: a run folder hard-links the game it ran, and du counts a file
+# once, for the first entry that has it - so a run folder's size is what it
+# holds of its own, and the rows add up to what deleting them frees.
+_RIG_SCAN = r"""
+for r in /var/tmp/pad_*/; do
+  r=${r%/}; n=${r##*/}
+  case $n in pad_aaiw_*) continue ;; esac
+  live=0
+  for f in "$r"/*.pid "$r"/rig*/*.pid; do
+    [ -f "$f" ] || continue
+    p=$(head -c 20 "$f" | tr -dc 0-9)
+    [ -n "$p" ] && kill -0 "$p" 2>/dev/null && live=1
+  done
+  [ $live = 0 ] && grep -aqlE "[/]var/tmp/$n/" /proc/[0-9]*/cmdline 2>/dev/null && live=1
+  list=()
+  for c in "$r"/cache/*/ "$r"/*/; do
+    [ -d "$c" ] || continue
+    c=${c%/}
+    [ "${c##*/}" = cache ] && continue
+    list+=("$c")
+  done
+  [ ${#list[@]} -gt 0 ] || continue
+  du -sxb "${list[@]}" 2>/dev/null | sed "s/\$/\t$live/"
+done
+true
+"""
+
+
+# Which of these rig roots (%s) has a game running: the scan's test.
+_RIG_BUSY = r"""
+for n in %s; do
+  b=0
+  grep -aqlE "[/]var/tmp/$n/" /proc/[0-9]*/cmdline 2>/dev/null && b=1
+  for f in /var/tmp/$n/*.pid /var/tmp/$n/rig*/*.pid; do
+    [ -f "$f" ] || continue
+    p=$(head -c 20 "$f" | tr -dc 0-9)
+    [ -n "$p" ] && kill -0 "$p" 2>/dev/null && b=1
+  done
+  [ $b = 1 ] && echo "$n"
+done
+true
+"""
+
+
+def _rig_detail(root, sub, name):
+    """(what it is, kind) for one entry of a rig's root."""
+    if root == "pad_spkproc_decomp":
+        return "Leftover: decompiled %s" % name, "leftover"
+    if sub:
+        return "Unpacked game: %s" % name, "game"
+    m = re.match(r"^rig(\d+)$", name)
+    if m:
+        return "Last run's folder (rig %s)" % m.group(1), "run"
+    if name.startswith(_RIG_ENVS):
+        return "The emulator's Python (%s)" % name, "env"
+    return "Leftover: %s" % name, "leftover"
+
+
+def scan_rigs():
+    """The emulators' folders, largest first: ``{path, size, manufacturer,
+    detail, kind, live}`` - kind ``game`` (re-unpacked on its next Start),
+    ``run`` (made again on the next Start), ``env`` (re-installed when next
+    needed), ``leftover``; ``live`` = a game of that emulator is running."""
+    out = _wsl_script(_RIG_SCAN, timeout=600)
+    entries = []
+    for line in out.splitlines():
+        bits = line.rstrip("\r").split("\t")
+        if len(bits) != 3:
+            continue
+        size_str, path, live = bits
+        m = _RIG_PATH_RE.match(path)
+        try:
+            size = int(size_str)
+        except ValueError:
+            continue
+        if not m or size < _RIG_MIN_BYTES or _RIG_KEEP_RE.match(m.group(3)):
+            continue
+        root, sub, name = m.groups()
+        detail, kind = _rig_detail(root, sub, name)
+        if root in RIG_VARIANTS:
+            detail += " (%s)" % RIG_VARIANTS[root]
+        entries.append({"path": path, "size": size,
+                        "manufacturer": RIG_MAKERS.get(root, "Emulator"),
+                        "detail": detail, "kind": kind,
+                        "live": live.strip() == "1"})
+    entries.sort(key=lambda e: e["size"], reverse=True)
+    return entries
+
+
+def _is_rig_path(path):
+    m = _RIG_PATH_RE.match(path)
+    return bool(m) and not m.group(1).startswith("pad_aaiw_") \
+        and not _RIG_KEEP_RE.match(m.group(3)) \
+        and m.group(3) not in (".", "..") \
+        and not (not m.group(2) and m.group(3) == "cache")
+
+
+# ---------------------------------------------------------------------------
 # Delete staging (fast, non-disruptive, no admin needed)
 # ---------------------------------------------------------------------------
 
 def _is_safe_staging_path(path):
+    if _is_rig_path(path):
+        return True
     return (any(path.startswith(p) for p in _ALLOWED_PREFIXES)
             and bool(_SAFE_PATH_RE.match(path))
             and path not in ("/tmp", "/var/tmp", "/"))
@@ -420,6 +569,17 @@ def delete(paths):
     # Measure first (so we can report freed bytes), then unmount-if-mounted and
     # remove.  A crashed DP/JJP run can leave a loop mount under the staging
     # dir; `umount -R` is best-effort so a non-mount is silently fine.
+    # An emulator's folder is never deleted while a game of it runs - checked
+    # again here, not just at scan time (the game may have started since).
+    roots = sorted({_RIG_PATH_RE.match(p).group(1) for p in paths
+                    if _is_rig_path(p)})
+    if roots:
+        busy = _wsl_script(_RIG_BUSY % " ".join(roots), timeout=60).split()
+        if busy:
+            raise WslDiskError(
+                "A game is running in %s - stop it on its Emulate tab "
+                "first; nothing was deleted." % ", ".join(
+                    sorted({RIG_MAKERS.get(b, b) for b in busy})))
     quoted = " ".join("'%s'" % p for p in paths)
     freed_out = _wsl_bash(
         f"du -scxb {quoted} 2>/dev/null | tail -1 | cut -f1", timeout=120)
