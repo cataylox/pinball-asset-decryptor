@@ -1067,7 +1067,9 @@ HELP_CONTENT = {
         ("As on the machine (Scenes)",
          "The Scenes preview is drawn the way the machine's screen will show "
          "it: through the whole screen overlay, then through the screen "
-         "itself (the individual files profile, undone). The game's own art "
+         "itself (the Machine screen on the Color profile tab, which you can "
+         "adjust; until you do, the individual files profile, undone). The "
+         "game's own art "
          "and a file left in its own colors look the way the machine really "
          "shows them; a picture with the profile switched on comes back to "
          "what your PC shows. Untick As on the machine, beside Behind, for "
