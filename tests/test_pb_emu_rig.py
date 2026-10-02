@@ -243,6 +243,27 @@ def test_the_game_loads_nothing_from_the_rigs_own_folder():
     assert "LD_PRELOAD=$PB_RIG/pbshim.so" in src
 
 
+def test_the_shim_unlocks_memory_so_the_game_has_sound():
+    """pinprog's mlockall(MCL_FUTURE) made PulseAudio's shared-memory pool
+    fail with EAGAIN under PAD-Runtime's 64 MB memlock limit: no sound at
+    all (PAD-313).  The shim makes it a no-op."""
+    src = (RIG / "pbshim.c").read_text()
+    assert re.search(r"int mlockall\(int flags\) \{\s*\(void\)flags;\s*return 0;", src)
+
+
+def test_a_desktop_run_gets_a_window_that_moves_and_scales():
+    """vidprog asks SDL for a BORDERLESS 1920x1080 window - a slab with no
+    title bar on the desktop (PAD-313).  A visible run sets PB_WINDOWED, the
+    shim drops BORDERLESS/FULLSCREEN, makes it resizable at a size that fits,
+    and scales the game's 1920x1080 picture into it; a hidden run is left
+    exactly as the machine makes it."""
+    src = (RIG / "pbshim.c").read_text()
+    assert "SDL_CreateWindow" in src and "SDL_RenderSetLogicalSize" in src
+    assert "PB_SDL_BORDERLESS" in src and "PB_SDL_RESIZABLE" in src
+    run = (RIG / "run_game.sh").read_text()
+    assert "PB_WINDOWED=${PB_WINDOWED:-$VISIBLE}" in run
+
+
 def test_a_failed_start_shows_the_games_last_words():
     """`tail -20 a b` is refused ("option used in invalid context"), so a
     start that failed said only "did not reach attract" - not why (PAD-313)."""
