@@ -2511,6 +2511,24 @@ HELP_CONTENT = {
          "Leave it alone and the app builds and installs the menu program "
          "there itself; point it somewhere of your own and that directory "
          "is checked and never written into."),
+        ("The SETTINGS card at the end of the menu",
+         "End the menu with a SETTINGS card in Menu settings (Stern, on by "
+         "default) puts one more card after the last image, with a gear on "
+         "it, whenever an image's game carries an adjustable color profile; "
+         "the preview draws it in exactly those cases, and a card built "
+         "with v1.60.x shows none until it is rebuilt. On the machine, "
+         "Settings > Color correction changes each game's color "
+         "correction without a computer: Start from (As built, "
+         "Recommended, No change, Black and white), middle shades and "
+         "color level per channel, color strength and darkest shades, with "
+         "the Color profile tab's test card on the glass corrected live as "
+         "the values move, then Save for this game or Save for every game. "
+         "The values reach the game at its next start - the game program "
+         "is copied into RAM with the new numbers in its drawing shaders, "
+         "the games partition is never written, and any failure runs the "
+         "program as built. No countdown runs inside Settings; on the card "
+         "the countdown boots the game the menu opened on, and two idle "
+         "minutes leave Settings without saving."),
         ("The heading across the top of the menu",
          "Heading in Menu settings is the line the machine draws above "
          "the cards. It reads SELECT GAME CODE because that is what the "

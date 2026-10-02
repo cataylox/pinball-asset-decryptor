@@ -1939,6 +1939,26 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    cut to the glass like every other line the menu draws, and a card
    that never asked for a heading is still written byte for byte the way
    it always was.
+   **A SETTINGS card at the end of the menu** from v1.62.0: Menu
+   settings has the tick **End the menu with a SETTINGS card** (Stern,
+   on by default), and the card, with a gear on it, follows the last
+   image whenever an image's game carries an adjustable color profile;
+   the tab's preview draws it in exactly those cases. On the machine,
+   Settings > Color correction lets the operator change each game's
+   color correction without a computer: Start from (As built,
+   Recommended, No change, Black and white), middle shades and color
+   level per channel, color strength and darkest shades, with the Color
+   profile tab's test card on the glass corrected live as the values
+   move, then Save for this game or Save for every game. The saved
+   values reach the game at its next start: the boot hook copies the
+   game program into RAM with the new numbers in its drawing shaders
+   and binds the copy over the original, so the games partition is
+   never written and any failure runs the program as built. No
+   countdown runs inside Settings; on the card itself the countdown
+   boots the game the menu opened on, and two idle minutes leave
+   Settings without saving. Builds now write the color profile in one
+   fixed shape so it can be adjusted; a card built with v1.60.x has no
+   slot to adjust and shows no SETTINGS card until it is rebuilt.
    **Every sound in the tab can be heard without leaving it.** A ▶ Play
    button sits beside the Browse… for the move click, the confirm
    stinger and an image's music, in Menu settings and in Edit image
