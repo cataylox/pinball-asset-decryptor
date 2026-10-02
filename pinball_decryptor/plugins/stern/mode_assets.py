@@ -480,9 +480,13 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
         folder = MP.mode_folder(project, slug)
         art = (load_art(os.path.join(folder, spec.screen_art)) if spec.screen_art
                else panel_art(spec.screen_title or spec.name, spec.panel_color, spec.title_color))
+        x, y, words_at = screen_place(art)                 # PAD-314: a big picture stays on the glass
+        if words_at is not None:                           # ... with its words on a darkened band of it
+            art = band_art(art)
         screens.append(dict(name=names["screen_node"], art_rgba=art,
                             words="%s A SHOT" % "{:,}".format(int(spec.award)),
-                            words_name=names["screen_text"].split(".", 1)[1]))
+                            words_name=names["screen_text"].split(".", 1)[1],
+                            x=x, y=y, words_at=words_at))
     screens += _code_screens(project, code, prof)
     huds = _code_huds(code, prof, hud_font)
 
@@ -621,6 +625,39 @@ def _add_second_clip(project, slug, spec, bank, parsed, prof, out_dir, ffmpeg, r
 
 
 # ---- a CODE mode's own screen and clip (the intricate modes' own audio and video) --------------
+def screen_place(art, words_at=None):
+    """Where a mode's screen goes on the glass (PAD-314, Ales's Metallica picture): ``(x, y,
+    words_at)`` for :func:`.scene_write.screen`. The generated 640x160 panel sits where it always
+    has (360, 200: the band under the HUD's top row); any other picture is centred on that band's
+    middle and kept on the glass, so a big picture of the player's own fills the screen from its
+    top-left corner instead of running off it from the panel's. The words go under the picture as
+    before unless that would put them below the glass, when they go on the picture's bottom band
+    (``words_at`` given, as a code mode's ``words_on_art``, is kept)."""
+    from .mode_hud import GLASS_W, GLASS_H
+    h, w = (int(v) for v in np.asarray(art).shape[:2])
+    cx, cy = 360.0 + 320.0, 200.0 + 80.0
+    x = min(max(cx - w / 2.0, 0.0), max(GLASS_W - w, 0.0))
+    y = min(max(cy - h / 2.0, 0.0), max(GLASS_H - h, 0.0))
+    if words_at is None and y + h + 50.0 + 8.0 > GLASS_H:
+        words_at = code_words_at(art)
+    return float(x), float(y), words_at
+
+
+def band_art(art, band=72):
+    """``art`` (RGBA array) with its bottom *band* pixels darkened, a gradient to 85% black, as
+    :func:`.code_modes.compose_art` gives a code mode's film frame: the words a form mode puts on
+    a big picture of the player's own (PAD-314, Ales: "+1,000,000" never showed with a picture)
+    read over any picture. A copy; the mode's PNG is untouched."""
+    out = np.array(art, dtype=np.uint8, copy=True)
+    h = out.shape[0]
+    band = min(int(band), h // 2)
+    for y in range(h - band, h):
+        a = min(1.0, (y - (h - band)) / max(1.0, band * 0.35)) * 217 / 255.0
+        out[y, :, :3] = np.round(out[y, :, :3].astype(np.float32) * (1.0 - a)).astype(np.uint8)
+        out[y, :, 3] = np.maximum(out[y, :, 3], int(round(a * 255)))
+    return out
+
+
 def code_words_at(art):
     """Where a code mode's words go when its picture carries a band for them (``words_on_art``):
     14 px above the picture's bottom edge, so the text box (40 px above its line, 8 below) sits on
@@ -642,9 +679,11 @@ def _code_screens(project, code, prof):
         folder = MP.mode_folder(project, slug)
         art = (load_art(os.path.join(folder, spec.screen_art)) if spec.screen_art
                else panel_art(spec.name, spec.panel_color, spec.title_color))
+        x, y, words_at = screen_place(                     # PAD-314: a big picture stays on the glass
+            art, code_words_at(art) if (spec.screen_art and spec.words_on_art) else None)
         out.append(dict(name=names["screen_node"], art_rgba=art, words=spec.name,
                         words_name=names["screen_text"].split(".", 1)[1],
-                        words_at=code_words_at(art) if (spec.screen_art and spec.words_on_art) else None))
+                        x=x, y=y, words_at=words_at))
     return out
 
 

@@ -1809,6 +1809,7 @@ static void mode_start(struct slot *M, const char *why)
 static void mode_end(const char *why)
 {
     struct slot *M = run.slot;
+    uint64_t net;
     if (!run.active || !M) return;
     run.active = 0;
     starts_ended(M);
@@ -1821,15 +1822,18 @@ static void mode_end(const char *why)
     own_lights_end(M);                       /* item mode-leds: the game has its inserts back */
     if (cfg.light_off[0]) lights(M, cfg.light_off);
     if (cfg.clip_end[0] && !clip_after_shot(cfg.clip_end, "mode end", why)) clip_now(cfg.clip_end, "mode end");
+    /* PAD-314 (Ales): the total is NET of the penalty shots - "TOTAL -500,000" when they took more */
+    net = run.total >= run.lost ? run.total - run.lost : run.lost - run.total;
     if (own_screen(M)) {
-        words(M, "TOTAL ", run.total, "");
+        words(M, run.total >= run.lost ? "TOTAL " : "TOTAL -", net, "");
         M->hide_ticks = (cfg.restore_after ? cfg.restore_after : 4) * TICKS_PER_S;
     } else {
-        if (cfg.total_msg) pm_award_screen(cfg.screen_type, cfg.total_msg, run.total);
+        if (cfg.total_msg) pm_award_screen(cfg.screen_type, cfg.total_msg, run.total >= run.lost ? net : 0);
         run.restore_ticks = cfg.restore_after * TICKS_PER_S;
     }
-    pm_log("%s END (%s): %u shots, awarded %llu, lost %llu, score %llu -> %llu, %lu ms wall", cfg.name, why,
-           run.hits, (unsigned long long)run.total, (unsigned long long)run.lost, (unsigned long long)run.score_at_start,
+    pm_log("%s END (%s): %u shots, awarded %llu, lost %llu, total %s%llu, score %llu -> %llu, %lu ms wall", cfg.name,
+           why, run.hits, (unsigned long long)run.total, (unsigned long long)run.lost,
+           run.total >= run.lost ? "" : "-", (unsigned long long)net, (unsigned long long)run.score_at_start,
            (unsigned long long)pm_score(run.player), pm_ms() - run.started_ms);
 }
 

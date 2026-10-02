@@ -888,9 +888,13 @@ def test_tryit_through_the_real_emulate_service(tmp_path, preview_on, monkeypatc
             w.call("ui.select_tab", "modes")
             w.call("modes.new")
 
-            # preflight, then the hand-off: the Emulate tab comes forward
+            # preflight, then the hand-off: the page STAYS on Modes (PAD-314, Ales), where the
+            # mode being tried is open; the footer's "Emulate tab" button goes there on purpose
             assert w.call("modes.tryit") is True
+            assert w.state("shell")["tab"] == "modes"
+            assert w.call("modes.goto_emulate") is True
             assert w.state("shell")["tab"] == "emulate"
+            w.call("ui.select_tab", "modes")
             assert wait_for(w, lambda: any(k == "popen" for k, _c in events), 15), \
                 w.state("modes")["tryit_line"]
             # the rig check first, then the install, THEN watch.sh
