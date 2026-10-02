@@ -90,11 +90,13 @@ TIPS = {
     "machine": "Drawn the way the machine's screen will show it: through the "
                "whole screen overlay, if one is set, and then through the "
                "screen itself, which shows middle shades too bright and too "
-               "blue (the Color profile tab's individual files profile, "
-               "undone). A picture with that profile switched on comes back "
-               "to what your PC shows; the game's own art, and a file left "
-               "in its own colors, look the way the machine really shows "
-               "them. Untick to see every picture in the PC's own colors.",
+               "blue. The screen is the Color profile tab's Machine screen, "
+               "and you can adjust it there; until you do, it is the "
+               "individual files profile, undone. A picture with that "
+               "profile switched on comes back to what your PC shows; the "
+               "game's own art, and a file left in its own colors, look the "
+               "way the machine really shows them. Untick to see every "
+               "picture in the PC's own colors.",
     "behind": "What the scene is laid over.\n\nThe machine draws on BLACK, "
               "so that is the true picture — but a black outline on a black "
               "frame is as invisible here as it is there. Pick a light "
