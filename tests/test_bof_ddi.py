@@ -142,6 +142,23 @@ def test_is_ddi_detects_gpt_erofs(tmp_path):
     assert not dc.is_ddi(str(other))
 
 
+def test_bonjovi_status_shown_in_app(tmp_path):
+    """The app must tell users Bon Jovi is extract-only and how to help."""
+    from pinball_decryptor.plugins.bof.manufacturer import BOFManufacturer
+    fun = tmp_path / "bon-jovi_2099.01.01.fun"
+    fun.write_bytes(_nested_fun({"BonJovi.x86_64": b"X" * 50}))
+    m = BOFManufacturer()
+    g = m.detect(str(fun))
+    assert g is not None and g.key == "bonjovi"
+    sections = m.image_info(str(fun))
+    assert sections and sections[0][0] == "Bon Jovi"
+    rows = dict(sections[0][1])
+    assert "Not available yet" in rows["Installable update"]
+    assert "help" in rows["How you can help"].lower()
+    # a GPG title gets no Bon Jovi section
+    assert m.image_info("dune.fun") == []
+
+
 def test_extract_game_binaries(tmp_path):
     big = bytes((i * 7) & 0xFF for i in range(9000))     # spans >1 block
     games = {"BonJovi.x86_64": big, "JayAndBob.x86_64": b"second game"}
