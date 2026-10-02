@@ -300,6 +300,17 @@ class EmulateBoFTab(RigTabMixin, TabService):
             compat.messagebox.showinfo("Emulate", "There is no file at\n%s"
                                        % fun)
             return
+        # Bon Jovi can't be emulated yet: its .fun is a signed disk image the
+        # rig's decrypt step can't open, and it has no hardware profile.  Say
+        # so up front instead of failing deep in watch.sh.
+        try:
+            from pinball_decryptor.plugins.bof.pipeline import detect_game
+            from pinball_decryptor.plugins.bof.manufacturer import BONJOVI_EMU
+            if detect_game(fun) == "bonjovi":
+                compat.messagebox.showinfo("Emulate", BONJOVI_EMU)
+                return
+        except Exception:
+            pass
         if self._refuse_off():
             return
         self._busy = True

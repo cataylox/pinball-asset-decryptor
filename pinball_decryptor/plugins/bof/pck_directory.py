@@ -53,6 +53,7 @@ trailer ``pck_size``), and the whole thing is streamed to disk.
 
 import hashlib
 import os
+import re
 import struct
 import sys
 
@@ -103,10 +104,32 @@ def _aes_ecb_block(key, block16):
     return AES.new(key, AES.MODE_ECB).encrypt(block16)
 
 
+def _lea_rip_target(binary, lo, hi):
+    """Return the file offset loaded by the LAST ``lea reg,[rip+disp32]``
+    in ``binary[lo:hi]`` (closest to ``hi``), or None.  Matches REX.W/.R
+    (0x48/0x4c) + 0x8d + ModRM mod=00 rm=101 (``..000101`` -> the eight
+    bytes 05/0d/15/1d/25/2d/35/3d).  The ELF is identity-mapped (vaddr ==
+    file offset for the loaded binaries we read), so the target offset is
+    ``insn_end + disp``."""
+    found = None
+    i = max(0, lo)
+    end = min(hi, len(binary) - 7)
+    while i < end:
+        if binary[i] in (0x48, 0x4c) and binary[i + 1] == 0x8d \
+                and (binary[i + 2] & 0xc7) == 0x05:
+            disp = struct.unpack("<i", binary[i + 3:i + 7])[0]
+            off = i + 7 + disp
+            if 0 <= off <= len(binary) - 32:
+                found = off
+        i += 1
+    return found
+
+
 def _find_token(binary):
     """Locate the 32-byte Security::TOKEN by finding the key-derivation
     code fingerprint and decoding the ``lea r15,[rip+disp32]`` that loads
-    TOKEN just before it.  Returns the bytes, or None."""
+    TOKEN just before it.  Returns the bytes, or None.  (Dune/Winchester-era
+    transform; see :func:`_derive_key`.)"""
     fp = binary.find(_KEY_XFORM_FP)
     if fp < 0:
         return None
@@ -117,6 +140,66 @@ def _find_token(binary):
             if 0 <= off and off + 32 <= len(binary):
                 return binary[off:off + 32]
     return None
+
+
+# Godot-4.7 (Bon Jovi) directory-key derivation, recovered from
+# FileAccessEncrypted::open_and_parse:
+#     key[i] = ((CONST[i] | TOKEN[i]) + TOKEN[i]) ^ XOR      (i = 0..31)
+# CONST is a 32-byte .data constant (brute-forced like the Dune script key),
+# TOKEN a 32-byte .rodata table loaded by a ``lea`` just before the loop.
+# The loop body is ``or r1,r2 ; add r1,r2 ; xor r1,imm8`` on the same two
+# registers; we match it register-agnostically and read XOR + TOKEN from it.
+_BJ_DERIV_RE = re.compile(rb"\x09(.)\x01\1\x83([\xf0-\xf7])(.)", re.DOTALL)
+
+
+def _derive_key_bj(const, token, xor_imm):
+    return bytes(
+        (((const[i] | token[i]) + token[i]) ^ xor_imm) & 0xff
+        for i in range(32))
+
+
+def _exec_progbits(binary):
+    """Yield (file_off, size) of executable PROGBITS sections (.text)."""
+    if binary[:4] != b"\x7fELF":
+        return
+    try:
+        e_shoff = struct.unpack("<Q", binary[0x28:0x30])[0]
+        ent = struct.unpack("<H", binary[0x3a:0x3c])[0]
+        num = struct.unpack("<H", binary[0x3c:0x3e])[0]
+    except struct.error:
+        return
+    for i in range(num):
+        sh = binary[e_shoff + i * ent: e_shoff + (i + 1) * ent]
+        if len(sh) < 40:
+            break
+        sh_type = struct.unpack("<I", sh[4:8])[0]
+        sh_flags = struct.unpack("<Q", sh[8:16])[0]
+        sh_off = struct.unpack("<Q", sh[24:32])[0]
+        sh_size = struct.unpack("<Q", sh[32:40])[0]
+        if sh_type == 1 and (sh_flags & 0x4):           # PROGBITS + SHF_EXECINSTR
+            yield sh_off, sh_size
+
+
+def _find_bj_schemes(binary):
+    """Yield ``(token_bytes, xor_imm)`` for every Godot-4.7 key-derivation
+    loop found in the binary's executable sections."""
+    ranges = list(_exec_progbits(binary))
+    if not ranges:
+        ranges = [(0, len(binary))]
+    seen = set()
+    for off, size in ranges:
+        region = binary[off:off + size]
+        for m in _BJ_DERIV_RE.finditer(region):
+            xor_imm = m.group(3)[0]      # imm8 of `xor r32, imm8` (83 /6 ib)
+            pos = off + m.start()
+            tok_off = _lea_rip_target(binary, pos - 256, pos)
+            if tok_off is None:
+                continue
+            token = bytes(binary[tok_off:tok_off + 32])
+            key = (token, xor_imm)
+            if key not in seen:
+                seen.add(key)
+                yield token, xor_imm
 
 
 def _writable_progbits(binary):
@@ -143,13 +226,27 @@ def _writable_progbits(binary):
 
 
 def _discover_key(binary, iv, ciphertext, plaintext_len, dir_md5):
-    """Recover the directory AES key with no hard-coded offsets: TOKEN from
-    the code fingerprint, script_encryption_key brute-forced over .data
-    using the directory's stored md5 as the success oracle."""
-    token = _find_token(binary)
-    if token is None:
+    """Recover the directory AES key with no hard-coded offsets.
+
+    The 32-byte constant (Dune's ``script_encryption_key`` / Bon Jovi's
+    CONST) is brute-forced over the writable ``.data`` sections, using the
+    directory's stored md5 as the success oracle.  Two key-derivation
+    transforms are tried per candidate so one path serves every BoF build:
+    the Dune/Winchester transform (TOKEN via :func:`_find_token`) and the
+    Godot-4.7/Bon Jovi transform (TOKEN + XOR via :func:`_find_bj_schemes`).
+    """
+    # Bind each recovered TOKEN to a derive(sek)->key closure.
+    derivers = []
+    dune_tok = _find_token(binary)
+    if dune_tok is not None:
+        derivers.append(lambda sek, t=dune_tok: _derive_key(sek, t))
+    for tok, xor_imm in _find_bj_schemes(binary):
+        derivers.append(
+            lambda sek, t=tok, x=xor_imm: _derive_key_bj(sek, t, x))
+    if not derivers:
         raise DirectoryError(
             "couldn't find the key-derivation code — unknown BOF build?")
+
     full_ct = ciphertext[:((plaintext_len + 15) // 16 * 16)]
     ct16 = full_ct[:16]
     for sec_off, sec_size in _writable_progbits(binary):
@@ -157,18 +254,20 @@ def _discover_key(binary, iv, ciphertext, plaintext_len, dir_md5):
             sek = binary[w:w + 32]
             if len(set(sek)) < 24:        # a real 32-byte key has high diversity
                 continue
-            key = _derive_key(sek, token)
-            # CFB first block: pt[0:16] = ct[0:16] ^ AES_ECB(key, iv)
-            f16 = bytes(a ^ b for a, b in zip(ct16, _aes_ecb_block(key, iv)))
-            pl = struct.unpack("<I", f16[:4])[0]
-            if not (4 < pl < 512):
-                continue
-            # entry path should start with a printable res path char
-            if not all(48 <= c < 123 or c in (46, 47, 95, 45) for c in f16[4:11]):
-                continue
-            body = _aes_cfb(key, iv, full_ct)[:plaintext_len]
-            if hashlib.md5(body).digest() == dir_md5:
-                return key
+            for derive in derivers:
+                key = derive(sek)
+                # CFB first block: pt[0:16] = ct[0:16] ^ AES_ECB(key, iv)
+                f16 = bytes(a ^ b for a, b in zip(ct16, _aes_ecb_block(key, iv)))
+                pl = struct.unpack("<I", f16[:4])[0]
+                if not (4 < pl < 512):
+                    continue
+                # entry path should start with a printable res path char
+                if not all(48 <= c < 123 or c in (46, 47, 95, 45)
+                           for c in f16[4:11]):
+                    continue
+                body = _aes_cfb(key, iv, full_ct)[:plaintext_len]
+                if hashlib.md5(body).digest() == dir_md5:
+                    return key
     raise DirectoryError(
         "couldn't recover the directory AES key (script key not in .data?)")
 
@@ -245,7 +344,7 @@ def _parse(binary_path, binary):
     if pck_off < 0 or pck_off + 104 > len(binary):
         return None
     hdr = binary[pck_off:pck_off + 104]
-    if hdr[:4] not in (b"GDPC", b"GBOF"):
+    if hdr[:4] not in (b"GDPC", b"GBOF", b"RHBP"):
         return None
     version = struct.unpack("<I", hdr[4:8])[0]           # pack_format_version
     if version < 2:

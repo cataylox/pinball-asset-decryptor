@@ -14,6 +14,45 @@ from .games import FUN_FILE_TO_GAME, GAME_DB
 from .pipeline import DecryptPipeline, ModifyPipeline, detect_game
 
 
+# ---------------------------------------------------------------------------
+# Bon Jovi status + volunteer call-to-action
+#
+# Bon Jovi ships as a signed systemd disk image (GPT + dm-verity + a vendor
+# signature), not the old GPG tarball.  Extracting and editing its assets works
+# fully; building an installable update does not, because re-signing the image
+# needs information we can only get from a physical machine.  These strings are
+# shown in the app (Image Info / Extract / Write) so an owner knows what works
+# and how they can help unlock image building.  No em dashes (shipped text).
+# ---------------------------------------------------------------------------
+BONJOVI_BADGE = ("Bon Jovi: you can extract assets, but changes can't be "
+                 "built into an installable update yet (see Image Info).")
+
+BONJOVI_WHY = ("Bon Jovi ships as a signed disk image, so rebuilding an "
+               "installable update needs information we can only get from a "
+               "physical machine.")
+
+BONJOVI_HELP = (
+    "If you own a Bon Jovi machine and want to help unlock image building and "
+    "emulation, the most useful thing is a full image of the machine's "
+    "internal drive (the NVMe), and whether a modified image can be written "
+    "back to it. The same drive image also lets us build the emulator's board "
+    "and switch profile. The game boots without a signature check, so a "
+    "modified drive image runs as-is and no vendor key is needed. Rough steps: "
+    "boot the machine from a Linux USB stick, image the internal NVMe to an "
+    "external drive, and send the image over. Being able to write a test image "
+    "back and report whether it boots would confirm the whole path. Get in "
+    "touch first and we will walk you through it.")
+
+# Shown when someone tries to emulate Bon Jovi (its .fun is a signed disk
+# image the emulator can't open, and it has no hardware profile yet).
+BONJOVI_EMU = (
+    "Emulation is not available for Bon Jovi yet. Its .fun is a signed disk "
+    "image, not the format the emulator opens, and the emulator also needs a "
+    "board and switch profile for the machine, which we build from a real "
+    "machine. You can still extract its assets to view or reuse. See the Image "
+    "Info window for how you can help.")
+
+
 _GAMES = tuple(sorted(
     (Game(key=k, display=info["display"], manufacturer_key="bof")
      for k, info in GAME_DB.items()),
@@ -192,10 +231,28 @@ class BOFManufacturer(Manufacturer):
         return Game(key=key, display=info["display"], manufacturer_key="bof")
 
     def image_info(self, path, assets_dir=None):
-        # The .fun itself is opaque (encrypted PCK); the version date only
-        # becomes readable once the update files are extracted.  The game
-        # applies a .fun only if its date is strictly newer than what's
-        # installed, so both dates matter when comparing releases.
+        # Bon Jovi: surface what works and how to help unlock image building,
+        # whether or not the user has extracted yet.
+        try:
+            is_bonjovi = detect_game(path) == "bonjovi"
+        except Exception:
+            is_bonjovi = False
+        if is_bonjovi:
+            return [("Bon Jovi", [
+                ("Extract assets", "Works now: audio, images, video, fonts "
+                                   "(to view or reuse)"),
+                ("Apply edits / build update", "Not available yet, so editing "
+                                               "an asset has no effect for now"),
+                ("Emulate", "Not available yet"),
+                ("Why", BONJOVI_WHY),
+                ("How you can help", BONJOVI_HELP),
+            ])]
+
+        # The GPG titles: the .fun itself is opaque (encrypted PCK); the
+        # version date only becomes readable once the update files are
+        # extracted.  The game applies a .fun only if its date is strictly
+        # newer than what's installed, so both dates matter when comparing
+        # releases.
         if not (assets_dir and os.path.isdir(assets_dir)):
             return []
         from .pipeline import peek_next_update_version
@@ -269,12 +326,20 @@ class BOFManufacturer(Manufacturer):
                              loop_names=loop_names)
 
     def extract_input_help(self):
-        return ("Decrypt a Barrels of Fun `.fun` update file (Labyrinth, "
-                "Dune, Winchester). Requires GPG; the game's assets are "
-                "unpacked from the Godot PCK natively (GDRE Tools only for "
-                "Godot 3 packs).")
+        return ("Open a Barrels of Fun `.fun` update file (Labyrinth, Dune, "
+                "Winchester, Bon Jovi) and unpack its assets. Labyrinth, Dune "
+                "and Winchester need GPG; Bon Jovi's newer signed disk image "
+                "is unwrapped natively. Assets come out of the Godot PCK "
+                "natively (GDRE Tools only for older Godot 3 packs). "
+                "Note: for Bon Jovi you can extract assets to view or reuse, "
+                "but changes can't be built into an installable update yet, so "
+                "editing has no effect for now (see the Image Info window for "
+                "why, and how you can help).")
 
     def write_install_help(self):
         return ("1. Copy the output .fun file to a USB drive (FAT32).\n"
                 "2. Insert the USB drive into the machine and follow the "
-                "on-screen update prompts.")
+                "on-screen update prompts.\n\n"
+                "Bon Jovi note: " + BONJOVI_WHY + " You can still extract its "
+                "assets to view or reuse, but changes can't be built in yet. "
+                + BONJOVI_HELP)

@@ -85,6 +85,67 @@ def _build_crafted_elf(sek, token):
     return bytes(buf)
 
 
+def _build_crafted_elf_bj(const, token, xor_imm=0x5d):
+    """Tiny ELF exercising the Godot-4.7 (Bon Jovi) key path: an executable
+    PROGBITS section holding ``lea r13,[rip+disp]`` (-> token) followed by the
+    derivation loop ``or;add;xor imm8``, plus a writable PROGBITS section
+    holding ``const``.  Enough for ``_exec_progbits`` + ``_find_bj_schemes`` +
+    ``_writable_progbits`` to recover the key for real."""
+    buf = bytearray()
+    buf += b"\x7fELF" + b"\x02\x01\x01\x00" + b"\x00" * 8
+    buf += b"\x00" * (64 - len(buf))
+    code_off = len(buf)
+    lea_off = len(buf)
+    buf += b"\x4c\x8d\x2d" + b"\x00\x00\x00\x00"            # lea r13,[rip+disp]
+    buf += b"\x90" * 8                                      # filler
+    buf += b"\x09\xd3\x01\xd3\x83\xf3" + bytes([xor_imm])   # or;add;xor imm8
+    code_end = len(buf)
+    token_off = len(buf)
+    buf += token
+    const_off = len(buf)
+    buf += const
+    struct.pack_into("<i", buf, lea_off + 3, token_off - (lea_off + 7))
+
+    def _sh(stype, flags, off, size):
+        s = bytearray(64)
+        struct.pack_into("<I", s, 4, stype)
+        struct.pack_into("<Q", s, 8, flags)
+        struct.pack_into("<Q", s, 24, off)
+        struct.pack_into("<Q", s, 32, size)
+        return bytes(s)
+
+    e_shoff = len(buf)
+    buf += b"\x00" * 64                                     # null section
+    buf += _sh(1, 0x4, code_off, code_end - code_off)       # PROGBITS + EXEC
+    buf += _sh(1, 0x1, const_off, 32)                       # PROGBITS + WRITE
+    struct.pack_into("<Q", buf, 0x28, e_shoff)
+    struct.pack_into("<H", buf, 0x3a, 64)
+    struct.pack_into("<H", buf, 0x3c, 3)
+    return bytes(buf)
+
+
+def _build_encrypted_pck_bj(files, const, token, base=104, xor_imm=0x5d):
+    from Crypto.Cipher import AES
+    prefix = _build_crafted_elf_bj(const, token, xor_imm)
+    body, filedata, total = _dir_body(files, base)
+    key = pd._derive_key_bj(const, token, xor_imm)
+    iv = bytes(range(16))
+    pad = (16 - len(body) % 16) % 16
+    ct = AES.new(key, AES.MODE_CFB, iv=iv, segment_size=128).encrypt(body + b"\x00" * pad)
+    dir_blob = (struct.pack("<I", len(files)) + hashlib.md5(body).digest()
+                + struct.pack("<Q", len(body)) + iv + ct)
+    hdr = bytearray(104)
+    hdr[0:4] = b"RHBP"                              # Bon Jovi PCK magic
+    struct.pack_into("<I", hdr, 4, 3)
+    struct.pack_into("<III", hdr, 8, 4, 7, 2)
+    struct.pack_into("<I", hdr, 20, 3)             # DIR_ENCRYPTED | REL_FILEBASE
+    struct.pack_into("<Q", hdr, 24, base)
+    dir_off = base + total
+    struct.pack_into("<Q", hdr, 32, dir_off)
+    pck = bytes(hdr) + filedata + dir_blob
+    return prefix + pck + struct.pack("<Q", len(pck)) + b"RHBP"
+
+
 def _build_encrypted_pck(files, sek, token, base=104):
     from Crypto.Cipher import AES
     prefix = _build_crafted_elf(sek, token)
@@ -164,6 +225,31 @@ def test_encrypted_directory_roundtrip(tmp_path):
     # read() must transparently discover the key + decrypt
     d = pd.read(str(_w(tmp_path, "g.x86_64", binary)))
     assert d.encrypted and d.key == pd._derive_key(sek, token)
+    _roundtrip(tmp_path, binary)
+
+
+def test_derive_key_bj_matches_engine():
+    # The exact constants recovered from the real Bon Jovi binary, and the
+    # AES key they must produce (verified against the directory md5 oracle).
+    const = bytes.fromhex("92f1247e5c53002867cf9ccf8b7b2377"
+                          "e01439ff49d4bdf02d22c4f4e78aae4e")
+    token = bytes.fromhex("4eff7bee3c7bed4ecab9ecd6ca7f19e4"
+                          "3920152c847cd6f8bf3e10f45590dca6")
+    key = pd._derive_key_bj(const, token, 0x5d)
+    assert key.hex() == ("71a3a7b1e5ab87e1e4e5b5e8c8a30986"
+                         "6f090f760c2588ad2321b9b5117787c9")
+
+
+def test_bonjovi_encrypted_directory_roundtrip(tmp_path):
+    const = bytes(range(31, 31 + 32))      # arbitrary high-diversity 32 bytes
+    token = bytes(range(70, 70 + 32))
+    files = [(b".godot/exported/133200997/export-0", b"RSRC" + b"\x11" * 640),
+             (b".godot/imported/BoF_BJ.wav-h.sample", b"RSRC" + b"\x22" * 1500),
+             (b".godot/imported/intro.png-h.ctex", b"GST2" + b"\x33" * 900)]
+    binary = _build_encrypted_pck_bj(files, const, token)
+    d = pd.read(str(_w(tmp_path, "bonjovi.x86_64", binary)))
+    assert d is not None and d.encrypted
+    assert d.key == pd._derive_key_bj(const, token, 0x5d)
     _roundtrip(tmp_path, binary)
 
 
