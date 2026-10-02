@@ -481,6 +481,8 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
         art = (load_art(os.path.join(folder, spec.screen_art)) if spec.screen_art
                else panel_art(spec.screen_title or spec.name, spec.panel_color, spec.title_color))
         x, y, words_at = screen_place(art)                 # PAD-314: a big picture stays on the glass
+        if words_at is not None:                           # ... with its words on a darkened band of it
+            art = band_art(art)
         screens.append(dict(name=names["screen_node"], art_rgba=art,
                             words="%s A SHOT" % "{:,}".format(int(spec.award)),
                             words_name=names["screen_text"].split(".", 1)[1],
@@ -639,6 +641,21 @@ def screen_place(art, words_at=None):
     if words_at is None and y + h + 50.0 + 8.0 > GLASS_H:
         words_at = code_words_at(art)
     return float(x), float(y), words_at
+
+
+def band_art(art, band=72):
+    """``art`` (RGBA array) with its bottom *band* pixels darkened, a gradient to 85% black, as
+    :func:`.code_modes.compose_art` gives a code mode's film frame: the words a form mode puts on
+    a big picture of the player's own (PAD-314, Ales: "+1,000,000" never showed with a picture)
+    read over any picture. A copy; the mode's PNG is untouched."""
+    out = np.array(art, dtype=np.uint8, copy=True)
+    h = out.shape[0]
+    band = min(int(band), h // 2)
+    for y in range(h - band, h):
+        a = min(1.0, (y - (h - band)) / max(1.0, band * 0.35)) * 217 / 255.0
+        out[y, :, :3] = np.round(out[y, :, :3].astype(np.float32) * (1.0 - a)).astype(np.uint8)
+        out[y, :, 3] = np.maximum(out[y, :, 3], int(round(a * 255)))
+    return out
 
 
 def code_words_at(art):

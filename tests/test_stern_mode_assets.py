@@ -228,3 +228,18 @@ def test_the_generated_panel_sits_where_it_always_has_and_a_big_picture_stays_on
     assert MA.screen_place(mid) == (280.0, 130.0, None)
     # a code mode's words on its own band are kept
     assert MA.screen_place(big, (20.0, 700.0)) == (0.0, 0.0, (20.0, 700.0))
+
+
+def test_the_words_band_darkens_only_the_bottom_of_a_picture():
+    """Ales (PAD-314 thread): with a picture for the screen the "+1,000,000" words never showed - they
+    were 50 px under a picture that already reached the bottom of the glass. They go on the picture's
+    bottom band now, darkened so they read over any picture; the top is untouched."""
+    import numpy as np
+    from pinball_decryptor.plugins.stern import mode_assets as MA
+    art = np.full((400, 200, 4), 200, dtype=np.uint8)
+    out = MA.band_art(art)
+    assert out.shape == art.shape and out is not art
+    assert (out[:328] == 200).all()                       # above the 72 px band: as it was
+    assert (out[-1, :, :3] < 40).all() and (out[-1, :, 3] >= 217).all()   # the bottom row: 85% black
+    assert (out[328 + 10, :, :3] < out[328 + 2, :, :3]).all()             # darker on the way down
+    assert (art == 200).all()                              # the mode's picture itself is untouched
