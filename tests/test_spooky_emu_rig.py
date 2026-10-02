@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import sys
 
 import pytest
@@ -681,3 +682,29 @@ def test_pinotaur_coils_on_is_attract_and_lights_are_kept(pino, tmp_path):
     assert st["leds_lit"] == 3 and st["board"] == "pinotaur"
     assert st["power"]["flippers"] == 1 and st["gi"] == {"3": 1}
     assert st["opcodes"]["48"] == 1
+
+
+# ------------------------------------------ an installed copy (PAD-313)
+def test_the_game_loads_nothing_from_the_rigs_own_folder():
+    """An installed app's rig is /mnt/c/Program Files/...: the launch line is
+    word-split and LD_PRELOAD / LD_LIBRARY_PATH are space-separated lists, so
+    the shim's path broke at its spaces - env ran "Files/Pinball" and
+    Beetlejuice never started on any installed copy (PAD-313).  The shim and
+    the libXinerama stub are copied into the slot's folder and loaded there."""
+    src = (RIG / "run_game.sh").read_text()
+    for line in src.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        for m in re.finditer(r'LD_(?:PRELOAD|LIBRARY_PATH)="?(\S+)', line):
+            assert not re.search(r"\$\{?(SPK_TOOLS|SPK_SHIM|HERE)\b", m.group(1)), line
+    assert 'cp "$SPK_SHIM" "$SPK_RIG/spkshim.so"' in src
+    assert "LD_PRELOAD=$SPK_RIG/spkshim.so" in src
+    assert "LD_LIBRARY_PATH=$SPK_RIG/lib" in src
+
+
+def test_a_failed_start_shows_the_games_last_words():
+    """`tail -20 a b` is refused ("option used in invalid context"), so a
+    start that failed said only "did not reach attract" - not why (PAD-313)."""
+    src = (RIG / "run_game.sh").read_text()
+    assert not re.search(r'tail -\d+ "[^"]*" "', src)
+    assert "game.out" in src.split("did not reach attract", 1)[1]

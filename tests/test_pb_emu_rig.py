@@ -10,6 +10,7 @@ parser reads differently is exactly the bug this guards against.
 
 import importlib.util
 import pathlib
+import re
 import sys
 
 import pytest
@@ -224,6 +225,30 @@ def test_scripts_are_lf_and_source_the_path_file(script):
     # ctl.sh only execs pbctl.py (hot path: one per switch-window pipe)
     if script not in ("pbpath.sh", "build.sh", "ctl.sh"):
         assert b'pbpath.sh"' in raw
+
+
+def test_the_game_loads_nothing_from_the_rigs_own_folder():
+    """An installed app's rig is /mnt/c/Program Files/...: the launch line is
+    word-split and LD_PRELOAD is a space-separated list, so the shim's path
+    broke at its spaces - env ran "Files/Pinball" and Predator never started
+    on any installed copy (PAD-313).  The shim is copied into the slot's
+    folder and preloaded from there."""
+    src = (RIG / "run_game.sh").read_text()
+    for line in src.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        for m in re.finditer(r'LD_(?:PRELOAD|LIBRARY_PATH)="?(\S+)', line):
+            assert not re.search(r"\$\{?(PB_TOOLS|PB_SHIM|HERE)\b", m.group(1)), line
+    assert 'cp "$PB_SHIM" "$PB_RIG/pbshim.so"' in src
+    assert "LD_PRELOAD=$PB_RIG/pbshim.so" in src
+
+
+def test_a_failed_start_shows_the_games_last_words():
+    """`tail -20 a b` is refused ("option used in invalid context"), so a
+    start that failed said only "did not reach attract" - not why (PAD-313)."""
+    src = (RIG / "run_game.sh").read_text()
+    assert not re.search(r'tail -\d+ "[^"]*" "', src)
+    assert "pinprog.out" in src.split("did not reach attract", 1)[1]
 
 
 def test_kills_are_filtered_by_this_rigs_mark():

@@ -56,6 +56,12 @@ bash "$PB_TOOLS/killgame.sh" >/dev/null 2>&1
 rm -rf "$PB_RIG"
 G=$PB_RIG/game
 mkdir -p "$PB_RIG"/{bin,initd,utils,home}
+# The shim is preloaded from this slot's folder, never from the rig's: an
+# installed app's rig is /mnt/c/Program Files/..., and both the launch line
+# below (word-split) and LD_PRELOAD itself (a space-separated list) break a
+# path at its spaces - env ran "Files/Pinball" and the game never started
+# (PAD-313).
+cp "$PB_SHIM" "$PB_RIG/pbshim.so"
 cp -al "$(realpath "$BUILD")" "$G"
 rm -f "$G/.pad_title"
 NV=$PB_ROOT/nv$PB_SLOT/$TITLE
@@ -127,7 +133,7 @@ VIDPORT=$((15555 + PB_SLOT))
 GST="GST_PLUGIN_SYSTEM_PATH=$PB_ENV/lib/gstreamer-1.0 GST_PLUGIN_SCANNER=$PB_ENV/libexec/gstreamer-1.0/gst-plugin-scanner GST_REGISTRY=$PB_ROOT/gst-registry.bin"
 ENVS="PATH=$PB_RIG/bin:/usr/local/bin:/usr/bin:/bin HOME=$PB_RIG/home USER=$PB_USER LANG=C.UTF-8 \
 DISPLAY=$DISP $AUDIO_ENV PB_MARK=$PB_RIG PB_DEV=$PB_RIG/dev PB_VIDPORT=$VIDPORT \
-LD_LIBRARY_PATH=$PB_ENV/lib LD_PRELOAD=$PB_SHIM $GST"
+LD_LIBRARY_PATH=$PB_ENV/lib LD_PRELOAD=$PB_RIG/pbshim.so $GST"
 
 # ns.sh records itself: neither it nor the runuser wrappers it starts carry
 # PB_MARK, and a wrapper whose program was killed sits STOPPED (T) with a
@@ -177,6 +183,11 @@ if pb_game_alive && grep -qE "$ATTRACT" "$G/raven.log" 2>/dev/null; then
     rigboard_post pb "$PB_SLOT" "$(pb_game_pid)" "$(basename "$BUILD")" "${PAD_TITLE:-$(tget title)}" "$VISIBLE" "$AUDIO"
 else
     echo "run_game.sh: the game did not reach attract:" >&2
-    tail -20 "$G/raven.log" "$PB_RIG/pbfast.log" "$PB_RIG/pinprog.out" "$PB_RIG/ns.out" >&2 2>/dev/null
+    # each log on its own: `tail -20 a b` is refused outright ("option used
+    # in invalid context") and printed nothing at all (PAD-313)
+    for f in "$G/raven.log" "$PB_RIG/pbfast.log" "$PB_RIG/pinprog.out" \
+             "$PB_RIG/vidprog.out" "$PB_RIG/ns.out"; do
+        [ -s "$f" ] && { echo "--- $(basename "$f")"; tail -n 20 "$f"; }
+    done >&2
     exit 1
 fi

@@ -46,6 +46,11 @@ TITLE=$(basename "$PROFILE" .json)
 HOMEDIR=$BOF_HOMES/$TITLE
 rm -rf "$BOF_RIG"
 mkdir -p "$BOF_RIG/bin" "$BOF_RIG/hw" "$HOMEDIR"
+# The shim is preloaded from this slot's folder, never from the rig's: an
+# installed app's rig is /mnt/c/Program Files/..., and LD_PRELOAD is a
+# space-separated list - ld.so tried "/mnt/c/Program", "Files/Pinball"...,
+# ignored them all, and the game never found its boards (PAD-313).
+cp "$BOF_SHIM" "$BOF_RIG/bofhwshim.so"
 echo "$BIN" > "$BOF_RIG/binary"
 echo "$TITLE" > "$BOF_RIG/title"
 echo "$VISIBLE" > "$BOF_RIG/visible"
@@ -120,7 +125,7 @@ setsid -f runuser -u "$BOF_USER" -- env -i \
     HOME="$HOMEDIR" USER="$BOF_USER" LANG=C.UTF-8 \
     DISPLAY="$DISP" XDG_RUNTIME_DIR="$BOF_RIG" $AUDIO_ENV \
     BOFEMU_LOG_DIR="$BOF_RIG" GODOT_SILENCE_ROOT_WARNING=1 \
-    LD_PRELOAD="$BOF_SHIM" BOFHW_DEV="$BOF_RIG/hw/dev" BOFHW_SYS="$BOF_RIG/hw/sys" \
+    LD_PRELOAD="$BOF_RIG/bofhwshim.so" BOFHW_DEV="$BOF_RIG/hw/dev" BOFHW_SYS="$BOF_RIG/hw/sys" \
     "$BIN" --display-driver x11 --rendering-method gl_compatibility \
         --audio-driver $AUDIO_ARG < /dev/null > "$BOF_RIG/game.log" 2>&1
 for _ in $(seq 1 50); do

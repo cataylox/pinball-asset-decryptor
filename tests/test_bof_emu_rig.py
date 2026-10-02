@@ -10,6 +10,7 @@ the bug this guards against.
 import importlib.util
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 
@@ -287,3 +288,19 @@ def test_switch_window_model(title):
 def test_switch_window_page_files_ship():
     for f in ("index.html", "bof.css", "bof.js"):
         assert (RIG / "bofpage" / f).is_file()
+
+
+def test_the_game_loads_nothing_from_the_rigs_own_folder():
+    """An installed app's rig is /mnt/c/Program Files/..., and LD_PRELOAD is
+    a space-separated list: ld.so tried "/mnt/c/Program", "Files/Pinball"...,
+    ignored them all, and the game never found its boards on any installed
+    copy (PAD-313).  The shim is copied into the slot's folder and preloaded
+    from there."""
+    src = (RIG / "run_game.sh").read_text()
+    for line in src.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        for m in re.finditer(r'LD_(?:PRELOAD|LIBRARY_PATH)="?(\S+)', line):
+            assert not re.search(r"\$\{?(BOF_TOOLS|BOF_SHIM|HERE)\b", m.group(1)), line
+    assert 'cp "$BOF_SHIM" "$BOF_RIG/bofhwshim.so"' in src
+    assert 'LD_PRELOAD="$BOF_RIG/bofhwshim.so"' in src
