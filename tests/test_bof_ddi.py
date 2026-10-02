@@ -157,6 +157,12 @@ def test_bonjovi_status_shown_in_app(tmp_path):
     assert "help" in rows["How you can help"].lower()
     # a GPG title gets no Bon Jovi section
     assert m.image_info("dune.fun") == []
+    # the emulate guard message exists and names emulation; Bon Jovi is not in
+    # the emulator's title:passphrase list (no key, not emulatable)
+    from pinball_decryptor.plugins.bof.manufacturer import BONJOVI_EMU
+    assert "mulation" in BONJOVI_EMU
+    from pinball_decryptor.webui.emulate_bof_core import title_keys
+    assert "bonjovi" not in title_keys()
 
 
 def test_extract_game_binaries(tmp_path):

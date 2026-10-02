@@ -82,6 +82,17 @@ systemd 261's own verity verification is the standard secure idiom
 (`PKCS7_verify` against the on-disk cert dirs, embedded certs ignored). There is
 no software-only remote/USB bypass.
 
+## Emulation
+
+Also not available yet. The Emulate (BoF) tab runs the game on the PC against
+emulated FAST boards, but its decrypt step uses the GPG flow (`watch.sh` with
+`title:passphrase`), which Bon Jovi has no key for, and there is no hardware
+profile (`tools/bof_emu/profiles/bonjovi.json`) describing its boards/switches.
+The tab guards Bon Jovi up front with a clear message (`BONJOVI_EMU`) instead of
+failing deep in `watch.sh`. Wiring it would mean teaching the rig's decrypt the
+DDI unwrap (reuse `ddi_container`) and building a profile from a real machine's
+drive image, which is folded into the same volunteer ask below.
+
 ## The realistic path (and the volunteer call-to-action)
 
 The installed machine **boots completely unsigned**: kernel cmdline

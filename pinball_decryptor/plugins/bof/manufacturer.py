@@ -32,15 +32,25 @@ BONJOVI_WHY = ("Bon Jovi ships as a signed disk image, so rebuilding an "
                "physical machine.")
 
 BONJOVI_HELP = (
-    "If you own a Bon Jovi machine and want to help unlock image building, "
-    "the most useful thing is a full image of the machine's internal drive "
-    "(the NVMe), and whether a modified image can be written back to it. "
-    "The game boots without a signature check, so a modified drive image runs "
-    "as-is and no vendor key is needed. Rough steps: boot the machine from a "
-    "Linux USB stick, image the internal NVMe to an external drive, and send "
-    "the image over. Being able to write a test image back and report whether "
-    "it boots would confirm the whole path. Get in touch first and we will "
-    "walk you through it.")
+    "If you own a Bon Jovi machine and want to help unlock image building and "
+    "emulation, the most useful thing is a full image of the machine's "
+    "internal drive (the NVMe), and whether a modified image can be written "
+    "back to it. The same drive image also lets us build the emulator's board "
+    "and switch profile. The game boots without a signature check, so a "
+    "modified drive image runs as-is and no vendor key is needed. Rough steps: "
+    "boot the machine from a Linux USB stick, image the internal NVMe to an "
+    "external drive, and send the image over. Being able to write a test image "
+    "back and report whether it boots would confirm the whole path. Get in "
+    "touch first and we will walk you through it.")
+
+# Shown when someone tries to emulate Bon Jovi (its .fun is a signed disk
+# image the emulator can't open, and it has no hardware profile yet).
+BONJOVI_EMU = (
+    "Emulation is not available for Bon Jovi yet. Its .fun is a signed disk "
+    "image, not the format the emulator opens, and the emulator also needs a "
+    "board and switch profile for the machine, which we build from a real "
+    "machine. You can still extract and edit its assets. See the Image Info "
+    "window for how you can help.")
 
 
 _GAMES = tuple(sorted(
