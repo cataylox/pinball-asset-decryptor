@@ -66,6 +66,7 @@ while read -r L; do
                mountpoint -q "$L" || mount -o loop,ro "$(dirname "$L")/root.img" "$L"; } ;;
     esac
     [ -d "$L/game" ] || { echo "run_game.sh: layer missing: $L (prepare.sh again)" >&2; exit 2; }
+    touch "$(dirname "$L")/.used"       # the Cache window's "last used"
     LOWER=${LOWER:+$LOWER:}$L
 done < "$BUILD/layers"
 
@@ -111,7 +112,9 @@ echo $! > "$PBIO_RIG/board.pid"
 for _ in $(seq 1 50); do [ -f "$PBIO_RIG/usb.tty" ] && break; sleep 0.1; done
 [ -f "$PBIO_RIG/usb.tty" ] || { echo "run_game.sh: the board did not start (board.out)" >&2; exit 1; }
 ACM=$(cat "$PBIO_RIG/acm.tty"); USB=$(cat "$PBIO_RIG/usb.tty")
-python3 "$PBIO_TOOLS/pbiotitles.py" switches "$TITLE" > "$PBIO_RIG/switches.json"
+# the virtual playfield's table (pbpf.py --rig pbio reads it; status.sh
+# names it), in Predator's format (pbioswitches.py)
+python3 "$PBIO_TOOLS/pbioswitches.py" "$PBIO_RIG" "$TITLE" && chmod 644 "$PBIO_RIG/switches.json"
 
 if [ "$VISIBLE" = 1 ]; then DISP=:0; else DISP=$PBIO_DISPLAY; fi
 echo "$DISP" > "$PBIO_RIG/display"
@@ -188,6 +191,16 @@ if ! pbio_game_alive; then
 fi
 if pbio_attract; then
     rigboard_post pbio "$PBIO_SLOT" "$(pbio_game_pid)" "$(basename "$BUILD")" "${PAD_TITLE:-$(tget name)}" "$VISIBLE" 0
+    # The playfield window's keys in the game's own window too (PAD-313's
+    # listener, as on Predator's rig): on the desktop (PAD_GAMEKEYS=1 forces
+    # it on a hidden run, inside the slot's network namespace where its
+    # Xvfb is).  It ends with the game.
+    if [ "${PAD_GAMEKEYS:-$VISIBLE}" = 1 ]; then
+        pbio_in_net setsid -f python3 -u "$PBIO_TOOLS/../ap_emu/gamekeys.py" --display "$DISP" \
+            --mark "PBIO_MARK=$PBIO_RIG" --sock "$PBIO_RIG/ctl.sock" \
+            --pidfile "$PBIO_RIG/game.pid" --table "$PBIO_RIG/switches.json" \
+            < /dev/null > "$PBIO_RIG/gamekeys.log" 2>&1
+    fi
     echo "attract"
     exit 0
 fi

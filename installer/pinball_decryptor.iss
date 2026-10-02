@@ -144,6 +144,13 @@ Source: "{#ProjectDir}\tools\spooky_emu\*"; DestDir: "{app}\tools\spooky_emu"; \
 Source: "{#ProjectDir}\tools\pb_emu\*"; DestDir: "{app}\tools\pb_emu"; \
     Flags: recursesubdirs ignoreversion; \
     Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.upd"
+; The Pinball Brothers I/O-board rig (tools/pbio_emu, PAD-272/PAD-315):
+; Alien and ABBA on the same Emulate PB tab.  All scripts, nothing built: the
+; game runs on the machine's own Linux, restored from its image under
+; /var/tmp inside WSL, never here.  Its switch window is tools/pb_emu's.
+Source: "{#ProjectDir}\tools\pbio_emu\*"; DestDir: "{app}\tools\pbio_emu"; \
+    Flags: recursesubdirs ignoreversion; \
+    Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.upd,*.iso"
 ; The rig board helper every rig above sources from its parent folder
 ; (PAD-296): each run posts itself where the triage dashboard can see it.
 Source: "{#ProjectDir}\tools\rigboard.sh"; DestDir: "{app}\tools"; Flags: ignoreversion

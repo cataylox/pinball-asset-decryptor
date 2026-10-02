@@ -1,6 +1,6 @@
 // Emulate (Pinball Brothers): run a Pinball Brothers game on this PC from its
-// update file - Predator only so far, which the page says up front.  Python
-// half: webui/tabs/emulate_pb.py.  Laid out as the American Pinball tab is
+// update file - Predator, Alien and ABBA (two rigs behind one page; Queen is
+// named as not yet, with the reason).  Python half: webui/tabs/emulate_pb.py.  Laid out as the American Pinball tab is
 // (the template every maker's Emulate tab follows): the setup notice, the
 // game file with Cache…, Start / Playfield window / Volume, and the status.
 // The virtual playfield is AP's window (tools/pb_emu/pbpf.py ->
@@ -19,6 +19,7 @@ export default function EmulatePB() {
   const up = !!s.up;
   const cells = s.cells || [];
   const supported = s.supported || [];
+  const pending = s.pending || [];
   const hist = (shell.path_history || {}).pb_emulate_file || [];
   // while a start is in flight the button is Cancel
   const stopish = up || !!s.starting;
@@ -39,13 +40,14 @@ export default function EmulatePB() {
       <div class="stack emu-col">
         <${Card} title="Game" cls="emu-src"
           extra=${s.game ? html`<${Chip} kind="ok" dot>${s.game}<//>` : null} footer=${footer}>
-          <label class="small">Update file (.upd)</label>
+          <label class="small">Update file (.upd) or restore image (.iso)</label>
           <${PathField} ns="emulate_pb" k="file" value=${s.file} title=${s.file_tip} history=${hist}
             placeholder="pbpp_predator_game_1_0_1.upd" onBrowse=${() => call("emulate_pb.browse")}
             extra=${html`<${Button} kind="ghost" disabled=${!s.rig_ok} onClick=${() => call("emulate_pb.open_cache")}
               title="Shows and manages what the emulator keeps in the app's Linux: each game unpacked from its updates, and the one-time setup. Deleting frees the space now; it is unpacked (or downloaded) again on the next Start.">Cache…<//>`} />
           <span class="small muted">${s.file_tip}</span>
         <//>
+        ${s.title_note ? html`<${Note} kind="info">${s.title_note}<//>` : null}
         ${s.note ? html`<${Note} kind="warn">${s.note}<//>` : null}
       </div>
       <div class="stack emu-col">
@@ -58,8 +60,9 @@ export default function EmulatePB() {
         <${Card} title="Supported games" cls="pb-supported">
           <div class="pb-games">
             ${supported.map((g) => html`<${Chip} kind="ok" dot>${g}<//>`)}
+            ${pending.map((g) => html`<${Chip} title=${s.pending_note}>${g} - not yet<//>`)}
           </div>
-          <span class="small muted">Alien, Queen and ABBA run on different boards and can't be emulated yet.</span>
+          ${s.pending_note ? html`<span class="small muted">${s.pending_note}</span>` : null}
         <//>
       </div>
     </div>

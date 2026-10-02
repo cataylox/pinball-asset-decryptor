@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-r"""pbpf.py - Predator's virtual playfield: the American Pinball window
+r"""pbpf.py - Pinball Brothers' virtual playfield (Predator's, and with
+--rig pbio Alien's and ABBA's, PAD-315): the American Pinball window
 (tools/ap_emu/appf.py, on the Stern rigs' page tools/spike2_emu/pfpage)
 pointed at this rig's board, as tools/spooky_emu/spkpf.py does for a Spooky
 game - so every maker's Emulate window looks and works the same: the key
@@ -7,7 +8,7 @@ panel, the coin-door service buttons, BALLS (trough dots, Plunge, Drain,
 Reset balls), Pause and the Volume / Mute bar.
 
     pythonw tools\pb_emu\pbpf.py --table <switches.json> [--distro PAD-Runtime]
-        [--slot 0] [--audio-ctl <audio_ctl.json>] [--parent-pipe]
+        [--slot 0] [--audio-ctl <audio_ctl.json>] [--parent-pipe] [--rig pbio]
 
 The table is pbswitches.py's (apswitches.py's format); the board answers
 appf's requests over ctl.sh --stream (pbfast.py, through pbctl.py).  The
@@ -29,12 +30,16 @@ import appf  # noqa: E402  (the AP window this one is)
 GEOM_FILE = os.path.join(os.path.expanduser("~"), ".pad_pb_switches.json")
 
 
-class Rig(appf.Rig):
-    """appf's pipe, into THIS rig's ctl.sh."""
+#: --rig: the rig whose board the window drives (its ctl.sh)
+RIGS = {"pb": HERE, "pbio": os.path.join(TOOLS, "pbio_emu")}
 
-    def __init__(self, distro, slot):
+
+class Rig(appf.Rig):
+    """appf's pipe, into THIS rig's ctl.sh (or the I/O-board rig's)."""
+
+    def __init__(self, distro, slot, rig="pb"):
         super().__init__(distro, slot)
-        ctl = os.path.join(HERE, "ctl.sh")
+        ctl = os.path.join(RIGS[rig], "ctl.sh")
         self.cmd = [(appf.wsl_path(ctl) if sys.platform == "win32" else ctl)
                     if c.endswith("ctl.sh") else c for c in self.cmd]
 
@@ -46,11 +51,11 @@ class App(appf.App):
     page's default "works here and in the game window" is true."""
 
 
-def serve(table, distro="", slot="0", audio_ctl="", title=""):
+def serve(table, distro="", slot="0", audio_ctl="", title="", rig_name="pb"):
     """The window's page, served and polling: (app, rig, host).  main()
     shows it; a capture script shows it to a headless browser instead."""
     title = title or table.get("title") or "Predator"
-    rig = Rig(distro, slot)
+    rig = Rig(distro, slot, rig_name)
     app = App(table, rig, "", title, slot=slot, audio_ctl=audio_ctl)
     host = appf.pfweb.WebHost(appf.PAGE_DIR, app,
                               title="%s - virtual playfield" % title)
@@ -76,10 +81,13 @@ def main(argv=None):
     ap.add_argument("--audio-ctl", default="", help="the app's audio_ctl.json (Volume / Mute)")
     ap.add_argument("--parent-pipe", action="store_true",
                     help="close the window when stdin closes (the app's Stop)")
+    ap.add_argument("--rig", default="pb", choices=sorted(RIGS),
+                    help="pb: Predator (tools/pb_emu); pbio: Alien, ABBA (tools/pbio_emu)")
     args = ap.parse_args(argv)
     with open(args.table, encoding="utf-8") as f:
         table = json.load(f)
-    app, rig, host = serve(table, args.distro, args.slot, args.audio_ctl)
+    app, rig, host = serve(table, args.distro, args.slot, args.audio_ctl,
+                           rig_name=args.rig)
     if args.parent_pipe:
         threading.Thread(target=appf.watch_parent, args=(app, host), daemon=True,
                          name="pb-parent").start()

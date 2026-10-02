@@ -256,3 +256,80 @@ def test_sw_names_aliases_and_numbers():
     assert sw.lookup("left orbit") == 9
     assert sw.lookup("12") == 12
     assert sw.lookup("tongue opto") == 60
+
+
+# ---------------------------------------------- the app's side (PAD-315)
+files = _load("files", RIG / "pbiofiles.py")
+pbioswitches = _load("switches", RIG / "pbioswitches.py")
+
+
+def _folder(tmp_path, names, full=()):
+    """PB's files by name; the ones in *full* big enough to be full updates
+    (sparse, so nothing is written)."""
+    for n in names:
+        with open(tmp_path / n, "wb") as f:
+            if n in full:
+                f.truncate(files.FULL_MIN)
+    return tmp_path
+
+
+def _chain(folder, name):
+    return [os.path.basename(p) for p in files.chain(str(folder / name))]
+
+
+def test_files_tell_alien_abba_and_queen_apart():
+    for name, key in (("pbap412.upd", "alien"), ("pbap41.upd", "alien"),
+                      ("pbap145.upd", "abba"), ("PBAP141.UPD", "abba"),
+                      ("pbq0210G.upd", "queen"),
+                      ("clonezilla-live-alien40.iso", "alien"),
+                      ("clonezilla-live-queen20d.iso", "queen"),
+                      ("pbpp_predator_game_1_0.upd", ""), ("x.iso", "")):
+        assert files.title(name) == key, name
+    # each digit is one part: 4.1 < 4.1.1 < 4.1.2
+    assert files.version("pbap41.upd") < files.version("pbap411.upd") < files.version("pbap412.upd")
+
+
+def test_a_delta_brings_the_newest_full_update_below_it(tmp_path):
+    d = _folder(tmp_path, ["clonezilla-live-alien40.iso", "pbap41.upd", "pbap411.upd",
+                           "pbap412.upd", "pbap141.upd", "pbap145.upd"],
+                full={"pbap41.upd", "pbap411.upd", "pbap141.upd"})
+    assert _chain(d, "pbap412.upd") == ["pbap411.upd", "pbap412.upd"]
+    assert _chain(d, "pbap411.upd") == ["pbap411.upd"]
+    assert _chain(d, "pbap41.upd") == ["pbap41.upd"]
+    # ABBA's updates never pick up Alien's (same "pbap")
+    assert _chain(d, "pbap145.upd") == ["pbap141.upd", "pbap145.upd"]
+    # an ISO is the whole machine: alone
+    assert _chain(d, "clonezilla-live-alien40.iso") == ["clonezilla-live-alien40.iso"]
+
+
+def test_a_delta_with_no_full_update_stands_on_its_restore_image(tmp_path):
+    d = _folder(tmp_path, ["clonezilla-live-alien40.iso", "pbap412.upd",
+                           "pbq0210G.upd"])
+    assert _chain(d, "pbap412.upd") == ["clonezilla-live-alien40.iso", "pbap412.upd"]
+    # no Queen image here: the delta alone (prepare.sh refuses it, saying why)
+    assert _chain(d, "pbq0210G.upd") == ["pbq0210G.upd"]
+
+
+@pytest.mark.parametrize("key", ["alien", "abba"])
+def test_the_playfield_table_is_predators_format(key):
+    t = pbioswitches.table(key)
+    prof = titles.get(key)
+    assert t["title"] == prof["name"] and t["shooter"] == prof["shooter"]
+    assert t["balls"] == len(prof["trough"])
+    used = {n for n, s in prof["switches"].items() if s != "UNUSED"}
+    assert {s["n"] for s in t["switches"]} == used
+    rows = {r["keys"]: r for r in t["rows"]}
+    b = prof["buttons"]
+    assert rows["1"]["ns"] == [b["start"]] and rows["5"]["ns"] == [b["coin"]]
+    assert rows["Space"]["ns"] == [b["launch"]] and rows["T"]["ns"] == [b["tilt"]]
+    # the flipper buttons on the arrows; their EOS switches get no key
+    assert rows["Left"]["ns"] and rows["Right"]["ns"]
+    eos = {s["n"] for s in t["switches"] if "Eos" in s["label"]}
+    assert eos and not any(set(r["ns"]) & eos for r in t["rows"] if r["keys"])
+    # the coin door's buttons and the trough are not playfield letters
+    lettered = {n for r in t["rows"] if len(r["keys"]) == 1 and r["keys"].isalpha()
+                and r["keys"] != "T" for n in r["ns"]}
+    assert not lettered & {b["enter"], b["escape"], b["up"], b["down"]}
+    assert not lettered & set(prof["trough"])
+    actions = {k["action"] for k in t["keymap"] if k["action"]}
+    assert actions == {"plunge", "drain", "pause"}

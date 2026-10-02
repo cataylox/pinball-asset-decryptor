@@ -117,6 +117,7 @@ T=/mnt/c/.../tools/pbio_emu
 P="/mnt/d/Pinball/images/Pinball Brothers"
 PAD_VISIBLE=0 bash $T/watch.sh "$P/clonezilla-live-alien40.iso"   # Alien 4.0
 PAD_VISIBLE=0 bash $T/watch.sh "$P/pbap411.upd" "$P/pbap412.upd"  # Alien 4.12, over the cached OS
+PAD_VISIBLE=0 bash $T/watch.sh "$P/pbap145.upd"   # one file: pbap141.upd under it (pbiofiles.py)
 python3 $T/sw.py coin; python3 $T/sw.py start     # sw.py --list, --state
 python3 $T/sw.py plunge                           # the Launch button
 python3 $T/sw.py "left orbit"; python3 $T/sw.py drain
@@ -157,9 +158,14 @@ credit.  Presses closer than ~1 s apart are debounced away by the game.
   Queen should need only a profile (its pinprog speaks the same protocol
   and needs no library Alien's image lacks).  `prepare.sh` refuses the
   delta alone.
-* **Not in the app yet**: an Emulate tab for Pinball Brothers is the
-  follow-up, as for every rig in this batch.  The control socket answers
-  the AP/Spooky requests, so the virtual playfield can be pointed at it.
+* **In the app since PAD-315**: the Emulate PB tab runs this rig when the
+  picked file is Alien's or ABBA's (`emulate_pb_core.kind_of`), and
+  Predator's rig otherwise.  One file is enough: `watch.sh` with one file
+  stacks what it builds on (`pbiofiles.py chain`: the newest full update
+  of that title at or below it, else its restore ISO).  The playfield
+  window is Predator's (`tools/pb_emu/pbpf.py --rig pbio`) on
+  `pbioswitches.py`'s table; the Cache window lists `cache.sh --list`
+  (the restored OS images and unpacked updates) beside Predator's.
 * **No sound** (`--audio` is refused politely): SDL 1.2 in the image
   speaks ALSA only and PAD-Runtime has no ALSA device.
 * **No physics** beyond the trough, the shooter lane and the kickers:

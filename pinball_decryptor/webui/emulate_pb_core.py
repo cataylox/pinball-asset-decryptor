@@ -1,5 +1,6 @@
-"""Emulate tab for Pinball Brothers - the Tk-free facts of the rig in
-``tools/pb_emu`` (the tab itself is ``webui/tabs/emulate_pb.py``).
+"""Emulate tab for Pinball Brothers - the Tk-free facts of its two rigs,
+``tools/pb_emu`` (Predator) and ``tools/pbio_emu`` (Alien, ABBA; PAD-315).
+The tab itself is ``webui/tabs/emulate_pb.py``.
 
 Predator is two native x86-64 Linux programs (pinprog, the rules; vidprog,
 the screen), so like Barrels of Fun and Spooky there is no CPU to emulate and
@@ -7,16 +8,23 @@ no key: the rig stands in for the boards the game talks to over USB serial
 (a FAST Neuron with its I/O nodes and expansion boards).  See
 ``tools/pb_emu/README.md``.
 
-ONE GAME SO FAR.  Predator is Pinball Brothers' only FAST machine; Alien,
-Queen and ABBA run on PB's own I/O boards, a different rig.  The tab says so
-up front and refuses their updates with that answer (``SUPPORTED``), rather
-than failing inside the rig.
+TWO RIGS, ONE TAB.  Predator is Pinball Brothers' only FAST machine; Alien,
+ABBA and Queen run on PB's own I/O boards (the hardware PB inherited from
+Heighway), a different rig - the same idea (the game's own two programs, an
+emulated board), a different board: ``tools/pbio_emu/README.md``.  The file a
+person picks says which rig runs it (``kind_of``); the rest of the tab is the
+same.  Queen is recognised but not run: its updates are deltas over a restore
+image this project has never had, and without the image there is no switch
+map for it either (``QUEEN_TEXT``).  ABBA runs with its screens dark: its
+updates carry the program and the sound, not the factory image's pictures
+and videos (``TITLE_NOTES``).
 
-A Predator update is a FULL .upd and then DELTAS over it; a person picks the
+A PB update is a FULL .upd and then DELTAS over it; a person picks the
 version they want and the rig finds the rest of the chain beside it
-(``tools/pb_emu/pbupdates.py``).
+(``tools/pb_emu/pbupdates.py``; ``tools/pbio_emu/pbiofiles.py``, which also
+takes a restore ISO - the whole machine).
 
-Everything that knows the rig's layout lives here, as the Spooky tab's does
+Everything that knows the rigs' layout lives here, as the Spooky tab's does
 in ``emulate_spooky_core``; how a script is invoked and how status is parsed
 is ``webui/rig.py``'s, shared by every rig.
 """
@@ -27,21 +35,42 @@ import pathlib
 import re
 import sys
 
-from pinball_decryptor.core import runtime
+from pinball_decryptor.core import rigslot, runtime
 from pinball_decryptor.webui import rig as _rig
 
-#: The rig ships next to this package.  ``PAD_PB_EMU_DIR`` moves it.
-DEFAULT_RIG_DIR = str(
-    pathlib.Path(__file__).resolve().parents[2] / "tools" / "pb_emu"
-)
+#: The rigs ship next to this package.  ``PAD_PB_EMU_DIR`` moves Predator's,
+#: ``PAD_PBIO_EMU_DIR`` the I/O-board one.
+_TOOLS = pathlib.Path(__file__).resolve().parents[2] / "tools"
+DEFAULT_RIG_DIR = str(_TOOLS / "pb_emu")
+DEFAULT_PBIO_DIR = str(_TOOLS / "pbio_emu")
 
 POLL_MS = 2000
 POLL_IDLE_MS = 10000
 POLL_FIRST_MS = 700
 
-#: The Pinball Brothers games the emulator runs: (display name, the start
-#: of their update files' names).
-SUPPORTED = (("Predator", "pbpp_predator_game_"),)
+#: The Pinball Brothers games the emulator runs: (display name, the rig,
+#: how their files are named).  Alien and ABBA share "pbap"; the major
+#: version tells them apart (Alien 4.x, ABBA 1.x: pbiofiles.py).
+SUPPORTED = (
+    ("Predator", "pb", re.compile(r"^pbpp_predator_game_.*\.upd$", re.I)),
+    ("Alien", "pbio",
+     re.compile(r"^(pbap4\w*\.upd|clonezilla-live-.*alien.*\.iso)$", re.I)),
+    ("ABBA", "pbio",
+     re.compile(r"^(pbap1\w*\.upd|clonezilla-live-.*abba.*\.iso)$", re.I)),
+)
+#: Recognised, not run (QUEEN_TEXT says why).
+QUEEN = re.compile(r"^(pbq\w*\.upd|clonezilla-live-.*queen.*\.iso)$", re.I)
+QUEEN_TEXT = ("Queen can't be emulated yet. Its updates (pbq….upd) carry only "
+              "what changed since the factory image, so the emulator would "
+              "also need Queen's restore image (clonezilla-live-queen….iso, "
+              "from Pinball Brothers) - and a map of Queen's switches, which "
+              "can only be made from that image.")
+#: Said when the game starts, and on the page while it runs.
+TITLE_NOTES = {
+    "ABBA": ("ABBA plays, but its screens stay dark: its update files carry "
+             "the program and the sound, not the pictures and videos the "
+             "factory installed. Play it from the playfield window."),
+}
 
 #: watch.sh's step headers -> the footer ladder (copy = first chip).
 FOOTER_STEPS = (("== Setup ==", "copy", 0,
@@ -53,18 +82,31 @@ FOOTER_STEPS = (("== Setup ==", "copy", 0,
                 ("== Ready ==", "run", None, "Game running"))
 PHASES = ("Unpack", "Board", "Game", "Ready")
 
-#: watch.sh's exit codes that mean something a user can act on.
+#: watch.sh's exit codes that mean something a user can act on - Predator's
+#: rig (``exit_text`` picks; ``PBIO_EXIT_TEXT`` is Alien's and ABBA's).
 EXIT_TEXT = {
     3: "Not enough free space in the app's Linux to unpack this update.",
-    4: "This file is not a Predator update. Predator is the only Pinball "
-       "Brothers game the emulator runs so far (Alien, Queen and ABBA run on "
-       "different boards).",
+    4: "This file is not one of the Pinball Brothers games the emulator "
+       "runs (Predator, Alien, ABBA): pick the game's .upd update, or "
+       "Alien's restore image (clonezilla-live-alien40.iso).",
     5: "The update could not be unpacked, or holds no game program - if you "
        "picked a delta (pbpp_predator_game_1_0_1.upd), the full update it "
        "builds on (pbpp_predator_game_1_0.upd) must be in the same folder.",
     6: "The game did not reach attract mode.",
     7: "The emulator's one-time setup did not finish (it downloads about "
        "700 MB) - check the connection and press Start again.",
+}
+PBIO_EXIT_TEXT = {
+    3: "Not enough free space in the app's Linux to unpack this game (a "
+       "restore image needs about 4 GB, a full update about 2.5 GB).",
+    4: EXIT_TEXT[4],
+    5: "The game could not be unpacked, or these files hold no complete "
+       "game. A small follow-up update (pbap412.upd, pbap145.upd) needs the "
+       "full update it builds on (pbap411.upd, pbap141.upd) in the same "
+       "folder - and the first start needs Alien's restore image "
+       "(clonezilla-live-alien40.iso) there too: it is the machine's own "
+       "Linux, which every one of these games runs on.",
+    6: "The game did not reach attract mode.",
 }
 
 SETUP_LABEL = "Set up emulator…"
@@ -80,21 +122,38 @@ def _base(path):
 
 
 def supported_names():
-    return [name for name, _pre in SUPPORTED]
+    return [name for name, _kind, _pat in SUPPORTED]
+
+
+def _match(path):
+    base = _base(path)
+    return next(((name, kind) for name, kind, pat in SUPPORTED
+                 if pat.match(base)), ("", ""))
 
 
 def supported_file(path):
-    """Is *path* an update of a game the emulator runs?  By name, the way
-    Pinball Brothers names its update files."""
-    base = _base(path).lower()
-    return base.endswith(".upd") and any(base.startswith(pre)
-                                         for _name, pre in SUPPORTED)
+    """Is *path* a file of a game the emulator runs?  By name, the way
+    Pinball Brothers names its updates and restore images."""
+    return bool(_match(path)[0])
+
+
+def is_queen(path):
+    return bool(QUEEN.match(_base(path)))
 
 
 def title_of(path):
-    """The game a supported update is for, else ""."""
-    base = _base(path).lower()
-    return next((name for name, pre in SUPPORTED if base.startswith(pre)), "")
+    """The game a supported file is for, else ""."""
+    return _match(path)[0]
+
+
+def kind_of(path):
+    """The rig that runs *path*: "pb" (Predator: tools/pb_emu), "pbio"
+    (Alien, ABBA: tools/pbio_emu), else ""."""
+    return _match(path)[1]
+
+
+def exit_text(kind, rc):
+    return (PBIO_EXIT_TEXT if kind == "pbio" else EXIT_TEXT).get(rc, "")
 
 
 def version_of(path):
@@ -103,22 +162,36 @@ def version_of(path):
     return m.group(1).replace("_", ".") if m else ""
 
 
-def rig_dir():
+def rig_dir(kind="pb"):
+    if kind == "pbio":
+        return os.environ.get("PAD_PBIO_EMU_DIR") or DEFAULT_PBIO_DIR
     return os.environ.get("PAD_PB_EMU_DIR") or DEFAULT_RIG_DIR
 
 
-def rig_available():
+#: what each rig must have, by script
+_RIG_FILES = {
+    "pb": ("watch.sh", "stop.sh", "status.sh", "cancel.sh", "cache.sh",
+           "ctl.sh", "setup.sh", "prepare.sh", "run_game.sh", "pbshim.so",
+           "pbfast.py", "pbctl.py", "pbswitches.py", "pbpf.py", "pbvol.py",
+           "pbtitles.py", "pbupdates.py"),
+    "pbio": ("watch.sh", "stop.sh", "status.sh", "cancel.sh", "cache.sh",
+             "ctl.sh", "prepare.sh", "run_game.sh", "killgame.sh",
+             "pbiopath.sh", "pbioboard.py", "pbioctl.py", "pbiotitles.py",
+             "pbiofiles.py", "pbioswitches.py"),
+}
+
+
+def rig_available(kind=None):
     """Present?  Checked by script, not by directory - a half-copied tools
     tree is the failure this catches.  The switch window and the volume
-    holder live in the AP and Spooky rigs."""
-    d = rig_dir()
-    tools = os.path.dirname(d)
-    return (all(os.path.isfile(os.path.join(d, s))
-                for s in ("watch.sh", "stop.sh", "status.sh", "cancel.sh",
-                          "cache.sh", "ctl.sh", "setup.sh", "prepare.sh",
-                          "run_game.sh", "pbshim.so", "pbfast.py",
-                          "pbctl.py", "pbswitches.py", "pbpf.py", "pbvol.py",
-                          "pbtitles.py", "pbupdates.py"))
+    holder live in the AP and Spooky rigs; the I/O-board rig's window is
+    Predator's (pbpf.py --rig pbio).  No *kind*: both rigs."""
+    for k in ((kind,) if kind else ("pb", "pbio")):
+        d = rig_dir(k)
+        if not all(os.path.isfile(os.path.join(d, s)) for s in _RIG_FILES[k]):
+            return False
+    tools = os.path.dirname(rig_dir("pb"))
+    return (os.path.isfile(os.path.join(rig_dir("pb"), "pbpf.py"))
             and os.path.isfile(os.path.join(tools, "ap_emu", "appf.py"))
             and os.path.isfile(os.path.join(tools, "spooky_emu", "spkvol.py")))
 
@@ -137,14 +210,27 @@ def rig_distro():
     return runtime.distro_for("pb")
 
 
-def rig_cmd(*args, **kw):
+def _rig_kw(kw):
+    """The rig's folder, and *kw* for webui/rig.py: the distro, and the rig
+    slot this app drives first in the env (``rigslot.rig_env``: empty on an
+    ordinary install - rig 0 - and PAD_SLOT / PAD_LABEL for an app a
+    ticket started, so its runs stay off rig 0 as the Stern tab's do)."""
+    d = rig_dir(kw.pop("kind", "pb"))
     kw.setdefault("distro", rig_distro())
-    return _rig.rig_cmd(rig_dir(), *args, **kw)
+    kw["env"] = rigslot.rig_env() + list(kw.get("env") or ())
+    return d, kw
+
+
+def rig_cmd(*args, **kw):
+    """A rig script's command line: Predator's rig, or ``kind="pbio"`` for
+    Alien's and ABBA's."""
+    d, kw = _rig_kw(kw)
+    return _rig.rig_cmd(d, *args, **kw)
 
 
 def rig_cmd_root(*args, **kw):
-    kw.setdefault("distro", rig_distro())
-    return _rig.rig_cmd_root(rig_dir(), *args, **kw)
+    d, kw = _rig_kw(kw)
+    return _rig.rig_cmd_root(d, *args, **kw)
 
 
 def mem_text(kb):
@@ -165,7 +251,7 @@ def state_text(info):
         return ("WSL not answering",
                 "The game runs inside WSL, the app's Linux.")
     if info.get("running") == "1":
-        name = info.get("title_name") or "Predator"
+        name = info.get("title_name") or "The game"
         if info.get("attract") != "1":
             return ("Starting", "%s is loading…" % name)
         bits = [name]
@@ -184,7 +270,9 @@ def setup_notice(info, rt_state, can_install=True):
     """``(text, button)`` for the tab's setup notice, as the AP tab's
     (``emulate_ap_core.setup_notice``): what is not set up, and whether "Set
     up emulator…" can fix it.  ``("", False)`` when nothing is wrong (or
-    nothing is known yet)."""
+    nothing is known yet).  Only Predator's rig has libraries to download
+    (its status says ``ready=``); Alien's and ABBA's run on the machine's
+    own, restored from its image."""
     if rt_state == "foreign":
         from . import runtime_prompt
         return runtime_prompt.notice("foreign", ""), False
@@ -213,10 +301,18 @@ def parse_cache(text):
 
 def cache_label(entry):
     """What the Cache window calls an entry: predator_1_0_1-028700ac ->
-    Predator 1.0.1; the setup -> the libraries."""
+    Predator 1.0.1; the setup -> the libraries; the I/O-board rig's
+    os-clonezilla-live-alien40 -> "Alien machine image (….iso)", upd-pbap145
+    -> "ABBA update (pbap145.upd)"."""
     name = entry["name"]
     if entry.get("kind") == "setup" or name == "setup":
-        return "Emulator setup (the game's libraries)"
+        return "Emulator setup (Predator's libraries)"
+    if entry.get("kind") in ("os", "update"):
+        src = entry.get("src") or name.split("-", 1)[-1]
+        title = (title_of(src) or ("Queen" if is_queen(src) else "")
+                 or "Pinball Brothers")
+        what = "machine image" if entry["kind"] == "os" else "update"
+        return "%s %s (%s)" % (title, what, src)
     m = re.match(r"^([a-z]+)_([0-9_]+)-[0-9a-f]+$", name)
     if m:
         return "%s %s" % (m.group(1).title(), m.group(2).replace("_", "."))
