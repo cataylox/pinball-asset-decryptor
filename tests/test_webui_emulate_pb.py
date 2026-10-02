@@ -458,3 +458,22 @@ def test_the_cache_window_shows_both_rigs_and_deletes_on_each(rig, monkeypatch, 
         drops = sorted(c for c in ran if "--drop" in c)
         assert drops == [["pb", "cache.sh", "--drop", "setup"],
                          ["pbio", "cache.sh", "--drop", "os-clonezilla-live-alien40"]]
+
+
+def test_rig_commands_carry_the_apps_rig_slot(monkeypatch):
+    """An app a ticket started drives its own rig (PAD_SLOT), as the Stern
+    tab does - before PAD-315 every PB run went to rig 0, David's."""
+    from pinball_decryptor.webui import emulate_pb_core as core
+    monkeypatch.setattr(core, "rig_distro", lambda: "PAD-Runtime")
+    monkeypatch.setenv("PAD_SLOT", "2")
+    monkeypatch.setenv("PAD_LABEL", "PAD-315")
+    cmd = core.rig_cmd_root("watch.sh", "x.iso", kind="pbio", env=["PAD_VISIBLE=1"])
+    assert cmd.index("PAD_SLOT=2") < cmd.index("PAD_VISIBLE=1")
+    assert "PAD_LABEL=PAD-315" in cmd
+    assert any(c.replace("\\", "/").endswith("pbio_emu/watch.sh") for c in cmd)
+    assert "PAD_SLOT=2" in core.rig_cmd("status.sh")
+    # an ordinary install: rig 0, nothing added
+    monkeypatch.delenv("PAD_SLOT")
+    monkeypatch.delenv("PAD_LABEL")
+    monkeypatch.delenv("PAD_TICKET", raising=False)
+    assert not any(c.startswith("PAD_SLOT=") for c in core.rig_cmd("status.sh"))

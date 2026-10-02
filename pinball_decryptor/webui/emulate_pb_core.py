@@ -35,7 +35,7 @@ import pathlib
 import re
 import sys
 
-from pinball_decryptor.core import runtime
+from pinball_decryptor.core import rigslot, runtime
 from pinball_decryptor.webui import rig as _rig
 
 #: The rigs ship next to this package.  ``PAD_PB_EMU_DIR`` moves Predator's,
@@ -210,17 +210,26 @@ def rig_distro():
     return runtime.distro_for("pb")
 
 
+def _rig_kw(kw):
+    """The rig's folder, and *kw* for webui/rig.py: the distro, and the rig
+    slot this app drives first in the env (``rigslot.rig_env``: empty on an
+    ordinary install - rig 0 - and PAD_SLOT / PAD_LABEL for an app a
+    ticket started, so its runs stay off rig 0 as the Stern tab's do)."""
+    d = rig_dir(kw.pop("kind", "pb"))
+    kw.setdefault("distro", rig_distro())
+    kw["env"] = rigslot.rig_env() + list(kw.get("env") or ())
+    return d, kw
+
+
 def rig_cmd(*args, **kw):
     """A rig script's command line: Predator's rig, or ``kind="pbio"`` for
     Alien's and ABBA's."""
-    d = rig_dir(kw.pop("kind", "pb"))
-    kw.setdefault("distro", rig_distro())
+    d, kw = _rig_kw(kw)
     return _rig.rig_cmd(d, *args, **kw)
 
 
 def rig_cmd_root(*args, **kw):
-    d = rig_dir(kw.pop("kind", "pb"))
-    kw.setdefault("distro", rig_distro())
+    d, kw = _rig_kw(kw)
     return _rig.rig_cmd_root(d, *args, **kw)
 
 

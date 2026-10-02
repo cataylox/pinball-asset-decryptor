@@ -34,9 +34,11 @@ else
 fi
 
 pbio_game_pid() { cat "$PBIO_RIG/game.pid" 2>/dev/null; }
+# (not `kill -0`: the game runs as root, and the app polls status.sh as the
+# ordinary user, whom kill -0 on a root process answers EPERM - PAD-315)
 pbio_game_alive() {
     local p; p=$(pbio_game_pid)
-    [ -n "$p" ] && kill -0 "$p" 2>/dev/null
+    [ -n "$p" ] && [ -d "/proc/$p" ]
 }
 # Every process of this slot: the namespace holder, the board, Xvfb, pinprog,
 # vidprog and anything they started.
