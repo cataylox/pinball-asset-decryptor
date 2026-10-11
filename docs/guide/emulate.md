@@ -370,6 +370,18 @@ machine (a 60 Hz board, the combination the game refuses to run on;
 from v0.219.4 the emulator leaves that refusal up instead of pressing
 past it). Both are remembered for every project and take effect at the next
 Start.
+**Edition** is which model the machine is. One Premium/LE card runs
+every Premium, LE and (on Batman 66, Elvira and John Wick) SLE of its
+title, and the machine tells the game which one it is with a model
+code on its CPU board; the list is the models the picked card's own
+game program takes, read off the card, and the first one is the model
+the card was built as, which is how the emulator has always run. A Pro
+card is a Pro whatever the board says, so it has nothing to pick. The
+game uses the model for little: its Pro or Premium/LE check, the LE
+number and machine page in the service menu, and a title's own feature
+here and there. The name on the boot screen is compiled into the
+card's game program, so it does not change. Not remembered: each
+session starts on the card's own model.
 Runs on Linux, and on Windows through WSL2. The rig ships with the
 app, in `tools/spike2_emu`, and the prerequisites installer pulls in
 what it needs (`qemu-user-static`, an ARM cross-compiler, `gcc` +

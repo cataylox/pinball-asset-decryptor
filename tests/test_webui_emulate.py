@@ -426,6 +426,55 @@ def test_start_launches_watch_with_the_machine_env(tmp_path, monkeypatch):
         assert any("[card] copying godzilla_le-1_16_0" in ln for ln in log)
 
 
+def test_the_edition_row_offers_the_cards_models_and_start_sends_the_code(tmp_path,
+                                                                          monkeypatch):
+    """PAD-519: a Premium/LE card runs every Premium, LE and SLE of its title; the board's
+    model code says which. The row lists what the card's own game takes, its first choice
+    sends the engine's "999" (the card's own), and a Pro card has nothing to pick."""
+    from pinball_decryptor.plugins.stern import cabinet_model
+    card = tmp_path / "batman-1_14_0.Release.8G.sdcard.raw"
+    card.write_bytes(b"\0" * 512)
+    pro = tmp_path / "star_wars_pro-1_31_0.Release.8G.sdcard.raw"
+    pro.write_bytes(b"\0" * 512)
+
+    def fake(path, title=None):
+        if path == str(pro):
+            return "star_wars_pro", {"built": "Pro", "choices": []}
+        return "batman", {"built": "Premium", "choices": [
+            ("Premium", "I2"), ("LE", "I0"), ("SLE", "I3")]}
+    monkeypatch.setattr(cabinet_model, "editions_card", fake)
+
+    def started(w, svc, rec):
+        rec.calls.clear()
+        w.call(NS + ".toggle")
+        _wait(w, lambda: any("watch.sh" in " ".join(c) for c in rec.calls))
+        _wait(w, lambda: svc._proc is None and not svc._starting)
+        w.drain()
+        return next(c for c in rec.calls if "watch.sh" in " ".join(c))
+
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        rec = _patch(svc, monkeypatch)
+        w.run(lambda: w.window.emulate_card_var.set(str(card)))
+        _wait(w, lambda: w.state(NS)["editions_on"])
+        st = w.state(NS)
+        assert [o["label"] for o in st["editions"]] == [
+            "Premium (the card's own)", "LE", "SLE"]
+        assert st["edition_note"] == ""
+        assert "PAD_MODEL=999" in started(w, svc, rec)
+
+        w.call("ui.set", NS, "edition", "SLE")
+        assert "PAD_MODEL=I3" in started(w, svc, rec)
+
+        # A Pro card: nothing to pick, nothing sent, and the row says why.
+        w.run(lambda: w.window.emulate_card_var.set(str(pro)))
+        _wait(w, lambda: w.state(NS)["edition_note"])
+        st = w.state(NS)
+        assert not st["editions_on"] and st["edition"] == ""
+        assert "Pro build" in st["edition_note"]
+        assert not any(a.startswith("PAD_MODEL=") for a in started(w, svc, rec))
+
+
 class _LiveProc:
     """A watch.sh that stays up (copying the card) until it is stopped."""
 

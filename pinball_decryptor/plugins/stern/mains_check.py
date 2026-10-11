@@ -125,15 +125,12 @@ def verdict_bytes(elf):
     return SKIPS if first == _MOV_R0_2 else SHOWS
 
 
-def verdict_card(path, title=None):
-    """``(title, verdict)`` for a card image - the game binary is read with
-    the app's own ext4 reader, so this works on Windows with no WSL.
+def game_binary(path, title=None):
+    """``(title, bytes)`` of a card's game binary, read with the app's own ext4 reader, so this
+    works on Windows with no WSL; ``(None, b"")`` when it cannot be read.
 
-    *title* picks one game directory on a multi-image card; without it the
-    first title that carries a ``game`` binary answers, which is the image the
-    emulator boots (PAD-122).  A card that cannot be read is
-    ``(None, UNKNOWN)`` rather than an exception: this decides a sentence on a
-    tab, and it must never be the reason a card cannot be run.
+    *title* picks one game directory on a multi-image card; without it the first title that
+    carries a ``game`` binary answers, which is the image the emulator boots (PAD-122).
     """
     from .explorer import CardImage
     try:
@@ -165,10 +162,22 @@ def verdict_card(path, title=None):
                             in reader.read_file_chunks(game))
                     except Exception:                    # noqa: BLE001
                         continue
-                    return name, verdict_bytes(blob)
+                    return name, blob
     except Exception:                                    # noqa: BLE001
+        return None, b""
+    return None, b""
+
+
+def verdict_card(path, title=None):
+    """``(title, verdict)`` for a card image (see :func:`game_binary`).  A card
+    that cannot be read is ``(None, UNKNOWN)`` rather than an exception: this
+    decides a sentence on a tab, and it must never be the reason a card cannot
+    be run.
+    """
+    name, blob = game_binary(path, title)
+    if not blob:
         return None, UNKNOWN
-    return None, UNKNOWN
+    return name, verdict_bytes(blob)
 
 
 def sentence(title, verdict):

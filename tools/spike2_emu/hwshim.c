@@ -4341,24 +4341,15 @@ static unsigned nv_udiv(unsigned n, unsigned d)
     return q;
 }
 
-static void nv_factory_hz_apply(void)
+/* The record's twelve bytes out of the EEPROM, or 0 when it does not decode
+ * or fails its check (*seed gets word 0, the generator's start). */
+static int nv_ident_decode(unsigned char *rec, unsigned *seed)
 {
-    const char *p = getenv("PAD_FACTORY_HZ");
     unsigned char *e = store[0];
-    unsigned char rec[12];
-    unsigned seed, state, key, w, sum, want, had, i;
-    char m[240];
-    if (!p || !*p) return;
-    if (p[0] == '5' && p[1] == '0' && !p[2]) want = 50;
-    else if (p[0] == '6' && p[1] == '0' && !p[2]) want = 60;
-    else {
-        logmsg("[i2c] PAD_FACTORY_HZ must be 50 or 60; the board is left as "
-               "it is\n");
-        return;
-    }
-    seed = (unsigned)e[0] | (unsigned)e[1] << 8 | (unsigned)e[2] << 16 |
-           (unsigned)e[3] << 24;
-    state = seed;
+    unsigned state, key, w, sum, i;
+    *seed = (unsigned)e[0] | (unsigned)e[1] << 8 | (unsigned)e[2] << 16 |
+            (unsigned)e[3] << 24;
+    state = *seed;
     for (i = 0; i < 12; i++) {
         state = state * 0x19660du + 1u;
         key = state >> 8;
@@ -4369,7 +4360,7 @@ static void nv_factory_hz_apply(void)
         if (w > 0xffu) {
             logmsg("[i2c] cabinet identity record does not decode; the board "
                    "is left as it is\n");
-            return;
+            return 0;
         }
         rec[i] = (unsigned char)w;
     }
@@ -4377,22 +4368,20 @@ static void nv_factory_hz_apply(void)
     if (((unsigned)rec[10] | (unsigned)rec[11] << 8) != (~sum & 0xffffu)) {
         logmsg("[i2c] cabinet identity record fails its checksum; the board "
                "is left as it is\n");
-        return;
+        return 0;
     }
-    had = (unsigned)rec[8] | (unsigned)rec[9] << 8;
-    if ((had == 50) == (want == 50)) {
-        snprintf(m, sizeof m, "[i2c] CPU board is already a %u Hz board "
-                 "(identity record says %u)\n", want, had);
-        logmsg(m);
-        return;
-    }
-    rec[8] = (unsigned char)want;
-    rec[9] = 0;
+    return 1;
+}
+
+/* Fix the check and write the record back under the same seed. */
+static void nv_ident_encode(unsigned char *rec, unsigned seed)
+{
+    unsigned char *e = store[0];
+    unsigned state = seed, key, w, sum, i;
     for (sum = 0, i = 0; i < 10; i++) sum += rec[i];
     sum = ~sum & 0xffffu;
     rec[10] = (unsigned char)sum;
     rec[11] = (unsigned char)(sum >> 8);
-    state = seed;
     for (i = 0; i < 12; i++) {
         state = state * 0x19660du + 1u;
         key = state >> 8;
@@ -4403,8 +4392,88 @@ static void nv_factory_hz_apply(void)
         e[4 + 4 * i + 2] = (unsigned char)(w >> 16);
         e[4 + 4 * i + 3] = (unsigned char)(w >> 24);
     }
+}
+
+static void nv_factory_hz_apply(void)
+{
+    const char *p = getenv("PAD_FACTORY_HZ");
+    unsigned char rec[12];
+    unsigned seed, want, had;
+    char m[240];
+    if (!p || !*p) return;
+    if (p[0] == '5' && p[1] == '0' && !p[2]) want = 50;
+    else if (p[0] == '6' && p[1] == '0' && !p[2]) want = 60;
+    else {
+        logmsg("[i2c] PAD_FACTORY_HZ must be 50 or 60; the board is left as "
+               "it is\n");
+        return;
+    }
+    if (!nv_ident_decode(rec, &seed)) return;
+    had = (unsigned)rec[8] | (unsigned)rec[9] << 8;
+    if ((had == 50) == (want == 50)) {
+        snprintf(m, sizeof m, "[i2c] CPU board is already a %u Hz board "
+                 "(identity record says %u)\n", want, had);
+        logmsg(m);
+        return;
+    }
+    rec[8] = (unsigned char)want;
+    rec[9] = 0;
+    nv_ident_encode(rec, seed);
     snprintf(m, sizeof m, "[i2c] CPU board made a %u Hz board (identity record "
              "line frequency %u -> %u)\n", want, had, want);
+    logmsg(m);
+}
+
+/* ══ PAD_MODEL=<code> - WHICH MODEL THE MACHINE IS: Pro, Premium, LE, SLE (PAD-519) ═
+ *
+ * One Premium/LE card runs every Premium, LE and SLE of a title; the machine
+ * says which it is with the MODEL CODE in bytes [4..7] of the cabinet identity
+ * record (see nv_ident_seed above). The game's classifier takes three code
+ * strings per class (batman 1.14.0 0x2b53c0: LE "I0", Premium "I2", SLE "I3");
+ * a Pro build answers Pro for every code. The boot screen does NOT follow it
+ * (its title is compiled in: Batman on "I3" still boots "BATMAN PRE"); the
+ * Pro/LE check, the LE number and a title's own model checks do. "999" is
+ * the engine's wildcard - the build's own compiled-in model, what the seeded
+ * record says.
+ * The codes a card takes are read off its binary by the app
+ * (plugins/stern/cabinet_model.py); this only writes the one it was given:
+ * one to three letters or digits, zero-padded to the record's four bytes.
+ *
+ * Saved with the EEPROM like PAD_FACTORY_HZ, so a run that does not set it
+ * keeps the model the board has; the Emulate tab always sends one (999 for
+ * the card's own). A record that does not decode is left alone. */
+static void nv_model_apply(void)
+{
+    const char *p = getenv("PAD_MODEL");
+    unsigned char rec[12], want[4] = {0, 0, 0, 0};
+    unsigned seed, i, same;
+    char m[200], had[5];
+    if (!p || !*p) return;
+    for (i = 0; p[i]; i++) {
+        char c = p[i];
+        if (i >= 3 || !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z'))) {
+            logmsg("[i2c] PAD_MODEL must be a model code of one to three "
+                   "capitals or digits (I2, 999); the board is left as it "
+                   "is\n");
+            return;
+        }
+        want[i] = (unsigned char)c;
+    }
+    if (!nv_ident_decode(rec, &seed)) return;
+    for (i = 0, same = 1; i < 4; i++) {
+        had[i] = (char)rec[4 + i];
+        if (rec[4 + i] != want[i]) same = 0;
+    }
+    had[4] = 0;
+    if (same) {
+        snprintf(m, sizeof m, "[i2c] board model is already %s\n", p);
+        logmsg(m);
+        return;
+    }
+    for (i = 0; i < 4; i++) rec[4 + i] = want[i];
+    nv_ident_encode(rec, seed);
+    snprintf(m, sizeof m, "[i2c] board model set to %s (identity record said "
+             "%s)\n", p, had[0] ? had : "nothing");
     logmsg(m);
 }
 
@@ -4494,6 +4563,7 @@ static void nv_load(void)
         logmsg(m);
         nv_ident_seed();
         nv_factory_hz_apply();
+        nv_model_apply();
         nv_country_apply();
         nv_poke_apply();     /* a poke must land on a blank chip too */
         return;
@@ -4508,6 +4578,7 @@ static void nv_load(void)
     logmsg(m);
     nv_ident_seed();
     nv_factory_hz_apply();
+    nv_model_apply();
     nv_country_apply();
     nv_poke_apply();
 }
