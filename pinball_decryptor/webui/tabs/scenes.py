@@ -72,7 +72,16 @@ class ScenesTab(TabService):
             # picture or a font since it was drawn (DragonRR: "auto update")
             svc.refresh_view()
             return True
-        return bool(svc.open(assets))
+        opened = bool(svc.open(assets))
+        # PAD-513: the Text tab's scan reads the card again for a project read by an older
+        # build (the boxes the game fills in); opening Scenes first starts it too
+        text = self.window.service("text")
+        if opened and text is not None and not _same(getattr(text, "_text_scan_dir", ""), assets):
+            try:
+                text._maybe_rescan()
+            except Exception:                            # noqa: BLE001
+                pass
+        return opened
 
     # -- hooks -------------------------------------------------------------
     def on_show(self):
@@ -84,6 +93,10 @@ class ScenesTab(TabService):
         self.set(folder="", empty="")
         if getattr(self, "_visible", False):
             self.ctx.loop.post(self._folder_changed)
+
+
+def _same(a, b):
+    return bool(a) and os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
 
 
 TAB = ScenesTab

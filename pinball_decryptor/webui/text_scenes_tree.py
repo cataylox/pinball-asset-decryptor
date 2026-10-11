@@ -1074,8 +1074,16 @@ class TreeEditMixin:
         known, the mode is).  On a screen whose text boxes a mode's code names, the words only
         count on those boxes, or for a line of a mode that names the screen: Tank Attack's
         code names only the instruction line on its start screen, and its MULTIBALL title
-        read as filled with a MULTIBALL the game shows elsewhere (DragonRR, PAD-513).
-        Memoised per scene until the text edits change."""
+        read as filled with a MULTIBALL the game shows elsewhere (DragonRR, PAD-513).  A box
+        whose words are a placeholder (``R.is_placeholder``: a score, a count, LINE 1
+        INSTRUCTIONS) is filled too, with no line or mode to name.
+
+        All that is guessing, and kept only for a project whose card has not been read since:
+        with ``engine.program_node_paths`` a box is filled exactly when the game program
+        points at its path from the screen's root, as the game finds a box to write in it
+        (PAD-513, emulator-proven: every box the game wrote, and only boxes it can name).  The
+        words still find its line, and the screen's modes name when.  Memoised per scene until
+        the text edits change."""
         memo = getattr(self, "_filled_memo", None)
         if memo is None or memo[0] != self.assets_dir:
             memo = self._filled_memo = (self.assets_dir, {}, None)
@@ -1098,11 +1106,12 @@ class TreeEditMixin:
                 for cls, keys in engine.program_mode_scenes(self.assets_dir).items():
                     for key in keys:
                         screens.setdefault(key, set()).add(R.mode_label(cls))
-                index = (R.filled_index(rows), boxes, screens)
+                index = (R.filled_index(rows), boxes, screens,
+                         engine.program_node_paths(self.assets_dir))
             except Exception:                        # noqa: BLE001
-                index = ({}, {}, {})
+                index = ({}, {}, {}, None)
             self._filled_memo = (self.assets_dir, memo[1], index)
-        lines, boxes, screens = index
+        lines, boxes, screens, known = index
         d = card.replace("\\", "/").rsplit("/", 1)[0]
         named, own = {}, set()
         for key, per in boxes.items():
@@ -1117,16 +1126,27 @@ class TreeEditMixin:
             names[n["id"]] = n.get("name") or ""
             if _kind_of(man, n) == "Text" and not n.get("added"):
                 texts.append(n)
-        mode_named = {}
+        mode_named, paths = {}, {}
         for n in texts:
             parts, cur = [], n["id"]
             while cur is not None:
                 parts.append(names[cur])
                 cur = parent.get(cur)
-            mode_named[n["id"]] = (named.get(".".join(reversed(parts)))
-                                   or named.get(names[n["id"]]))
+            paths[n["id"]] = ".".join(reversed(parts))
+            mode_named[n["id"]] = named.get(paths[n["id"]]) or named.get(names[n["id"]])
         some_named = any(mode_named.values())
         out = {}
+        if known is not None:
+            for n in texts:
+                if paths[n["id"]] not in known:
+                    continue
+                words = R.stand_in_words(_text_of(man, n, "Text"), True)
+                hits = lines.get(words) if words else None
+                hits = sorted(hits or (), key=lambda h: not own & set(h[1]))
+                out[n["id"]] = ({"line": hits[0][0], "modes": list(hits[0][1])} if hits else
+                                {"line": None, "modes": list(mode_named[n["id"]] or sorted(own))})
+            memo[1][card] = out
+            return out
         for n in texts:
             words = R.stand_in_words(_text_of(man, n, "Text"), True)
             hits = lines.get(words) if words else None
@@ -1137,6 +1157,8 @@ class TreeEditMixin:
                 out[n["id"]] = {"line": hits[0][0], "modes": list(hits[0][1])}
             elif labels:
                 out[n["id"]] = {"line": None, "modes": list(labels)}
+            elif R.is_placeholder(_text_of(man, n, "Text")):
+                out[n["id"]] = {"line": None, "modes": []}
         memo[1][card] = out
         return out
 

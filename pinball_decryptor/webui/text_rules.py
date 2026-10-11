@@ -101,6 +101,20 @@ def stand_in_rows(rows, r):
     return same + near
 
 
+#: words that only hold a place for the game's own (PAD-513): a score or a count
+#: (XXX,XXX,XXX, 00, AWARDS +XX FLIPS) or a line of instructions (LINE 1 INSTRUCTIONS, LINE3)
+_PLACEHOLDER = re.compile(r"^(?:0[0,.:]*|LINE ?\d+(?: INSTRUCTIONS?)?|INSTRUCTIONS?)$"
+                          r"|(?<![A-Z])X{2,}(?![A-Z])")
+
+
+def is_placeholder(s):
+    """True when a text box's words *s* are a placeholder the game writes over as it plays
+    (DragonRR, PAD-513: "have you checked elsewhere?" - Godzilla has 124 of them: scores,
+    counters and instructions)."""
+    s = stand_in_words(s).upper()
+    return bool(s) and _PLACEHOLDER.search(s) is not None
+
+
 #: words a game-program line and a text box are not matched on (PAD-485)
 _BOX_STOP = frozenset(("VS", "THE", "AN", "OF", "AND", "TO", "FOR", "IS", "AT", "IN",
                        "ON", "INSTANCE", "TEXT", "TEXTBOX"))

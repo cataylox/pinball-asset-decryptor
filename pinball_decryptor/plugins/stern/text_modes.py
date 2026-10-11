@@ -79,6 +79,8 @@ class Reading:
     scenes: dict = field(default_factory=dict)
     #: ``{mode class: {scene key: [node path]}}``: the text boxes it names with each screen
     boxes: dict = field(default_factory=dict)
+    #: every node path the program points at (:func:`node_refs`): the boxes the game can fill
+    paths: list = field(default_factory=list)
 
     def label(self, cls):
         return self.labels.get(cls) or mode_label(cls)
@@ -281,9 +283,43 @@ _NODE_PATH = re.compile(rb"(?<=\x00)[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9
 _NODE_WORD = re.compile(rb"Instance|Textbox|_Text\b|Title|Line\d")
 #: how far from the scene's name a node path counts as named with it: a table entry's words,
 #: or the same function's code (Godzilla's inits load a scene's name and its boxes' paths
-#: in one run of movw/movt)
+#: in one run of movw/movt).  Further on in the function a path still counts until the
+#: function names another scene (PAD-513: Bridge Attack's super jackpot intro fills BRIDGE,
+#: ATTACK and MULTIBALL, its MULTIBALL box 0x228 bytes past the scene's name)
 _BOX_TABLE_REACH = 0x60
 _BOX_CODE_REACH = 0x200
+
+
+def node_refs(raw):
+    """Every dotted name the game program's code or tables point at, and each name after one of
+    its dots (a tail the compiler shares), sorted.  The game finds a text box by its path from
+    the screen's root to write in it, so a box whose path is here can be filled in as the game
+    plays, and one whose path is not, cannot (PAD-513, emulator-proven on stock Godzilla LE
+    1.16 with the game's own set_text hooked: every box the game wrote on the screens a run
+    reached had its path here; DragonRR's TANK ATTACK letters and MULTIBALL title had not, and
+    the game never wrote them).  The plain reference census, without the far movw/movt pairs:
+    on that card they add no box's path and cost 20 times as long."""
+    from . import progreloc
+    hosts, at = [], {}
+    for m in _NODE_PATH.finditer(raw):
+        if len(m.group()) >= 200:       # Godzilla's score panel: paths of 82 characters
+            continue
+        text = m.group().decode("latin1")
+        hosts.append((m.start(), text))
+        at[(m.start(), 0)] = text
+        i = text.find(".")
+        while i >= 0:
+            at[(m.start(), i + 1)] = text[i + 1:]
+            i = text.find(".", i + 1)
+    census = progreloc.reference_census(raw, hosts)
+    return sorted({at[(off, r["delta"])] for off, refs in census.items() for r in refs
+                   if (off, r["delta"]) in at})
+
+
+def _tails(path):
+    """*path* and what follows each of its dots: ``A.B.C``, ``B.C``, ``C``."""
+    parts = path.split(".")
+    return [".".join(parts[i:]) for i in range(len(parts))]
 
 
 def mode_scenes(prog, raw, owners):
@@ -297,8 +333,10 @@ def mode_scenes(prog, raw, owners):
     names = sorted({m.decode() for m in _SCENE_NAME.findall(raw)})
     if not names:
         return {}, {}
-    paths = sorted({m.decode() for m in _NODE_PATH.findall(raw)
-                    if len(m) < 80 and _NODE_WORD.search(m)})
+    # a path's tails after a dot too: the compiler keeps "Title_Instance" as the end of
+    # "SwitchMeter.Title_Instance", and Tank Attack's title is named by that (PAD-513)
+    paths = sorted({t for m in _NODE_PATH.findall(raw) if len(m) < 80
+                    for t in _tails(m.decode()) if _NODE_WORD.search(t.encode())})
     refs = CM.clip_refs(prog, raw, names + paths, owners)
     first = {}
     for name in names:
@@ -312,6 +350,8 @@ def mode_scenes(prog, raw, owners):
     # the boxes named with a scene: in its table entry, or in the same function's code
     in_table = lambda r: r.kind in ("lone", "group")             # noqa: E731
     prefs = sorted((r.at, p, in_table(r)) for p in paths for r in refs.get(p, ()))
+    fns = {a: prog.func_start(a) for a, _p, t in prefs if not t}
+    loads = sorted(r.at for name in names for r in refs.get(name, ()) if not in_table(r))
     boxes = {}
     for name in names:
         for r in refs.get(name, ()):
@@ -322,8 +362,10 @@ def mode_scenes(prog, raw, owners):
                 near = [p for a, p, t in prefs if t and abs(a - r.at) <= _BOX_TABLE_REACH]
             else:
                 fn = prog.func_start(r.at)
-                near = [p for a, p, t in prefs if not t and abs(a - r.at) <= _BOX_CODE_REACH
-                        and prog.func_start(a) == fn]
+                i = bisect.bisect_right(loads, r.at)
+                upto = loads[i] if i < len(loads) else float("inf")
+                near = [p for a, p, t in prefs if not t and fns[a] == fn
+                        and (abs(a - r.at) <= _BOX_CODE_REACH or r.at < a < upto)]
             got = boxes.setdefault(m, {}).setdefault(name, [])
             for p in near:
                 if p not in got:
@@ -391,6 +433,7 @@ def _read(raw, spans, census):
         spans = progtext._display_spans(raw, ranges)
     if census is None:
         census = progtext._census(raw, spans)
+    out.paths = node_refs(raw)
     try:
         prog = S.Program(raw)
     except S.ScanError:

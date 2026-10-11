@@ -238,7 +238,8 @@ def enumerate_program_strings(raw, modes=False, ctx=None):
     which leaves every other line of the text as it is.  *ctx*, a dict when
     given, gets ``scenes`` and ``boxes``: the screens each mode names and
     the text boxes it names with them (:func:`.text_modes.mode_scenes`,
-    PAD-485).
+    PAD-485), and ``paths``, every node path the program points at
+    (:func:`.text_modes.node_refs`, PAD-513).
 
     ``budget`` is the byte length a replacement must fit: :data:`MAX_EDIT_LEN`
     for a *growable* row (every reference to the string is visible to the
@@ -311,6 +312,7 @@ def _with_mode_rows(raw, spans, census, rows, ctx=None):
     if ctx is not None:
         ctx["scenes"] = dict(getattr(reading, "scenes", None) or {})
         ctx["boxes"] = dict(getattr(reading, "boxes", None) or {})
+        ctx["paths"] = list(getattr(reading, "paths", None) or ())
     if not reading.keys:
         return rows
     offs_of = {}

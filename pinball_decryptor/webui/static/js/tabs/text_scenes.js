@@ -835,13 +835,17 @@ export const filledLines = (f) => {
   const who = (f.modes || []).join(", ");
   return [
     f.line ? `The game fills this box in as it plays, with its own line: ${f.line}${who ? ` (${who})` : ""}. The words here are a stand-in; the game's line is what the machine shows.`
-      : `The game fills this box in as it plays${who ? `, during ${who}` : ""}. The words here are a stand-in; the game's own line is what the machine shows.`,
+      : who ? `The game fills this box in as it plays, during ${who}. The words here are a stand-in; the game's own line is what the machine shows.`
+        // PAD-513: a box the game names (or a placeholder: XXX,XXX,XXX, 00) with no line or mode to name
+        : "The game fills this box in as it plays with words of its own: a score, a count, a name or one of its lines. The words here are a stand-in.",
     "Its size, place and font set here hold for whatever the game puts in it.",
   ];
 };
 const filledTip = (f) => ({ head: "Filled in by the game", lines: [
   ...filledLines(f),
-  ["T", f.line ? "find the game's line on the Replace Text tab" : "list that mode's lines on the Replace Text tab"] ] });
+  f.line ? ["T", "find the game's line on the Replace Text tab"]
+    : (f.modes || []).length ? ["T", "list that mode's lines on the Replace Text tab"] : null ] });
+const filledFinds = (f) => !!(f && (f.line || (f.modes || []).length));
 const rowTip = (l, cs) => ({
   head: `${l.name}${l.added ? " (added)" : ""}`,
   lines: [
@@ -1038,7 +1042,7 @@ function TreeLayers({ t }) {
         aria-label="Show on the Images tab" ...${tip(l.pics.length === 1 ? "Show this picture on the Images tab"
           : `Show one of the ${l.pics.length} pictures it draws on the Images tab`)}
         onClick=${(e) => { e.stopPropagation(); showPics(l.pics, e); }}><${Icon} name="image" /></button>`
-        : l.filled ? html`<button type="button" class="ly-img ly-txt"
+        : filledFinds(l.filled) ? html`<button type="button" class="ly-img ly-txt"
         aria-label="Find the game's line on the Replace Text tab" ...${tip(l.filled.line ? `Find the game's line, ${l.filled.line}, on the Replace Text tab`
           : `List the lines of ${(l.filled.modes || []).join(", ")} on the Replace Text tab`)}
         onClick=${(e) => { e.stopPropagation(); call("text_scenes.activate", filledJump(l.filled)); }}><${Icon} name="text" /></button>`
@@ -1460,12 +1464,14 @@ function GameFills({ p }) {
     <div class="tree-row tg-head">
       <span class="tg-name" ...${tip(f ? filledTip(f) : FILLS_OFF_TIP)}><${Icon} name="gear" /><span class="eyebrow">Filled in by the game</span></span>
       <span class="grow"></span>
-      <${Button} size="xs" kind="ghost" icon="text" disabled=${!f}
-        title=${!f ? "Only a box the game fills in has a line of the game's" : f.line ? "Find the game's line on the Replace Text tab" : "List that mode's lines on the Replace Text tab"}
+      <${Button} size="xs" kind="ghost" icon="text" disabled=${!filledFinds(f)}
+        title=${!f ? "Only a box the game fills in has a line of the game's"
+          : !filledFinds(f) ? "The game writes words of its own here, not one line of its text" : f.line ? "Find the game's line on the Replace Text tab" : "List that mode's lines on the Replace Text tab"}
         onClick=${() => call("text_scenes.activate", filledJump(f))}>${f && !f.line ? "Its lines" : "Its line"}<//>
     </div>
     <div class="small ellip tg-what">${!f ? "Not this one"
-      : f.line ? html`With <b>${f.line}</b>${who ? ` (${who})` : ""}` : html`During <b>${who}</b>`}</div>
+      : f.line ? html`With <b>${f.line}</b>${who ? ` (${who})` : ""}` : who ? html`During <b>${who}</b>`
+        : "With words of its own"}</div>
   </div>`;
 }
 export function GameColors({ g }) {
