@@ -281,9 +281,17 @@ _NODE_PATH = re.compile(rb"(?<=\x00)[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9
 _NODE_WORD = re.compile(rb"Instance|Textbox|_Text\b|Title|Line\d")
 #: how far from the scene's name a node path counts as named with it: a table entry's words,
 #: or the same function's code (Godzilla's inits load a scene's name and its boxes' paths
-#: in one run of movw/movt)
+#: in one run of movw/movt).  Further on in the function a path still counts until the
+#: function names another scene (PAD-513: Bridge Attack's super jackpot intro fills BRIDGE,
+#: ATTACK and MULTIBALL, its MULTIBALL box 0x228 bytes past the scene's name)
 _BOX_TABLE_REACH = 0x60
 _BOX_CODE_REACH = 0x200
+
+
+def _tails(path):
+    """*path* and what follows each of its dots: ``A.B.C``, ``B.C``, ``C``."""
+    parts = path.split(".")
+    return [".".join(parts[i:]) for i in range(len(parts))]
 
 
 def mode_scenes(prog, raw, owners):
@@ -297,8 +305,10 @@ def mode_scenes(prog, raw, owners):
     names = sorted({m.decode() for m in _SCENE_NAME.findall(raw)})
     if not names:
         return {}, {}
-    paths = sorted({m.decode() for m in _NODE_PATH.findall(raw)
-                    if len(m) < 80 and _NODE_WORD.search(m)})
+    # a path's tails after a dot too: the compiler keeps "Title_Instance" as the end of
+    # "SwitchMeter.Title_Instance", and Tank Attack's title is named by that (PAD-513)
+    paths = sorted({t for m in _NODE_PATH.findall(raw) if len(m) < 80
+                    for t in _tails(m.decode()) if _NODE_WORD.search(t.encode())})
     refs = CM.clip_refs(prog, raw, names + paths, owners)
     first = {}
     for name in names:
@@ -312,6 +322,8 @@ def mode_scenes(prog, raw, owners):
     # the boxes named with a scene: in its table entry, or in the same function's code
     in_table = lambda r: r.kind in ("lone", "group")             # noqa: E731
     prefs = sorted((r.at, p, in_table(r)) for p in paths for r in refs.get(p, ()))
+    fns = {a: prog.func_start(a) for a, _p, t in prefs if not t}
+    loads = sorted(r.at for name in names for r in refs.get(name, ()) if not in_table(r))
     boxes = {}
     for name in names:
         for r in refs.get(name, ()):
@@ -322,8 +334,10 @@ def mode_scenes(prog, raw, owners):
                 near = [p for a, p, t in prefs if t and abs(a - r.at) <= _BOX_TABLE_REACH]
             else:
                 fn = prog.func_start(r.at)
-                near = [p for a, p, t in prefs if not t and abs(a - r.at) <= _BOX_CODE_REACH
-                        and prog.func_start(a) == fn]
+                i = bisect.bisect_right(loads, r.at)
+                upto = loads[i] if i < len(loads) else float("inf")
+                near = [p for a, p, t in prefs if not t and fns[a] == fn
+                        and (abs(a - r.at) <= _BOX_CODE_REACH or r.at < a < upto)]
             got = boxes.setdefault(m, {}).setdefault(name, [])
             for p in near:
                 if p not in got:

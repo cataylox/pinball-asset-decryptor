@@ -1074,8 +1074,10 @@ class TreeEditMixin:
         known, the mode is).  On a screen whose text boxes a mode's code names, the words only
         count on those boxes, or for a line of a mode that names the screen: Tank Attack's
         code names only the instruction line on its start screen, and its MULTIBALL title
-        read as filled with a MULTIBALL the game shows elsewhere (DragonRR, PAD-513).
-        Memoised per scene until the text edits change."""
+        read as filled with a MULTIBALL the game shows elsewhere (DragonRR, PAD-513).  A box
+        whose words are a placeholder (``R.is_placeholder``: a score, a count, LINE 1
+        INSTRUCTIONS) is filled too, with no line or mode to name.  Memoised per scene until
+        the text edits change."""
         memo = getattr(self, "_filled_memo", None)
         if memo is None or memo[0] != self.assets_dir:
             memo = self._filled_memo = (self.assets_dir, {}, None)
@@ -1137,6 +1139,8 @@ class TreeEditMixin:
                 out[n["id"]] = {"line": hits[0][0], "modes": list(hits[0][1])}
             elif labels:
                 out[n["id"]] = {"line": None, "modes": list(labels)}
+            elif R.is_placeholder(_text_of(man, n, "Text")):
+                out[n["id"]] = {"line": None, "modes": []}
         memo[1][card] = out
         return out
 

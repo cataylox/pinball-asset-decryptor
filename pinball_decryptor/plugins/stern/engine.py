@@ -2033,8 +2033,9 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
 #: game-program rows' modes were read at (a project read before has none), and
 #: (PAD-485, ``scenes_rev`` :data:`SCENES_REV`) the screens each mode names
 _PROGRAM_MODES_FILE = "program_modes.json"
-#: PAD-485: bumped when what :func:`.text_modes.mode_scenes` finds changes
-SCENES_REV = 1
+#: PAD-485: bumped when what :func:`.text_modes.mode_scenes` finds changes (2: PAD-513,
+#: boxes further on in a function and named by a path's tail)
+SCENES_REV = 2
 
 
 def _program_modes_read(assets_dir, scenes=None, boxes=None):
