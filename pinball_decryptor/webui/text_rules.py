@@ -125,13 +125,16 @@ def filled_index(rows):
     "some kind of alert that this item in scenes is subject to being replaced by text"):
     ``{stand-in words (loose): [(original, [mode label])]}`` over the game-program rows of
     *rows* (a mode's own rows left out: the main row names every mode).  A box whose own
-    words, a closing ! . ? aside, are in it is filled by the game with that line."""
+    words, a closing ! . ? aside, are in it is filled by the game with that line.  A line
+    the game never reads (``unused``) fills nothing, and one of a single letter is no line:
+    Godzilla's TANK ATTACK is spelled a letter to a box, and its T boxes read as filled with
+    a stray " T!" of the program's (DragonRR, PAD-513)."""
     out = {}
     for r in rows:
-        if row_is_scene(r) or row_part(r):
+        if row_is_scene(r) or row_part(r) or r.get("unused"):
             continue
         words = stand_in_words(r.get("original"), True)
-        if not words:
+        if len(re.sub(r"\W", "", words)) < 2:
             continue
         labels = [mode_label(m) for m in r.get("modes") or ()]
         out.setdefault(words, []).append((r["original"], labels))
