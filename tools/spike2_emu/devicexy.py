@@ -136,6 +136,11 @@ BLANK_IMAGE = ""
 #: (Bot.Arch)`); this only bounds the NUL search, it is not a limit to tune.
 TEXT_MAX = 200
 
+#: The same bound for an UNPLACED lamp (_one, PAD-517), whose part text is a
+#: list of rects: Bond's SPEAKER 23-B points at 216 characters. Kept apart so
+#: an artwork-less table reads exactly what it did.
+UNPLACED_TEXT_MAX = 1000
+
 #: How many times a word must appear before it is taken for a candidate shared
 #: empty string. The pointer is repeated once per record and once more per
 #: record from the neighbouring field, so a table worth finding is in the
@@ -215,7 +220,8 @@ def layout_image(recs):
         # shares. Counted as one it would win this vote outright on an
         # artwork-less title - every record carries it - and hand the playfield
         # renderer 388 markers stacked on (0, 0).
-        if r["image"] == BLANK_IMAGE:
+        # An unplaced lamp (PAD-517) names a picture it is not drawn on.
+        if r["image"] == BLANK_IMAGE or _unplaced(r):
             continue
         per.setdefault(r["image"], []).append(r)
     if not per:
@@ -278,7 +284,7 @@ def blank_str(d, va):
     return 0 <= o < len(d) and d[o] == 0
 
 
-def _text_ptr(d, va):
+def _text_ptr(d, va, limit=TEXT_MAX):
     """True if `va` is null or points at a NUL-terminated run of TEXT.
 
     What an artwork-less record's connector and part fields hold (BLANK_IMAGE).
@@ -294,7 +300,7 @@ def _text_ptr(d, va):
     o = va - VA_BIAS
     if o < 0 or o >= len(d):
         return False
-    e = d.find(b"\0", o, o + TEXT_MAX + 1)
+    e = d.find(b"\0", o, o + limit + 1)
     if e < 0:
         return False
     return all(32 <= c < 127 or c in (9, 10, 13) for c in d[o:e])
@@ -337,11 +343,28 @@ def _one(d, cstr, va):
     conn = struct.unpack_from("<I", d, o + 0x18)[0]
     part = struct.unpack_from("<I", d, o + 0x1C)[0]
     cls = struct.unpack_from("<h", d, o + 0x08)[0]
-    if blank:
+    # ★ A NAMED IMAGE WITH NO RECT IS AN UNPLACED RECORD (PAD-517). Godzilla,
+    # Bond, Jaws, John Wick and D&D point their backbox speaker lights, SPEAKER
+    # 1-R .. 23-B on node 7, at `System/TestMode/spike_2_speaker_panel_cropped`
+    # and leave x, y, w, h zero: the places are in the part text instead
+    # (`rect:320,126,30,30,56,126,30,30#part:511-1135-00`, both rings). The
+    # size test below refused all 69, so those titles had no speaker lights at
+    # all while the artwork-less ones (Venom, Rush) did. Taken on the blank
+    # variant's tighter terms, never as a position, and for LAMPS only: the
+    # same shape also carries Bond's cabinet switches and coils, and a new
+    # switch row moves every swelf id after it. One on the layout picture
+    # itself is dropped by records() (a marker at 0, 0 on the artwork).
+    unplaced = not blank and not (x or y or w or h)
+    if unplaced and cls != 3:
+        return None
+    if blank or unplaced:
         if x or y or w or h or cls not in (1, 2, 3):
             return None
-        # Null, or text - see BLANK_IMAGE for the title that needed this.
-        if not (_text_ptr(d, conn) and _text_ptr(d, part)):
+        # Null, or text - see BLANK_IMAGE for the title that needed this. An
+        # unplaced lamp's part text lists its rects, and Bond's SPEAKER 23-B
+        # runs to 216 characters.
+        limit = UNPLACED_TEXT_MAX if unplaced else TEXT_MAX
+        if not (_text_ptr(d, conn, limit) and _text_ptr(d, part, limit)):
             return None
     elif not (0 <= x <= 4000 and 0 <= y <= 4000
               and 0 < w <= 200 and 0 < h <= 200):
@@ -489,8 +512,36 @@ def records(d, cstr):
             seen.add(cur)
             cur += STRIDE
         if len(run) >= 4:                 # a lone match is noise, a run is a table
-            out.extend(run)
-    return out
+            out.extend(_old_runs(run))
+    # An unplaced lamp (_one, PAD-517) on the title's own layout picture would
+    # be a marker at 0, 0 on the artwork: D&D's LEFT/RIGHT GI on its Rope
+    # drawing. The layout is the placed records' vote, so these cannot move it.
+    lay = layout_image(out)
+    return [r for r in out if not (_unplaced(r) and r["image"] == lay)]
+
+
+def _unplaced(r):
+    """A record naming an image but no rect on it (_one, PAD-517)."""
+    return r["image"] != BLANK_IMAGE and not (r["x"] or r["y"] or r["w"] or r["h"])
+
+
+def _old_runs(run):
+    """`run` with every other record judged as it was before unplaced lamps
+    were read: a stretch of them between two unplaced lamps is kept only if it
+    is a run of four on its own. Star Wars ELG's unplaced lamps join two short
+    stretches into one long run, which would have read a blank switch the
+    title never had - and a new switch row moves every swelf id after it."""
+    out, part = [], []
+    for r in run + [None]:
+        if r is None or _unplaced(r):
+            if len(part) >= 4:
+                out.extend(part)
+            part = []
+            if r is not None:
+                out.append(r)
+        else:
+            part.append(r)
+    return sorted(out, key=lambda r: r["va"])
 
 
 def build(game=None, elf_path=None):
@@ -597,7 +648,7 @@ def counts(keep):
 #: refuses a table recording another revision, or none, which re-derives it
 #: once through the same path a new build takes. BUMP THIS whenever a change to
 #: devicexy or swelf would alter a cached table for an unchanged binary.
-READER_REV = 2
+READER_REV = 3                  # 3: unplaced records (PAD-517)
 READER_TAG = "# reader: "
 
 
