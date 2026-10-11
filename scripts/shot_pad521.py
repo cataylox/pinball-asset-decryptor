@@ -4,7 +4,7 @@
 
 The server runs from <repo> (default: this tree) against a scratch settings folder. The project holds YOLT WIZARD,
 a blocks mode as the owner made it: You Only Live Twice done -> Light the mode at the Right ramp with BLOFELD
-(before: one insert blinking, all there was; after: the seed's blocks). Shot:
+(before: one insert blinking, all there was; after: the six villains chasing and the film's insert solid). Shot:
   <before|after>_<screen>.png its blocks, the pointer on the block its film event runs
 """
 
@@ -46,8 +46,9 @@ BM.save(%(project)r, slug, BM.normalize({"name": "YOLT WIZARD", "seconds": 30, "
 
 FILM = {"before": {"op": "light_mode", "shot": "Right ramp exit opto", "insert": "BLOFELD", "color": "#00ff40",
                    "pattern": "blink"},
-        "after": {"op": "light_mode", "shot": "Right ramp exit opto", "insert": "BLOFELD", "color": "#00ff40",
-                  "pattern": "blink"}}
+        "after": {"op": "light_mode", "shot": "Right ramp exit opto",
+                  "insert": "DR. NO-RIGHT RAMP,ROSA KLEBB,GOLDFINGER-RIGHT RAMP,LARGO,BLOFELD,MR. HENDERSON",
+                  "color": "#00ff40", "pattern": "chase", "solid": "Y.O.L.T.", "solid_color": "#ffffff"}}
 WORDS = {"before": "Light the mode at", "after": "Light the mode at"}
 
 
@@ -108,9 +109,11 @@ def main():
                 time.sleep(0.5)
             block = page.locator(".bk-script .bk-w", has_text=WORDS[kind])
             print("blocks", block.count(), flush=True)
-            if block.count():
+            if block.count() and os.environ.get("PAD521_HOVER"):
                 block.last.hover()
                 time.sleep(1.5)
+            page.mouse.move(5, 5)
+            time.sleep(0.5)
             page.screenshot(path=os.path.join(outdir, "%s_%s.png" % (which, screen)))
             browser.close()
         print("shots in", outdir, flush=True)
