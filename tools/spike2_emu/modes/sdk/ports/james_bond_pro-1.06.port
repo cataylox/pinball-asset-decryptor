@@ -44,6 +44,16 @@ site surface_find     0x0057fbd8 0xe92d4070 0xe24dd008
 site surface_set_video 0x005772bc 0xe5d030d4 0xe92d4ff0
 site surface_play     0x005750c8 0xe5d030d4 0xe92d43f0
 site surface_stop     0x00574878 0xe5d030d4 0xe92d40f0
+# PAD-530: the surface's own seek, length and position, at LE 1.06's distances from surface_play, each the same code
+# (seek calls the player's gst_element_seek, length and position its query_duration / query_position). A mode's clip
+# the game's own clip took the surface from comes back where it would be by then, once the game's clip is over: when
+# the game asks for its main-play video (MainPlayLoop_<film>, as on LE), or the surface is idle. Seen in the emulator
+# 2026-10-11 (stock card, hidden, muted) as on LE: the game's own Ball Lock (effect 117) and Extra Ball (effect 279,
+# award_screen(279, 0, 0, 0x7a7e00) as Pro 0x5e8ec) over a mode file's 111.9 s clip - back at 8785 ms and 15372 ms.
+site surface_seek     0x00574d5c 0xe92d43f0 0xe1a07003
+site surface_duration 0x00574a14 0xe5d030d4 0xe92d40f0
+site surface_position 0x00574bb8 0xe5d030d4 0xe92d40f0
+text backdrop_idle MainPlayLoop
 site balls_in_play    0x00264464 0xe92d4010 0xe3094860
 site find_text        0x0057f380 0xe92d4070 0xe24dd008
 site agent_header     0x005cc978 0xe92d40f8 0xe2505000
