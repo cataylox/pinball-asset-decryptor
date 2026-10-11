@@ -652,7 +652,7 @@ def _staging_items(slots_by_rel, assignments, assets_dir):
     """``(colour, chosen, items)`` of a staging pass: the project's colour
     profile (PAD-305), the files profiles ``{rel: Profile}``, and the
     ``[(rel, replacement), ...]`` it stages, in that order."""
-    from . import colour_profile
+    from . import colour_profile, staged_originals
     # the project's colour profile (PAD-305), read once for the whole pass
     colour = colour_profile.active(assets_dir) if assets_dir else None
     items = [(rel, rep) for rel, rep in assignments.items()
@@ -664,10 +664,20 @@ def _staging_items(slots_by_rel, assignments, assets_dir):
                                             [rel for rel, _r in items]))
     # A game's own clip unlocked on the Video tab (PAD-336) is its own
     # replacement: re-encoded from its original only to bake the colors in,
-    # so with no profile to bake (or no original to keep) it is left alone.
+    # so with no profile to bake (or no original to keep) it is left alone;
+    # unless an earlier build re-encoded it (it has its .orig/ snapshot):
+    # then No change puts the game's own clip back (PAD-528)
     items = [(rel, rep) for rel, rep in items
-             if rep != STOCK_SOURCE or (assets_dir and rel in chosen)]
+             if rep != STOCK_SOURCE or (assets_dir and (
+                 rel in chosen or (colour is None and staged_originals
+                                   .has_snapshot(assets_dir, rel))))]
     return colour, chosen, items
+
+
+def _stock_put_back(rep, clip_colour):
+    """A game's own clip switched on with No change (PAD-528): staging puts
+    its snapshot back, as switching it off does; no conversion."""
+    return rep == STOCK_SOURCE and clip_colour is None
 
 
 def _conversion(cache, slot, rep, orig, slot_noconv, choice, trim_to_length,
@@ -747,6 +757,8 @@ def conversions_due(slots_by_rel: Dict[str, VideoSlot],
         slot = slots_by_rel[rel]
         stock = rep == STOCK_SOURCE
         if not stock and bool(overrides.get(rel, no_conversion)):
+            continue
+        if _stock_put_back(rep, colour or chosen.get(rel)):
             continue
         orig = (staged_originals.snapshot_path(assets_dir, rel)
                 if assets_dir else None)
@@ -857,6 +869,19 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
         slot_noconv = False if stock else bool(overrides.get(rel, no_conversion))
         if progress_cb:
             progress_cb(i, total, rel)
+        if _stock_put_back(rep, colour or chosen.get(rel)):
+            if staged_originals.revert(assets_dir, rel):
+                staged += 1
+                cache.forget(rel)
+                if log_cb:
+                    log_cb(f"  ✓ {rel}  ←  the game's own clip, its own "
+                           f"colors (No change)", "success")
+            else:
+                failures.append((rel, "its original could not be put back"))
+                if log_cb:
+                    log_cb(f"  ✗ {rel}: its original could not be put back",
+                           "error")
+            continue
         if log_cb:
             note = ""
             if rel in overrides and bool(overrides[rel]) != bool(no_conversion):

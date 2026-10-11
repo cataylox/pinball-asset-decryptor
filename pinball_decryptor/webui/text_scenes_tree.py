@@ -77,6 +77,7 @@ class TreeEditMixin:
         self._tlive_job = None
         self._tlive_lock = threading.Lock()
         self._thist = {}             # (project, card) -> undo / redo lists of (ops, eyes) steps
+        self._tbatches = []          # changes made to several scenes at once (PAD-528)
 
     def _tree_reset(self):
         self._trees = None
@@ -2030,6 +2031,162 @@ class TreeEditMixin:
         return self._tree_add(op)
 
     @rpc
+    def tree_text_colour_all(self, node):
+        """PAD-528 (DragonRR: "I was relying on being able to apply no change to all images
+        and text. Please make sure that this can also be done with font colour changes"):
+        line *node*'s own colour, or Default (none), for every line of text that is not
+        locked, in every scene: the lines Apply to all lines of text reaches (PAD-471), less
+        the score panel lines the game paints (PAD-507).  After an "Are you sure?"; one Undo
+        puts every scene back."""
+        from ..plugins.stern import scene_edit, score_colours as sc, text_colour
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        node = int(node)
+        mine = text_colour.own_colours(self._tree_ops(card)).get(node)
+        trees = self._load_trees()
+        try:
+            lines = text_colour.every_line(self.assets_dir, trees=trees)
+        except Exception:                            # noqa: BLE001
+            log.exception("every line of text")
+            lines = {}
+        panels = {}
+        targets = {}
+        for rel in lines:
+            c, _h, n = rel.rpartition("#")
+            if c not in panels:
+                try:
+                    panels[c] = set(sc.panel_lines(trees.get(c) or {}))
+                except Exception:                    # noqa: BLE001
+                    panels[c] = set()
+            if int(n) not in panels[c]:
+                targets.setdefault(c, set()).add(int(n))
+        n_all = sum(len(v) for v in targets.values())
+        if not n_all or set(targets) == {card} and targets[card] == {node}:
+            self.window.toast(
+                "There are no other lines of text to give it to: the game's own lines are "
+                "locked until Unlock extracted images and text is ticked (under Advanced)."
+                if not self._tree_lines_unlocked() else
+                "There are no other lines of text to give it to.", "info")
+            return False
+        edits = scene_edit.load(self.assets_dir)
+
+        def same(had):
+            if mine is None:
+                return had is None
+            return had is not None and (had.get("pick"), had.get("bright")) == (
+                mine.get("pick"), mine.get("bright"))
+        change = {}
+        for c, nodes in targets.items():
+            had = text_colour.own_colours(edits.get(c) or [])
+            todo = sorted(n for n in nodes if not same(had.get(n)))
+            if todo:
+                change[c] = todo
+        what = ("this line's color, %s%s" % (
+            mine.get("pick"), "" if mine.get("bright", 100) == 100
+            else " at %d%% brightness" % mine["bright"])) if mine else "Default"
+        if not change:
+            self.window.toast("All %d lines of text that are not locked already have %s."
+                              % (n_all, what), "info")
+            return False
+        n_change = sum(len(v) for v in change.values())
+        msg = ("Are you sure?\n\nEvery line of text that is not locked (each one added in "
+               "Scenes, and the game's own lines while they are unlocked), all %d of them, "
+               % n_all)
+        msg += ("gets %s, in place of the color each has now. A line with a color of its own "
+                "is drawn in exactly that color, and the color profile no longer changes it."
+                % what) if mine else (
+                "goes back to Default: each one's own color is taken off, so the game's color "
+                "comes back, and the color profile on the lines that have one.")
+        msg += " %d of them change, in %d scene%s." % (
+            n_change, len(change), "" if len(change) == 1 else "s")
+        msg += ("\n\nThe score panel lines are left as they are: the game paints their "
+                "colors as it plays.\n\nUndo in Scenes puts them all back.")
+        if not compat.messagebox.askyesno("Apply to all lines of text", msg):
+            return False
+        edits = scene_edit.load(self.assets_dir)      # read again after the question
+        after = {}
+        for c, nodes in change.items():
+            ops = [op for op in edits.get(c) or ()
+                   if not (op.get("op") == "text_colour" and op.get("node") in nodes)]
+            if mine is not None:
+                ops += [dict(mine, node=n) for n in nodes]
+            after[c] = ops
+        return self._tree_batch(after, "Font text color %s applied to all %d lines of text "
+                                       "(%d changed)." % (what, n_all, n_change))
+
+    def _tree_lines_unlocked(self):
+        from ..core import colour_profile as cp, staged_changes
+        try:
+            return bool(staged_changes.peek(self.assets_dir).get(cp.STOCK_IMAGES_KEY))
+        except Exception:                            # noqa: BLE001
+            return False
+
+    # -- one Undo step over several scenes (PAD-528) ----------------------------
+    # A change made to many scenes at once is a step on each scene's own list, noted
+    # together, so Undo (or Redo) on any of them takes every scene that is still as the
+    # change left it back (or forward) with it.
+    _BATCHES_KEPT = 8
+
+    def _tree_batch(self, after, note=None):
+        """Put the op lists *after* (``{card: ops}``) in one save, one step on each scene."""
+        from ..plugins.stern import scene_edit
+        for c in after:
+            self._tree_track(c)
+        edits = scene_edit.load(self.assets_dir)
+        before = {c: list(edits.get(c) or ()) for c in after}
+        edits.update({c: [dict(op) for op in ops] for c, ops in after.items()})
+        try:
+            scene_edit.save(self.assets_dir, edits)
+        except OSError as e:
+            compat.messagebox.showerror("Scene edit", str(e))
+            return False
+        for c in after:
+            self._tree_track(c)
+        self._tbatches.append({"dir": self.assets_dir,
+                               "cards": {c: (before[c], self._tree_ops(c)) for c in after}})
+        del self._tbatches[:-self._BATCHES_KEPT]
+        if note:
+            self.window.append_log(note, "info")
+        self._tree_refresh()
+        return True
+
+    def _tree_batch_step(self, card, redo):
+        """Undo (*redo*: Redo) the change to several scenes whose step *card*'s comes next;
+        ``None`` when its next step is its own."""
+        from ..plugins.stern import scene_edit
+        h = self._tree_hist(card)
+        stack = (h or {}).get("redo" if redo else "undo")
+        if not stack:
+            return None
+        for b in reversed(self._tbatches):
+            pair = b["cards"].get(card) if b["dir"] == self.assets_dir else None
+            if pair is None:
+                continue
+            frm, to = (pair[0], pair[1]) if redo else (pair[1], pair[0])
+            if h["now"] != frm or stack[-1][0] != to:
+                return None
+            edits = scene_edit.load(self.assets_dir)
+            for c, (b_ops, a_ops) in b["cards"].items():
+                ch = self._tree_hist(c)
+                frm, to = (b_ops, a_ops) if redo else (a_ops, b_ops)
+                st = (ch or {}).get("redo" if redo else "undo")
+                if not st or ch["now"] != frm or st[-1][0] != to:
+                    continue                          # changed since: left as it is
+                st.pop()
+                ch["undo" if redo else "redo"].append((ch["now"], ch["eyes"]))
+                edits[c] = [dict(op) for op in to]
+                ch["now"] = list(to)
+            try:
+                scene_edit.save(self.assets_dir, edits)
+            except OSError as e:
+                compat.messagebox.showerror("Scene edit", str(e))
+                return False
+            self._tree_refresh()
+            return True
+        return None
+
+    @rpc
     def tree_text_colour_save(self, hex_color, bright=100):
         """Save a copy (PAD-514, DragonRR: "save and load text colours as you have done in
         profiles"): the colour on show kept as a file of its own, listed under Saved colors
@@ -2878,6 +3035,9 @@ class TreeEditMixin:
         if card is None:
             return False
         h = self._tree_hist(card)
+        done = self._tree_batch_step(card, False)         # several scenes at once (PAD-528)
+        if done is not None:
+            return done
         # a step from before the app was started has no eyes noted (they follow its hides)
         was = h["undo"].pop() if h["undo"] else (scene_edit.undone(h["now"]), None)
         if was[0] == h["now"] and was[1] in (None, h["eyes"]):
@@ -2894,6 +3054,9 @@ class TreeEditMixin:
         h = self._tree_hist(card)
         if not h["redo"]:
             return False
+        done = self._tree_batch_step(card, True)
+        if done is not None:
+            return done
         h["undo"].append((h["now"], h["eyes"]))
         return self._tree_put(card, h, h["redo"].pop())
 

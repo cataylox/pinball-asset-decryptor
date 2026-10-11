@@ -182,8 +182,18 @@ function TextColor({ p, c }) {
       <${Button} size="xs" icon="upload" onClick=${() => call("text_scenes.tree_text_colour_load", id)}
         title="Load a text color saved earlier and give it to this line">Load...<//>
     </div>
+    <div class="row fnt-row fnt-color-all">
+      <span class="sp"></span>
+      <${Button} size="xs" icon="copy" onClick=${() => call("text_scenes.tree_text_colour_all", id)}
+        title=${ALL_TIP}>Apply to all lines of text…<//>
+    </div>
   </div>`;
 }
+
+// PAD-528 (DragonRR: "make sure that this can also be done with font colour changes"):
+// Apply to all for the line's own color, or Default, in the words of the Colors bar's
+// Apply to all lines of text (PAD-471)
+const ALL_TIP = "This will change all of your unlocked lines of text to the color you have selected in this tab, or back to Default if this line has no color of its own. This may mean that every single line of text, the game's own and the ones you added, in every scene will be affected. The score panel lines the game paints are left as they are. You can undo this function";
 
 // PAD-507 / PAD-514: a score panel line is painted by the game as it plays, so its colors
 // are the game's, picked here as under Selected
