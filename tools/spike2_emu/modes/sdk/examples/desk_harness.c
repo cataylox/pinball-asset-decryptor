@@ -597,15 +597,13 @@ int pm_status_bar(const char *words, unsigned rgb, int percent)
     static unsigned had_rgb;
     static int had_pct = -2;
     if (!words || !*words) {
-        if (had[0]) printf("%6lu STATUSBAR OFF %s
-", now_ms, current && current->name ? current->name : "?");
+        if (had[0]) printf("%6lu STATUSBAR OFF %s\n", now_ms, current && current->name ? current->name : "?");
         had[0] = 0;
         had_pct = -2;
         return 1;
     }
     if (strcmp(had, words) || had_rgb != rgb || had_pct != percent)
-        printf("%6lu STATUSBAR %d %06x %s %s
-", now_ms, percent, rgb & 0xffffffu, words,
+        printf("%6lu STATUSBAR %d %06x %s %s\n", now_ms, percent, rgb & 0xffffffu, words,
                current && current->name ? current->name : "?");
     snprintf(had, sizeof had, "%s", words);
     had_rgb = rgb;

@@ -1503,3 +1503,42 @@ def test_a_lit_mode_claims_its_shot_while_it_would_start_there(tmp_path):
     # lit; the game's own mode in the way; clear again; it started
     assert re.findall(r"LITCLAIM (\w+) TEST MODE", out) == ["200000", "0", "200000", "0"]
     assert "START (its lit shot)" in out
+
+
+# ---- PAD-521: the game's own status bar (James Bond: the coloured bar under the TV) ---------------------------------
+def test_the_bar_is_off_unless_ticked_and_keeps_a_colour():
+    p = BM.normalize({"name": "X"})
+    assert p["bar"] == {"on": False, "color": "#00c040"}
+    assert BM.normalize({"bar": {"on": 1, "color": "blue"}})["bar"] == {"on": True, "color": "#00c040"}
+    assert "pm_status_bar" not in BM.to_c(BM.starter("RAMP FRENZY", SHOTS), "ramp_frenzy")
+    src = BM.to_c(prog([], bar={"on": True, "color": "#1060ff"}), "blk")
+    assert "#define BAR_RGB          0x1060ffu" in src
+    used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", src))
+    assert used <= _header_calls(), used - _header_calls()
+
+
+def test_the_bar_shows_the_name_and_its_clock_then_the_total_then_goes(tmp_path):
+    """The Bond owner (PAD-521): the game's own mini-wizards show their name in a coloured bar under the TV, the clock
+    draining along it, kept through the total. Started, it is full; the clock runs it down; at the end it is full again
+    for the total's 3 s, then given back. A drain gives it back at once."""
+    p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]}],
+             seconds=4, bar={"on": True, "color": "#00c040"}, name="YOLT WIZARD")
+    out = play(tmp_path, p, "shot", "Left ramp", "secs", 2, "secs", 2.5, "secs", 3.5)
+    bars = re.findall(r"^\s*(\d+) STATUSBAR (-?\d+|OFF) ?(\w*)", out, re.M)
+    pcts = [int(b[1]) for b in bars if b[1] not in ("OFF",)]
+    running = [x for x in pcts if x >= 0]
+    assert pcts[0] == 100 and pcts[-1] == -1                           # full at the start; full (no wipe) at the end
+    assert running == sorted(running, reverse=True) and min(running) <= 5   # it drained with the clock
+    assert bars[-1][1] == "OFF"
+    end = _at_any(out, r"END \(time ran out\)")
+    off = int(bars[-1][0])
+    assert 2900 <= off - end <= 3200                                   # through the total
+    assert "STATUSBAR 100 00c040 YOLT WIZARD" in out
+    out = play(tmp_path, p, "shot", "Left ramp", "secs", 1, "ball_end", "secs", 0.2)
+    bars = re.findall(r"^\s*(\d+) STATUSBAR (-?\d+|OFF)", out, re.M)
+    assert bars[-1][1] == "OFF" and int(bars[-1][0]) - _at_any(out, r"END \(ball ended\)") <= 40
+
+
+def test_only_a_title_whose_port_names_the_bar_offers_it():
+    assert MP.profile("james_bond_le_1_06").status_bar is True
+    assert MP.profile("godzilla_le_1_16").status_bar is False

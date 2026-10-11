@@ -2590,6 +2590,7 @@ static struct {
     char words[64];
     unsigned rgb;
     unsigned long out_since;
+    const struct pm_mode *owner;      /* the mode holding it: only it gives it back (another may take it over) */
 } sb;
 
 static unsigned char *sb_obj(void)
@@ -2652,6 +2653,7 @@ int pm_status_bar(const char *words, unsigned rgb, int percent)
     int k;
     if (!(can & PM_CAN_STATUS_BAR)) return 0;
     if (!words || !*words) {
+        if (sb.held && sb.owner && current && sb.owner != current) return 1;   /* another mode of ours has it now */
         sb_release("the mode gave it back");
         return 1;
     }
@@ -2671,6 +2673,7 @@ int pm_status_bar(const char *words, unsigned rgb, int percent)
         sb.rgb = rgb;
         sb.sent = 0;
     }
+    sb.owner = current;
     if (percent > 100) percent = 100;
     sb.now[0] = percent < 0 ? 0 : (unsigned char)percent;
     sb.now[1] = sb.now[2] = sb.now[3] = 1;

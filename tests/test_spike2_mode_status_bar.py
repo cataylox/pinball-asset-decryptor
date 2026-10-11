@@ -15,6 +15,9 @@ PRELUDE = r"""
 #include <string.h>
 #define PM_CAN_STATUS_BAR 0x4000000u
 static unsigned can = PM_CAN_STATUS_BAR;
+struct pm_mode { const char *name; };
+static const struct pm_mode mode_a = { "A" }, mode_b = { "B" };
+static const struct pm_mode *current = &mode_a;
 static unsigned long now_ms = 1000;
 static int in_game = 1;
 static unsigned long pm_ms(void) { return now_ms; }
@@ -78,6 +81,9 @@ int main(void)
     obj[0x120] = 0; obj[0x11f] = 7;                     /* the game's own display took it: left to the game */
     pm_status_bar("", 0, 0); bytes("the game's now");
     pm_status_bar("YOLT WIZARD", 0x00ff00, 10);
+    current = &mode_b; pm_status_bar("DAF", 0x0000ff, -1);    /* another mode of ours takes it over */
+    current = &mode_a; pm_status_bar(0, 0, 0); bytes("not A's to give back");
+    current = &mode_b; pm_status_bar("YOLT WIZARD", 0x00ff00, 10);
     in_game = 0; sb_tick(); now_ms += 31000; sb_tick(); bytes("game over");
     return 0;
 }
@@ -106,7 +112,8 @@ def test_a_mode_holds_the_games_status_bar_and_gives_it_back(tmp_path):
         "blue, no wipe 0 1110 DIAMOND DEATH THREAT 0.00 0.00 1.00 1.0 3",
         "given back 0 1000 DIAMOND DEATH THREAT 0.00 0.00 1.00 1.0 3",
         "the game's now 10 1701 YOLT WIZARD 0.00 1.00 0.00 1.0 4",
-        "game over 10 1701 YOLT WIZARD 0.00 1.00 0.00 1.0 5",          # as it found it, the second time
+        "not A's to give back 0 1110 DAF 0.00 0.00 1.00 1.0 6",
+        "game over 10 1701 YOLT WIZARD 0.00 1.00 0.00 1.0 7",          # as it found it, the second time
     ]
 
 

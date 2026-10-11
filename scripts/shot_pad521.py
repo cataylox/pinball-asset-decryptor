@@ -6,6 +6,7 @@ The server runs from <repo> (default: this tree) against a scratch settings fold
 a blocks mode as the owner made it: You Only Live Twice done -> Light the mode at the Right ramp with BLOFELD
 (before: one insert blinking, all there was; after: the six villains chasing and the film's insert solid). Shot:
   <before|after>_<screen>.png its blocks, the pointer on the block its film event runs
+  <before|after>_blocks_yolt_bar.png the settings row: (after) its name in the game's own status bar, its colour
 """
 
 import json
@@ -38,7 +39,7 @@ sys.path.insert(0, %(repo)r)
 from pinball_decryptor.plugins.stern import block_modes as BM
 film = %(film)r
 slug, _c = BM.new_blocks_mode(%(project)r, "YOLT WIZARD")
-BM.save(%(project)r, slug, BM.normalize({"name": "YOLT WIZARD", "seconds": 30, "vars": [], "scripts": [
+BM.save(%(project)r, slug, BM.normalize({"name": "YOLT WIZARD", "seconds": 30, "vars": [], "bar": %(bar)r, "scripts": [
     {"hat": {"kind": "shot", "shot": "Side ramp enter opto", "when": "running"},
      "do": [{"op": "score", "points": {"k": "num", "v": 5000000}}, {"op": "add_time", "seconds": {"k": "num", "v": 5}}]},
     {"hat": {"kind": "event", "event": "film_yolt", "when": "any"}, "do": [film]}]}))
@@ -65,7 +66,8 @@ def main():
     os.makedirs(project)
     seed = os.path.join(scratch, "seed.py")
     with open(seed, "w", encoding="utf-8") as f:
-        f.write(SEED % {"repo": repo, "project": project, "film": FILM[kind]})
+        f.write(SEED % {"repo": repo, "project": project, "film": FILM[kind],
+                        "bar": {"on": True, "color": "#00c040"} if screen == "blocks_yolt_bar" else {}})
     import subprocess
     subprocess.run([sys.executable, seed], check=True)
     hostpy = os.path.join(scratch, "host.py")
@@ -104,6 +106,14 @@ def main():
                 hide.first.click()
                 time.sleep(1)
             scripts = page.locator(".bk-script")
+            if screen == "blocks_yolt_bar":         # the settings row: its name in the game's bar, and its colour
+                page.locator(".bk-settings").first.evaluate("(el) => el.scrollIntoView({block: 'center'})")
+                time.sleep(0.5)
+                box = page.get_by_text("its name in the game's bar", exact=True)
+                print("bar box", box.count(), flush=True)
+                page.screenshot(path=os.path.join(outdir, "%s_%s.png" % (which, screen)))
+                browser.close()
+                return
             if scripts.count():
                 scripts.last.evaluate("(el) => el.scrollIntoView({block: 'center'})")
                 time.sleep(0.5)

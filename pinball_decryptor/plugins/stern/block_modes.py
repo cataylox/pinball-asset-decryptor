@@ -34,6 +34,8 @@ THE PROGRAM (``blocks.json``)::
       "clips": [{"name": "sever", "file": "sever.mp4"}],      PAD-374: its own clips and sounds,
       "sounds": [{"name": "roar", "file": "roar.wav", "priority": 4}],   files in its folder
       "music": "music.wav",       its own music bed while it runs ("" = the game's music)
+      "bar": {"on": true, "color": "#00c040"},   PAD-521: its name in the game's own status bar (James Bond: the
+                                  coloured bar under the TV), in this colour, its clock draining along it
       "scripts": [
         {"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"},
          "do": [{"op": "if", "cond": {...}, "then": [...], "else": [...]}, ...]}
@@ -368,6 +370,7 @@ def normalize(data):
     out["music"] = str(out.get("music") or "")
     out["scripts"] = [s for s in (out.get("scripts") or []) if isinstance(s, dict)]
     out["hud"] = _norm_hud(out.get("hud"))
+    out["bar"] = _norm_bar(out.get("bar"))
     for s in out["scripts"]:
         for b in _walk(s.get("do")):
             # PAD-372: Add seconds takes a value; one saved before held a plain number
@@ -375,6 +378,16 @@ def normalize(data):
             if b.get("op") == "add_time" and isinstance(secs, (int, float)) and not isinstance(secs, bool):
                 b["seconds"] = {"k": "num", "v": b["seconds"]}
     return out
+
+
+BAR_COLOR = "#00c040"            # PAD-521: the status bar's colour unless one is picked
+
+
+def _norm_bar(b):
+    """PAD-521: the game's own status bar - off unless ticked, in a colour of its own."""
+    b = b if isinstance(b, dict) else {}
+    return {"on": bool(b.get("on", False)),
+            "color": b.get("color") if COLOR_RE.match(str(b.get("color") or "")) else BAR_COLOR}
 
 
 def _norm_hud(h):
@@ -1632,6 +1645,7 @@ def to_c(program, slug):
     # PAD-375: a mode with a HUD or a screen of its own watches the game's displays (the kit's
     # kit_display): its words step aside under one, so it holds a display priority while it runs
     watch = has_hud or program["screen"]
+    has_bar = program["bar"]["on"]          # PAD-521: its name, colour and clock in the game's own status bar
     live = []                           # (counter 0-2, C of its value): counters that follow a value
     gauge_live = None
     if has_hud:
@@ -1671,6 +1685,9 @@ def to_c(program, slug):
              % (program["priority"] or (HUD_PRIORITY if has_hud else 0)))
     L.append("#define TIMER_MAX_MS     %dL" % TIMER_MAX_MS)
     L.append("#define ENDING_MS        3000        /* the total its own screen shows at the end */")
+    if has_bar:
+        L.append("#define BAR_RGB          0x%06xu   /* PAD-521: its colour in the game's own status bar */"
+                 % int(program["bar"]["color"][1:], 16))
     L.append("#define UNUSED __attribute__((unused))   /* a helper the blocks may not call */")
     L.append("")
     gm = program["game_modes"]                           # PAD-373: as a form mode's (PAD-363)
@@ -1730,6 +1747,8 @@ def to_c(program, slug):
     L.append("static void *screen, *screen_words;")
     L.append("static unsigned hide_ticks, poll;")
     L.append("static unsigned ended_begun;          /* PAD-413: pm_begun() at its end, while its total shows */")
+    if has_bar:
+        L.append("static unsigned bar_max, bar_hold;     /* PAD-521: the clock's most ticks; the bar kept through the total */")
     if watch:
         L.append("static int screen_away;                /* its screen hidden: a game display or mode has the middle */")
     if has_hud:
@@ -1768,6 +1787,8 @@ def to_c(program, slug):
     L.append("    return run.on && RUN_SECONDS ? (run.ticks_left + TICKS_PER_SECOND - 1) / TICKS_PER_SECOND : 0;")
     L.append("}")
     L.append("")
+    if has_bar:
+        L.extend(_BAR_C.split("\n"))
     L.append("/* a timer: ms from now (0 or less stops it); the milliseconds it has left */")
     L.append("UNUSED static void timer_start(int i, long long ms)")
     L.append("{")
@@ -1999,6 +2020,10 @@ def to_c(program, slug):
     L.append("    run.elapsed = 0;")
     L.append("    run.shots = 0;")
     L.append("    run.total = 0;")
+    if has_bar:
+        L.append("    bar_max = run.ticks_left;")
+        L.append("    bar_hold = 0;")
+        L.append("    bar_show(1);                      /* PAD-521: its name in the game's bar */")
     if g.mech:
         L.append("    scoop_next = 0;")
     L.append("    hide_ticks = 0;")
@@ -2048,6 +2073,10 @@ def to_c(program, slug):
         L.append("    }")
         L.append("    pa_end(&own);                     /* its music fades, the game's comes back */")
     L.append("    unlight_all();                    /* a show it ends with paints on, then hands back */")
+    if has_bar:
+        L.append("    bar_show(0);                      /* PAD-521: the bar full, kept through its total */")
+        L.append("    bar_hold = ENDING_MS / 1000 * TICKS_PER_SECOND;")
+        L.append("    ended_begun = pm_begun();")
     L.append("    if (screen) {")
     L.append('        words("TOTAL", (long long)run.total, 1);')
     L.append("        hide_ticks = %d * TICKS_PER_SECOND;" % (TOTAL_MS // 1000))
@@ -2084,6 +2113,9 @@ def to_c(program, slug):
     L.append("{")
     L.append("    end(why);")
     L.append("    hide_ticks = 0;")
+    if has_bar:
+        L.append("    bar_hold = 0;")
+        L.append("    pm_status_bar(0, 0, 0);           /* PAD-521: the game's display comes at once */")
     L.append("    if (screen) pm_show(screen, 0);")
     L.append("    if (DISPLAY_PRIORITY) pm_display_priority(0);")
     if has_hud:
@@ -2176,6 +2208,11 @@ def to_c(program, slug):
     L.append("        if (screen) pm_show(screen, 0);")
     L.append('        pm_log("its total gives way - another mode began");')
     L.append("    }")
+    if has_bar:
+        L.append("    if (bar_hold && !run.on && (pm_begun() != ended_begun || --bar_hold == 0)) {")
+        L.append("        bar_hold = 0;")
+        L.append("        pm_status_bar(0, 0, 0);       /* PAD-521: the bar back (not if another mode of ours has it) */")
+        L.append("    }")
     L.append("    if (hide_ticks && --hide_ticks == 0 && !run.on && screen) pm_show(screen, 0);")
     timer_scripts = scripts_of("timer_done")
     if timer_scripts:
@@ -2209,6 +2246,8 @@ def to_c(program, slug):
     L.append("        }")
     L.append("    }")
     L.append("    (void)seconds;")
+    if has_bar:
+        L.append("    bar_show(1);                      /* PAD-521: the clock along the bar */")
     L.append("    lamps_tick();")
     if g.mech:
         L.append("    scoop_tick();")
@@ -2610,6 +2649,21 @@ UNUSED static void game_wizard(const char *name, int start)
     int r = pm_game_wizard_named(name, start ? PM_WIZARD_START : PM_WIZARD_LIGHT);
     if (r) pm_log("mini-wizard: the game's %s, %s", name, r == PM_WIZARD_STARTED ? "started" : r == PM_WIZARD_WAITING
                   ? "to start the moment nothing of the game's is in its way" : "lit for its start shot");
+}
+"""
+
+#: PAD-521: the game's own status bar (MODE_SDK.md "The game's status bar")
+_BAR_C = r"""/* PAD-521: its name in the game's own status bar (James Bond: the coloured bar under the TV), in BAR_RGB, the clock
+ * draining along it as the game's own modes show theirs; full through its total, then given back. A game without
+ * one shows nothing here. */
+static void bar_show(int clock)
+{
+    int pct = -1;
+    if (clock && RUN_SECONDS) {
+        if (run.ticks_left > bar_max) bar_max = run.ticks_left;    /* time added: the bar is full again */
+        pct = bar_max ? (int)((run.ticks_left * 100u + bar_max - 1) / bar_max) : 0;
+    }
+    pm_status_bar(MODE_NAME, BAR_RGB, pct);
 }
 """
 
