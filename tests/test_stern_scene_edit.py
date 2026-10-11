@@ -290,6 +290,73 @@ def test_each_scene_says_whether_its_edits_are_on_a_card_yet(tmp_path):
     assert E.scene_states(a) == {"c2": "written"}
 
 
+_YELLOW = {"name": "Yellow", "gain": [3.19, 3.17, 0.14], "gamma": [0.22, 0.22, 3.85],
+           "lift": [0.0, 0.0, 0.0], "saturation": 1.0}
+
+
+def test_a_line_s_color_profile_marks_its_scene_changed_until_written(tmp_path):
+    """DragonRR (PAD-524): "I have changed the colour profile to yellow but the scene is not
+    reflecting a change - no yellow dot".  A profile on a game line is a change of its
+    scene: orange until a Write bakes it, green after, orange again when the profile moves
+    or the line goes back to the game's colours (the card still has the yellow)."""
+    from pinball_decryptor.core import colour_profile as cp, staged_changes
+    a = str(tmp_path)
+    card = "/godzilla_le/assets/lcd/auto_loaded/abc/scene.radium"
+    scene = "/godzilla_le/assets/lcd/auto_loaded/abc"
+    rel = cp.text_rel(card, 1239)
+    data = staged_changes.load(a)
+    data[cp.STOCK_IMAGES_KEY] = True
+    staged_changes.save(a, data)
+    assert X.scene_colour_states(a) == {}                     # its colours as they were
+    cp.store_own_profile(a, "text", rel, cp._from_dict(_YELLOW))
+    assert X.scene_colour_states(a) == {}                     # a profile, but switched off
+    cp.set_text_slot(a, rel, True)
+    assert X.scene_colour_states(a) == {scene: "edited"}      # no Write yet
+    assert X.scene_states(a) == {}                            # no scene edit at all
+    assert X.mark_built(a)
+    assert X.scene_colour_states(a) == {scene: "written"}
+    cp.store_own_profile(a, "text", rel, cp._from_dict(dict(_YELLOW, saturation=0.5)))
+    assert X.scene_colour_states(a) == {scene: "edited"}
+    X.mark_built(a)
+    assert X.scene_colour_states(a) == {scene: "written"}
+    cp.set_text_slot(a, rel, False)
+    assert X.scene_colour_states(a) == {scene: "edited"}
+    X.mark_built(a)
+    assert X.scene_colour_states(a) == {}
+
+
+def test_a_picture_s_color_profile_marks_every_scene_drawing_it(tmp_path):
+    """A game picture switched on behind the unlock box, with the individual files profile:
+    every scene that draws it is changed; one recorded by a Write before PAD-524 (no colours
+    in the record) is not taken as written."""
+    import json
+    import os
+    from pinball_decryptor.core import colour_profile as cp, staged_changes
+    a = str(tmp_path)
+    tex = os.path.join(a, "images", "scene_textures")
+    os.makedirs(tex)
+    with open(os.path.join(tex, "radium_images.txt"), "w", encoding="utf-8") as f:
+        f.write("# rel\tcard\toffset\n"
+                "scene_textures/radimg_8x8_aa.png\t/g/auto_loaded/s1/scene.radium\t16\n"
+                "scene_textures/radimg_8x8_aa.png\t/g/auto_loaded/s2/scene.radium\t16\n"
+                "scene_textures/radimg_8x8_bb.png\t/g/auto_loaded/s3/scene.radium\t16\n")
+    data = staged_changes.load(a)
+    data[cp.STOCK_IMAGES_KEY] = True
+    staged_changes.save(a, data)
+    cp.store_asset_profile(a, cp._from_dict(_YELLOW))
+    assert X.scene_colour_states(a) == {}                     # no picture switched on
+    cp.set_asset_slot(a, "images", "images/scene_textures/radimg_8x8_aa.png", True)
+    assert X.scene_colour_states(a) == {"/g/auto_loaded/s1": "edited",
+                                        "/g/auto_loaded/s2": "edited"}
+    with open(os.path.join(tex, X.BUILT_FILENAME), "w", encoding="utf-8") as f:
+        json.dump({"edits": {}}, f)                           # an older Write's record
+    assert X.scene_colour_states(a) == {"/g/auto_loaded/s1": "edited",
+                                        "/g/auto_loaded/s2": "edited"}
+    X.mark_built(a)
+    assert X.scene_colour_states(a) == {"/g/auto_loaded/s1": "written",
+                                        "/g/auto_loaded/s2": "written"}
+
+
 def test_a_turn_rotates_about_the_middle_and_both_sides_agree():
     """DragonRR: "graphics can be rotated".  90 degrees clockwise about its own point: the
     point stays put on the glass, and the card draws what the preview draws."""

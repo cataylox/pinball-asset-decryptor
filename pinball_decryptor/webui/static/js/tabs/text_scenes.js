@@ -30,11 +30,12 @@ const SCENE_COLS = [
 ];
 let sceneWidths = null;         // dragged column widths, kept for the session
 // DragonRR: a scene's colour says where its edits stand - orange: changed and not written to
-// a card yet (the next Write puts them on); green: exactly what the last Write put on the card
+// a card yet (the next Write puts them on); green: exactly what the last Write put on the card.
+// A color profile on one of its pictures or lines of text is a change too (PAD-524).
 const STATE_TIP = {
-  same: "Not changed: the scene as the game ships it.",
-  edited: "Changed since the last Write: the next Write puts it on the card.",
-  written: "Written: the last Write put exactly these edits on the card.",
+  same: "Not changed: the scene as the game ships it, no color profile on any of its pictures or lines.",
+  edited: "Changed since the last Write (its edits or a color profile on its pictures or lines): the next Write puts it on the card.",
+  written: "Written: the last Write put exactly these edits and color profiles on the card.",
 };
 // PAD-429 (DragonRR): the search finds the game's on-screen text, not only scene names;
 // PAD-468: with nothing typed, the arrows go through every line of text of every scene

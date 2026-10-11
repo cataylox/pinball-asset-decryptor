@@ -2720,6 +2720,8 @@ class TreeEditMixin:
         """PAD-471: lines' colour switches moved from the Colors tab (Apply to all lines of
         text, or its Undo).  The tab tells this scene to draw again itself; a running game is
         handed it, as a palette click does."""
+        if getattr(self, "_alive", False):
+            self._restate_list()                     # PAD-524: a profile is a change too
         if getattr(self, "_alive", False) and self._sel:
             self._live_kick()
 
@@ -2728,6 +2730,7 @@ class TreeEditMixin:
         (the preview shows a switched-on file the way the Write bakes it)."""
         if getattr(self, "_alive", False):
             self._publish_look()                     # a profile's name or its count moved
+            self._restate_list()                     # PAD-524: a profile is a change too
         if not getattr(self, "_alive", False) or not self._sel:
             return
         self._trev += 1
