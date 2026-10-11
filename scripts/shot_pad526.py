@@ -77,7 +77,7 @@ def main():
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="msedge")
-            page = browser.new_page(viewport={"width": 1440, "height": 1300})
+            page = browser.new_page(viewport={"width": 1440, "height": 1700})
             page.goto(url)
             page.wait_for_function("window.__padReady === true", timeout=60000)
             time.sleep(2)
@@ -86,11 +86,11 @@ def main():
                 rows.first.click()
                 time.sleep(2)
             sec = page.locator("section.modes-sec", has_text="The game's own modes").first
-            sec.scroll_into_view_if_needed()
+            sec.locator(".modes-shots").first.evaluate("e => e.scrollIntoView({block: 'end'})")
             time.sleep(1)
             labels = sec.locator("label").all_inner_texts()
             print("held off:", len(labels), labels, flush=True)
-            sec.screenshot(path=out)
+            page.screenshot(path=out)
             browser.close()
         print("shot", out, os.path.getsize(out), flush=True)
     finally:
