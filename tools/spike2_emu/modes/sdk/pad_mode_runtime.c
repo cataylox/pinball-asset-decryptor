@@ -2084,6 +2084,7 @@ static volatile int disp_clip_ours, disp_clip_lost;
 static char disp_clip_name[96], disp_lost_name[64];
 static void display_tick(void);           /* the display priority section, below */
 static void block_tick(void);             /* PAD-347: a mode that keeps the game's modes from starting */
+static void bd2_tick(void);               /* PAD-521: the backdrop on the bank's surface, below */
 
 int pm_clip(const char *name)
 {
@@ -2177,6 +2178,7 @@ static void clip_tick(void)
     long playing = pm_port_value("surface_playing", 2);
     display_tick();                           /* item 154 display: the hold, the covered state */
     block_tick();                             /* PAD-347: a block ends with its mode */
+    bd2_tick();                               /* PAD-521: the loop on the bank's surface */
     if (!clip.on && clip_v2 && !clip2_hidden && pm_ms() - clip2_tried > 1000) {
         clip2_tried = pm_ms();                /* a grafted surface out of sight, once its scene is up */
         clip2_show(0);
@@ -2335,6 +2337,14 @@ static struct {
     unsigned plays, frames;
 } bd;
 static unsigned char *disp_layered_mgr;   /* the layered display's manager (display priority, below) */
+/* PAD-521: THE BACKDROP ON CLIP V2 (James Bond LE). A build whose clips play on the video bank's own surface
+ * (clip v2, below) has no background element to take over, and the game keeps its own videos in front of that
+ * surface: what the bank shows is behind them. So the loop is simply the bank's clip, played again whenever the
+ * surface is idle while the mode wants it - after its end, after a one-shot in its place, after a full-screen clip
+ * of ours. A port opts in with `value backdrop_surface 1` once its loop was seen on the glass. bd.obj is 1 while
+ * the clip on the surface is ours. */
+static int bd_v2;
+static void *clip2_surface(void);
 
 static unsigned bd_surface_state(void)
 {
@@ -2349,7 +2359,13 @@ static void bd_field(unsigned obj, unsigned v)
 
 static void bd_release(const char *why)
 {
-    if (bd.obj) {
+    if (bd.obj && bd_v2) {                /* PAD-521: ours off the bank's surface (a full-screen clip of ours stays) */
+        void *surf = clip2_surface();
+        if (surf && !clip.on && ((int (*)(void *))(unsigned long)fn("surface_state"))(surf)
+                                   == (int)pm_port_value("surface_playing", 2))
+            ((void (*)(void *))(unsigned long)fn("surface_stop"))(surf);
+        say("backdrop: taken away (%s) after %u play(s)", why, bd.plays);
+    } else if (bd.obj) {
         bd_field(bd.obj, 0);
         say("backdrop: taken away (%s) after %u play(s), %u frame(s)", why, bd.plays, bd.frames);
     }
@@ -2433,12 +2449,57 @@ static void on_scene_show(unsigned *r)
     bd_play(e);                        /* asked, a one-shot or the game's clip over: play (again) */
 }
 
+/* PAD-521: the loop (or the one-shot asked for) on the bank's surface */
+static void bd2_play(void *surf)
+{
+    const char *name = bd.once[0] ? bd.once : bd.loop;
+    int once = name == bd.once;
+    unsigned str;
+    char was[96];
+    unsigned i;
+    if (!name[0]) return;
+    for (i = 0; name[i] && i + 1 < sizeof was; i++) was[i] = name[i];
+    was[i] = 0;
+    if (once) bd.once[0] = 0;
+    bd.pending = 0;
+    bd.since = pm_ms();
+    str = std_string(was);
+    if (!((int (*)(void *, unsigned *))(unsigned long)fn("surface_set_video"))(surf, &str)) {
+        say("backdrop: the video bank has no clip \"%s\"", was);
+        if (!once) bd.on = 0;             /* no loop to play: not asked again every tick */
+        return;
+    }
+    ((int (*)(void *, int, int))(unsigned long)fn("surface_play"))(surf, 0, -1);
+    bd.obj = 1;
+    bd.playing_once = once;
+    if (bd.plays++ < 60)
+        say("backdrop: \"%s\" %s on the video bank's surface, behind the game's own videos", was,
+            once ? "once" : bd.plays == 1 ? "looped" : "again");
+}
+
+/* PAD-521: every tick (clip_tick): play the loop again once the surface is idle; a one-shot asked for plays at once */
+static void bd2_tick(void)
+{
+    void *surf;
+    if (!bd_v2 || !bd.on) return;
+    if (clip.on) {                        /* a full-screen clip of ours has the surface: the loop after it */
+        bd.obj = 0;
+        return;
+    }
+    surf = clip2_surface();
+    if (!surf) return;
+    if (bd.pending && bd.once[0]) { bd2_play(surf); return; }
+    if (pm_ms() - bd.since < 500) return;  /* just asked: the surface may not say "playing" yet */
+    if (((int (*)(void *))(unsigned long)fn("surface_state"))(surf) == (int)pm_port_value("surface_playing", 2)) return;
+    bd2_play(surf);                       /* its end, the one-shot's or the game's clip over: the loop (again) */
+}
+
 int pm_backdrop(const char *name)
 {
     unsigned i;
     if (!(can & PM_CAN_BACKDROP)) return 0;
     if (!name || !*name) {
-        if (bd.on && !clip.on && bd.obj && bd_surface_state() == (unsigned)pm_port_value("surface_playing", 2))
+        if (!bd_v2 && bd.on && !clip.on && bd.obj && bd_surface_state() == (unsigned)pm_port_value("surface_playing", 2))
             ((void (*)(void))(unsigned long)fn("clip_stop"))();
         bd.on = 0;
         bd.loop[0] = bd.once[0] = 0;
@@ -2450,6 +2511,7 @@ int pm_backdrop(const char *name)
     for (i = 0; name[i] && i + 1 < sizeof bd.loop; i++) bd.loop[i] = name[i];
     bd.loop[i] = 0;
     bd.on = bd.pending = 1;
+    if (bd_v2) bd.since = 0;              /* PAD-521: the next tick plays it */
     return 1;
 }
 
@@ -2487,6 +2549,17 @@ static void bd_reset(const char *why)
 static int have_sites(const char *const *names);
 static void backdrop_arm(void)
 {
+    static const char *const s2[] = { "surface_state", "surface_set_video", "surface_play", "surface_stop", 0 };
+    if (pm_port_value("backdrop_surface", 0)) {          /* PAD-521: the loop on the bank's surface (clip v2) */
+        if (!(can & PM_CAN_CLIPS) || !clip_v2 || !have_sites(s2)) {
+            say("backdrop: off - backdrop_surface needs the clip v2 lines");
+            return;
+        }
+        bd_v2 = 1;
+        can |= PM_CAN_BACKDROP;
+        say("backdrop: on - a mode's clip loops on the video bank's surface, behind the game's own videos");
+        return;
+    }
     static const char *const s[] = { "backdrop_draw", "scene_show", "clip_play", "clip_stop", "video_player",
                                      "video_surface", "surface_state", 0 };
     static const char *const d[] = { "backdrop_city_vtable", 0 };

@@ -4004,6 +4004,30 @@ stop; the renderer presenting every frame. Not measured: a machine; another titl
 lines); a battle's background (the backdrop only takes the city's place, so ANGUIRUS, inside a battle,
 does not use it).
 
+### The backdrop on a clip v2 build: the loop on the bank's surface (PAD-521)
+
+A James Bond owner wanted their own mini-wizards to look like the game's: a video cycling all through the mode and
+back again after a shot's video. Bond LE plays a mode's clips on the video bank's own surface (clip v2, "Clips on the
+newer builds"), which the game draws in the TV frame above the score panel; it has no background element to take
+over, so `pm_backdrop` answered 0 and a loop played once. With
+
+```
+value backdrop_surface 1        # james_bond_le-1.06: the clip v2 lines are needed too
+```
+
+`pm_backdrop` / `pm_backdrop_once` work there: the runtime plays the loop on the surface again whenever it is idle
+while the mode wants it - its own end, a one-shot in its place (played at once), a full-screen clip of the mode's
+(`pm_clip`, the same surface: the loop after it), a clip of the game's on that surface. `pm_backdrop(0)`, `pm_end`
+and a ball end stop ours, and the game's own clips come back. The boot log says `backdrop: on - a mode's clip loops
+on the video bank's surface, behind the game's own videos`; each play is a `backdrop: "<clip>" looped / once / again
+on the video bank's surface` line.
+
+**Measured (emulator, stock Bond LE 1.06 card, 2026-10-11, rig 1, the game's own clips by name):** the loop
+(`GLDFNGR_Wizard_Mode_Background`) waited for the game's clip then on the surface and played in the TV frame,
+on through a Side ramp shot; `Disco_Intro` once in its place and the loop again by itself after it; a full-screen
+`MainPlayLoop_DrNo` over it; the game's own main-play loop back when the mode stopped it. No abort. Not measured: a
+machine; Bond Pro 1.06 (no line yet).
+
 ### A full-screen clip on a machine: drawn at the frame hand-over (PAD-301)
 
 On David's Premium 1.16 (2026-10-01, a traced card and a phone video) a mode's full-screen clip (`pm_clip`:

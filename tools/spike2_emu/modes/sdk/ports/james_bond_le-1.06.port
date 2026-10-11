@@ -342,6 +342,11 @@ site surface_find     0x00583280 0xe92d4070 0xe24dd008
 site surface_set_video 0x0057a964 0xe5d030d4 0xe92d4ff0
 site surface_play     0x00578770 0xe5d030d4 0xe92d43f0
 site surface_stop     0x00577f20 0xe5d030d4 0xe92d40f0
+# PAD-521: the backdrop on the bank's surface - a mode's loop is played there again whenever it is idle (after
+# its end, a one-shot in its place, a full-screen clip of the mode's). Seen on the glass in the emulator 2026-10-11:
+# GLDFNGR_Wizard_Mode_Background looped in the TV frame above the score panel, Disco_Intro once in its place and
+# the loop back, a Side ramp shot under it, the game's own main-play loop back when the mode ended it.
+value backdrop_surface 1
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Side ramp target
