@@ -1447,6 +1447,51 @@ def drop_text_slots(assets_dir):
         staged_changes.save(assets_dir, data)
 
 
+#: PAD-525 (DragonRR): the game's own pictures' and lines' switches while the
+#: unlock box is off, ``{"images": {rel: bool}, "text": {text_rel: bool}}``,
+#: so ticking it again puts them back (he had Black and white on 6,668 of
+#: them, and one untick to try something lost every one).
+LOCKED_SWITCHES_KEY = "color_locked_switches"
+
+
+def lock_switches(data, images):
+    """The unlock box went off: in sidecar *data* (changed in place), the
+    game's own pictures' switches *images* (``{rel: bool}``, taken out of
+    their slots by the caller) and the game lines' switches are put aside for
+    the next time it is ticked.  Locked, none of them counts."""
+    kept = {}
+    images = {str(r): bool(v) for r, v in (images or {}).items()}
+    if images:
+        kept["images"] = images
+    lines = data.pop(TEXT_SLOTS_KEY, None)
+    if isinstance(lines, dict) and lines:
+        kept["text"] = {str(r): bool(v) for r, v in lines.items()}
+    if kept:
+        data[LOCKED_SWITCHES_KEY] = kept
+    else:
+        data.pop(LOCKED_SWITCHES_KEY, None)
+
+
+def unlock_switches(data):
+    """The unlock box was ticked: the game lines' switches :func:`lock_switches`
+    put aside go back into sidecar *data* (changed in place); returns the game
+    pictures' (``{rel: bool}``) for the caller to put back where it keeps them
+    (a picture picked or built since is the user's own and keeps its own)."""
+    kept = data.pop(LOCKED_SWITCHES_KEY, None)
+    if not isinstance(kept, dict):
+        return {}
+    lines = kept.get("text")
+    if isinstance(lines, dict) and lines:
+        m = data.get(TEXT_SLOTS_KEY)
+        m = dict(m) if isinstance(m, dict) else {}
+        for r, v in lines.items():
+            m.setdefault(str(r), bool(v))
+        data[TEXT_SLOTS_KEY] = m
+    images = kept.get("images")
+    return ({str(r): bool(v) for r, v in images.items()}
+            if isinstance(images, dict) else {})
+
+
 def text_lines_on(assets_dir, data=None):
     """The game's own lines switched on: their :func:`text_rel` keys, while
     the unlock box is ticked (only then does a game line's switch count)."""

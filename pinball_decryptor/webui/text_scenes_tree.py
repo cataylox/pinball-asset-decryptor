@@ -2535,9 +2535,6 @@ class TreeEditMixin:
         if not self.assets_dir or not self._colour_unlock()["offered"]:
             return False
         on = bool(on)
-        if not on:
-            # the game's own lines of text are locked again with its pictures (PAD-438)
-            _cp.drop_text_slots(self.assets_dir)
         images = self._images_here()
         if images is not None:
             try:
@@ -2547,18 +2544,26 @@ class TreeEditMixin:
         data = staged_changes.load(self.assets_dir)
         if bool(data.get(_cp.STOCK_IMAGES_KEY)) != on:
             # the Images tab has not scanned this folder: its own record is the file.  As
-            # there, a game picture's switch lives only while the box is ticked, so neither
-            # way keeps one: ticking never wakes a switch left from an old pick (PAD-345)
+            # there, a game picture's switch counts only while the box is ticked: unticking
+            # puts the switches aside with the game's own lines' (PAD-438), and ticking
+            # brings back those, never one left from an old pick (PAD-345, PAD-525)
             picks = data.get("image") or {}
             built = _cp.built_image_rels(self.assets_dir, data)
             slots = data.get(_cp.IMAGE_SLOTS_KEY) or {}
             stock = [r for r in slots if not picks.get(r) and r not in built]
+            back = {}
             if on:
                 data[_cp.STOCK_IMAGES_KEY] = True
+                back = _cp.unlock_switches(data)
             else:
                 data.pop(_cp.STOCK_IMAGES_KEY, None)
+                _cp.lock_switches(data, {r: slots[r] for r in stock})
             # a built picture's switch is the user's own: the box never touches it
             slots = {r: v for r, v in slots.items() if picks.get(r) or r in built}
+            for r, v in back.items():
+                if (not picks.get(r) and r not in built
+                        and os.path.isfile(os.path.join(self.assets_dir, *r.split("/")))):
+                    slots.setdefault(r, v)
             if slots:
                 data[_cp.IMAGE_SLOTS_KEY] = slots
             else:
