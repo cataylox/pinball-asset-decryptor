@@ -4028,6 +4028,38 @@ on through a Side ramp shot; `Disco_Intro` once in its place and the loop again 
 `MainPlayLoop_DrNo` over it; the game's own main-play loop back when the mode stopped it. No abort. Not measured: a
 machine; Bond Pro 1.06 (no line yet).
 
+### The game's status bar (PAD-521)
+
+James Bond LE shows each of its own modes in a coloured bar under the TV: the mode's name in the game's lettering, the
+bar in the mode's colour (Goldfinger's Jackpot gold), and its clock as a wipe draining along it. That bar is the port's
+scene `hud` (6fb39344/7de1c159: `StatusBar_Instance` with `bar_Color_Instance`, `Progress_Instance`, `Text_Instance`),
+and it belongs to the score display. A mode puts itself there the same way:
+
+```c
+pm_status_bar("YOLT WIZARD", PM_RGB(0, 192, 64), percent);   /* percent 0-100 of the wipe, -1 = no wipe */
+pm_status_bar(0, 0, 0);                                     /* given back as it was */
+```
+
+How the game does it (read off the game program): the score display is a singleton (`site status_bar`, its getter
+0x1862dc); its frame update shows the bar, its words, its colour and its wipe from four bytes at +0x11e, and moves the
+wipe to frame (+0x11c) + 1. The game's own modes set the words by a message id and the colour by a palette index, and
+both setters end in the nodes' own calls: the text node (+0x118) through `set_text`, the bar_Color node (+0x114)
+through its vfn +0x4c and +0x44, each (node, r, g, b, 1.0). The runtime makes those calls with the mode's words and any
+colour, sets the four bytes, keeps them while it holds the bar (a display of the game's that hides it is answered the
+next tick, words and colour sent again) and gives back the bytes it found - unless the game took the bar for a display
+of its own since - when the mode gives it back, or once the game has been over 30 s. Port lines (defaults shown):
+
+```
+site status_bar       0x001862dc 0xe92d4038 0xe30e48f8    # james_bond_le-1.06
+value status_flags_at 0x11e      value status_frame_at 0x11c
+value status_text_at  0x118      value status_colour_at 0x114
+value status_colour_vfn 0x4c     value status_tint_vfn 0x44
+```
+
+**Measured (emulator, stock Bond LE 1.06 card, 2026-10-11, rig 1):** a green bar named YOLT WIZARD with its wipe full
+and at 40, the Goldfinger background looping in the TV above it, through a Side ramp shot; a blue DIAMOND DEATH THREAT
+with no wipe; the empty bar back when given back. No abort. Not measured: a machine; Bond Pro 1.06 (no line yet).
+
 ### A full-screen clip on a machine: drawn at the frame hand-over (PAD-301)
 
 On David's Premium 1.16 (2026-10-01, a traced card and a phone video) a mode's full-screen clip (`pm_clip`:

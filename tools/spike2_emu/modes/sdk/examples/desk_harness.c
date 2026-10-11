@@ -590,6 +590,28 @@ int pm_game_wizard_way(void)
 {
     return in_game && player ? wizard_way : -1;
 }
+/* PAD-521: the game's own status bar - "STATUSBAR <percent> <rrggbb> <words> <mode>" each time it changes, "STATUSBAR OFF" */
+int pm_status_bar(const char *words, unsigned rgb, int percent)
+{
+    static char had[64];
+    static unsigned had_rgb;
+    static int had_pct = -2;
+    if (!words || !*words) {
+        if (had[0]) printf("%6lu STATUSBAR OFF %s
+", now_ms, current && current->name ? current->name : "?");
+        had[0] = 0;
+        had_pct = -2;
+        return 1;
+    }
+    if (strcmp(had, words) || had_rgb != rgb || had_pct != percent)
+        printf("%6lu STATUSBAR %d %06x %s %s
+", now_ms, percent, rgb & 0xffffffu, words,
+               current && current->name ? current->name : "?");
+    snprintf(had, sizeof had, "%s", words);
+    had_rgb = rgb;
+    had_pct = percent;
+    return 1;
+}
 /* PAD-503: a lit mode's claim on its shot - "LITCLAIM <shots> <mode>" each time a mode's claim changes */
 int pm_lit_claim(uint64_t shots)
 {

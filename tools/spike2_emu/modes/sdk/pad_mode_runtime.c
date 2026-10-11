@@ -2575,6 +2575,148 @@ static void backdrop_arm(void)
     }
 }
 
+/* ---- the game's own status bar (PAD-521) ---------------------------------------------------------------
+ * James Bond LE 1.06 (read off the game program, docs/plans/bond_film_wizards.md "PAD-521"): the coloured bar under
+ * the TV is scene hud (7de1c159), and it belongs to the score display, a singleton (`site status_bar`, its getter,
+ * 0x1862dc). That object's frame update shows the bar, its words, its colour and its progress wipe from four bytes
+ * (`value status_flags_at`, in that order) and moves the wipe to frame +status_frame_at + 1 (0-100). The words are its
+ * text node's (+status_text_at), set as every text is (`site set_text`); the colour is the bar_Color node's
+ * (+status_colour_at) two colour calls, vfn +status_colour_vfn and +status_tint_vfn, each (node, r, g, b, 1.0) - what
+ * the game's own colour setter does once it has looked the colour up in its palette. The game's own modes raise it
+ * the same way (Goldfinger's Jackpot, 0xbf2b8: bar, words, colour, wipe, then the wipe from its clock). */
+static struct {
+    int held, sent;
+    unsigned char was[5], now[5];     /* the wipe's frame, then bar, words, colour, wipe: as found / as held */
+    char words[64];
+    unsigned rgb;
+    unsigned long out_since;
+} sb;
+
+static unsigned char *sb_obj(void)
+{
+    return (unsigned char *)((void *(*)(void))(unsigned long)fn("status_bar"))();
+}
+
+static unsigned char *sb_at(unsigned char *o, int k)    /* 0 = the wipe's frame, 1-4 = the four flags */
+{
+    return k ? o + pm_port_value("status_flags_at", 0x11e) + k - 1 : o + pm_port_value("status_frame_at", 0x11c);
+}
+
+/* the words and the colour onto the bar's own nodes */
+static void sb_send(unsigned char *o)
+{
+    void *text = (void *)(unsigned long)*(unsigned *)(o + pm_port_value("status_text_at", 0x118));
+    void *bar = (void *)(unsigned long)*(unsigned *)(o + pm_port_value("status_colour_at", 0x114));
+    float r = (float)((sb.rgb >> 16) & 255u) / 255.0f, g = (float)((sb.rgb >> 8) & 255u) / 255.0f,
+          b = (float)(sb.rgb & 255u) / 255.0f;
+    if (text) {
+        unsigned str = std_string(sb.words);
+        ((void (*)(void *, unsigned *))(unsigned long)fn("set_text"))(text, &str);
+    }
+    if (bar) {
+        unsigned *vt = (unsigned *)(unsigned long)*(unsigned *)bar;
+        ((void (*)(void *, float, float, float, float))(unsigned long)
+            vt[pm_port_value("status_colour_vfn", 0x4c) / 4])(bar, r, g, b, 1.0f);
+        ((void (*)(void *, float, float, float, float))(unsigned long)
+            vt[pm_port_value("status_tint_vfn", 0x44) / 4])(bar, r, g, b, 1.0f);
+    }
+    sb.sent = 1;
+}
+
+static void sb_put(unsigned char *o)
+{
+    int k;
+    for (k = 0; k < 5; k++) *sb_at(o, k) = sb.now[k];
+    if (!sb.sent) sb_send(o);
+}
+
+/* given back: the bytes as they were found - unless the game has taken the bar for a display of its own since */
+static void sb_release(const char *why)
+{
+    unsigned char *o;
+    int k, ours = 1;
+    if (!sb.held) return;
+    o = sb_obj();
+    if (o) {
+        for (k = 1; k < 5; k++) ours &= *sb_at(o, k) == sb.now[k];
+        if (ours) for (k = 0; k < 5; k++) *sb_at(o, k) = sb.was[k];
+    }
+    sb.held = 0;
+    sb.words[0] = 0;
+    say("status bar: given back (%s)%s", why, ours ? "" : " - the game's own display has it now");
+}
+
+int pm_status_bar(const char *words, unsigned rgb, int percent)
+{
+    unsigned char *o;
+    int k;
+    if (!(can & PM_CAN_STATUS_BAR)) return 0;
+    if (!words || !*words) {
+        sb_release("the mode gave it back");
+        return 1;
+    }
+    o = sb_obj();
+    if (!o) return 0;
+    if (!sb.held) {
+        for (k = 0; k < 5; k++) sb.was[k] = *sb_at(o, k);
+        sb.held = 1;
+        sb.sent = 0;
+        sb.out_since = 0;
+        say("status bar: taken for \"%s\" in %06x%s", words, rgb & 0xffffffu, percent < 0 ? "" : ", with its wipe");
+    }
+    if (!str_eq(sb.words, words) || sb.rgb != rgb) {
+        unsigned n = 0;
+        while (words[n]) n++;
+        str_copy(sb.words, sizeof sb.words, words, n);
+        sb.rgb = rgb;
+        sb.sent = 0;
+    }
+    if (percent > 100) percent = 100;
+    sb.now[0] = percent < 0 ? 0 : (unsigned char)percent;
+    sb.now[1] = sb.now[2] = sb.now[3] = 1;
+    sb.now[4] = percent >= 0;
+    sb_put(o);
+    return 1;
+}
+
+/* every tick: held up against a display of the game's that hides it (its words and colour sent again), given back
+ * once the game is over (pm_in_game() 0 for 30 s: Bond ends play at its own big modes' ends until the drain) */
+static void sb_tick(void)
+{
+    unsigned char *o;
+    int k, moved = 0;
+    if (!sb.held) return;
+    if (!pm_in_game()) {
+        if (!sb.out_since) sb.out_since = pm_ms() | 1;
+        else if (pm_ms() - sb.out_since > 30000) sb_release("out of a game");
+        return;
+    }
+    sb.out_since = 0;
+    o = sb_obj();
+    if (!o) return;
+    for (k = 1; k < 5; k++) moved |= *sb_at(o, k) != sb.now[k];
+    if (moved) {
+        static unsigned long said_at;
+        if (!said_at || pm_ms() - said_at > 10000) say("status bar: a display of the game's moved it - held again");
+        said_at = pm_ms() | 1;
+        sb.sent = 0;
+    }
+    sb_put(o);
+}
+
+static void status_bar_arm(void)
+{
+    static const char *const s[] = { "status_bar", "set_text", "string_new", 0 };
+    if (!site("status_bar")) return;                    /* a port without it: silent */
+    if (!have_sites(s)) {
+        say("status bar: off - the port's status bar lines are incomplete");
+        return;
+    }
+    can |= PM_CAN_STATUS_BAR;
+    say("status bar: on - a mode can put its name, colour and clock in the game's own bar (getter 0x%08x)",
+        fn("status_bar"));
+}
+
 /* ---- display priority (item 154 display) --------------------------------------------------------
  * HOW THE GAME LAYERS ITS DISPLAY (read off Godzilla Pro 1.15 and Premium 1.16, measured in the
  * emulator with display_probe.c; MODE_SDK.md "Display priority"):
@@ -7585,6 +7727,7 @@ static void on_tick(unsigned *r)
         EACH_MODE(m) if (m->init) { current = m; m->init(); }
     }
     clip_tick();
+    sb_tick();                                /* PAD-521: the status bar held */
     sound_fades_tick();                       /* item 150 follow-up: fades end in silence */
     sound_swaps_tick();                       /* item 163: swapped carrier keys come back */
     events_deliver();
@@ -8920,6 +9063,7 @@ static void pad_mode_start(void)
     display_arm();                            /* item 154 display: the clip_play hook, display priority */
     block_arm();                              /* PAD-347: a mode may keep the game's modes from starting */
     backdrop_arm();                           /* hud-layers: a clip behind the HUD */
+    status_bar_arm();                         /* PAD-521: the game's own status bar */
     frame_arm();                              /* PAD-301: a full-screen clip drawn at the frame hand-over */
     if (can & PM_CAN_OWN_SOUND) hook(fn("sound_lookup"), on_sound_lookup);
     /* item 163: with /dump/soundlog.on there at the start, every request the game's sound worker
@@ -8962,7 +9106,7 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
@@ -8970,7 +9114,8 @@ static void pad_mode_start(void)
         can & PM_CAN_BACKDROP ? " backdrop" : "", can & PM_CAN_COILS ? " magnet" : "",
         can & PM_CAN_SCOOP ? " scoop" : "", can & PM_CAN_SHIELD ? " shield" : "",
         can & PM_CAN_BUILDING ? " building" : "", can & PM_CAN_GAME_SHOWS ? " game-shows" : "",
-        can & PM_CAN_SHAKER ? " shaker" : "", can & PM_CAN_GAME_WIZARDS ? " game-wizards" : "");
+        can & PM_CAN_SHAKER ? " shaker" : "", can & PM_CAN_GAME_WIZARDS ? " game-wizards" : "",
+        can & PM_CAN_STATUS_BAR ? " status-bar" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }

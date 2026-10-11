@@ -671,4 +671,15 @@ int pm_game_wizard_way(void);
  * gone; one of your modes beginning ends a hold. Shots from switches only (the port's switch lines). 1 = claimed. */
 int pm_lit_claim(uint64_t shots);
 
+/* ---- the game's own status bar (PAD-521; MODE_SDK.md "The game's status bar") ------------------------------------
+ * James Bond LE shows each of its own modes in a coloured bar under the TV: the mode's name, the bar in the mode's
+ * colour, and its clock as a progress wipe draining along it (Goldfinger's Jackpot: gold). pm_status_bar puts a mode
+ * of yours there the same way: `words` (shown in the game's own lettering, so capitals), `rgb` (PM_RGB) and
+ * `percent` 0-100 of the wipe (-1 = no wipe). Call it again to change any of them (cheap when nothing changed).
+ * NULL or "" gives the bar back as it was. The runtime keeps it up while you hold it (a game display that hides it
+ * is answered on the next tick) and gives it back by itself when the game is over. 1 = shown; 0 = this game's port
+ * names no status bar (pm_can(PM_CAN_STATUS_BAR)), or the game has none yet. */
+#define PM_CAN_STATUS_BAR   0x4000000u /* pm_status_bar */
+int pm_status_bar(const char *words, unsigned rgb, int percent);
+
 #endif

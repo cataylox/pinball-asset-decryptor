@@ -348,6 +348,13 @@ site surface_stop     0x00577f20 0xe5d030d4 0xe92d40f0
 # the loop back, a Side ramp shot under it, the game's own main-play loop back when the mode ended it.
 value backdrop_surface 1
 
+# PAD-521: the game's own status bar under the TV (scene hud 7de1c159): the score display's getter. Its object keeps
+# the bar's text node at +0x118, its bar_Color node at +0x114, the wipe's frame at +0x11c and four flags at +0x11e (bar,
+# words, colour, wipe); the colour is the node's vfn +0x4c and +0x44 (node, r, g, b, 1.0) - the runtime's defaults.
+# Seen on the glass in the emulator 2026-10-11: a green bar named YOLT WIZARD, its wipe at 100 and 40, a blue one
+# with no wipe, the empty bar back when given back.
+site status_bar       0x001862dc 0xe92d4038 0xe30e48f8
+
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Side ramp target
 
