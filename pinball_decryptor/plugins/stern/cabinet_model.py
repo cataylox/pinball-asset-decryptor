@@ -10,9 +10,10 @@ first 52 bytes of the CPU board's i2c EEPROM (decoded in tools/spike2_emu/hwshim
 emulator's own record says "999", the engine's wildcard for "the build's compiled-in model", which
 is why every run so far booted as whatever the build was compiled as (Batman 66 1.14: Premium).
 
-THE CODES, decoded from batman 1.14.0 (title 0x2b5760, wrapper 0x2b567c, classifier 0x2b53c0) and
-the same shape in elvira3 1.13.0, munsters_le 1.28.0 and star_wars_pro 1.31.0. A title routine
-asks a wrapper for the model; the wrapper hands the engine's classifier TWELVE code strings, three per class in a fixed order, each a pointer in .data:
+THE CODES, decoded from batman 1.14.0 (title routine 0x2b5758, wrapper 0x2b567c, classifier
+0x2b53c0) and the same shape in every build read. The title routine asks a wrapper for the model;
+the wrapper hands the engine's classifier TWELVE code strings, three per class in a fixed order,
+each a pointer in .data:
 
     Pro      Batman "05" "08"        Star Wars "J5" "J8" "08"   Munsters "L1" "05" "08"
     LE       Batman "I0" "06" "0A"   Elvira    "J1" "X2" "0A"   Munsters "L2" "06" "0A"
@@ -23,23 +24,31 @@ and the classifier answers 2 Pro, 3 LE, 4 Premium, 6 SLE, 5 for a code it does n
 indexes of the build's own word table " PRO" / " LE" / " PRE" / " PRE/LE" / " SLE", the same on
 every build read. Each class's second and third strings come back flagged as alternates.
 
-WHAT THE MODEL CHANGES IS LESS THAN IT LOOKS. The routine that would swap the title's " PRE" for
-the class's word (and give Elvira's LE its "ELVIRA'S BLOOD RED KISS LE") has NO CALLER in any of
-the eight builds read (Batman 1.14, Beatles 1.29, Elvira 1.13, Bond 60th 1.11, John Wick 1.02,
-Munsters 1.28, Star Wars Pro 1.31, Stranger Things LE 1.13): the boot screen prints the compiled
-title, and MEASURED on the rig, Batman 1.14 with the board on "I3" (SLE) still boots "BATMAN PRE".
-What does read it: the Pro vs Premium/LE check ("PRE/LE CODE PRESENT ON PRO GAME"), the service
-menu's machine page and the LE number (Batman: is-LE 0x2b5b10, effective model 0x454b4c, used by
-MenuPageSerialNumHz), the Insider Connected registration (game_model.number, model_type), and a
-title's own checks where it has them (hwshim.c nv_ident_seed: Stranger Things' projector).
+WHAT IT CHANGES, MEASURED on the rig (Batman 1.14, PAD-519): the title routine swaps the compiled
+title's " PRE" for the class's word, and the service menu's first page names the machine with it
+and its code - "BATMAN PRE" / "000000-I2-..." on the card's own model, "BATMAN LE" / "I0" with the
+LE picked on the Emulate tab, "BATMAN SLE" / "I3" as an SLE. (The routine's entry is 8 bytes before
+its push, a `cmp r0,#0; bxeq lr` guard; it has 12-13 callers on every build read - menu pages,
+the Insider report.) The BOOT SCREEN does not follow: it is drawn from the compiled title, and
+Batman as an SLE still boots "BATMAN PRE". The model also decides the Pro vs Premium/LE check
+("PRE/LE CODE PRESENT ON PRO GAME") and the LE number's page, and a title's own checks where it has
+them (hwshim.c nv_ident_seed: Stranger Things' projector).
+
+A TITLE OF ITS OWN. The title routine carries three more strings, an own title for the LE, the
+Premium and the Pro (loaded in that order, empty on most builds), used in place of the compiled
+title when the board's code is that class's ALTERNATE. That is where Stern's named editions live:
+Elvira 1.13 LE "X2" = "ELVIRA'S BLOOD RED KISS LE", Godzilla LE 1.16 Premium "T8" = "GODZILLA:
+70TH ANNIVERSARY", Iron Maiden LE 1.18 "N8" = "IRON MAIDEN: 50TH ANNIVERSARY", Jaws LE 1.02 "AL" =
+"JAWS ANNIVERSARY PREMIUM EDITION", Jurassic Park LE 1.16 LE "M6" = "JURASSIC PARK: 30TH
+ANNIVERSARY LE" (library sweep, 53 latest cards). Each is offered as an edition of its own.
 
 WHICH CODES A BUILD TAKES is the classifier's own answer, so this module RUNS it (unicorn, which
 the app already ships for the audio engine) on every code in the table instead of trusting the
 order above. That matters: a PRO build answers Pro for every code and raises a second flag for a
 Premium/LE one, which is its "PRE/LE CODE PRESENT ON PRO GAME" message - measured on star_wars_pro
 1.31.0. So a Pro card has no edition to pick, and a Premium/LE card offers the classes it answers
-for. A code the classifier marks as an alternate (each class's second and third string) is left
-out: the game treats it as its class, and the class's first code stands for it.
+for. An alternate code is offered only where its class has a title of its own; elsewhere the game
+treats it as its class, and the class's first code stands for it.
 
 Read-only, no rig, no WSL: the Emulate tab shows the choices for the card picked, and Start hands
 the code to the shim as PAD_MODEL.
@@ -197,10 +206,50 @@ def find_table(blob):
                     for g in globs:
                         p = elf.word(g)
                         codes.append(elf.cstr(p) if p else None)
+                    titles, title = _titles(elf, a + 4, site)
                     return {"codes": list(zip(_ORDER, codes)), "globals": globs,
-                            "classifier": classifier, "builtin": _builtin(elf, globs, codes)}
+                            "classifier": classifier, "builtin": _builtin(elf, globs, codes),
+                            "titles": titles, "title": title}
             a += 4
     return None
+
+
+#: the classes the title routine's three title-of-its-own strings belong to, in the order it
+#: loads them (batman 1.14.0 0x2b5784..: 0x78ce0c tested with class 3, 0x78caa4 with 4,
+#: 0x78c450 with 2)
+_TITLE_ORDER = (LE, PREMIUM, PRO)
+
+
+def _titles(elf, start, end):
+    """``({class: title of its own}, compiled title)`` from the title routine after its model
+    call: the first three strings it loads are the classes' own titles (empty on every build
+    read but Elvira 1.13, whose LE's is "ELVIRA'S BLOOD RED KISS LE"), the fourth the title
+    the build was compiled with ("BATMAN PRE")."""
+    regs, found = {}, []
+    a = start
+    while a < end and len(found) < 4:
+        w = elf.word(a)
+        if w is None:
+            break
+        rd = (w >> 12) & 0xf
+        if (w & 0x0ff00000) == 0x03000000:
+            regs[rd] = (w >> 4) & 0xf000 | (w & 0xfff)
+        elif (w & 0x0ff00000) == 0x03400000:
+            regs[rd] = (regs.get(rd, 0) & 0xffff) | (((w >> 4) & 0xf000 | (w & 0xfff)) << 16)
+        elif (w & 0x0ff00fff) == 0x05900000 and ((w >> 16) & 0xf) in regs:
+            p = elf.word(regs[(w >> 16) & 0xf])
+            found.append(elf.cstr(p, 80) or "" if p else "")
+        a += 4
+    if len(found) < 4:
+        return {}, ""
+    return {c: t for c, t in zip(_TITLE_ORDER, found) if t}, found[3]
+
+
+def _edition_name(title):
+    """A title of its own as an edition's name, in ordinary case ("JURASSIC PARK: 30TH
+    ANNIVERSARY LE" -> "Jurassic Park: 30th Anniversary LE")."""
+    return " ".join(w if w in ("LE", "SLE", "PRO", "PRE") else w.capitalize()
+                    for w in title.split())
 
 
 def _builtin(elf, globs, codes):
@@ -341,19 +390,30 @@ def editions_bytes(blob):
     except Exception:                                    # noqa: BLE001
         answers = {}
     built = answers.get(own)
-    choices = {}
+    choices, own_title = {}, {}
+    titles = table.get("titles") or {}
     for _slot, code in table["codes"]:
         got = answers.get(code)
         if not got:
             continue
         cls, alternate, other = got
-        if alternate or other or cls not in CLASS_NAMES or cls == PRE_LE:
+        if other or cls not in CLASS_NAMES or cls == PRE_LE:
             continue
-        choices.setdefault(cls, code)
+        if not alternate:
+            choices.setdefault(cls, code)
+        elif cls in titles:
+            # an alternate code is where a class's title of its own comes in (the title
+            # routine uses it only with the alternate flag up): Elvira's "X2"
+            own_title.setdefault(cls, code)
     if len(choices) < 2:
-        choices = {}
-    return {"built": CLASS_NAMES.get(built[0], "") if built else "",
-            "choices": [(CLASS_NAMES[c], choices[c]) for c in _LIST if c in choices]}
+        return {"built": CLASS_NAMES.get(built[0], "") if built else "", "choices": []}
+    out = []
+    for c in _LIST:
+        if c in choices:
+            out.append((CLASS_NAMES[c], choices[c]))
+        if c in own_title:
+            out.append((_edition_name(titles[c]), own_title[c]))
+    return {"built": CLASS_NAMES.get(built[0], "") if built else "", "choices": out}
 
 
 def editions_card(path, title=None):

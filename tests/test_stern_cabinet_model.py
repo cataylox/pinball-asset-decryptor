@@ -60,6 +60,29 @@ def test_a_build_with_no_wildcard_names_the_emulators_own_record(monkeypatch):
     assert ed["choices"] == [("Premium", "I2"), ("LE", "I0")]
 
 
+def test_a_class_with_a_title_of_its_own_offers_its_alternate_code(monkeypatch):
+    """Elvira 1.13: the LE's alternate "X2" is where "ELVIRA'S BLOOD RED KISS LE" comes in, so
+    it is an edition of its own; the other alternates stay off the list."""
+    table = dict(_TABLE, titles={cm.LE: "ELVIRA'S BLOOD RED KISS LE"},
+                 title="ELVIRA'S HOUSE OF HORRORS PRE", builtin="J2", codes=[
+                     (2, None), (2, "05"), (2, "08"), (3, "J1"), (3, "X2"), (3, "0A"),
+                     (4, "J2"), (4, "04"), (4, "09"), (6, "J3"), (6, "J4"), (6, "0B")])
+    _stub(monkeypatch, {
+        "05": (2, True, False), "08": (2, True, False),
+        "J1": (3, False, False), "X2": (3, True, False), "0A": (3, True, False),
+        "J2": (4, False, False), "04": (4, True, False), "09": (4, True, False),
+        "J3": (6, False, False), "J4": (6, True, False), "0B": (6, True, False),
+        "999": (5, False, False)}, table)
+    assert cm.editions_bytes(b"x")["choices"] == [
+        ("Premium", "J2"), ("LE", "J1"), ("Elvira's Blood Red Kiss LE", "X2"), ("SLE", "J3")]
+
+
+def test_an_editions_name_is_the_games_title_in_ordinary_case():
+    assert cm._edition_name("JURASSIC PARK: 30TH ANNIVERSARY LE") == \
+        "Jurassic Park: 30th Anniversary LE"
+    assert cm._edition_name("GODZILLA: 70TH ANNIVERSARY") == "Godzilla: 70th Anniversary"
+
+
 def test_not_a_game_binary_is_empty():
     assert cm.editions_bytes(b"not an elf") == {"built": "", "choices": []}
     assert cm.find_table(b"") is None
@@ -98,6 +121,10 @@ def _card(name):
     ("munsters_le-1_28_0.Release.8G.sdcard.raw", "Premium",
      [("Premium", "L3"), ("LE", "L2")]),
     ("star_wars_pro-1_31_0.Release.8G.sdcard.raw", "Pro", []),
+    ("elvira3-1_13_0.Release.16G.sdcard.raw", "Premium",
+     [("Premium", "J2"), ("LE", "J1"), ("Elvira's Blood Red Kiss LE", "X2"), ("SLE", "J3")]),
+    ("godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw", "Premium",
+     [("Premium", "T7"), ("Godzilla: 70th Anniversary", "T8"), ("LE", "T6")]),
 ])
 def test_real_builds(card, built, choices, _no_faulthandler):
     _title, ed = cm.editions_card(_card(card))

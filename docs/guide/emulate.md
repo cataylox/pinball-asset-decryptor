@@ -376,12 +376,16 @@ title, and the machine tells the game which one it is with a model
 code on its CPU board; the list is the models the picked card's own
 game program takes, read off the card, and the first one is the model
 the card was built as, which is how the emulator has always run. A Pro
-card is a Pro whatever the board says, so it has nothing to pick. The
-game uses the model for little: its Pro or Premium/LE check, the LE
-number and machine page in the service menu, and a title's own feature
-here and there. The name on the boot screen is compiled into the
-card's game program, so it does not change. Not remembered: each
-session starts on the card's own model.
+card is a Pro whatever the board says, so it has nothing to pick.
+Where a game has a title of its own for a special edition, that
+edition is on the list too: Elvira's Blood Red Kiss LE, Godzilla 70th
+Anniversary, Iron Maiden 50th Anniversary, Jaws Anniversary Premium
+Edition and Jurassic Park 30th Anniversary LE on the latest cards. The
+game names the machine by its model in the service menu (BATMAN SLE,
+ELVIRA'S BLOOD RED KISS LE) and goes by it for its Pro or Premium/LE
+check, the LE number and a title's own feature here and there. The
+boot screen is compiled into the card's game program, so it does not
+change. Not remembered: each session starts on the card's own model.
 Runs on Linux, and on Windows through WSL2. The rig ships with the
 app, in `tools/spike2_emu`, and the prerequisites installer pulls in
 what it needs (`qemu-user-static`, an ARM cross-compiler, `gcc` +

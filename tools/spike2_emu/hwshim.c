@@ -4430,9 +4430,11 @@ static void nv_factory_hz_apply(void)
  * says which it is with the MODEL CODE in bytes [4..7] of the cabinet identity
  * record (see nv_ident_seed above). The game's classifier takes three code
  * strings per class (batman 1.14.0 0x2b53c0: LE "I0", Premium "I2", SLE "I3");
- * a Pro build answers Pro for every code. The boot screen does NOT follow it
- * (its title is compiled in: Batman on "I3" still boots "BATMAN PRE"); the
- * Pro/LE check, the LE number and a title's own model checks do. "999" is
+ * a Pro build answers Pro for every code. The service menu names the machine
+ * by it (Batman on "I3": "BATMAN SLE", code I3), and a class's alternate code
+ * can carry a title of its own (Elvira "X2": "ELVIRA'S BLOOD RED KISS LE").
+ * The boot screen does NOT follow it (its title is compiled in: Batman on
+ * "I3" still boots "BATMAN PRE"). "999" is
  * the engine's wildcard - the build's own compiled-in model, what the seeded
  * record says.
  * The codes a card takes are read off its binary by the app

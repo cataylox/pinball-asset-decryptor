@@ -125,12 +125,14 @@ POWER_TIP = (
     "you picked is one of those, it says so under this row.")
 
 EDITION_TIP = (
-    "Which model the machine is: Premium, LE, and on some titles SLE. One "
-    "Premium/LE card runs all of them, and the machine tells the game which "
-    "one it is with a model code on its CPU board. This sets that code.\n\n"
-    "The game uses it for little: its Pro or Premium/LE check, the LE number "
-    "and the machine page in its service menu, and a title's own feature "
-    "here and there. The name on the boot screen is part of the card's game "
+    "Which model the machine is: Premium, LE, on some titles SLE, and the "
+    "named editions a game has a title of its own for (Godzilla 70th "
+    "Anniversary, Elvira's Blood Red Kiss LE...). One Premium/LE card runs "
+    "all of them, and the machine tells the game which one it is with a "
+    "model code on its CPU board. This sets that code.\n\n"
+    "The game names the machine by it in the service menu (BATMAN SLE) and "
+    "goes by it for its Pro or Premium/LE check, the LE number and a title's "
+    "own feature here and there. The boot screen is part of the card's game "
     "program, so it stays the same.\n\nThe list is what the picked "
     "card's own game program takes, read off the card. A Pro card runs as a "
     "Pro whatever the board says, so it has nothing to pick. The first "
