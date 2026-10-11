@@ -1043,27 +1043,47 @@ class ImagesTab(FindOriginalsMixin, TabService):
             return True
         self._color_unlocked = value
         restored = []
+        from ...core import colour_profile as cp, staged_changes
+        folder = self._assets_dir()
         if value:
+            # PAD-525: the switches they had when the box went off come back
+            back = 0
+            try:
+                if folder:
+                    data = staged_changes.load(folder)
+                    kept = cp.unlock_switches(data)
+                    staged_changes.save(folder, data)
+                    for r, v in kept.items():
+                        if (r in self._by_rel and not self._assignments.get(r)
+                                and not self._is_built(r) and r not in self._color):
+                            self._color[r] = v
+                            back += 1
+            except Exception:                           # noqa: BLE001
+                log.exception("images unlock: switches back")
             self.log("Replace Images: the game's own pictures are unlocked: "
                      "each one can have the individual files color profile "
-                     "baked in when you build.", "info")
+                     "baked in when you build%s." % (
+                         "; %d have their color switch back" % back
+                         if back else ""), "info")
         else:
             stock = [r for r in self._color if not self._assignments.get(r)
                      and not self._is_built(r)]
-            for r in stock:
-                del self._color[r]
-            # the game's own lines of text in Scenes are locked again too (PAD-438)
+            kept = {r: self._color.pop(r) for r in stock}
+            # the game's own lines of text in Scenes are locked again too (PAD-438); both
+            # keep their switches for the next tick (PAD-525)
             try:
-                from ...core import colour_profile as cp
-                if self._assets_dir():
-                    cp.drop_text_slots(self._assets_dir())
+                if folder:
+                    data = staged_changes.load(folder)
+                    cp.lock_switches(data, kept)
+                    staged_changes.save(folder, data)
             except Exception:                           # noqa: BLE001
-                log.exception("images unlock: text switches")
+                log.exception("images unlock: switches put aside")
             if not self._is_running():
                 restored = self._put_back_originals(
                     self._applied_replacement_rels(stock))
             self.log("Replace Images: the game's own pictures are locked "
-                     "again%s." % (
+                     "again (their color switches come back when it is "
+                     "ticked)%s." % (
                          "; %d corrected one(s) have their own colors back "
                          "in the project folder" % len(restored)
                          if restored else ""), "info")
