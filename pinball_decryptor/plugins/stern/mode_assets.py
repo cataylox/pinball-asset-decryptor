@@ -638,6 +638,8 @@ def code_screen(project, slug, spec):
     the mode writes its own from then on."""
     names = MP.asset_names(slug)
     folder = MP.mode_folder(project, slug)
+    if getattr(spec, "screen_style", "") == "words" and not spec.screen_art:
+        return words_screen(names, spec.name)
     art = (load_art(os.path.join(folder, spec.screen_art)) if spec.screen_art
            else panel_art(spec.name, spec.panel_color, spec.title_color))
     x, y, words_at = screen_place(                     # PAD-314: a big picture stays on the glass
@@ -645,6 +647,27 @@ def code_screen(project, slug, spec):
     return dict(name=names["screen_node"], art_rgba=art, words=spec.name,
                 words_name=names["screen_text"].split(".", 1)[1],
                 x=x, y=y, words_at=words_at)
+
+
+#: PAD-521: a screen of words alone (``screen_style`` "words"): a clear picture the size of James Bond's TV frame (the
+#: video bank's surface, 218-1140 x 12-430 on the glass) at its middle, the words twice the HUD font's size in white
+WORDS_ART = (920, 200)
+WORDS_AT = (218.0, 121.0)
+WORDS_SCALE = 2.0
+
+
+def words_screen(names, words):
+    """PAD-521: the game's own look for a mode's words (James Bond: a mode's name lettered over its intro, its TOTAL over
+    the total's picture): no panel, a clear picture over the TV and the words on its middle, large and white in the
+    game's own lettering (the HUD scene's font), centred."""
+    w, h = WORDS_ART
+    art = np.zeros((h, w, 4), dtype=np.uint8)
+    # the text box is (0, -40) .. (w, 8) about the words' place, scaled about that place: centred on the picture
+    words_at = (w / 2.0 - w * WORDS_SCALE / 2.0, h / 2.0 + 16.0 * WORDS_SCALE)
+    return dict(name=names["screen_node"], art_rgba=art, words=words,
+                words_name=names["screen_text"].split(".", 1)[1],
+                x=WORDS_AT[0], y=WORDS_AT[1], words_at=words_at, words_scale=WORDS_SCALE,
+                words_rgba=(1.0, 1.0, 1.0, 1.0))
 
 
 #: PAD-323: what a mode's ``screen_layout`` holds (MODE_PARAMETERS.md), all optional: the

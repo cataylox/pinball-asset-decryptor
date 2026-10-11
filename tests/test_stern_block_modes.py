@@ -1542,3 +1542,49 @@ def test_the_bar_shows_the_name_and_its_clock_then_the_total_then_goes(tmp_path)
 def test_only_a_title_whose_port_names_the_bar_offers_it():
     assert MP.profile("james_bond_le_1_06").status_bar is True
     assert MP.profile("godzilla_le_1_16").status_bar is False
+
+
+# ---- PAD-521: its own screen as words alone, over the game's video ---------------------------------------------------
+def test_words_alone_is_a_screen_style_and_reaches_the_assets(tmp_path):
+    assert BM.normalize({})["screen_style"] == "panel"
+    assert BM.normalize({"screen_style": "words"})["screen_style"] == "words"
+    assert BM.normalize({"screen_style": "big"})["screen_style"] == "panel"
+    project = str(tmp_path)
+    slug, _c = BM.new_blocks_mode(project, "YOLT WIZARD")
+    BM.save(project, slug, BM.normalize({"name": "YOLT WIZARD", "screen": True, "screen_style": "words",
+                                         "scripts": []}))
+    from pinball_decryptor.plugins.stern import code_modes as CM, mode_assets as MA
+    spec = CM.load(project, slug)
+    assert spec.screen_style == "words"
+    scr = MA.code_screen(project, slug, spec)
+    assert scr["words"] == "YOLT WIZARD" and scr["words_rgba"] == (1.0, 1.0, 1.0, 1.0)
+    assert scr["art_rgba"].shape == (200, 920, 4) and not scr["art_rgba"].any()   # clear: no panel
+    assert (scr["x"], scr["y"]) == MA.WORDS_AT and scr["words_scale"] == 2.0
+    BM.save(project, slug, BM.normalize({"name": "YOLT WIZARD", "screen": True, "scripts": []}))
+    assert CM.load(project, slug).screen_style == ""                               # the panel again
+
+
+def test_words_alone_show_the_name_then_a_line_then_the_total(tmp_path):
+    """The Bond owner (PAD-521): the game letters a mode's name over its intro and its TOTAL over its end picture, and
+    shows nothing of the kind in between. Words alone: the name at the start for 4 s, a Words block's line for 3 s,
+    the TOTAL at the end for 3 s - each then hidden."""
+    p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]},
+              {"hat": {"kind": "shot", "shot": "Right ramp", "when": "running"},
+               "do": [{"op": "score", "points": num(500)}, {"op": "words", "text": "JACKPOT"}]}],
+             seconds=12, screen=True, screen_style="words")
+    out = play(tmp_path, p, "shot", "Left ramp", "secs", 5, "shot", "Right ramp", "secs", 12)
+    shows = [(int(t), int(on)) for t, on in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Screen (\d)$", out, re.M)]
+    start = _at_any(out, r"START \(a block\)")
+    shot = _at_any(out, r"WORDS PadMode_blk_Screen_Words: JACKPOT")
+    end = _at_any(out, r"END \(time ran out\)")
+    on_at = [t for t, on in shows if on]
+    off_at = [t for t, on in shows if not on]
+    assert any(abs(t - start) <= 40 for t in on_at)
+    assert any(3900 <= t - start <= 4100 for t in off_at)                         # the name, 4 s
+    assert any(abs(t - shot) <= 40 for t in on_at) and any(2900 <= t - shot <= 3100 for t in off_at)
+    assert re.search(r"WORDS PadMode_blk_Screen_Words: TOTAL 500", out)
+    assert any(abs(t - end) <= 40 for t in on_at) and any(2900 <= t - end <= 3200 for t in off_at)
+    # the panel stays up all along, as ever
+    out = play(tmp_path, dict(p, screen_style="panel"), "shot", "Left ramp", "secs", 6)
+    assert not [t for t, on in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Screen (\d)$", out, re.M) if on == "0"
+                and int(t) > 100]

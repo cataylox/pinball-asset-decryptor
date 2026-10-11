@@ -34,6 +34,8 @@ THE PROGRAM (``blocks.json``)::
       "clips": [{"name": "sever", "file": "sever.mp4"}],      PAD-374: its own clips and sounds,
       "sounds": [{"name": "roar", "file": "roar.wav", "priority": 4}],   files in its folder
       "music": "music.wav",       its own music bed while it runs ("" = the game's music)
+      "screen_style": "words",    PAD-521: its own screen as words alone, large and white over the game's video (the
+                                  game's own look: a name over its intro, the TOTAL over its end); "panel" = the panel
       "bar": {"on": true, "color": "#00c040"},   PAD-521: its name in the game's own status bar (James Bond: the
                                   coloured bar under the TV), in this colour, its clock draining along it
       "scripts": [
@@ -351,6 +353,7 @@ def normalize(data):
         out["seconds"] = 30
     out["ends_on_drain"] = bool(out.get("ends_on_drain", True))
     out["screen"] = bool(out.get("screen", False))
+    out["screen_style"] = out.get("screen_style") if out.get("screen_style") in SCREEN_STYLES else "panel"   # PAD-521
     if out.get("game_modes") not in GAME_MODES:          # PAD-373; PAD-398: our modes run alone by default
         out["game_modes"] = "block"
     keep = out.get("keep_rules") if isinstance(out.get("keep_rules"), list) else []      # PAD-398
@@ -381,6 +384,9 @@ def normalize(data):
 
 
 BAR_COLOR = "#00c040"            # PAD-521: the status bar's colour unless one is picked
+#: PAD-521: its own screen - the panel with its name, or its words alone over the game's video, as the game's own
+SCREEN_STYLES = {"panel": "a panel", "words": "words over the video"}
+WORDS_NAME_MS, WORDS_SHOW_MS = 4000, 3000   # words alone: its name at the start, a Words block's line, then gone
 
 
 def _norm_bar(b):
@@ -525,7 +531,8 @@ def _sync_assets(project, slug, program):
     changed = (spec.name != (program["name"] or slug.upper()) or bool(spec.screen) != program["screen"]
                or spec.seconds != max(1, program["seconds"] or 60)
                or (spec.clips or {}) != clips or (spec.calls or {}) != calls
-               or (spec.music or "") != program["music"] or dict(spec.hud or {}) != hud)
+               or (spec.music or "") != program["music"] or dict(spec.hud or {}) != hud
+               or (getattr(spec, "screen_style", "") or "panel") != program["screen_style"])
     if changed or not os.path.isfile(os.path.join(MP.mode_folder(project, slug), CM.ASSETS_FILE)):
         spec.name = program["name"] or slug.upper()
         spec.screen = program["screen"]
@@ -534,6 +541,7 @@ def _sync_assets(project, slug, program):
         spec.clips = clips
         spec.calls = calls
         spec.music = program["music"]
+        spec.screen_style = "words" if program["screen_style"] == "words" else ""
         CM.save(project, slug, spec)
 
 
@@ -1685,6 +1693,9 @@ def to_c(program, slug):
              % (program["priority"] or (HUD_PRIORITY if has_hud else 0)))
     L.append("#define TIMER_MAX_MS     %dL" % TIMER_MAX_MS)
     L.append("#define ENDING_MS        3000        /* the total its own screen shows at the end */")
+    words_only = program["screen"] and program["screen_style"] == "words"
+    L.append("#define WORDS_ONLY       %d          /* PAD-521: its screen is words alone: shown a moment, not all along */"
+             % (1 if words_only else 0))
     if has_bar:
         L.append("#define BAR_RGB          0x%06xu   /* PAD-521: its colour in the game's own status bar */"
                  % int(program["bar"]["color"][1:], 16))
@@ -1744,6 +1755,7 @@ def to_c(program, slug):
     L.append("    uint64_t total;")
     L.append("} run;")
     L.append("static int sec_changed, ending;")
+    L.append("static unsigned flash_ticks;           /* PAD-521: words alone: how long its words stay up */")
     L.append("static void *screen, *screen_words;")
     L.append("static unsigned hide_ticks, poll;")
     L.append("static unsigned ended_begun;          /* PAD-413: pm_begun() at its end, while its total shows */")
@@ -1827,6 +1839,10 @@ def to_c(program, slug):
     L.append("        pm_set_text(screen_words, line);")
     L.append("    } else {")
     L.append("        pm_set_text(screen_words, text);")
+    L.append("    }")
+    L.append("    if (WORDS_ONLY && run.on && screen) {   /* PAD-521: words alone stay up a moment */")
+    L.append("        flash_ticks = %d * TICKS_PER_SECOND / 1000;" % WORDS_SHOW_MS)
+    L.append("        if (!screen_away) pm_show(screen, 1);" if watch else "        pm_show(screen, 1);")
     L.append("    }")
     L.append("}")
     L.append("")
@@ -2033,6 +2049,8 @@ def to_c(program, slug):
     L.append("    if (screen) {")
     L.append("        words(MODE_NAME, 0, 0);")
     L.append("        pm_show(screen, 1);")
+    L.append("        if (WORDS_ONLY) flash_ticks = %d * TICKS_PER_SECOND / 1000;   /* PAD-521: its name over the intro */"
+             % WORDS_NAME_MS)
     L.append("    }")
     if has_hud:
         L.append("    {")
@@ -2078,6 +2096,8 @@ def to_c(program, slug):
         L.append("    bar_hold = ENDING_MS / 1000 * TICKS_PER_SECOND;")
         L.append("    ended_begun = pm_begun();")
     L.append("    if (screen) {")
+    L.append("        flash_ticks = 0;")
+    L.append("        if (WORDS_ONLY) pm_show(screen, 1);   /* PAD-521: its TOTAL over the game's video */")
     L.append('        words("TOTAL", (long long)run.total, 1);')
     L.append("        hide_ticks = %d * TICKS_PER_SECOND;" % (TOTAL_MS // 1000))
     L.append("        ended_begun = pm_begun();")
@@ -2246,6 +2266,7 @@ def to_c(program, slug):
     L.append("        }")
     L.append("    }")
     L.append("    (void)seconds;")
+    L.append("    if (WORDS_ONLY && flash_ticks && --flash_ticks == 0 && screen) pm_show(screen, 0);   /* PAD-521 */")
     if has_bar:
         L.append("    bar_show(1);                      /* PAD-521: the clock along the bar */")
     L.append("    lamps_tick();")
@@ -2258,7 +2279,7 @@ def to_c(program, slug):
         L.append("    if (run.on && screen) {           /* its screen out of the way of the game's (PAD-375) */")
         L.append("        int away = pm_display_covered() || pm_aside();")
         L.append("        if (away != screen_away) {")
-        L.append("            pm_show(screen, !away);")
+        L.append("            pm_show(screen, !away && (!WORDS_ONLY || flash_ticks));")
         L.append("            screen_away = away;")
         L.append("        }")
         L.append("    }")
