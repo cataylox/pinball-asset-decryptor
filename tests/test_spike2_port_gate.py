@@ -259,6 +259,7 @@ static const struct pm_mode *const list[] = { &mode };
 #define EACH_MODE(m) for (const struct pm_mode *const *pp_ = list; pp_ < list + 1 && ((m) = *pp_, 1); pp_++)
 static void on_ball_end(unsigned *r) { printf("BALL_END\n"); }
 static volatile unsigned event_fired[N_BUS_IDS];
+static void lit_hold_check(unsigned id) {}           /* PAD-503's, not under test here */
 @SWITCHES@
 @DISPATCH@
 int main(void)

@@ -10,6 +10,7 @@ tests/test_spike2_spike3_detect.py.
 """
 
 import os
+import sys
 
 import pytest
 
@@ -107,6 +108,9 @@ def test_a_non_spike3_card_is_not_refused_for_that_reason(tmp_path, monkeypatch)
         assert "Spike 3" not in (svc.last_refusal or "")
 
 
+@pytest.mark.skipif(sys.platform == "darwin",
+                    reason="macOS never asks (spike3_cmd is None: the container cannot open "
+                           "the card's host path); the rig's own refusal speaks there")
 def test_the_probe_asks_parts_py_and_records_the_verdict(tmp_path, monkeypatch):
     card = tmp_path / "wdr-secure.raw"
     card.write_bytes(b"\0" * 512)

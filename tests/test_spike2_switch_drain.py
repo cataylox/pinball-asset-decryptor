@@ -51,6 +51,7 @@ static void say(const char *fmt, ...) { (void)fmt; }
 static int in_game = 1;
 int pm_in_game(void) { return in_game; }
 static volatile unsigned switch_fired[N_SWITCH_IDS];
+static void lit_hold_check(unsigned id) { (void)id; }    /* PAD-503's, not under test here */
 @EDGE@
 
 /* generation B: 0x20-byte records (level byte at +0x18) pointing at 0x28-byte descriptors from +8 */
