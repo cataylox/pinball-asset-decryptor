@@ -1696,7 +1696,7 @@ def _set_intact_reason(set_dir, base_card, E):
 #: milliseconds where the build took most of a minute. A field not named here (a new one
 #: included) always builds the set again.
 SETTINGS_ONLY_FIELDS = frozenset((
-    "start_shot", "start_count", "seconds", "scoring_shots", "countdown", "lights",
+    "start_shot", "start_or", "start_count", "seconds", "scoring_shots", "countdown", "lights",
     "light_color", "light_on_raw", "light_off_raw", "stack", "award_ladder", "shot_award",
     "end_shot", "callout_at", "restore_after", "starts_on", "ends_on", "starts", "cooldown",
     "priority", "light_shots", "light_shots_pattern", "start_also", "after", "after_when",

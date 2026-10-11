@@ -146,6 +146,7 @@ becomes. A key a newer editor wrote is kept in `extra` and written back, never d
 | `title` | `godzilla_pro_1_15` | | which `TitleProfile`: shot masks, callout ids, scenes |
 | `start_shot` | "Maser target" | Mode > Starts on | `trigger` bits |
 | `start_count` | 3 | Mode > times in one ball | `trigger` count |
+| `start_or` | [] | Mode > Starts on > or (two lists under the start shot) | PAD-518: their bits OR'd into the `trigger` line's with `start_shot`'s, so every hit of any of them counts toward `start_count` (three pop bumpers, 120 hits between them). `validate`: up to `START_OR_MAX` (2), each a shot the title has; `start_count` 1 to `START_COUNT_MAX` (999). `retarget` drops a shot the new title lacks; a card's mode file read back keeps up to three of its `trigger` shots |
 | `seconds` | 30 | Mode > Runs for | `seconds` |
 | `scoring_shots` | Left ramp, Right ramp | Shots that score | `shots` |
 | `award` | 1000000 | Mode > First shot pays | `award` |
@@ -199,7 +200,7 @@ becomes. A key a newer editor wrote is kept in `extra` and written back, never d
 | `art_source`, `art_from` | "", 0.0 | From a film > Picture... (item 142) | nothing: the film and the second of the frame; the frame is `screen_art` |
 | `clip_crop`, `art_crop` | "" | the film dialog's letterbox / fill (item 142) | nothing: how the clip and the picture were cropped, so the dialog reopens on it |
 | `starts_on` | "shot" | Starts and ends > Starts on: Its shot / These shots, in order (PAD-314) / An event (item 147) | `starts_on event <name>` in place of the `trigger` line (nothing when "shot"); `starts_on sequence` and the `trigger_seq` lines in its place with "sequence". `validate` names an event the title's `TitleProfile.events` does not carry |
-| `start_also` | [] | Mode > Starts on > And also (up to 2 rows; the file takes 3) | one `trigger_also <bits> <count>` per `[shot name, count]` (nothing when empty). `validate`: up to 3, a shot the title has, a count of 1-20. `retarget` drops a shot the new title lacks |
+| `start_also` | [] | Mode > Starts on > And also (up to 2 rows; the file takes 3) | one `trigger_also <bits> <count>` per `[shot name, count]` (nothing when empty). `validate`: up to 3, a shot the title has, a count of 1-999 (PAD-518; 1-20 before). `retarget` drops a shot the new title lacks |
 | `after` | "" | Mode > Starts on > Only after | `after <after_when> <name>` (nothing when ""): another mode of the project, by its NAME. `validate` refuses the mode's own name; the tab names one no mode of the project has (`after_problems`) |
 | `after_when` | "game" | Mode > Starts on > has run this ball / this game | `ball` or `game` in the `after` line |
 | `start_sequence` | [] | Mode > Starts on > These shots, in order (up to 8 lists; the next appears as the last is filled) | PAD-314, with `starts_on` "sequence": one `trigger_seq <bits>` per name, in order. `validate`: 2 to 8 names, each a shot the title has (`SEQUENCE_MIN`, `SEQUENCE_MAX`). `retarget` drops a shot the new title lacks and says so |

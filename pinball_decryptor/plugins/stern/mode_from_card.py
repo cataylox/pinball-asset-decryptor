@@ -123,9 +123,11 @@ def recover_spec(text, p):
         names = _mask_names(p, int(trig[0], 16))
         if names:
             spec.start_shot = names[0]
+            spec.start_or = names[1:1 + MP.START_OR_MAX]          # PAD-518: their hits count together
             spec.start_count = int(trig[1]) if len(trig) > 1 else 1
-            if len(names) > 1:
-                lost.append("it started on any of %s; it starts on %s now" % (", ".join(names), names[0]))
+            if len(names) > 1 + MP.START_OR_MAX:
+                kept = names[:1 + MP.START_OR_MAX]
+                lost.append("it started on any of %s; it starts on %s now" % (", ".join(names), ", ".join(kept)))
     except (IndexError, ValueError):
         lost.append("what starts it")
     for key, attr in (("seconds", "seconds"), ("award", "award")):

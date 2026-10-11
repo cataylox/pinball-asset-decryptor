@@ -63,6 +63,7 @@ _STR_FIELDS = (
     "callout_secs_2", "callout_id_2", "callout_secs_3", "callout_id_3",
     "balls", "ball_save", "add_ball_shot", "add_ball_max", "mb_on_shot",       # item 167, PAD-228
     "also_shot_0", "also_count_0", "also_shot_1", "also_count_1", "after_mode", "after_when",  # PAD-227
+    "start_or_0", "start_or_1",                                                       # PAD-518
     "start_save_s",  # PAD-225
     "magnet_s", "scoop_s",   # PAD-381
     "coil_s_0", "coil_s_1", "coil_s_2", "coil_when_0", "coil_when_1", "coil_when_2",   # PAD-381
@@ -98,6 +99,7 @@ _DEFAULTS = {
     "mb_on_shot": "(when it starts)",
     "also_shot_0": "(nothing else)", "also_count_0": "1", "also_shot_1": "(nothing else)",
     "also_count_1": "1", "after_mode": "(any time)", "after_when": "game",
+    "start_or_0": "(no other shot)", "start_or_1": "(no other shot)",              # PAD-518
     "seq_reset_any": False,                                                        # PAD-314
     "game_modes": "block",                                                         # PAD-363; PAD-398
     "show_start": "(none)", "show_end": "(none)",                                  # PAD-418
@@ -280,6 +282,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     ALSO_NONE = "(nothing else)"
     AFTER_NONE = "(any time)"
     ALSO_ROWS = 2
+    #: PAD-518: the "or" lists beside the start shot (their hits count with its own), and their first entry
+    START_OR_NONE = "(no other shot)"
     #: PAD-314: the "these shots in order" lists' first entry, and the rows the form has
     SEQ_NONE = "(no more shots)"
     SEQ_ROWS = MP.SEQUENCE_MAX
@@ -291,7 +295,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     #: page draws each as a number field with arrows. ``callout_secs`` is the four callout
     #: rows' seconds. (The film dialog's length is bounded by its own ``film.max``.)
     SPINBOXES = {
-        "start_count": [1, 20], "seconds": [0, 300], "clip_seconds": [1, 30, "any"],   # 0: a multiball with no clock
+        "start_count": [1, MP.START_COUNT_MAX], "seconds": [0, 300], "clip_seconds": [1, 30, "any"],   # 0: a multiball with no clock
         "sound_shot_every": [1, 20], "starts_count": [1, MP.STARTS_MAX],
         "cooldown": [0, MP.COOLDOWN_MAX], "priority": [0, 255],
         "clip_both_seconds": [1, 30, "any"], "callout_secs": [0, 300],
@@ -302,7 +306,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         "magnet_s": [MP.MAGNET_MIN_MS / 1000, MP.MAGNET_MAX_MS / 1000, "any"],  # PAD-381
         "scoop_s": [MP.SCOOP_MIN_MS / 1000, MP.SCOOP_MAX_MS / 1000, "any"],     # PAD-381
         "coil_s": [MP.COIL_MIN_MS / 1000, MP.COIL_MAX_MS / 1000, "any"],        # PAD-381: coil_s_0..2
-        "also_count": [1, 20],                                                  # PAD-227
+        "also_count": [1, MP.START_COUNT_MAX],                                  # PAD-227; PAD-518
     }
 
     def __init__(self, window):
@@ -1399,6 +1403,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             f["also_shot_%d" % i] = str(row[0]) if row else self.ALSO_NONE
             f["also_count_%d" % i] = str(row[1]) if row else "1"
         self._also_beyond = list(rows[self.ALSO_ROWS:])   # a hand-edited 3rd row is kept
+        more = spec.start_or if isinstance(spec.start_or, list) else []   # PAD-518
+        for i in range(MP.START_OR_MAX):
+            f["start_or_%d" % i] = str(more[i]) if i < len(more) and more[i] else self.START_OR_NONE
         after = spec.after.strip() if isinstance(spec.after, str) else ""
         f["after_mode"] = after or self.AFTER_NONE
         f["after_when"] = spec.after_when if spec.after_when in MP.AFTER_WHEN else "game"
@@ -1414,6 +1421,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             text = str(self.f["also_count_%d" % i]).replace(",", "").strip()
             rows.append([shot, int(text) if text.isdigit() else text])
         spec.start_also = rows + list(self._also_beyond)
+        more = [str(self.f["start_or_%d" % i]).strip() for i in range(MP.START_OR_MAX)]   # PAD-518
+        spec.start_or = [s for s in more if s and s != self.START_OR_NONE]
         after = str(self.f["after_mode"]).strip()
         spec.after = "" if after == self.AFTER_NONE else after
         spec.after_when = self.f["after_when"]
