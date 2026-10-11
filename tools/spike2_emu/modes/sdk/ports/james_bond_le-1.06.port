@@ -350,6 +350,12 @@ value backdrop_surface 1
 # PAD-521: the game's own main-play video (MainPlayLoop_<film>) takes the surface the moment a mode's clip ends; a
 # mode's loop takes it back (any other clip of the game's is waited out)
 text backdrop_idle MainPlayLoop
+# PAD-530: the surface's own seek, length and position (each (surface[, ms]), in ms: the player's gst_element_seek and
+# query_duration / query_position, the calls the game's film reels make to stay in step after its clips). A mode's clip
+# the game's own clip took the surface from comes back where it would be by then, once the game's clip is over.
+site surface_seek     0x00578404 0xe92d43f0 0xe1a07003
+site surface_duration 0x005780bc 0xe5d030d4 0xe92d40f0
+site surface_position 0x00578260 0xe5d030d4 0xe92d40f0
 
 # PAD-521: the game's own status bar under the TV (scene hud 7de1c159): the score display's getter. Its object keeps
 # the bar's text node at +0x118, its bar_Color node at +0x114, the wipe's frame at +0x11c and four flags at +0x11e (bar,

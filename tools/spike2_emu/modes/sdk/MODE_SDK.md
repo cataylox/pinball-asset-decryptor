@@ -2640,6 +2640,24 @@ sites do:
 The game draws that surface, so there is no draw loop. `surface_state` reads 2 while the clip
 plays. `surface_stop` stops it.
 
+The game puts its own clips on the same surface (James Bond's Ball Lock or Extra Ball in the
+middle of a mode). PAD-530: with three more port lines, a clip of the mode's comes back after
+the game's clip, where it would be by then, as the game keeps its own film reels in step:
+
+```
+site surface_seek       0x...    # (surface, ms): the player's gst_element_seek
+site surface_duration   0x...    # (surface) -> ms: query_duration
+site surface_position   0x...    # (surface) -> ms: query_position
+text backdrop_idle      MainPlayLoop   # the game's own main-play video: its clip is over
+```
+
+The runtime hooks `surface_set_video`. When the game asks for a clip while the mode's clip
+plays, it notes how far in the mode's clip was. Once the game asks for its main-play video, or
+the surface is idle, it plays the mode's clip again and seeks it on. It does not come back if
+the mode ended, another mode of ours began, or its time ran out under the game's clip. James
+Bond LE and Pro 1.06 name them (LE at `surface_play` - 0x36c, - 0x6b4 and - 0x510, Pro the
+same distances). A port without them keeps the old way: the game's clip ends the mode's.
+
 The port lines:
 
 ```
