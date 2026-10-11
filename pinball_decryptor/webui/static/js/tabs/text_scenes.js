@@ -369,10 +369,10 @@ export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
         </div>
         ${(s.scenes || []).length ? null : html`<p class="small muted" style="margin:0">${s.hint}</p>`}
         ${(s.scenes || []).length ? html`<div class="row small muted sc-legend">
-          <span class="sc-dot same"></span><span title=${STATE_TIP.same}>not changed</span>
-          <span class="sc-dot edited"></span><span title=${STATE_TIP.edited}>not written yet</span>
-          <span class="sc-dot all"></span><span title=${STATE_TIP.all}>profile on all</span>
-          <span class="sc-dot written"></span><span title=${STATE_TIP.written}>written to a card</span>
+          <span class="sc-key" title=${STATE_TIP.same}><span class="sc-dot same"></span>not changed</span>
+          <span class="sc-key" title=${STATE_TIP.edited}><span class="sc-dot edited"></span>not written yet</span>
+          <span class="sc-key" title=${STATE_TIP.all}><span class="sc-dot all"></span>profile on all</span>
+          <span class="sc-key" title=${STATE_TIP.written}><span class="sc-dot written"></span>written to a card</span>
         </div>` : null}
         <div class="scenes-list-wrap" ref=${listRef} ...${tip(tips.list)}>
           <${Table} key=${sceneCols(listW).length} cls="scenes-list" columns=${sceneCols(listW)}
