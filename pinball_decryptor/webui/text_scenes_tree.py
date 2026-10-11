@@ -863,6 +863,7 @@ class TreeEditMixin:
         w, h = int(man["stage"][0]), int(man["stage"][1])
         hits = []
         filled = self._tree_filled(card, man)
+        painted = self._tree_painted(man)
         for d in self._tdraws:
             if d["mul"][3] <= 0.01 or d["kind"] not in ("bitmap", "text", "flip"):
                 continue
@@ -871,6 +872,8 @@ class TreeEditMixin:
                          # PAD-512: the picture, for its clear parts (tree_see)
                          "img": d.get("image") if d["kind"] != "text" else None,
                          "filled": d["node"] in filled,
+                         # PAD-515: a line the game paints gets an outline of its own
+                         "painted": d["node"] in painted,
                          "pts": [[round(x, 1), round(y, 1)] for x, y in
                                  scene_eval.outline(d)]})
         rest = self._tree_default(card)
@@ -936,6 +939,7 @@ class TreeEditMixin:
                            "shown": n["id"] in (self._tforce.get(card) or ()),
                            "added": bool(n.get("added")),
                            "filled": filled.get(n["id"]),
+                           "painted": n["id"] in painted,
                            "hidden": any(op["op"] == "visible" and op.get("node") == n["id"]
                                          for op in ops),
                            "view_off": n["id"] in view,
@@ -1006,6 +1010,17 @@ class TreeEditMixin:
                 "filled": self._tree_filled(card, man).get(nid),
                 "words": self._tree_words_of(card, man, n, ops),
                 "game_colors": self._tree_game_colors(man, nid)}
+
+    def _tree_painted(self, man):
+        """The lines of scene manifest *man* the game program paints itself as it plays
+        (PAD-515, DragonRR: "it is extremely easy to forget this exists"): Godzilla's score
+        panel (PAD-507), ``{node id: "up" | "rest"}``."""
+        from ..plugins.stern import score_colours as sc
+        try:
+            return sc.panel_lines(man)
+        except Exception:                            # noqa: BLE001
+            log.exception("score panel lines")
+            return {}
 
     def _tree_game_colors(self, man, nid):
         """PAD-507 (DragonRR): a line of Godzilla's score panel, which the game program
