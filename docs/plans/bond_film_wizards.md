@@ -177,6 +177,53 @@ the game's Mr Osato running when the film completed (lit); a ramp mid-Osato `not
 out; the next ramp held off Under Water Fight and started the mode; it ran its 30 s out; the next ramp started the
 game's own mode as ever. No abort.
 
+## PAD-521: the owner's own mini-wizards should LOOK like the game's own
+
+The same owner's list, for their YOLT and DAF modes: (1) villain inserts cycling while qualified and the film insert
+solid; (2) at the start, the name lettered over the splash; (3) a video cycling all through the mode; (4) its music;
+(5) a timer; (6) back to the cycling video after a shot's video; (7) a colour bar under it (green YOLT, blue DAF);
+(8) the name in that bar; (9) at the end, the total over a large image.
+
+What the game's own looks like (emulator, stock LE 1.06, rig 1, C:/tmp/PAD-521 run r2: `pm_game_wizard_named("Goldfinger's
+Jackpot", START)` on a fresh game): the INTRO clip in the TV frame with the name lettered into the clip itself; then the
+STATUS BAR under the TV, gold, "GOLDFINGER'S JACKPOT"; the BACKGROUND loop in the TV; a three-digit countdown at the lower
+left (090, 076...); an info line under the bar ("SUPER JACKPOT: 125,000"); at the drain the TOTAL clip (the vault) in the
+TV, the bar kept, "TOTAL 3,625,000" under the bar.
+
+Done:
+- (1) Light the mode at names several inserts (a Chase across them) and one more held solid (block_modes.py, 059f1f18).
+- (3)/(6) a clip "behind the HUD, over and over" loops in the TV and comes back after a one-shot, a full-screen clip
+  or a clip of the game's: the runtime's backdrop on the bank's surface, `value backdrop_surface 1` (a395dd56; MODE_SDK
+  "The backdrop on a clip v2 build"). Emulator-proven with the game's own clips (run r1).
+- (4) was already there: the mode's own Music... (program `music`), started with the mode.
+
+Left (the next run), with what the game program says:
+
+- THE STATUS BAR (7, 8, and the timer as the bar's progress). Scene `hud` (6fb39344/7de1c159) IS the bar:
+  `StatusBarBg_Instance`, `StatusBar_Instance` { `bar_Color_Instance`, `NoProgress_Instance`, `Progress_Instance`
+  (a wipe), `Text_Instance`, `Bar_Overlay_Instance` }, at 218,449. Its owner is the score display object, a singleton:
+  getter `0x1862dc` (object at *(0x81e8f8 + 0x18), 0x128 bytes, built by `0x185e58`, nodes found by `0x183e60`:
+  +0x104 StatusBar, +0x108 StatusBarBg, +0x10c Progress, +0x110 NoProgress, +0x114 bar_Color, +0x118 Text). Its frame
+  update `0x1872b4` shows them from bytes: +0x11e bar, +0x11f text, +0x120 colour, +0x121 progress (NoProgress = !it),
+  +0x11c the progress frame (gotoFrame(+0x11c + 1), 0..100). Setters: text by MESSAGE ID `0x184834(obj, id)` (thunk
+  `0x184984`; it calls `0x38c6cc(id)` for the words, then the text node's set `0x566754`), colour by PALETTE INDEX
+  `0x184904(obj, idx)` (thunk `0x184988`; palette `0x164200`: 20 entries of 3 bytes at 0x62f6d4 + 0x3c, /255; then the
+  bar_Color node's vfn +0x4c and +0x44, each (node, r, g, b, 1.0f) in s0-s3 - so ANY rgb works the same way), progress
+  `0x18498c(obj, frame)` (strb +0x11c). The game's own "show" `0x18634c(text id, colour idx)`: bar 1, text, colour, text 1,
+  colour 1, progress 0. Goldfinger's wizard `0xbf2b8`: the same with progress 1 (id 0xd89, colour 9), then `0xbf308`
+  sets the frame from its clock (percent), 100 at its start (`0xc041c`).
+  Plan: runtime `pm_status_bar(const char *words, unsigned rgb, int percent)` (-1 = no progress; words NULL = hide and
+  give back the bytes it found), port `site status_bar 0x1862dc` + values for the offsets; the words through the
+  runtime's own set-text on the node at +0x118; the colour through the two vfns. Blocks: a program `bar`
+  {on, color} (the mode's name, the clock as its progress) shown while it runs and through its total.
+- THE COUNTDOWN DIGITS (5): `Timer_Instance.Digit_1/2` referenced at 0xdcc9c / 0xdcd2c (a timer element of the game's;
+  who owns it and how a mode raises it is not read yet). The bar's progress alone may do.
+- THE NAME OVER THE SPLASH (2) and THE TOTAL (9): the game letters the name into its intro clips, and shows its total in
+  scene 6fb39344/65222d79/16d675aa (`Sprite1.Text2`, found by `0x582a28`) over its `<MODE>_Total` clip
+  (`0x1ce1ec(*0x8185c8, &name, 0, 1)`, Goldfinger `0xc09c4`). For a mode of one's own: the TOTAL in that scene's text
+  under the bar, over the mode's own total clip/picture in the TV; the name in large letters over the TV for the intro
+  (a words-only screen of the mode's, or that same total scene's text) - check the HUD scene draws over the bank surface.
+
 The plan as it was written (PAD-428):
 
 What the user asked first: the game's mini-wizard (its own mode, music and screens) lit
