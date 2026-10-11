@@ -586,20 +586,52 @@ def built_colours(assets_dir):
     return colours if isinstance(colours, dict) else {}
 
 
+#: a profile on files in at least this many scenes, and in more than half the scenes with one,
+#: is one applied to all (an Apply to all from a file's own profile)
+ALL_SCENES_MIN = 3
+
+
+def all_profile_keys(assets_dir, marks):
+    """The profiles applied to all of a project's files, by :meth:`Profile.key`, from *marks*
+    (:func:`colour_marks`): the individual files profile (what All images and All text give
+    every file), and one a file's Apply to all gave the rest, seen as reaching more than half
+    the scenes with a profile on them (DragonRR, PAD-524: with every file Black and white,
+    every scene was orange, and the few he had colored on their own were lost among them)."""
+    from ...core import colour_profile as cp
+    keys = set()
+    shared = cp.asset_active(assets_dir)
+    if shared is not None:
+        keys.add(shared.key())
+    scenes = {}
+    for d, ms in marks.items():
+        for _rel, key in ms:
+            scenes.setdefault(key, set()).add(d)
+    keys.update(key for key, ds in scenes.items()
+                if len(ds) >= ALL_SCENES_MIN and len(ds) * 2 > len(marks))
+    return keys
+
+
 def scene_colour_states(assets_dir):
-    """``{scene dir: "edited" | "written"}`` for every scene with a color profile baked into
-    one of its pictures or lines now or at the last Write, as :func:`scene_states` for edits:
-    *edited* = not what the last Write baked, *written* = exactly that."""
+    """``{scene dir: "edited" | "all" | "written"}`` for every scene with a color profile baked
+    into one of its pictures or lines now or at the last Write, as :func:`scene_states` for
+    edits: *edited* = not what the last Write baked, *written* = exactly that.  *all* is
+    *edited* where every difference is the profile applied to all (:func:`all_profile_keys`):
+    a picture or line that has it now, or had it and has no profile now (PAD-524)."""
     now = colour_marks(assets_dir)
     built = built_colours(assets_dir)
+    every = all_profile_keys(assets_dir, now)
     out = {}
     for d in set(now) | set(built or {}):
         marks = now.get(d) or []
         if built is not None and marks == (built.get(d) or []):
             if marks:
                 out[d] = "written"
-        else:
-            out[d] = "edited"
+            continue
+        was = dict((built or {}).get(d) or [])
+        mine = dict(marks)
+        own = any((mine[rel] if rel in mine else was[rel]) not in every
+                  for rel in set(mine) | set(was) if mine.get(rel) != was.get(rel))
+        out[d] = "edited" if own else "all"
     return out
 
 

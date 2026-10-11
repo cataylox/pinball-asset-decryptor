@@ -327,7 +327,7 @@ def test_a_line_s_color_profile_marks_its_scene_changed_until_written(tmp_path):
 
 def test_a_picture_s_color_profile_marks_every_scene_drawing_it(tmp_path):
     """A game picture switched on behind the unlock box, with the individual files profile:
-    every scene that draws it is changed; one recorded by a Write before PAD-524 (no colours
+    every scene that draws it is changed (blue: the profile on all, PAD-524); one recorded by a Write before PAD-524 (no colours
     in the record) is not taken as written."""
     import json
     import os
@@ -346,16 +346,61 @@ def test_a_picture_s_color_profile_marks_every_scene_drawing_it(tmp_path):
     cp.store_asset_profile(a, cp._from_dict(_YELLOW))
     assert X.scene_colour_states(a) == {}                     # no picture switched on
     cp.set_asset_slot(a, "images", "images/scene_textures/radimg_8x8_aa.png", True)
-    assert X.scene_colour_states(a) == {"/g/auto_loaded/s1": "edited",
-                                        "/g/auto_loaded/s2": "edited"}
+    assert X.scene_colour_states(a) == {"/g/auto_loaded/s1": "all",     # the files profile
+                                        "/g/auto_loaded/s2": "all"}
     with open(os.path.join(tex, X.BUILT_FILENAME), "w", encoding="utf-8") as f:
         json.dump({"edits": {}}, f)                           # an older Write's record
-    assert X.scene_colour_states(a) == {"/g/auto_loaded/s1": "edited",
-                                        "/g/auto_loaded/s2": "edited"}
+    assert X.scene_colour_states(a) == {"/g/auto_loaded/s1": "all",     # the files profile
+                                        "/g/auto_loaded/s2": "all"}
     X.mark_built(a)
     assert X.scene_colour_states(a) == {"/g/auto_loaded/s1": "written",
                                         "/g/auto_loaded/s2": "written"}
 
+
+
+def test_scenes_changed_only_by_the_profile_on_all_are_blue_not_orange(tmp_path):
+    """DragonRR (PAD-524, round 2): "colour the dot blue instead of gold for scenes where
+    changes were made by applying a color profile to all images or all text ... every single
+    dot is now gold".  The individual files profile (All images / All text) and one an Apply
+    to all gave every file are the profile on all; a scene with a profile of its own on a
+    picture or line, or with edits, stays orange."""
+    import os
+    from pinball_decryptor.core import colour_profile as cp, staged_changes
+    a = str(tmp_path)
+    tex = os.path.join(a, "images", "scene_textures")
+    os.makedirs(tex)
+    scenes = ["/g/auto_loaded/s%d" % i for i in range(1, 5)]
+    pics = ["images/scene_textures/radimg_8x8_%d.png" % i for i in range(1, 5)]
+    with open(os.path.join(tex, "radium_images.txt"), "w", encoding="utf-8") as f:
+        f.writelines("%s\t%s/scene.radium\t16\n" % (p[len("images/"):], d)
+                     for p, d in zip(pics, scenes))
+    data = staged_changes.load(a)
+    data[cp.STOCK_IMAGES_KEY] = True
+    staged_changes.save(a, data)
+    bw = dict(_YELLOW, name="Black and white", gain=[1.0] * 3, gamma=[1.0] * 3, saturation=0.0)
+    cp.store_asset_profile(a, cp._from_dict(bw))
+    for p in pics:                                            # All images
+        cp.set_asset_slot(a, "images", p, True)
+    assert X.scene_colour_states(a) == {d: "all" for d in scenes}
+    line = cp.text_rel(scenes[0] + "/scene.radium", 7)
+    cp.set_text_slot(a, line, True)
+    assert X.scene_colour_states(a)[scenes[0]] == "all"       # the line takes the same one
+    cp.store_own_profile(a, "text", line, cp._from_dict(_YELLOW))
+    assert X.scene_colour_states(a) == dict({d: "all" for d in scenes}, **{scenes[0]: "edited"})
+    X.mark_built(a)
+    assert X.scene_colour_states(a) == {d: "written" for d in scenes}
+    cp.store_asset_profile(a, cp._from_dict(dict(bw, saturation=0.2)))   # the all one moves
+    assert X.scene_colour_states(a) == {d: "all" for d in scenes}
+    X.mark_built(a)
+    cp.set_text_slot(a, line, False)                          # his own yellow taken off
+    assert X.scene_colour_states(a) == dict({d: "written" for d in scenes},
+                                            **{scenes[0]: "edited"})
+    X.mark_built(a)
+    # an Apply to all from one picture's own profile: every picture gets a copy of it
+    cp.store_own_profiles(a, "images", pics, cp._from_dict(_YELLOW))
+    assert X.scene_colour_states(a) == {d: "all" for d in scenes}
+    cp.store_own_profile(a, "images", pics[1], cp._from_dict(dict(_YELLOW, saturation=0.5)))
+    assert X.scene_colour_states(a) == dict({d: "all" for d in scenes}, **{scenes[1]: "edited"})
 
 def test_a_turn_rotates_about_the_middle_and_both_sides_agree():
     """DragonRR: "graphics can be rotated".  90 degrees clockwise about its own point: the

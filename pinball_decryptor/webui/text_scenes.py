@@ -615,9 +615,10 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         return scene_eval.MANIFEST_VERSION
 
     def _scene_states(self):
-        """``{scene dir: "edited" | "written"}`` (DragonRR: colour the list by what is not
-        written to a card yet and what is).  A color profile on one of its pictures or lines
-        counts as a change too (PAD-524); either not written yet makes the scene not written."""
+        """``{scene dir: "edited" | "all" | "written"}`` (DragonRR: colour the list by what is
+        not written to a card yet and what is).  A color profile on one of its pictures or lines
+        counts as a change too (PAD-524); either not written yet makes the scene not written,
+        *all* where the only change is the profile applied to all of them."""
         try:
             from ..plugins.stern import scene_edit
             out = {card.replace("\\", "/").rsplit("/", 1)[0]: st

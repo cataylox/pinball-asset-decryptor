@@ -31,10 +31,12 @@ const SCENE_COLS = [
 let sceneWidths = null;         // dragged column widths, kept for the session
 // DragonRR: a scene's colour says where its edits stand - orange: changed and not written to
 // a card yet (the next Write puts them on); green: exactly what the last Write put on the card.
-// A color profile on one of its pictures or lines of text is a change too (PAD-524).
+// A color profile on one of its pictures or lines of text is a change too (PAD-524); blue: the
+// only change is the profile applied to all of them (DragonRR: every dot was orange after All images).
 const STATE_TIP = {
   same: "Not changed: the scene as the game ships it, no color profile on any of its pictures or lines.",
-  edited: "Changed since the last Write (its edits or a color profile on its pictures or lines): the next Write puts it on the card.",
+  edited: "Changed since the last Write (its edits, or a color profile of its own on one of its pictures or lines): the next Write puts it on the card.",
+  all: "Changed since the last Write only by the color profile applied to all pictures or lines (All images, All text, Apply to all): the next Write puts it on the card.",
   written: "Written: the last Write put exactly these edits and color profiles on the card.",
 };
 // PAD-429 (DragonRR): the search finds the game's on-screen text, not only scene names;
@@ -367,9 +369,10 @@ export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
         </div>
         ${(s.scenes || []).length ? null : html`<p class="small muted" style="margin:0">${s.hint}</p>`}
         ${(s.scenes || []).length ? html`<div class="row small muted sc-legend">
-          <span class="sc-dot same"></span><span title=${STATE_TIP.same}>not changed</span>
-          <span class="sc-dot edited"></span><span title=${STATE_TIP.edited}>not written yet</span>
-          <span class="sc-dot written"></span><span title=${STATE_TIP.written}>written to a card</span>
+          <span class="sc-key" title=${STATE_TIP.same}><span class="sc-dot same"></span>not changed</span>
+          <span class="sc-key" title=${STATE_TIP.edited}><span class="sc-dot edited"></span>not written yet</span>
+          <span class="sc-key" title=${STATE_TIP.all}><span class="sc-dot all"></span>profile on all</span>
+          <span class="sc-key" title=${STATE_TIP.written}><span class="sc-dot written"></span>written to a card</span>
         </div>` : null}
         <div class="scenes-list-wrap" ref=${listRef} ...${tip(tips.list)}>
           <${Table} key=${sceneCols(listW).length} cls="scenes-list" columns=${sceneCols(listW)}
