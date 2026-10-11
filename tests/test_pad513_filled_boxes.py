@@ -133,3 +133,49 @@ def test_a_score_placeholder_is_marked_with_no_line_to_name(tmp_path):
         assert layers["Score0"] == {"line": None, "modes": []}
         assert layers["Art0"] is None
         w.call("text_scenes.close")
+
+
+def test_with_the_programs_node_paths_a_box_is_filled_when_the_game_can_name_it(tmp_path):
+    """Round 3 (emulator-proven: the game's own set_text hooked on stock Godzilla LE 1.16): the
+    game finds a box by its path from the screen's root to write in it.  With the program's
+    node paths read, a box is filled exactly when its path is one of them - whatever its
+    words match - and its words still find its line."""
+    gigan = "cmode_battle_vs_gigan"
+    from pinball_decryptor.plugins.stern import engine
+    folder = _project(tmp_path, {"original": "KAIJU!", "modes": [gigan]}, two=True)
+    engine._program_modes_read(str(folder), {gigan: ["g/scene1"]}, {},
+                               ["Award_Textbox.Title", "Award_Textbox", "Other_Instance"])
+    assert engine.program_node_paths(str(folder)) == {"Award_Textbox.Title", "Award_Textbox",
+                                                      "Other_Instance"}
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        layers = _layers(w)
+        assert layers["Title0"] is None          # KAIJU like the line, but the game can't name it
+        assert layers["Title1"] == {"line": "KAIJU!", "modes": ["Battle vs Gigan"]}
+        assert layers["Art0"] is None
+        w.call("text_scenes.close")
+
+
+def test_an_empty_or_older_reading_has_no_node_paths(tmp_path):
+    from pinball_decryptor.plugins.stern import engine
+    folder = tmp_path / "p"
+    (folder / "text").mkdir(parents=True)
+    assert engine.program_node_paths(str(folder)) is None
+    engine._program_modes_read(str(folder), {}, {}, [])
+    assert engine.program_node_paths(str(folder)) is None
+
+
+def test_godzilla_le_116_node_paths_are_the_boxes_the_game_wrote():
+    """The node paths read off the stock card: the boxes the emulator run saw the game write
+    (Ebirah's LEFT, Bridge Attack's MULTIBALL, the score panel's 82-character score path) are
+    there; DragonRR's Tank Attack title and letters, which the game never wrote, are not."""
+    from tests.test_pad470_text_modes import LE116, _program
+    from pinball_decryptor.plugins.stern import text_modes
+    paths = set(text_modes.node_refs(_program(LE116)))
+    for p in ("Line1_Left_Instance", "Multiball_Textbox.Mulitball_Instance", "Line1_Instance",
+              "Player1_Instance.P1_ActiveScore_Instance.ActiveScore_1_Text_Instance.Player1.score",
+              "DoubleScoringSlideOut_Artbox.DoubleScoringPanel_Artbox.DoubleScoringTimer_Instance"):
+        assert p in paths, p
+    for p in ("Title2_Textbox.Title_Instance", "Title2_Textbox", "Letter_7T_Textbox.Letter_7T_Instance",
+              "Letter_7T_Instance", "Letter_1T_Textbox.Letter_1T_Instance"):
+        assert p not in paths, p

@@ -353,6 +353,10 @@ class TextTab(TabService):
         self._clear_edit_panel()
         self._refresh_list(rebuild_rows=True)
         self.set(empty=EMPTY_NONE if not rows else "")
+        # PAD-513: the scan may have read the card again (the program's node paths), and the
+        # Scenes tab marks the boxes the game fills from that reading
+        if getattr(self.scenes, "_filled_memo", None) is not None:
+            self.scenes.text_edits_changed()
 
     # ------------------------------------------------------------------
     # the list

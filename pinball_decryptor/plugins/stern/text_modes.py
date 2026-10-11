@@ -79,6 +79,8 @@ class Reading:
     scenes: dict = field(default_factory=dict)
     #: ``{mode class: {scene key: [node path]}}``: the text boxes it names with each screen
     boxes: dict = field(default_factory=dict)
+    #: every node path the program points at (:func:`node_refs`): the boxes the game can fill
+    paths: list = field(default_factory=list)
 
     def label(self, cls):
         return self.labels.get(cls) or mode_label(cls)
@@ -288,6 +290,32 @@ _BOX_TABLE_REACH = 0x60
 _BOX_CODE_REACH = 0x200
 
 
+def node_refs(raw):
+    """Every dotted name the game program's code or tables point at, and each name after one of
+    its dots (a tail the compiler shares), sorted.  The game finds a text box by its path from
+    the screen's root to write in it, so a box whose path is here can be filled in as the game
+    plays, and one whose path is not, cannot (PAD-513, emulator-proven on stock Godzilla LE
+    1.16 with the game's own set_text hooked: every box the game wrote on the screens a run
+    reached had its path here; DragonRR's TANK ATTACK letters and MULTIBALL title had not, and
+    the game never wrote them).  The plain reference census, without the far movw/movt pairs:
+    on that card they add no box's path and cost 20 times as long."""
+    from . import progreloc
+    hosts, at = [], {}
+    for m in _NODE_PATH.finditer(raw):
+        if len(m.group()) >= 200:       # Godzilla's score panel: paths of 82 characters
+            continue
+        text = m.group().decode("latin1")
+        hosts.append((m.start(), text))
+        at[(m.start(), 0)] = text
+        i = text.find(".")
+        while i >= 0:
+            at[(m.start(), i + 1)] = text[i + 1:]
+            i = text.find(".", i + 1)
+    census = progreloc.reference_census(raw, hosts)
+    return sorted({at[(off, r["delta"])] for off, refs in census.items() for r in refs
+                   if (off, r["delta"]) in at})
+
+
 def _tails(path):
     """*path* and what follows each of its dots: ``A.B.C``, ``B.C``, ``C``."""
     parts = path.split(".")
@@ -405,6 +433,7 @@ def _read(raw, spans, census):
         spans = progtext._display_spans(raw, ranges)
     if census is None:
         census = progtext._census(raw, spans)
+    out.paths = node_refs(raw)
     try:
         prog = S.Program(raw)
     except S.ScanError:

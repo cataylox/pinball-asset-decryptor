@@ -2007,7 +2007,7 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
         text_manifest.save(output_dir, all_rows)
         if prog_rows:
             _program_modes_read(output_dir, prog_ctx.get("scenes"),
-                                prog_ctx.get("boxes"))
+                                prog_ctx.get("boxes"), prog_ctx.get("paths"))
     except Exception as e:
         log("Couldn't write display-text manifest (%s)." % e, "warning")
         return 0
@@ -2034,15 +2034,16 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
 #: (PAD-485, ``scenes_rev`` :data:`SCENES_REV`) the screens each mode names
 _PROGRAM_MODES_FILE = "program_modes.json"
 #: PAD-485: bumped when what :func:`.text_modes.mode_scenes` finds changes (2: PAD-513,
-#: boxes further on in a function and named by a path's tail)
-SCENES_REV = 2
+#: boxes further on in a function and named by a path's tail; 3: PAD-513, ``paths``)
+SCENES_REV = 3
 
 
-def _program_modes_read(assets_dir, scenes=None, boxes=None):
+def _program_modes_read(assets_dir, scenes=None, boxes=None, paths=None):
     """Note that the manifest's game-program rows carry this build's reading
     of the game's own modes (:mod:`.text_modes`), with *scenes*, the screens
     each mode names (``{mode class: [scene key]}``), and *boxes*, the text
-    boxes it names with them (``{mode class: {scene key: [node path]}}``).
+    boxes it names with them (``{mode class: {scene key: [node path]}}``),
+    and *paths*, every node path the program points at (PAD-513).
     Never raises."""
     import json
     from . import text_modes
@@ -2053,7 +2054,8 @@ def _program_modes_read(assets_dir, scenes=None, boxes=None):
                   encoding="utf-8") as f:
             json.dump({"rev": text_modes.READ_REV, "scenes_rev": SCENES_REV,
                        "scenes": dict(scenes or {}),
-                       "boxes": dict(boxes or {})}, f)
+                       "boxes": dict(boxes or {}),
+                       "paths": sorted(paths or ())}, f)
     except OSError:
         pass
 
@@ -2073,6 +2075,26 @@ def program_mode_boxes(assets_dir):
                 for m, v in got.items() if isinstance(v, dict)}
     except (OSError, ValueError, TypeError, AttributeError):
         return {}
+
+
+def program_node_paths(assets_dir):
+    """The node paths the game program points at, as the project's last read
+    of the card found them (PAD-513: a text box whose path from its screen's
+    root is one of them is one the game can fill in, and only those), or None
+    for a project read before they were noted (or a reading that found none).
+    Never raises."""
+    import json
+    from ...core import text_manifest
+    try:
+        with open(os.path.join(assets_dir, text_manifest.RELDIR,
+                               _PROGRAM_MODES_FILE), encoding="utf-8") as f:
+            got = json.load(f)
+        paths = got.get("paths")
+        if got.get("scenes_rev", 0) < 3 or not paths or not isinstance(paths, list):
+            return None
+        return frozenset(str(p) for p in paths)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
 
 
 def program_mode_scenes(assets_dir):
@@ -2244,7 +2266,8 @@ def refresh_program_text_flags(assets_dir, log=None, cancel=None):
                         "budget": f["budget"], "grow": True,
                         "modes": list(f.get("modes") or ())})
             n += 1
-    _program_modes_read(assets_dir, prog_ctx.get("scenes"), prog_ctx.get("boxes"))
+    _program_modes_read(assets_dir, prog_ctx.get("scenes"), prog_ctx.get("boxes"),
+                        prog_ctx.get("paths"))
     if not n:
         return 0
     try:
