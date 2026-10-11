@@ -20,6 +20,13 @@ A line's corrected colour is a number in the scene, so a project read again off 
 built with it would see the corrected number and correct it twice.  The Write keeps what it
 wrote (:data:`RECORD`): a line that still shows it is worked out from the colour it had
 before, and one switched off again gets that colour back.
+
+PAD-514 (DragonRR: "a facility to directly control text colour"): a line can have a colour
+of its own instead, set on the Scenes Font bar (a ``text_colour`` scene edit,
+:func:`own_colours`).  It is drawn in exactly that colour and the profile does not reach it:
+white is already full red, so the profile's red sliders could never turn white letters red.
+It goes into the scene the same way, as ``line_colour`` edits (and, for a font whose letters
+carry their own colours, the line's own copy of the font with its letters in that colour).
 """
 
 import json
@@ -40,9 +47,17 @@ _SPREAD = 40
 _NEUTRAL = [1, [1.0, 1.0, 1.0, 1.0], [0.0, 0.0, 0.0, 0.0]]
 _TOL = 2e-3
 
+#: PAD-514: a font whose letters carry their own colours is drawn in a line's own colour by
+#: their light and shade: their brightest is the colour, this far down the letters' pixels
+#: (so a few white glints do not set it), never below the floor (a dark font stays a gain the
+#: profile maths takes)
+_PEAK_SHARE = 0.98
+_PEAK_FLOOR = 0.25
+
 _LOCK = threading.Lock()
 _FONTS = {}        # assets_dir -> (manifest stamp, {font key: font})
 _ART = {}          # atlas path -> ((mtime, size), coloured?)
+_PEAKS = {}        # atlas path -> ((mtime, size), brightest letter luma 0..1)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -166,6 +181,149 @@ def font_scenes(assets_dir, rels):
     for r in rels or ():
         cards |= got[1].get(r) or set()
     return len(cards)
+
+
+# ---------------------------------------------------------------------------------------------
+# a line's own colour (PAD-514)
+# ---------------------------------------------------------------------------------------------
+def own_colours(ops):
+    """``{node id: op}`` of the lines *ops* give a colour of their own (``text_colour``
+    edits: ``rgb`` 0..1 as drawn, ``pick`` the colour picked and ``bright`` its brightness %,
+    as the Font bar shows them); the last one of a line counts."""
+    out = {}
+    for op in ops or ():
+        if op.get("op") != "text_colour" or op.get("node") is None:
+            continue
+        try:
+            rgb = [min(1.0, max(0.0, float(c))) for c in op["rgb"][:3]]
+        except (KeyError, TypeError, ValueError):
+            continue
+        if len(rgb) == 3:
+            out[op["node"]] = dict(op, rgb=rgb)
+    return out
+
+
+def shade(rgb, bright):
+    """*rgb* (0..1) at *bright* % (the Font bar's Brightness, 0..100): 100 is the colour
+    itself, below it darker down to black.  (Lighter is toward the middle of the wheel: a
+    line is its letters times its colour, which cannot go past full.)"""
+    b = min(100.0, max(0.0, float(bright))) / 100.0
+    return [round(float(c) * b, 4) for c in rgb[:3]]
+
+
+def _art_peak(assets_dir, rel):
+    """The brightest of atlas *rel*'s letter pixels, as luma 0..1 (:data:`_PEAK_SHARE` of
+    the way up), from its pristine copy as :func:`_art_coloured` reads it."""
+    from ...core import staged_originals
+    from ...core.colour_profile import _LUMA
+    path = (staged_originals.snapshot_path(assets_dir, "images/" + rel)
+            or os.path.join(assets_dir, "images", *rel.split("/")))
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    stamp = (st.st_mtime_ns, st.st_size)
+    with _LOCK:
+        got = _PEAKS.get(path)
+        if got is not None and got[0] == stamp:
+            return got[1]
+    peak = None
+    try:
+        import numpy as np
+        from PIL import Image
+        with Image.open(path) as im:
+            arr = np.asarray(im.convert("RGBA"))
+        solid = arr[..., 3] > 128
+        if int(solid.sum()) >= 16:
+            luma = arr[..., :3][solid].astype(np.float32) @ np.asarray(_LUMA, np.float32)
+            peak = float(np.quantile(luma, _PEAK_SHARE)) / 255.0
+    except Exception:                                # noqa: BLE001
+        peak = None
+    with _LOCK:
+        _PEAKS[path] = (stamp, peak)
+    return peak
+
+
+def art_peak(assets_dir, font):
+    """How bright a font whose letters carry their own colours is at its brightest (luma
+    0..1, over all its pictures; 1.0 when none reads)."""
+    peaks = [p for p in (_art_peak(assets_dir, r) for r in font_pictures(assets_dir, font))
+             if p is not None]
+    return max(_PEAK_FLOOR, max(peaks)) if peaks else 1.0
+
+
+#: a saved text colour: a small text file of its own, one per colour, like a saved profile
+COLOUR_FILE_HEAD = "# Pinball Asset Decryptor text color"
+
+
+def save_colour_file(path, pick, bright=100):
+    """Keep colour *pick* (``#rrggbb``) at *bright* % in the file *path*."""
+    from . import text_colors
+    rgb = text_colors.parse_hex(pick)
+    if rgb is None:
+        raise ValueError("not a color: %r" % (pick,))
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("%s\ncolor %s\nbrightness %d\n" % (
+            COLOUR_FILE_HEAD, text_colors.to_hex(rgb),
+            int(round(min(100.0, max(0.0, float(bright)))))))
+
+
+def read_colour_file(path):
+    """``(#rrggbb, brightness %)`` kept in *path*, or None when it holds no colour.  A file
+    with just a ``#rrggbb`` in it (written by hand) is that colour at 100 %."""
+    from . import text_colors
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read(4096)
+    except (OSError, UnicodeDecodeError):
+        return None
+    pick, bright = None, 100
+    for line in text.splitlines():
+        words = line.strip().split()
+        if not words or words[0].startswith("#") and len(words) > 1:
+            continue
+        if words[0].lower() in ("color", "colour") and len(words) > 1:
+            pick = text_colors.parse_hex(words[1])
+        elif words[0].lower() == "brightness" and len(words) > 1:
+            try:
+                bright = int(round(min(100.0, max(0.0, float(words[1])))))
+            except ValueError:
+                pass
+        elif pick is None and len(words) == 1:
+            pick = text_colors.parse_hex(words[0])
+    return (text_colors.to_hex(pick), bright) if pick is not None else None
+
+
+def saved_colours(folders):
+    """``[(name, path, #rrggbb, brightness %)]``: the text colours kept in *folders* (each
+    ``.txt`` file holding one, by file name), the first folder's first."""
+    out, seen = [], set()
+    for d in folders or ():
+        try:
+            names = sorted(os.listdir(d), key=str.lower)
+        except (OSError, TypeError):
+            continue
+        for name in names:
+            path = os.path.join(d, name)
+            key = os.path.normcase(os.path.abspath(path))
+            if not name.lower().endswith(".txt") or key in seen:
+                continue
+            got = read_colour_file(path)
+            if got is not None:
+                seen.add(key)
+                out.append((os.path.splitext(name)[0], path, got[0], got[1]))
+    return out
+
+
+def own_colour_profile(rgb, peak=1.0):
+    """The profile that draws letters with colours of their own in *rgb* (0..1): their light
+    and shade kept (black and white), their brightest (*peak*, :func:`art_peak`) the colour.
+    Baked into the line's own copy of its font as any profile is (PAD-451)."""
+    from ...core import colour_profile as cp
+    k = 1.0 / max(_PEAK_FLOOR, min(1.0, float(peak)))
+    lo, hi = cp.LIMITS["gain"]
+    return cp.Profile(name="Own color", saturation=0.0,
+                      gain=tuple(round(min(hi, max(lo, float(c) * k)), 4) for c in rgb[:3]))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -434,7 +592,13 @@ def line_ops(assets_dir, card, man, ops=(), data=None, fonts=None, record=None, 
     A line in a font whose letters carry their own colours (PAD-451) gets a ``line_font``
     edit instead: its own copy of the font, the profile baked into the copy's pictures, with a
     constant colour of its own (its track's; a plain font's Text colour) baked in first and
-    set white, so the line looks as a picture of it would through the profile."""
+    set white, so the line looks as a picture of it would through the profile.
+
+    A line given a colour of its own on the Font bar (PAD-514, :func:`own_colours`) is drawn
+    in it whatever its switch, *bake* too: the colour is SET (each step of its track, keeping
+    the step's opacity; a plain font's Text colour where that is size-neutral) and the profile
+    is not applied to it.  In a font whose letters carry their own colours it gets its own
+    copy of the font with them drawn in that colour by their light and shade."""
     from ...core import colour_profile as cp, staged_changes
     from . import text_colors
     if not assets_dir or man is None:
@@ -481,7 +645,55 @@ def line_ops(assets_dir, card, man, ops=(), data=None, fonts=None, record=None, 
             e["col"] = col
             w.update(col=col, base_col=base_col)
 
+    # PAD-514: the lines with a colour of their own first, so a line the profile corrects
+    # beside one of them in the same Text leaves it alone
+    own = own_colours(ops)
+    kept = set()
     for n in nodes:
+        mine = own.get(n["id"])
+        oid, o = _text_of(man, n) if mine else (None, None)
+        if o is None:
+            continue
+        rgb = mine["rgb"]
+        base_rgb, base_col = base_of(n, o)
+        steps = _steps(base_col)
+        shared = len(users.get(oid) or ()) > 1
+        font = fonts.get(o.get("font") or "")
+        if font is not None and font_pictures(assets_dir, font):
+            # its letters' colours are in its font: its own copy, drawn in this colour
+            if base_col and not _white(base_col):
+                put(n["id"], col=[[f, [1.0, 1.0, 1.0, m[3]], a] for f, m, a in steps],
+                    base_col=base_col)
+            if not o.get("styled") and not shared and not _close(base_rgb, [1.0, 1.0, 1.0]):
+                put(n["id"], rgb=[1.0, 1.0, 1.0], base_rgb=base_rgb)
+            own_fonts[n["id"]] = {"op": "line_font", "node": n["id"], "mul": None,
+                                  "profile": cp._profile_dict(own_colour_profile(
+                                      rgb, art_peak(assets_dir, font))),
+                                  "art": art_map(font)}
+            written.setdefault(n["id"], {})["font"] = True
+            continue
+        if o.get("styled"):
+            put(n["id"], col=[[f, list(rgb) + [m[3]], a] for f, m, a in steps],
+                base_col=base_col)
+            continue
+        if not shared and _white(base_col):
+            put(n["id"], rgb=rgb, base_rgb=base_rgb)
+            continue
+        # its colour goes into its track, the Text white; each other node drawing that Text
+        # keeps its look
+        put(n["id"], rgb=[1.0, 1.0, 1.0], col=[[f, list(rgb) + [m[3]], a] for f, m, a in steps],
+            base_rgb=base_rgb, base_col=base_col)
+        for s in users.get(oid) or ():
+            if s is n or s["id"] in own or s["id"] in edits:
+                continue
+            _r, s_col = base_of(s, o)
+            put(s["id"], col=[[f, [round(base_rgb[i] * m[i], 5) for i in range(3)] + [m[3]], a]
+                              for f, m, a in _steps(s_col)], base_col=s_col)
+            kept.add(s["id"])
+
+    for n in nodes:
+        if n["id"] in own:
+            continue
         oid, o = _text_of(man, n)
         if o is None:
             continue
@@ -489,6 +701,8 @@ def line_ops(assets_dir, card, man, ops=(), data=None, fonts=None, record=None, 
         prof = (resolve("text", sw["rel"])
                 if bake and sw and sw.get("line") and sw.get("on") else None)
         base_rgb, base_col = base_of(n, o)
+        if prof is None and n["id"] in kept:
+            continue                              # it keeps its look beside one (PAD-514)
         if prof is None:
             # off (or nothing to correct): a line a Write corrected gets its colours back
             w = rec.get(str(n["id"])) or {}

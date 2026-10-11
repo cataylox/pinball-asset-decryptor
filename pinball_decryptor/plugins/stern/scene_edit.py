@@ -570,6 +570,9 @@ def describe(op):
         return "aligned %s %s" % (VALIGN_NAMES[op["valign"]], ALIGN_NAMES[op["align"]])
     if k in ("line_colour", "line_font"):
         return "colors corrected"
+    if k == "text_colour":
+        return "colored #%02x%02x%02x" % tuple(int(round(min(1.0, max(0.0, c)) * 255))
+                                              for c in op["rgb"][:3])
     if k == "text_font":
         return ", ".join((["font %s" % op["style"]] if op.get("style") else [])
                          + (["%g px" % op["px"]] if op.get("px") else [])) or "font changed"
@@ -897,6 +900,8 @@ def apply_manifest(man, ops):
                         "tr": [[1, [1, 0, 0, 1, op["x"], op["y"]]]], "comps": [[1, oid]],
                         "added": True}
                 kids.insert(max(0, min(len(kids), int(op.get("index", len(kids))))), node)
+            elif k == "text_colour":
+                pass        # PAD-514: drawn by text_colour.line_ops, as the profile's are
             else:
                 notes.append("unknown edit %r" % k)
         except (KeyError, TypeError, ValueError, ZeroDivisionError) as e:
@@ -1224,6 +1229,8 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
                               [T.Component(1, cid, obj)])
                 kids.insert(max(0, min(len(kids), int(op.get("index", len(kids))))), node)
                 applied += 1
+            elif k == "text_colour":
+                pass        # PAD-514: its line_colour edits (text_colour.line_ops) set it
             else:
                 notes.append("unknown edit %r" % k)
         except (KeyError, TypeError, ValueError, OSError, ZeroDivisionError) as e:

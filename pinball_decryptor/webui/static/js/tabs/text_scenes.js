@@ -768,6 +768,11 @@ const artLines = (c) => {
 // advanced box beside Preview colors unlocks it (PAD-344; moved there in PAD-349)
 const colorTip = (l, cs) => {
   const c = l.color || {};
+  // PAD-514: a line with a color of its own (the Font bar's) is drawn in it, profile or not
+  if (c.line && c.own_colour) return { head: `Its own color: ${c.own_colour}`, lines: [
+    "Set in the Font bar: this line is drawn in exactly this color, in the preview and on the machine, so the color profile does not change it.",
+    c.on || c.font_on ? "Its color profile switch stays as it was; it counts again once Default in the Font bar takes the line's own color off." : null,
+    "Open the Font bar on this line to change it, or Default to take it off." ] };
   if (c.locked && c.line) return { head: "Color: the game's own line of text", lines: [
     "Stern made its colors for the machine's screen, so the individual files profile is not offered on it.",
     ...artLines(c),
@@ -1429,7 +1434,7 @@ const GAME_COLORS_TIP = { head: "Painted by the game", lines: [
   "Pick one and Write makes the machine show it, in every player's box: the game program paints it, and that kind of line goes white in the scene. The preview draws the boxes the same way.",
   "A score line with the color profile switched on puts the profile on these too, unless a color is picked here." ] };
 const gameColorSrc = (r) => r.picked ? "picked" : r.profiled ? "color profile" : "the game's own";
-function GameColors({ g }) {
+export function GameColors({ g }) {
   return html`<div class="tree-game-colors">
     <div class="small tree-filled-note" ...${tip(GAME_COLORS_TIP)}><${Icon} name="gear" /><span>Painted by the game as it plays</span></div>
     ${g.roles.map((r) => html`<div key=${r.role} class="tree-row tgc-row" ...${tip({ head: r.label, lines: [

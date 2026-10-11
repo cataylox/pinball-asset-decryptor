@@ -1881,7 +1881,161 @@ class TreeEditMixin:
                            "is": any(op["op"] == "shadow" and op.get("id") == n["id"]
                                      for op in ops)},
                 "edited": any(op.get("node") == n["id"] and op["op"] in self._FONT_OPS
-                              for op in ops)}
+                              for op in ops),
+                # PAD-514: its own colour, if it has one
+                "colour": self._tree_colour_of(man, n, o, ops)}
+
+    def _tree_colour_of(self, man, n, o, ops):
+        """PAD-514 (DragonRR): a line's colour as the Font bar shows it: ``own`` when it has
+        one of its own (``pick`` and ``bright`` as set, ``hex`` drawn), else the colour it is
+        drawn in now (its first step's); ``art`` for a font whose letters carry their own
+        colours; ``saved``, the colours kept with Save a copy."""
+        from ..plugins.stern import text_colour, text_colors
+        mine = text_colour.own_colours(ops).get(n["id"])
+        try:
+            font = text_colour.fonts_by_key(self.assets_dir).get(o.get("font") or "")
+            art = bool(font is not None and text_colour.font_pictures(self.assets_dir, font))
+        except Exception:                            # noqa: BLE001
+            art = False
+        if mine:
+            pick = text_colors.parse_hex(mine.get("pick")) or text_colors.from_floats(
+                mine["rgb"])
+            return {"own": True, "pick": text_colors.to_hex(pick),
+                    "bright": int(round(float(mine.get("bright", 100)))),
+                    "hex": text_colors.to_hex(text_colors.from_floats(mine["rgb"])),
+                    "art": art, "saved": self._text_colours_saved()}
+        steps = n.get("col") or [[1, [1.0, 1.0, 1.0, 1.0], [0.0, 0.0, 0.0, 0.0]]]
+        m = steps[0][1]
+        rgba = [1.0, 1.0, 1.0] if o.get("styled") else list(o.get("rgba") or (1, 1, 1))[:3]
+        now = text_colors.to_hex(text_colors.from_floats([rgba[i] * m[i] for i in range(3)]))
+        return {"own": False, "pick": now, "bright": 100, "hex": now, "art": art,
+                "saved": self._text_colours_saved()}
+
+    #: the browse key a text colour's Save a copy and Load share, so its list follows them
+    _COLOUR_KEY = "text_colour"
+
+    def _text_colour_folders(self):
+        """The saved text colours' folders: the one Save a copy / Load last used, and PAD's
+        own Text colors folder (beside the saved color profiles')."""
+        from ..core import config
+        out = []
+        try:
+            last = self.window.last_browse_dir(self._COLOUR_KEY)
+        except Exception:                            # noqa: BLE001
+            last = ""
+        for d in (last, os.path.join(os.path.dirname(config.SETTINGS_FILE), "Text colors")):
+            if d and d not in out:
+                out.append(d)
+        return out
+
+    def _text_colours_saved(self):
+        from ..plugins.stern import text_colour
+        try:
+            got = text_colour.saved_colours(self._text_colour_folders())
+        except Exception:                            # noqa: BLE001
+            log.exception("saved text colours")
+            got = []
+        return [{"name": name, "path": path, "pick": pick, "bright": bright}
+                for name, path, pick, bright in got[:self._COLOURS_SHOWN]]
+
+    #: the most saved colours the Font bar lists
+    _COLOURS_SHOWN = 40
+
+    @rpc
+    def tree_text_colour(self, node, hex_color=None, bright=100):
+        """PAD-514 (DragonRR: "a facility to directly control text colour"): a line of text's
+        own colour, *hex_color* at *bright* % (100 as picked, below darker;
+        :func:`text_colour.shade`).  It is drawn in exactly that colour, here and on the
+        machine, and the colour profile no longer changes it.  *hex_color* ``None``: its own
+        colours back, and the profile if it has one switched on."""
+        from ..plugins.stern import scene_edit, text_colour, text_colors
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        node = int(node)
+        had = text_colour.own_colours(self._tree_ops(card)).get(node)
+        if hex_color in (None, ""):
+            if had is None:
+                return False
+            scene_edit.drop(self.assets_dir, card, node, "text_colour")
+            self._tree_refresh()
+            return True
+        pick = text_colors.parse_hex(hex_color)
+        try:
+            b = int(round(min(100.0, max(0.0, float(bright)))))
+        except (TypeError, ValueError):
+            return False
+        if pick is None:
+            return False
+        rgb = text_colour.shade([c / 255.0 for c in pick], b)
+        op = {"op": "text_colour", "node": node, "rgb": rgb,
+              "pick": text_colors.to_hex(pick), "bright": b}
+        if had is not None and had.get("pick") == op["pick"] and had.get("bright") == b:
+            return False
+        scene_edit.drop(self.assets_dir, card, node, "text_colour")
+        return self._tree_add(op)
+
+    @rpc
+    def tree_text_colour_save(self, hex_color, bright=100):
+        """Save a copy (PAD-514, DragonRR: "save and load text colours as you have done in
+        profiles"): the colour on show kept as a file of its own, listed under Saved colors
+        from then on."""
+        from ..plugins.stern import text_colour, text_colors
+        pick = text_colors.parse_hex(hex_color)
+        if pick is None:
+            return False
+        folders = self._text_colour_folders()
+        start = folders[0] if folders else None
+        if start and not os.path.isdir(start):
+            try:
+                os.makedirs(start, exist_ok=True)
+            except OSError:
+                start = None
+        path = self.window.ask_save(
+            self._COLOUR_KEY, "Save a copy of this text color",
+            initialfile="Text color %s.txt" % text_colors.to_hex(pick).lstrip("#"),
+            defaultextension=".txt", initialdir=start,
+            filetypes=[("Text color", "*.txt"), ("All files", "*.*")])
+        if not path:
+            return False
+        try:
+            text_colour.save_colour_file(path, text_colors.to_hex(pick), bright)
+        except (OSError, ValueError) as e:
+            self.window.toast("Could not save the color: %s" % e, "error")
+            return False
+        self.window.toast("Saved %s" % os.path.basename(path), "success")
+        self._tree_refresh()
+        return True
+
+    @rpc
+    def tree_text_colour_load(self, node):
+        """Load (PAD-514): a text colour kept with Save a copy, given to line *node*."""
+        folders = self._text_colour_folders()
+        path = self.window.ask_open(
+            self._COLOUR_KEY, "Load a text color",
+            filetypes=[("Text color", "*.txt"), ("All files", "*.*")],
+            initialdir=next((d for d in folders if os.path.isdir(d)), None))
+        if not path:
+            return False
+        return self._text_colour_from(node, path)
+
+    @rpc
+    def tree_text_colour_use(self, node, path):
+        """The Saved colors list (PAD-514): the colour kept in *path* given to line *node*."""
+        known = {os.path.normcase(os.path.abspath(c["path"]))
+                 for c in self._text_colours_saved()}
+        if not path or os.path.normcase(os.path.abspath(path)) not in known:
+            return False
+        return self._text_colour_from(node, path)
+
+    def _text_colour_from(self, node, path):
+        from ..plugins.stern import text_colour
+        got = text_colour.read_colour_file(path)
+        if got is None:
+            self.window.toast("%s holds no text color" % os.path.basename(path), "error")
+            return False
+        self.tree_text_colour(node, got[0], got[1])
+        return True
 
     @staticmethod
     def _tree_text_slant_width(nid, ops):
@@ -3276,10 +3430,14 @@ def _text_switch(assets_dir, card, man, n, ops, data, fonts, picks, settings, un
     images/, which every other line in it shares), ``"scenes"`` drawing from them and
     ``"font_on"`` when the Images tab has the profile on all of them (every line in the font
     corrected, this one too)."""
-    from ..plugins.stern import text_colour
+    from ..plugins.stern import text_colour, text_colors
     sw = text_colour.line_switch(assets_dir, card, man, n, ops, data, fonts)
     if sw is None:
         return None
+    mine = text_colour.own_colours(ops).get(n["id"])
+    if mine:
+        # PAD-514: a colour of its own (the Font bar's), which the profile does not change
+        sw = dict(sw, own_colour=text_colors.to_hex(text_colors.from_floats(mine["rgb"])))
     if sw.get("art"):
         rels = sw.get("font_pictures") or []
         sw = dict(sw, font_pictures=["images/" + r for r in rels],
