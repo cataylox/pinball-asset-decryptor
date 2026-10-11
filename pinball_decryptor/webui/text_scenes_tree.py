@@ -1181,8 +1181,20 @@ class TreeEditMixin:
         if not orig.strip() or orig not in ((self._scenes.get(d) or {}).get("texts") or ()):
             return None
         rep = dict((self._load_text_changes() or {}).get(card) or ()).get(orig)
-        return {"text": rep or orig, "game": orig, "edited": bool(rep),
-                "limit": text_rules.row_budget({"path": card, "original": orig})}
+        out = {"text": rep or orig, "game": orig, "edited": bool(rep),
+               "limit": text_rules.row_budget({"path": card, "original": orig})}
+        if self._game_writes(card, man, n):
+            out["locked"] = True                # PAD-513: the game writes it, see below
+        return out
+
+    def _game_writes(self, card, man, n):
+        """PAD-513 (DragonRR): does the game write line *n*'s box itself as it plays?  Only by
+        the proven rule (the game program names the box's path, :mod:`.game_filled`): then
+        new words for it would never show, and the Words box does not take them."""
+        from . import game_filled
+        if not game_filled.known_paths(self.assets_dir):
+            return False
+        return n["id"] in self._tree_filled(card, man)
 
     @rpc
     def tree_words(self, node, words=None):
@@ -1214,6 +1226,11 @@ class TreeEditMixin:
             return True
         from ..core import text_manifest
         orig = text_manifest.escape_cell(_text_of(self._tman, n, "Text") or "")
+        if words is not None and words != orig and self._game_writes(card, self._tman, n):
+            from . import game_filled
+            log.info("Scenes: %s keeps its words - %s", n.get("name") or "the line",
+                     game_filled.LOCKED_NOTE)
+            return False
         done = self.tab.set_scene_words(self.assets_dir, card, orig, words)
         if done is None:
             compat.messagebox.showinfo(

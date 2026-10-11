@@ -99,7 +99,7 @@ export default function TextTab() {
     if (el && !el.disabled) { el.focus(); el.select(); }
   };
   const apply = () => {
-    if (!s.can_edit) return;
+    if (!s.can_edit || s.locked) return;
     const v = editorValue(editRef.current);
     call("text.apply", v == null ? s.new : v);
   };
@@ -205,7 +205,7 @@ function Editor({ s, editRef, apply }) {
       <${Field} value=${s.orig} readOnly mono cls="pre-field" />
       <label class="lbl nw" for="text-new">New text:</label>
       <div ref=${editRef} class="grow" onKeyDown=${(e) => { if (e.key === "Enter") { e.preventDefault(); apply(); } }}>
-        <${Field} id="text-new" ns="text" k="new" value=${s.new} disabled=${!on} mono delay=${120}
+        <${Field} id="text-new" ns="text" k="new" value=${s.new} disabled=${!on || s.locked} mono delay=${120}
           bad=${on && s.budget_over} cls="pre-field" />
       </div>
     </div>
@@ -216,7 +216,7 @@ function Editor({ s, editRef, apply }) {
         label="Apply to every scene with the same original text" />
       <span class="grow"></span>
       <${Button} icon="undo" disabled=${!on} onClick=${() => call("text.revert")}>Revert<//>
-      <${Button} kind="primary" disabled=${!on || s.budget_over} onClick=${apply}>Apply<//>
+      <${Button} kind="primary" disabled=${!on || s.budget_over || s.locked} onClick=${apply}>Apply<//>
     </div>
     ${s.scene_note ? html`<div class="small muted text-scene-note">${s.scene_note}</div>` : null}
     <p class="muted small text-saved">${SAVED_NOTE}</p>

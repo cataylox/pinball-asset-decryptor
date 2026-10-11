@@ -179,3 +179,86 @@ def test_godzilla_le_116_node_paths_are_the_boxes_the_game_wrote():
     for p in ("Title2_Textbox.Title_Instance", "Title2_Textbox", "Letter_7T_Textbox.Letter_7T_Instance",
               "Letter_7T_Instance", "Letter_1T_Textbox.Letter_1T_Instance"):
         assert p not in paths, p
+
+
+# ---- round 4 (DragonRR): "Where it would be pointless to change the text in the scene ... please
+# don't allow the user to edit the text in the scene in those instances"
+def _paths(folder, paths):
+    from pinball_decryptor.plugins.stern import engine
+    engine._program_modes_read(str(folder), {"cmode_battle_vs_gigan": ["g/scene1"]}, {}, paths)
+
+
+def test_a_scene_line_is_locked_only_when_the_game_writes_every_box_of_it(tmp_path):
+    from pinball_decryptor.webui import game_filled
+    from tests.test_gui_scene_editor import CARD
+    folder = _project(tmp_path, {"original": "KAIJU!"}, two=True)
+    assert game_filled.locked_lines(str(folder)) == {}            # no reading: no lock
+    _paths(folder, ["Award_Textbox.Title"])
+    # the root's KAIJU is its own words: new words for the line show there
+    assert game_filled.locked_lines(str(folder)) == {}
+    _paths(folder, ["Award_Textbox.Title", "Title"])
+    assert game_filled.locked_lines(str(folder)) == {CARD: frozenset({"KAIJU"})}
+    assert game_filled.is_locked(str(folder), {"path": CARD, "original": "KAIJU"})
+    assert not game_filled.is_locked(str(folder), {"path": "/g/game", "original": "KAIJU!"})
+
+
+def test_the_text_tab_keeps_a_line_the_game_writes(tmp_path):
+    """Its New text is refused (it would never show), a Revert still puts back an old edit,
+    Replace everywhere leaves it, and the game's own line still takes new words."""
+    from tests.test_gui_scene_editor import CARD
+    folder = _project(tmp_path, {"original": "KAIJU!"}, two=True)
+    _paths(folder, ["Award_Textbox.Title", "Title"])
+    with web_app(tmp_path, mfr="stern") as w:
+        w.run(lambda: w.window.write_assets_var.set(str(folder)))
+        w.call("ui.select_tab", "text")
+        _wait(w, lambda: not w.state("text")["scanning"] and w.state("text").get("total", 0) > 0)
+        rows = w.window.service("text")._text_rows
+        scene = next(i for i, r in enumerate(rows) if r["path"] == CARD and r["original"] == "KAIJU")
+        w.call("text.select", scene)
+        assert w.state("text")["locked"] is True
+        assert "game writes this line" in w.state("text")["scene_note"]
+        n = len(w.asked)
+        assert w.call("text.apply", "MONSTER") is False
+        assert len(w.asked) == n + 1 and rows[scene]["replacement"] == ""
+        assert w.call("text.apply", "KAIJU") is True                 # its own words: no change
+        plan = w.call("text.replace_plan", "KAIJU", "MONSTER", True)
+        assert "1 line(s) the game writes itself are left as they are" in plan["text"]
+        w.call("text.replace_apply", "KAIJU", "MONSTER", True)
+        assert rows[scene]["replacement"] == ""
+        prog = next(i for i, r in enumerate(rows) if r["path"] == "/g/game")
+        assert rows[prog]["replacement"] == "MONSTER!"
+        w.call("text.select", prog)
+        assert w.state("text")["locked"] is False
+
+
+def test_the_scenes_words_box_keeps_a_box_the_game_writes(tmp_path):
+    folder = _project(tmp_path, {"original": "KAIJU!"}, two=True)
+    _paths(folder, ["Award_Textbox.Title"])
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        ids = {l["name"] + str(l["depth"]): l["id"] for l in _tv(w)["layers"]}
+        w.call("text_scenes.tree_select", ids["Title1"])
+        _wait(w, lambda: (_tv(w).get("props") or {}).get("id") == ids["Title1"])
+        words = _tv(w)["props"]["words"]
+        assert words["locked"] is True and words["text"] == "KAIJU"
+        assert w.call("text_scenes.tree_words", ids["Title1"], "MONSTER") is False
+        # the root's KAIJU is the scene's own: it still takes new words
+        w.call("text_scenes.tree_select", ids["Title0"])
+        _wait(w, lambda: (_tv(w).get("props") or {}).get("id") == ids["Title0"])
+        assert _tv(w)["props"]["words"].get("locked") is None
+        assert w.call("text_scenes.tree_words", ids["Title0"], "MONSTER") is True
+        w.call("text_scenes.close")
+
+
+def test_without_the_programs_paths_nothing_is_locked(tmp_path):
+    """The older marks are guesses: a guess never stops an edit."""
+    folder = _project(tmp_path, {"original": "KAIJU"}, two=True)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        layers = {l["name"] + str(l["depth"]): l for l in _tv(w)["layers"]}
+        assert layers["Title0"]["filled"]                     # marked by its words
+        w.call("text_scenes.tree_select", layers["Title0"]["id"])
+        _wait(w, lambda: (_tv(w).get("props") or {}).get("id") == layers["Title0"]["id"])
+        assert _tv(w)["props"]["words"].get("locked") is None
+        assert w.call("text_scenes.tree_words", layers["Title0"]["id"], "MONSTER") is True
+        w.call("text_scenes.close")
