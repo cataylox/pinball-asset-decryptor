@@ -197,7 +197,19 @@ Done:
   "The backdrop on a clip v2 build"). Emulator-proven with the game's own clips (run r1).
 - (4) was already there: the mode's own Music... (program `music`), started with the mode.
 
-Left (the next run), with what the game program says:
+Done in run 2 (all nine now):
+- (5)/(7)/(8) `pm_status_bar` (MODE_SDK "The game's status bar") and a blocks mode's "its name in the game's bar": its
+  name in the bar under the TV in its colour, the clock as the wipe (the game's own modes show their clock this way;
+  Goldfinger's three-digit countdown is that mode's own bomb counter, not a general timer), full through its total.
+- (2)/(9) a mode's own screen "as words over the video" (`screen_style` words): its name large and white over its intro
+  for 4 s, a Words block's line for 3 s, its TOTAL over its end clip for 3 s. The game's own TOTAL is a blocking end
+  sequence that draws its own frames (Goldfinger 0xc0b50: the score display, the total scene 16d675aa, a frame, until
+  done), which a mode cannot borrow.
+- The loop takes the TV at once when asked or after a full-screen clip of the mode's, and back from the game's
+  main-play video (`text backdrop_idle MainPlayLoop`).
+- End to end in the emulator (runs e2-e6, and m1 with main's code for the before): the artifacts' emulator_yolt pair.
+
+What the game program says (kept for the next Bond ticket):
 
 - THE STATUS BAR (7, 8, and the timer as the bar's progress). Scene `hud` (6fb39344/7de1c159) IS the bar:
   `StatusBarBg_Instance`, `StatusBar_Instance` { `bar_Color_Instance`, `NoProgress_Instance`, `Progress_Instance`
