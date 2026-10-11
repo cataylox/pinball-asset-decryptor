@@ -328,6 +328,44 @@ site block_start_14     0x00047ff4 0xe92d43f8 0xe3041d2c
 text block_name_14      Bath O Sub Hurryup
 site block_start_15     0x0008ca40 0xe92d4008 0xe30001ab
 text block_name_15      Double Scoring
+# PAD-526: the twelve henchman and villain modes (the story's chapters), from the chapter table 0x629018 as on the
+# LE; their caller goes on only when a start says it began, so each is refused with 0
+site block_start_16     0x0011095c 0xe92d41f0 0xe3a00003
+text block_name_16      Dr No's Lair
+site block_start_17     0x0011a8bc 0xe92d40f8 0xe1a05001
+text block_name_17      Orient Express
+site block_start_18     0x00115ff4 0xe92d41f0 0xe3a00003
+text block_name_18      Oddjob Battles Bond
+site block_start_19     0x0012c4a4 0xe92d41f0 0xe3a00003
+text block_name_19      Cut Bond in Half
+site block_start_20     0x00122f48 0xe92d41f0 0xe3a00003
+text block_name_20      Mr Osato
+site block_start_21     0x001267bc 0xe92d41f0 0xe3a00003
+text block_name_21      Professor Dent
+site block_start_22     0x0011839c 0xe92d40f8 0xe1a05001
+text block_name_22      Mr Wint & Mr Kidd
+site block_start_23     0x00113844 0xe92d41f0 0xe3a00003
+text block_name_23      Feeding Frenzy
+site block_start_24     0x0011df60 0xe92d41f0 0xe3a00003
+text block_name_24      Fiona Volpe
+site block_start_25     0x0012e8b8 0xe92d40f8 0xe3a00003
+text block_name_25      Under Water Fight
+site block_start_26     0x001299cc 0xe92d40f8 0xe3a00003
+text block_name_26      Training Grounds
+site block_start_27     0x0013115c 0xe92d40f8 0xe3a00003
+text block_name_27      Diamond Death Ray
+value block_ret_16          0
+value block_ret_17          0
+value block_ret_18          0
+value block_ret_19          0
+value block_ret_20          0
+value block_ret_21          0
+value block_ret_22          0
+value block_ret_23          0
+value block_ret_24          0
+value block_ret_25          0
+value block_ret_26          0
+value block_ret_27          0
 
 # ---- PAD-473: the game's own mini-wizards (MODE_SDK.md "The game's own mini-wizards"), James Bond LE 1.06's code
 # on this build: the same table (4 entries of 0x20 bytes: index, bit, insert lamp, start, running query - the inserts

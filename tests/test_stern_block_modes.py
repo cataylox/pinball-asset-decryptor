@@ -1412,6 +1412,24 @@ def test_the_bond_le_offers_its_villains_inserts():
     assert "Right ramp exit opto" in [n for n, _m in p.shots] and p.wizard_shot == "Right ramp"
 
 
+BOND_CHAPTERS = ["Dr No's Lair", "Orient Express", "Oddjob Battles Bond", "Cut Bond in Half", "Mr Osato",
+                 "Professor Dent", "Mr Wint & Mr Kidd", "Feeding Frenzy", "Fiona Volpe", "Under Water Fight",
+                 "Training Grounds", "Diamond Death Ray"]
+
+
+@pytest.mark.parametrize("key", ["james_bond_le_1_06", "james_bond_pro_1_06"])
+def test_both_bonds_can_hold_off_the_games_henchman_and_villain_modes(key):
+    """PAD-526: an owner wanted none of the game's modes to start during theirs, the henchman and villain modes too.
+    The LE 1.06 offered its twelve (the story's chapters, ids 16..27); the Pro 1.06 offered none, though its program
+    has the same chapter table (0x629018) and the same starts. Both now tick them by default, each refused with 0."""
+    p = MP.profile(key)
+    names = {i: n for i, n, _on in p.game_modes}
+    assert [names.get(i) for i in range(16, 28)] == BOND_CHAPTERS
+    assert all(on for i, _n, on in p.game_modes if i >= 16)               # ticked: held off unless unticked
+    port = open(os.path.join(SDK, "ports", key.replace("_1_06", "-1.06") + ".port"), encoding="utf-8").read()
+    assert all(re.search(r"^value block_ret_%d\s+0$" % i, port, re.M) for i in range(16, 28))
+
+
 def test_a_mode_lit_at_a_shot_starts_from_it_ball_after_ball_and_per_player(tmp_path):
     out = play(tmp_path, _lit_prog(),
                "shot", "Right ramp",                                # not lit yet: nothing

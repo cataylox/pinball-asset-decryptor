@@ -22,6 +22,11 @@ CHAPTERS = {
     "james_bond_le-1.06": (0x62d080, 0x68, ["Dr No's Lair", "Orient Express", "Oddjob Battles Bond", "Cut Bond in Half",
                                             "Mr Osato", "Professor Dent", "Mr Wint & Mr Kidd", "Feeding Frenzy",
                                             "Fiona Volpe", "Under Water Fight", "Training Grounds", "Diamond Death Ray"]),
+    # PAD-526: the Pro's own copy of the LE's table (entries alike but the starts; each start's code is the LE's, and
+    # its story start 0x1356dc is the LE's 0x136714, loading this table and going on only when the start says it began)
+    "james_bond_pro-1.06": (0x629018, 0x68, ["Dr No's Lair", "Orient Express", "Oddjob Battles Bond", "Cut Bond in Half",
+                                             "Mr Osato", "Professor Dent", "Mr Wint & Mr Kidd", "Feeding Frenzy",
+                                             "Fiona Volpe", "Under Water Fight", "Training Grounds", "Diamond Death Ray"]),
 }
 CS = os.path.join(HERE, "json")
 PORTS = os.path.join(wt, "tools", "spike2_emu", "modes", "sdk", "ports")
