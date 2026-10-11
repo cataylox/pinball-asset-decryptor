@@ -849,6 +849,20 @@ const filledTip = (f) => ({ head: "Filled in by the game", lines: [
   ...filledLines(f),
   f.line ? ["T", "find the game's line on the Replace Text tab"]
     : (f.modes || []).length ? ["T", "list that mode's lines on the Replace Text tab"] : null ] });
+// PAD-531 (DragonRR: "multiple icons in each of the three locations and it is hard to know
+// why"): a layer drawn in only some looks of a switchable part (the map's Bridge: Loop, Select,
+// Destroyed) names them on its row, and the Selected panel can show that look
+const lookLine = (k) => `Part of ${k.part_name}'s ${k.looks.join(" and ")} ${k.looks.length > 1 ? "looks" : "look"}. The game's code picks which look shows; its other looks sit in the same place.`;
+function LookNote({ k }) {
+  if (!k) return null;
+  const back = k.shown && k.pinned != null;
+  return html`<div class="tree-row tree-look">
+    <span class="small muted grow">${lookLine(k)}</span>
+    ${k.shown && !back ? null : html`<${Button} size="xs" icon=${back ? "undo" : "eye"}
+      title=${back ? `Put ${k.part_name} back as it rests (Switchable parts)` : `Show ${k.part_name} at ${k.looks[0]} in the preview (Switchable parts); the card is not changed`}
+      onClick=${() => call("text_scenes.tree_state", k.part, back ? "" : k.frame)}>${back ? "As it rests" : "Show this look"}<//>`}
+  </div>`;
+}
 const filledFinds = (f) => !!(f && (f.line || (f.modes || []).length));
 const rowTip = (l, cs) => ({
   head: `${l.name}${l.added ? " (added)" : ""}`,
@@ -856,6 +870,7 @@ const rowTip = (l, cs) => ({
     l.edits || l.kind,
     ...filledLines(l.filled),
     l.painted ? "The game paints it as it plays: the colors the machine shows it in are picked in the Selected panel." : null,
+    l.look ? lookLine(l.look) : null,
     l.state_off ? "Off in the preview: the part it sits in shows another of its looks. Its eye turns it on here."
       : l.part_off && !l.view_off ? "The look it sits in is off in the preview: it shows when that look is on."
       : !l.drawn && !l.view_off ? "Not on the screen at this moment." : null,
@@ -1033,7 +1048,7 @@ function TreeLayers({ t }) {
         <${Icon} name=${l.view_off || l.state_off ? "eye-off" : "eye"} /></button>
       <span class="sc-t ellip">${l.filled ? html`<span class="ly-filled" aria-label="Filled in by the game" ...${tip(filledTip(l.filled))}><${Icon} name="gear" /></span>`
         : l.painted ? html`<span class="ly-filled ly-painted" aria-label="Painted by the game" ...${tip(GAME_COLORS_TIP)}><${Icon} name="brush" /></span>` : null}${l.name}${l.added ? " (added)" : ""}</span>
-      <span class=${cx("sc-i small ellip", l.hidden ? "in-game" : "muted")}>${l.edits || (l.filled ? "game fills it" : l.painted ? "game paints it" : l.kind)}</span>
+      <span class=${cx("sc-i small ellip", l.hidden ? "in-game" : "muted")}>${l.edits || (l.filled ? "game fills it" : l.painted ? "game paints it" : l.look ? l.look.short : l.kind)}</span>
       <button type="button" class=${cx("ly-game", l.hidden && "on")} aria-label="Hidden in the game"
         aria-pressed=${l.hidden ? "true" : "false"} ...${tip(gameTip(l))}
         onClick=${(e) => { e.stopPropagation(); call("text_scenes.tree_visible", l.id, l.hidden); }}>
@@ -1605,6 +1620,7 @@ function TreeSide({ t, play, playFrame, openFont, find, searching }) {
       : p.peek ? html`<div class="small muted">The game does not draw this at this moment. It is shown on top while it is selected; an edit holds wherever the game shows it.</div>` : null}
       ${p.hidden ? html`<div class="small in-game">Hidden in the game: Write leaves it out of the card.${p.view_off ? "" : " Its eye is open, so the preview still shows it."}</div>`
       : p.hid_in ? html`<div class="small in-game">It sits in ${p.hid_in}, hidden in the game: Write leaves it out of the card.</div>` : null}
+      <${LookNote} k=${p.look} />
       <${GameFills} p=${p} />
       <${GameColors} g=${p.game_colors} />
       <${Words} p=${p} find=${find} searching=${searching} />
