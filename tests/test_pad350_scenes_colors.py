@@ -113,7 +113,8 @@ def test_the_bar_loads_on_the_scenes_page(tmp_path):
             encoding="utf-8")
     (tmp_path / "tabs" / "text_scenes.js").write_text(
         "export const ScenesPage = () => null;" + chr(10)
-        + "export const ScenesActions = () => null;" + chr(10), encoding="utf-8")
+        + "export const ScenesActions = () => null;" + chr(10)
+        + "export const GameColors = () => null;" + chr(10), encoding="utf-8")   # (PAD-514)
     (tmp_path / "package.json").write_text('{"type": "module"}', encoding="utf-8")
     (tmp_path / "load.js").write_text(_LOAD, encoding="utf-8")
     run = subprocess.run([shutil.which("node"), str(tmp_path / "load.js")],

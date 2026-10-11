@@ -838,8 +838,10 @@ const fileWord = (f) => (f && f.kind === "text" ? "line of text" : "file");
 // PAD-462: several clips selected together are one target
 const thisFile = (f) => (f && f.count > 1 ? `these ${f.count} files` : "this " + fileWord(f));
 
-// The line under the modes: what the profile on show does to this project now.
-export function statusNote(s) {
+// The line under the modes: what the profile on show does to this project now.  ownColor
+// (PAD-514): the color of its own the line of text on show has (the Scenes Font bar's), which
+// the profile does not change.
+export function statusNote(s, ownColor = null) {
   const assets = s.per_file && s.mode === "assets";
   const screen = s.per_file && s.mode === "screen";
   return !s.has_project
@@ -849,6 +851,8 @@ export function statusNote(s) {
         : s.screen_follow
           ? html`<${Note} kind="info">${"Scenes uses the individual files profile, undone (“" + (s.name || "") + "”). Move a slider or pick a starting point to set this machine's own screen."}<//>`
           : html`<${Note} kind="info">${"Scenes uses the Recommended screen, tuned on a real Spike 2. Move a slider or pick a starting point to set this machine's own screen."}<//>`)
+    : assets && s.file && s.file.kind === "text" && ownColor
+      ? html`<${Note} kind="info">${"This line has its own color (" + ownColor + ", set in the Font bar), so “" + (s.name || "My profile") + "” does not change it. Default in the Font bar puts the profile back."}<//>`
     : assets && s.file
       ? (s.file.on === false
           ? html`<${Note} kind="info">${"No color profile is attached to " + thisFile(s.file) + ". Pick a starting point or a saved profile, or move a slider, and " + (s.file.count > 1 ? "each is attached." : "it is attached.")}<//>`

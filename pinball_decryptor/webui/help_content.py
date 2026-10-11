@@ -650,6 +650,12 @@ HELP_CONTENT = {
             "(Top / Middle / Bottom) in its box, wrapping, shrink to fit and line breaks, "
             "**Fit box to text**, and **Add** / **Remove** a drop shadow, in "
             "the preview and in the game. **Font as shipped** puts the font and style back. "
+            "Its **Color** gives the line a color of its own: a wheel, **Brightness**, an "
+            "exact color, and **Save a copy...** / **Load...** with your **Saved** colors. "
+            "The line is drawn in exactly that color and the color profile no longer "
+            "changes it; **Default** puts the game's color (and the profile) back. "
+            "A score panel line the game paints as it plays shows the game's colors there "
+            "instead. "
             "Lines the "
             "game fills in itself on Godzilla's mode screens (a battle's title and "
             "instructions) always sit in the middle of their box and shrink to fit it; the "
@@ -1165,7 +1171,13 @@ HELP_CONTENT = {
          "text…** (and **All text…** under Which files) give the shown profile to "
          "every line in every scene. Lines already corrected through their font "
          "are left out, and the question says how many. One Undo puts them all "
-         "back."),
+         "back.\n"
+         "- A profile bends the colors a line already has, so it cannot make white "
+         "letters red: white is already full red, and only turning green and blue "
+         "down tints it. To pick a line's color outright, use **Color** in the "
+         "Scenes **Font** bar. A line with a color of its own is drawn in exactly "
+         "it and the profile leaves it alone; the Colors bar's **Font text color** "
+         "row shows it (or **Default**)."),
         ("Machine screen (Spike 2, preview only)",
          "Not a correction but your machine's screen itself. It is never written to "
          "the card, and Revert all leaves it alone.\n\n"

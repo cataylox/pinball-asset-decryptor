@@ -774,6 +774,11 @@ const artLines = (c) => {
 // advanced box beside Preview colors unlocks it (PAD-344; moved there in PAD-349)
 const colorTip = (l, cs) => {
   const c = l.color || {};
+  // PAD-514: a line with a color of its own (the Font bar's) is drawn in it, profile or not
+  if (c.line && c.own_colour) return { head: `Its own color: ${c.own_colour}`, lines: [
+    "Set in the Font bar: this line is drawn in exactly this color, in the preview and on the machine, so the color profile does not change it.",
+    c.on || c.font_on ? "Its color profile switch stays as it was; it counts again once Default in the Font bar takes the line's own color off." : null,
+    "Open the Font bar on this line to change it, or Default to take it off." ] };
   if (c.locked && c.line) return { head: "Color: the game's own line of text", lines: [
     "Stern made its colors for the machine's screen, so the individual files profile is not offered on it.",
     ...artLines(c),
@@ -1446,7 +1451,7 @@ const FILLS_OFF_TIP = { head: "Filled in by the game", lines: [
   "Not this one: the game does not put words of its own in it.",
   "A box the game fills in as it plays is lit here in teal, with the game's line and a button to find it on the Replace Text tab. On the preview its outline is teal." ] };
 const PAINTS_OFF_TIP = { head: "Painted by the game", lines: [
-  "Not this one: the game does not paint its colors as it plays, so its Tint and its color profile are what the machine shows.",
+  "Not this one: the game does not paint its colors as it plays, so its Tint and its color profile (or a line's own color, from the Font bar) are what the machine shows.",
   "A line the game paints (the score panel's) is lit here in violet, with the colors the machine shows it in. On the preview its outline is violet." ] };
 function GameFills({ p }) {
   const f = p.filled;
@@ -1463,7 +1468,7 @@ function GameFills({ p }) {
       : f.line ? html`With <b>${f.line}</b>${who ? ` (${who})` : ""}` : html`During <b>${who}</b>`}</div>
   </div>`;
 }
-function GameColors({ g }) {
+export function GameColors({ g }) {
   return html`<div class=${cx("tree-game paints", !g && "off")}>
     <div class="tree-row tg-head">
       <span class="tg-name" ...${tip(g ? GAME_COLORS_TIP : PAINTS_OFF_TIP)}><${Icon} name="brush" /><span class="eyebrow">Painted by the game</span></span>

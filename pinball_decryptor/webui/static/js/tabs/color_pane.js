@@ -31,6 +31,9 @@
 // PAD-463 (DragonRR): the Images tab the same: several pictures selected are one target, and
 // its panes draw through the profiles, so the bar there has "Show it in this preview" too.
 // The Which files card's boxes are All images / All videos (color.js WhichFiles).
+// PAD-514 (DragonRR): on a line of text in Scenes, a Font text color row: Default, or the
+// color the Font bar gave the line (drawn in exactly it, the profile no longer changing it),
+// and a word that lines of text can be colored directly there.
 
 import { html, useEffect, useRef, useState, Button, Check, Icon, tip, call, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
@@ -233,13 +236,36 @@ function FileLine({ s, host }) {
   </div>`;
 }
 
+// PAD-514: a line of text's own color (line: its font.colour, with game for a score panel
+// line the game paints), and the way to the Font bar where it is set
+function TextColorLine({ line, openFont }) {
+  const own = line.own && !line.game;
+  return html`<div class="cpd-file cpd-textcol">
+    <div class="row cpd-file-hd">
+      <span class="eyebrow nw">Font text color</span>
+      ${own ? html`<span class="cpd-textcol-sw" style=${`background:${line.hex}`}></span>
+          <span class="mono small">${line.hex}</span>`
+        : html`<span class="cpd-textcol-def small">${line.game ? "Painted by the game" : "Default"}</span>`}
+      <span class="sp"></span>
+      ${openFont ? html`<${Button} size="xs" icon="text" onClick=${openFont}
+        title="Open the Font bar on this line: its Color sets the line's own color">Font bar<//>` : null}
+    </div>
+    <div class="small muted">${line.game
+      ? "The game paints this line's color as it plays: pick it in the Font bar (or under Selected)."
+      : own ? "This line has its own color, set in the Font bar, so the color profile does not change it. Default there puts the profile back."
+      : "Lines of text can be colored directly in the Font bar. A color set there is drawn exactly and takes the color profile off that line."}</div>
+  </div>`;
+}
+
 // host: "scenes" (the default), "images" or "video" (PAD-364).  startMode: the profile the
 // bar opens on the first time it is opened here (Images and Video: "assets", the one their
 // Color column attaches); after that it opens where it was left.  file (PAD-368): the file
 // clicked on the host, {kind, rel, label, on, attach, more}, or null (PAD-462: more, the other
 // files selected with it that are not locked).  cls: more classes for the bar
 // (Scenes: "cpd-beside" while its Font bar is open, PAD-452, so this tab hangs from that one).
-export function ColorBar({ open, setOpen, host = "scenes", startMode = null, file = null, cls = "" }) {
+// line, openFont (Scenes, PAD-514): the line of text selected, its own color, and the Font bar.
+export function ColorBar({ open, setOpen, host = "scenes", startMode = null, file = null, cls = "",
+  line = null, openFont = null }) {
   const s = useNs("color");
   const h = HOSTS[host] || HOSTS.scenes;
   const lookState = useNs(h.lookNs || "color");
@@ -305,7 +331,8 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null, fil
           <${UndoRedo} s=${s} flush=${flush} size="xs" />
           <${CopyPaste} p=${p} update=${update} mode=${mode} name=${s.name} /></div>
         ${s.per_file && mode === "assets" ? html`<${FileLine} s=${s} host=${host} />` : null}
-        <div class="cpd-status">${statusNote(s)}</div>
+        ${line ? html`<${TextColorLine} line=${line} openFont=${openFont} />` : null}
+        <div class="cpd-status">${statusNote(s, line && line.own && !line.game ? line.hex : null)}</div>
         ${s.try_note ? html`<div class="small muted">${s.try_note}</div>` : null}
         ${s.per_file && mode === "assets" && !s.file ? html`<${WhichFiles} s=${s} />` : null}
         <${Controls} s=${s} p=${p} update=${update} />

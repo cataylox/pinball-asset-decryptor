@@ -9,8 +9,14 @@
 // pixels on the screen as the line is drawn now (webui/text_scenes_tree.py, tree_text_*).
 // Round 2 (DragonRR): Italic (a slant of the line's own matrix: the fonts have no italic),
 // the letters' width, and the drop shadow's Add / Remove, moved here from Selected.
+// PAD-514 (DragonRR: "a facility to directly control text colour"): the line's own Color, a
+// wheel and a Brightness slider, saved and loaded as files as the color profiles are.  A line
+// with a color of its own is drawn in exactly it and the color profile no longer changes it
+// (white is already full red: the profile's red sliders could never make white letters red).
+// A score panel line the game paints as it plays shows those colors here instead (PAD-507).
 
-import { html, Button, Check, Icon, Select, Seg, tip, call, cx } from "../core/ui.js";
+import { html, useEffect, useRef, useState, Button, Check, Icon, Select, Seg, tip, call, cx } from "../core/ui.js";
+import { GameColors } from "./text_scenes.js";
 
 const CSS_HREF = "/static/css/tabs/scene_fonts.css";
 if (typeof document !== "undefined" && !document.querySelector(`link[href="${CSS_HREF}"]`)) {
@@ -29,6 +35,23 @@ export function fontBarOpenAtStart() {
 export function rememberFontBarOpen(open) {
   try { localStorage.setItem(OPEN_KEY, open ? "1" : "0"); } catch (e) { /* private mode */ }
 }
+
+// colors: "#rrggbb" <-> hue (degrees) and saturation (0..1) at full value, the wheel's
+const hexRgb = (h) => [1, 3, 5].map((i) => parseInt((h || "#ffffff").slice(i, i + 2), 16) / 255 || 0);
+const rgbHex = (c) => "#" + c.map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0")).join("");
+function hexHs(h) {
+  const [r, g, b] = hexRgb(h);
+  const mx = Math.max(r, g, b), d = mx - Math.min(r, g, b);
+  let hue = 0;
+  if (d > 0) hue = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [(hue * 60 + 360) % 360, mx > 0 ? d / mx : 0];
+}
+function hsHex(hue, sat) {
+  const f = (n) => { const k = (n + hue / 60) % 6; return 1 - sat * Math.max(0, Math.min(k, 4 - k, 1)); };
+  return rgbHex([f(5), f(3), f(1)]);
+}
+// the color a line is drawn in: the one picked at its brightness (text_colour.shade)
+const shadeHex = (h, bright) => rgbHex(hexRgb(h).map((v) => v * Math.max(0, Math.min(100, bright)) / 100));
 
 const px = (v) => `${Math.round(v * 10) / 10}`;
 const pxList = (sizes) => (sizes.length < 2 ? px(sizes[0] || 0)
@@ -53,7 +76,7 @@ export function FontBar({ open, setOpen, t }) {
   return html`<div class=${cx("cpd fnt", open && "open")}>
     <button type="button" class="cpd-handle fnt-handle" aria-expanded=${open ? "true" : "false"} aria-controls="fnt-panel"
         aria-label="Font" onClick=${() => setOpen(!open)}
-        ...${tip({ head: "Font", lines: ["The selected line of text's font, size, italic, letter width, spacing, wrapping, alignment and drop shadow, beside the scene."] })}>
+        ...${tip({ head: "Font", lines: ["The selected line of text's color, font, size, italic, letter width, spacing, wrapping, alignment and drop shadow, beside the scene."] })}>
       <span class="cpd-handle-ico"><${Icon} name="text" /></span>
       <span class="cpd-handle-txt">Font</span>
     </button>
@@ -68,9 +91,107 @@ export function FontBar({ open, setOpen, t }) {
         ${f ? html`<${FontControls} p=${p} f=${f} />`
           : html`<p class="small muted cpd-words">${multi
             ? "Several layers are selected: click one line of text on its own to set its font."
-            : "Click a line of text in the preview, or a text row in Layers, to set its font, size and spacing."}</p>`}
+            : "Click a line of text in the preview, or a text row in Layers, to set its color, font, size and spacing."}</p>`}
       </div>
     </aside></div>
+  </div>`;
+}
+
+// The color wheel: hue round it, white in the middle (saturation out to the rim).  A drag
+// shows the color as it goes; letting go sets it.
+function Wheel({ hex, onMove, onPick }) {
+  const ref = useRef(null);
+  const drag = useRef(false);
+  const [hue, sat] = hexHs(hex);
+  const at = (e) => {
+    const r = ref.current.getBoundingClientRect();
+    const x = e.clientX - (r.left + r.width / 2), y = e.clientY - (r.top + r.height / 2);
+    return hsHex((Math.atan2(y, x) * 180 / Math.PI + 450) % 360, Math.min(1, Math.hypot(x, y) / (r.width / 2)));
+  };
+  const down = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    drag.current = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    onMove(at(e));
+  };
+  const move = (e) => { if (drag.current) onMove(at(e)); };
+  const up = (e) => { if (!drag.current) return; drag.current = false; onPick(at(e)); };
+  const a = hue * Math.PI / 180;
+  return html`<div class="fnt-wheel" ref=${ref} role="slider" aria-label="Color wheel" aria-valuetext=${hex}
+      onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${() => { drag.current = false; }}
+      ...${tip({ head: "Color wheel", lines: ["Round the wheel: which color. Toward the middle: paler, to white in the middle.",
+        ["Click or drag", "pick the line's color"], "Brightness below makes it darker."] })}>
+    <span class="fnt-wheel-dot" style=${`left:${50 + Math.sin(a) * sat * 50}%;top:${50 - Math.cos(a) * sat * 50}%;background:${hex}`}></span>
+  </div>`;
+}
+
+const COLOR_TIP = { head: "This line's color", lines: [
+  "Gives this line of text a color of its own: it is drawn in exactly this color, in the preview and on the machine.",
+  "The color profile no longer changes this line while it has a color of its own. Default puts back the game's color, and the color profile if the line has one.",
+  "A color profile can only bend the colors a line already has: white is already full red, green and blue, so turning red up leaves white letters white. A color here sets it directly."] };
+
+// PAD-514: the line's own color (c: the line's font.colour from text_scenes_tree.py)
+function TextColor({ p, c }) {
+  const id = p.id;
+  const [pick, setPick] = useState(c.pick);
+  const [bright, setBright] = useState(c.bright);
+  useEffect(() => { setPick(c.pick); setBright(c.bright); }, [id, c.pick, c.bright, c.own]);
+  const send = (h, b) => call("text_scenes.tree_text_colour", id, h, b);
+  const drawn = c.own || pick !== c.pick || bright !== c.bright ? shadeHex(pick, bright) : c.hex;
+  const saved = c.saved || [];
+  return html`<div class="fnt-sec fnt-color">
+    <div class="row fnt-row"><span class="eyebrow" ...${tip(COLOR_TIP)}>Color</span><span class="sp"></span>
+      <span class=${cx("small nw", c.own ? "ok-ink" : "muted")}>${c.own ? "Its own color" : "Default"}</span></div>
+    <div class="row fnt-row fnt-color-row">
+      <${Wheel} hex=${pick} onMove=${setPick} onPick=${(h) => { setPick(h); send(h, bright); }} />
+      <div class="fnt-color-side">
+        <span class="fnt-swatch" style=${`background:${drawn}`} ...${tip(c.own ? "The color this line is drawn in" : "The color this line is drawn in now")}></span>
+        <span class="mono small">${drawn}</span>
+        <label class="fnt-exact-lbl small" ...${tip({ head: "Exact color", lines: ["Pick or type an exact color (#RRGGBB) instead of using the wheel."] })}>
+          <input type="color" class="tree-color fnt-exact" value=${pick} aria-label="Exact color"
+            onInput=${(e) => setPick(e.target.value)} onChange=${(e) => send(e.target.value, bright)} />
+          <span>Exact…</span></label>
+        <${Button} size="xs" icon="undo" disabled=${!c.own} onClick=${() => send(null)}
+          title=${{ head: "Default", lines: ["Take this line's own color off: the game's color comes back, and the color profile if the line has one."] }}>Default<//>
+      </div>
+    </div>
+    <label class="row fnt-row fnt-bright" ...${tip({ head: "Brightness", lines: ["100% is the color as picked; lower is darker, down to black at 0%."] })}>
+      <span class="lbl">Brightness</span>
+      <input type="range" min="0" max="100" step="1" value=${bright} aria-label="Brightness"
+        onInput=${(e) => setBright(Number(e.target.value))} onChange=${(e) => send(pick, Number(e.target.value))} />
+      <span class="small mono fnt-pct">${bright}%</span>
+    </label>
+    <div class="small muted fnt-note">${c.own
+      ? "Drawn in its own color, so the color profile does not change this line."
+      : "Picking a color here gives this line its own color and takes the color profile off it."}${c.art
+      ? " Its font's letters carry colors of their own: they keep their light and shade, in this color (the line gets its own copy of the font)." : ""}</div>
+    <div class="row fnt-row fnt-saved">
+      <span class="lbl" ...${tip({ head: "Saved colors", lines: ["Colors kept with Save a copy, one file each, as saved color profiles are. Click one to give it to this line.",
+        saved.length ? "" : "None yet: Save a copy keeps the color on show here."].filter(Boolean) })}>Saved</span>
+      ${saved.length ? saved.map((s) => html`<button type="button" key=${s.path} class="fnt-saved-sw"
+          style=${`background:${shadeHex(s.pick, s.bright)}`} aria-label=${s.name}
+          ...${tip({ head: s.name, lines: [`${s.pick}${s.bright !== 100 ? ` at ${s.bright}% brightness` : ""}`, ["Click", "give this line that color"]] })}
+          onClick=${() => call("text_scenes.tree_text_colour_use", id, s.path)}></button>`)
+        : html`<span class="small muted">none yet</span>`}
+    </div>
+    <div class="row fnt-row">
+      <span class="sp"></span>
+      <${Button} size="xs" icon="save" onClick=${() => call("text_scenes.tree_text_colour_save", pick, bright)}
+        title="Save this color as a file of its own, listed under Saved from then on (as Save a copy keeps a color profile)">Save a copy...<//>
+      <${Button} size="xs" icon="upload" onClick=${() => call("text_scenes.tree_text_colour_load", id)}
+        title="Load a text color saved earlier and give it to this line">Load...<//>
+    </div>
+  </div>`;
+}
+
+// PAD-507 / PAD-514: a score panel line is painted by the game as it plays, so its colors
+// are the game's, picked here as under Selected
+function GamePainted({ g }) {
+  return html`<div class="fnt-sec fnt-color">
+    <span class="eyebrow">Color</span>
+    <${GameColors} g=${g} />
+    <div class="small muted fnt-note">The game paints this line's color as it plays, so it is picked here: a color of its own would be painted over.</div>
   </div>`;
 }
 
@@ -84,6 +205,8 @@ function FontControls({ p, f }) {
       <div class="row cpd-file-hd"><span class="eyebrow nw">This line of text</span>
         <span class="mono small ellip" title=${p.name}>${p.name}</span></div>
     </div>
+    ${p.game_colors ? html`<${GamePainted} g=${p.game_colors} />`
+      : f.colour ? html`<${TextColor} p=${p} c=${f.colour} />` : null}
     <div class="fnt-sec">
       <span class="eyebrow">Font</span>
       <${Select} sm value=${f.style} disabled=${!many}
@@ -174,7 +297,7 @@ function FontControls({ p, f }) {
     <div class="row fnt-row fnt-foot">
       <span class="sp"></span>
       <${Button} size="xs" icon="undo" disabled=${!f.edited}
-        title="Put this line's font, size, style, spacing, wrapping and alignment back as the game shipped them. Its box and place are kept, and so is a drop shadow."
+        title="Put this line's font, size, style, spacing, wrapping and alignment back as the game shipped them. Its box and place are kept, and so are a drop shadow and its color (Default under Color puts that back)."
         onClick=${() => call("text_scenes.tree_text_font_reset", id)}>Font as shipped<//>
     </div>`;
 }

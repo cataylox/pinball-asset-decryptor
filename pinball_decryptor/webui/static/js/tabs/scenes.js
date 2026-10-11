@@ -39,6 +39,10 @@ export default function ScenesTab() {
   // own shows that font picture's (kind "images")
   const file = c && !c.locked && c.rel ? { kind: c.kind || "images", rel: c.rel, label: lay.name, on: !!c.on,
     attach: { ns: "scenes", node: lay.id } } : null;
+  // PAD-514: a line of text's own color (set in the Font bar), shown in the Colors bar too
+  const props = t && t.props && (t.sels || []).length < 2 ? t.props : null;
+  const line = props && props.kind === "Text" && props.font && props.font.colour
+    ? { ...props.font.colour, game: !!props.game_colors } : null;
   let body;
   if (p.empty === "no_project") {
     body = html`<${Empty} title="No project folder yet" icon="folder">Extract a Stern Spike 2 card on the Extract tab (or open a project) and its scenes show here.<//>`;
@@ -53,6 +57,7 @@ export default function ScenesTab() {
     <${PageHead} title="Scenes" sub=${INTRO}><${ScenesActions} /><//>
     ${body}
   </div>${ready && s.tree ? html`<${FontBar} open=${fontOn} setOpen=${setFont} t=${t} />` : null}${ready
-    ? html`<${ColorBar} host="scenes" open=${colors} setOpen=${setColors} file=${file} cls=${fontOn ? "cpd-beside" : ""} />`
+    ? html`<${ColorBar} host="scenes" open=${colors} setOpen=${setColors} file=${file} cls=${fontOn ? "cpd-beside" : ""}
+        line=${line} openFont=${() => setFont(true)} />`
     : null}</div>`;
 }
