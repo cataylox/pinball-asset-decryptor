@@ -995,9 +995,11 @@ HELP_CONTENT = {
                 {"icon": "gear", "tone": "info", "title": "Game-program text",
                  "text": "Drawn by the game code itself: titles, battle names, award "
                          "lines. The Scene column reads **game program**."}]},
-            {"note": "A scene's line is often a placeholder the code writes over. If a "
-                     "line still shows the old words on the machine after you changed "
-                     "every scene copy, edit its game-program row.", "kind": "tip"},
+            {"note": "A scene's line is often a placeholder the code writes over. Where "
+                     "the app can tell the game writes a line itself, that scene line is "
+                     "locked (Apply to every scene and Replace everywhere skip it): "
+                     "edit its game-program row instead. If a line still shows the old "
+                     "words on the machine, do the same.", "kind": "tip"},
         ]),
         ("Length limits", [
             "The **Max** column is each line's budget in bytes (letters). A row reading "
