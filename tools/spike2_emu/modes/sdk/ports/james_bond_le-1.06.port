@@ -353,6 +353,9 @@ text backdrop_idle MainPlayLoop
 # PAD-530: the surface's own seek, length and position (each (surface[, ms]), in ms: the player's gst_element_seek and
 # query_duration / query_position, the calls the game's film reels make to stay in step after its clips). A mode's clip
 # the game's own clip took the surface from comes back where it would be by then, once the game's clip is over.
+# Seen in the emulator 2026-10-11 (stock card, hidden, muted): the game's own GLDFNGR_Wizard_Mode_INTRO took the
+# surface 4266 ms into a mode's 111900 ms clip, and 4.7 s later the clip was back at 8981 ms (the video bridge: "seek
+# to 8981 ms: starting the clip there"). Pro 1.06's lines matched its program and armed; no game started there.
 site surface_seek     0x00578404 0xe92d43f0 0xe1a07003
 site surface_duration 0x005780bc 0xe5d030d4 0xe92d40f0
 site surface_position 0x00578260 0xe5d030d4 0xe92d40f0
