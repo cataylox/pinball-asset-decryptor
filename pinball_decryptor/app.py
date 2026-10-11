@@ -4366,18 +4366,22 @@ class App:
         # the game's own clips switched on for color (PAD-336): each one is
         # its own replacement, re-encoded with the profile baked in, and
         # only where there is one to bake (Spike 2, a profile that changes
-        # something)
+        # something); with No change, put back where an earlier build
+        # re-encoded it (PAD-528)
+        from .core import staged_originals
         assignments = dict(assignments)
         mfr = self._current_mfr
         try:
             per_file = bool(mfr is not None
-                            and mfr.colour_profile_on_display()
-                            and colour_profile.any_asset_active(assets_dir))
+                            and mfr.colour_profile_on_display())
         except Exception:                               # noqa: BLE001
             per_file = False
-        for rel in (colour_profile.stock_video_rels(
-                staged_changes.load(assets_dir)) if per_file else ()):
-            if rel in slots_by_rel and not assignments.get(rel):
+        stock = [rel for rel in (colour_profile.stock_video_rels(
+                    staged_changes.load(assets_dir)) if per_file else ())
+                 if rel in slots_by_rel and not assignments.get(rel)]
+        baked = colour_profile.asset_map(assets_dir, "videos", stock)             if stock else {}
+        for rel in stock:
+            if rel in baked or staged_originals.has_snapshot(assets_dir, rel):
                 assignments[rel] = STOCK_SOURCE
         if not assignments:
             return None

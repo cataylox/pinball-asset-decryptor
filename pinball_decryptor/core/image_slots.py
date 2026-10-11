@@ -244,22 +244,39 @@ def pictures_due(slots_by_rel: Dict[str, ImageSlot],
             colour or chosen.get(rel))
 
     n = sum(1 for rel in picked if not kept(rel, assignments[rel]))
-    if colour is None and assets_dir and colour_profile.any_asset_active(
-            assets_dir):
-        stock = {rel for rel in colour_profile.stock_image_rels(
-            assets_dir, picked) if rel in slots_by_rel}
-        chosen.update(colour_profile.asset_map(assets_dir, "images",
-                                               sorted(stock)))
+    if colour is None and assets_dir:
+        stock, profs = _stock_to_stage(assets_dir, slots_by_rel, picked)
+        chosen.update(profs)
         n += sum(1 for rel in stock if not kept(rel, None))
         resolve = colour_profile.asset_resolver(assets_dir)
         for rel in colour_profile.built_image_on(assets_dir):
-            if (rel in slots_by_rel and rel not in picked
-                    and rel not in stock
-                    and resolve("images", rel) is not None
-                    and (colour_profile.uncorrected_path(assets_dir, rel)
-                         or os.path.isfile(slots_by_rel[rel].abs_path))):
+            if rel not in slots_by_rel or rel in picked or rel in stock:
+                continue
+            if resolve("images", rel) is None:
+                # No change: back to its kept uncorrected copy (PAD-528)
+                n += bool(colour_profile.uncorrected_path(assets_dir, rel))
+            elif (colour_profile.uncorrected_path(assets_dir, rel)
+                  or os.path.isfile(slots_by_rel[rel].abs_path)):
                 n += 1
     return n
+
+
+def _stock_to_stage(assets_dir, slots_by_rel, picked):
+    """The game's own pictures switched on behind the unlock that a staging
+    stages, and the profile each gets baked in: ``(rels, {rel: Profile})``.
+
+    One whose profile changes nothing (No change) is staged too where an
+    earlier build changed it (it has its ``.orig/`` snapshot): from those
+    pristine bytes, so it goes back to the game's own colors.  DragonRR,
+    PAD-528: after every picture had been built Black and white, No change
+    on all of them left them Black and white, because a staging with no
+    profile that changes something skipped the game's pictures altogether."""
+    from . import colour_profile, staged_originals
+    stock = {rel for rel in colour_profile.stock_image_rels(assets_dir, picked)
+             if rel in slots_by_rel}
+    profs = colour_profile.asset_map(assets_dir, "images", sorted(stock))
+    return ({rel for rel in stock if rel in profs
+             or staged_originals.has_snapshot(assets_dir, rel)}, profs)
 
 
 def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
@@ -298,15 +315,12 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
     # a picture picked again: a copy kept from its earlier build is stale
     for rel, _r in items:
         colour_profile.discard_uncorrected(assets_dir, rel)
-    stock = set()
-    if colour is None and assets_dir and colour_profile.any_asset_active(
-            assets_dir):
-        stock = {rel for rel in colour_profile.stock_image_rels(
-            assets_dir, {rel for rel, _r in items}) if rel in slots_by_rel}
-        if stock:
-            chosen.update(colour_profile.asset_map(
-                assets_dir, "images", sorted(stock)))
-            items += [(rel, None) for rel in sorted(stock)]
+    if colour is None and assets_dir:
+        # (PAD-528: No change too, where an earlier build changed them)
+        stock, profs = _stock_to_stage(assets_dir, slots_by_rel,
+                                       {rel for rel, _r in items})
+        chosen.update(profs)
+        items += [(rel, None) for rel in sorted(stock)]
         # The user's own pictures an earlier build put here, pick gone
         # (PAD-345): corrected from their kept uncorrected copy, never from
         # .orig/ (Stern's picture), so a second build never corrects twice.
@@ -317,10 +331,13 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
             # its own profile (PAD-368), else the project's
             prof = resolve("images", rel)
             if prof is None:
-                continue
-            kept = colour_profile.keep_uncorrected(assets_dir, rel)
+                # No change: its kept uncorrected copy goes back (PAD-528)
+                kept = colour_profile.uncorrected_path(assets_dir, rel)
+            else:
+                kept = colour_profile.keep_uncorrected(assets_dir, rel)
             if kept:
-                chosen[rel] = prof
+                if prof is not None:
+                    chosen[rel] = prof
                 items.append((rel, kept))
                 # already the size the build made it: never fitted again
                 keep_size = frozenset(keep_size) | {rel}
@@ -376,7 +393,9 @@ def _stage_items(items, slots_by_rel, baseline, failures, cache, colour,
         if log_cb:
             log_cb(f"Staging {rel}  ←  "
                    + (os.path.basename(rep) if rep else
-                      "its own picture, colors corrected for the machine"),
+                      "its own picture, colors corrected for the machine"
+                      if colour or chosen.get(rel) else
+                      "its own picture, its own colors (No change)"),
                    "info")
         original = snap = None
         if assets_dir:

@@ -496,13 +496,16 @@ def built_all(assets_dir):
 
 
 def scene_states(assets_dir):
-    """``{card: "edited" | "written"}`` for every scene with edits now or at the last Write:
-    *edited* = its edits differ from what the last Write put on the card (not written yet),
-    *written* = the last Write put exactly these edits on the card.  A scene as shipped both
-    now and then is absent."""
+    """``{card: "edited" | "all" | "written"}`` for every scene with edits now or at the last
+    Write: *edited* = its edits differ from what the last Write put on the card (not written
+    yet), *written* = the last Write put exactly these edits on the card.  A scene as shipped
+    both now and then is absent.  *all* is *edited* where the only difference is one font
+    color given to its lines that many scenes got alike (PAD-528: the Font bar's Apply to all
+    lines of text, as :func:`scene_colour_states` tells the profile on all apart)."""
     now = load(assets_dir)
     built = built_all(assets_dir)
     out = {}
+    alike = {}
     for card in set(now) | set(built or {}):
         ops = now.get(card) or []
         was = [op for op in ((built or {}).get(card) or ()) if isinstance(op, dict)]
@@ -511,7 +514,34 @@ def scene_states(assets_dir):
                 out[card] = "written"
         else:
             out[card] = "edited"
+            change = _font_colour_change(ops, was)
+            if change and len(set(change.values())) == 1:
+                alike[card] = next(iter(change.values()))
+    if alike:
+        counts = {}
+        for v in alike.values():
+            counts[v] = counts.get(v, 0) + 1
+        for card, v in alike.items():
+            if counts[v] >= ALL_SCENES_MIN and counts[v] * 2 > len(alike):
+                out[card] = "all"
     return out
+
+
+def _font_colour_change(ops, was):
+    """``{node: (pick, brightness) or None}``: the lines whose own font color (PAD-514) *ops*
+    change from *was* (``None``: Default, none of its own) when that is all they change, else
+    ``None``."""
+    from . import text_colour
+
+    def rest(lst):
+        return [op for op in lst if op.get("op") != "text_colour"]
+    if rest(ops) != rest(was):
+        return None
+    a, b = text_colour.own_colours(ops), text_colour.own_colours(was)
+
+    def colour(op):
+        return None if op is None else (op.get("pick"), op.get("bright"))
+    return {n: colour(a.get(n)) for n in set(a) | set(b) if colour(a.get(n)) != colour(b.get(n))}
 
 
 def scene_dir(card):
@@ -522,11 +552,12 @@ def scene_dir(card):
     return card.rsplit("/", 1)[0] or card
 
 
-def colour_marks(assets_dir):
+def colour_marks(assets_dir, identity=False):
     """``{scene dir: [[rel, profile key]]}``: the pictures and lines of text of each scene the
     next Write bakes a color profile into, each with the profile's numbers (DragonRR, PAD-524:
     a scene whose only change is a line's yellow profile showed as not changed).  A scene
-    with none is absent."""
+    with none is absent.  *identity*: the ones switched on with No change too, under
+    :func:`no_change_key` (PAD-528)."""
     from ...core import colour_profile as cp, staged_changes
     from . import scene_render
     out = {}
@@ -534,7 +565,7 @@ def colour_marks(assets_dir):
     def add(card, rel, prof):
         out.setdefault(scene_dir(card), set()).add((rel, prof.key()))
     try:
-        pending = scene_render.pending_pictures(assets_dir, paths=False)
+        pending = scene_render.pending_pictures(assets_dir, paths=False, identity=identity)
     except Exception:                                    # noqa: BLE001
         pending = {}
     coloured = {rel: v["colour"] for rel, v in pending.items()
@@ -564,7 +595,7 @@ def colour_marks(assets_dir):
                      if op.get("op") == "add_text" and op.get("color")
                      and op.get("id") is not None)
     if lines:
-        resolve = cp.asset_resolver(assets_dir, data)
+        resolve = cp.asset_resolver(assets_dir, data, identity=identity)
         for rel in lines:
             prof = resolve("text", rel)
             if prof is not None:
@@ -591,6 +622,13 @@ def built_colours(assets_dir):
 ALL_SCENES_MIN = 3
 
 
+
+def no_change_key():
+    """:meth:`Profile.key` of No change (every profile that changes nothing has its numbers)."""
+    from ...core import colour_profile as cp
+    return cp.Profile().key()
+
+
 def all_profile_keys(assets_dir, marks):
     """The profiles applied to all of a project's files, by :meth:`Profile.key`, from *marks*
     (:func:`colour_marks`): the individual files profile (what All images and All text give
@@ -599,9 +637,9 @@ def all_profile_keys(assets_dir, marks):
     every scene was orange, and the few he had colored on their own were lost among them)."""
     from ...core import colour_profile as cp
     keys = set()
-    shared = cp.asset_active(assets_dir)
-    if shared is not None:
-        keys.add(shared.key())
+    # No change too (PAD-528, DragonRR: "NO CHANGE does something"): with every picture Black
+    # and white on the card, All images with No change made every dot orange
+    keys.add(cp.asset_profile(assets_dir).key())
     scenes = {}
     for d, ms in marks.items():
         for _rel, key in ms:
@@ -617,9 +655,13 @@ def scene_colour_states(assets_dir):
     edits: *edited* = not what the last Write baked, *written* = exactly that.  *all* is
     *edited* where every difference is the profile applied to all (:func:`all_profile_keys`):
     a picture or line that has it now, or had it and has no profile now (PAD-524)."""
-    now = colour_marks(assets_dir)
+    full = colour_marks(assets_dir, identity=True)
+    none = no_change_key()
+    # what the next Write bakes: No change bakes nothing
+    now = {d: ms for d, ms in ((d, [m for m in ms if m[1] != none])
+                               for d, ms in full.items()) if ms}
     built = built_colours(assets_dir)
-    every = all_profile_keys(assets_dir, now)
+    every = all_profile_keys(assets_dir, full)
     out = {}
     for d in set(now) | set(built or {}):
         marks = now.get(d) or []
@@ -628,7 +670,9 @@ def scene_colour_states(assets_dir):
                 out[d] = "written"
             continue
         was = dict((built or {}).get(d) or [])
-        mine = dict(marks)
+        # a file the last Write baked a profile into that has No change now is a change, as
+        # any other profile is (PAD-528); one that never had one changes nothing
+        mine = {rel: key for rel, key in full.get(d) or [] if key != none or rel in was}
         own = any((mine[rel] if rel in mine else was[rel]) not in every
                   for rel in set(mine) | set(was) if mine.get(rel) != was.get(rel))
         out[d] = "edited" if own else "all"

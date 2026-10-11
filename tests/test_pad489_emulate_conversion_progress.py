@@ -204,7 +204,10 @@ def test_the_game_pictures_switched_on_are_counted(tmp_path, monkeypatch):
         slots[rel] = image_slots.ImageSlot(rel_path=rel, abs_path=str(tmp_path / n),
                                            ext=".png", info=None, size=1)
     monkeypatch.setattr(cp, "active", lambda d: None)
-    monkeypatch.setattr(cp, "any_asset_active", lambda d: True)
+    # each with a profile that changes something (PAD-528: one with No change is counted
+    # only where an earlier build changed it)
+    monkeypatch.setattr(cp, "asset_map", lambda d, kind, rels: {
+        r: cp.Profile(name="Black and white", saturation=0.0) for r in rels})
     monkeypatch.setattr(cp, "stock_image_rels",
                         lambda d, assigned=(): sorted(set(slots) - set(assigned)))
     monkeypatch.setattr(cp, "built_image_on", lambda d: [])
