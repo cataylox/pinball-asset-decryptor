@@ -1251,10 +1251,11 @@ def file_profile(assets_dir, kind, rel):
     return own if own is not None else asset_profile(assets_dir)
 
 
-def asset_resolver(assets_dir, data=None):
+def asset_resolver(assets_dir, data=None, identity=False):
     """``fn(kind, rel) -> Profile or None``: what is baked into file *rel*
     with its switch on (its own profile, else the project's), ``None`` where
-    that changes nothing.  The sidecar is read once."""
+    that changes nothing (*identity*: that profile too, No change, PAD-528).
+    The sidecar is read once."""
     if not assets_dir:
         return lambda kind, rel: None
     owns = _own_parsed(assets_dir, data)
@@ -1262,7 +1263,8 @@ def asset_resolver(assets_dir, data=None):
 
     def _shared():
         if not shared:
-            shared.append(asset_active(assets_dir))
+            shared.append(asset_profile(assets_dir) if identity
+                          else asset_active(assets_dir))
         return shared[0]
 
     def _rec():
@@ -1276,7 +1278,7 @@ def asset_resolver(assets_dir, data=None):
             prof = _rec()
         if prof is None:
             return _shared()
-        return None if prof.is_identity() else prof
+        return None if prof.is_identity() and not identity else prof
     return resolve
 
 

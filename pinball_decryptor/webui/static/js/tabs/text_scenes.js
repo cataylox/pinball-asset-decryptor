@@ -36,7 +36,7 @@ let sceneWidths = null;         // dragged column widths, kept for the session
 const STATE_TIP = {
   same: "Not changed: the scene as the game ships it, no color profile on any of its pictures or lines.",
   edited: "Changed since the last Write (its edits, or a color profile of its own on one of its pictures or lines): the next Write puts it on the card.",
-  all: "Changed since the last Write only by the color profile applied to all pictures or lines (All images, All text, Apply to all): the next Write puts it on the card.",
+  all: "Changed since the last Write only by the color profile applied to all pictures or lines (All images, All text, Apply to all; No change too), or by a font color given to all lines of text: the next Write puts it on the card.",
   written: "Written: the last Write put exactly these edits and color profiles on the card.",
 };
 // PAD-429 (DragonRR): the search finds the game's on-screen text, not only scene names;

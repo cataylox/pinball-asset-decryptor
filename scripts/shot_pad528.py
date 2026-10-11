@@ -10,7 +10,9 @@ given red on the Font bar (PAD-514).  Then, under the same names before and afte
                         Save a copy and Load, and no way to give it to the other lines.
                         After: Apply to all lines of text under them.
 
-After only: font_bar_confirm.png, the question Apply to all lines of text asks (answered No).
+After only: font_bar_confirm.png, the question Apply to all lines of text asks; answered Yes,
+font_bar_applied.png, every line red and the scenes blue in the list (changed only by what was
+applied to all); then Undo, and the list's colors before and after go to the console.
 
 Needs Playwright (the user site-packages one).
 """
@@ -44,6 +46,15 @@ def main():
     state = lambda: webui_shot.state(url)                    # noqa: E731
     tv = lambda: (state().get("text_scenes") or {}).get("tree_view") or {}  # noqa: E731
     from playwright.sync_api import sync_playwright
+
+    def rows():
+        return (state().get("text_scenes") or {}).get("scenes") or []
+
+    def counts():
+        got = {}
+        for r in rows():
+            got[r.get("state") or "same"] = got.get(r.get("state") or "same", 0) + 1
+        return got
 
     def settle(page, wait=1.5):
         try:
@@ -98,8 +109,20 @@ def main():
                 btn.click()
                 time.sleep(4)
                 page.screenshot(path=out("font_bar_confirm.png"))
-                page.click(".modal button:has-text('No')")
+                t = time.time()
+                page.click(".modal button:has-text('Yes')")
+                while time.time() - t < 120 and not any(
+                        r.get("state") for r in rows()):
+                    time.sleep(0.5)
+                time.sleep(3)
+                print("applied to all in %.1f s; list:" % (time.time() - t), counts(), flush=True)
+                page.mouse.move(5, 1100)
                 time.sleep(1)
+                page.screenshot(path=out("font_bar_applied.png"))
+                t = time.time()
+                print("undo:", api("text_scenes.tree_undo"), flush=True)
+                time.sleep(3)
+                print("after Undo (%.1f s):" % (time.time() - t), counts(), flush=True)
             print("page errors:", errors, flush=True)
             browser.close()
     finally:

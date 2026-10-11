@@ -229,3 +229,75 @@ def test_the_font_bar_offers_it():
         src = f.read()
     assert 'call("text_scenes.tree_text_colour_all", id)' in src
     assert "Apply to all lines of text…" in src
+
+
+# ---------------------------------------------------------------------------------------------
+# the Scenes list's dots (PAD-524): No change applied to all, and a font color given to all
+# lines, are blue (changed only by what was applied to all), as any other profile on all is
+# ---------------------------------------------------------------------------------------------
+def _four_scenes(a):
+    tex = os.path.join(a, "images", "scene_textures")
+    os.makedirs(tex)
+    scenes = ["/g/auto_loaded/s%d" % i for i in range(1, 5)]
+    pics = ["images/scene_textures/radimg_8x8_%d.png" % i for i in range(1, 5)]
+    with open(os.path.join(tex, "radium_images.txt"), "w", encoding="utf-8") as f:
+        f.writelines("%s\t%s/scene.radium\t16\n" % (p[len("images/"):], d)
+                     for p, d in zip(pics, scenes))
+    data = staged_changes.load(a)
+    data[cp.STOCK_IMAGES_KEY] = True
+    staged_changes.save(a, data)
+    return scenes, pics
+
+
+def test_no_change_on_all_after_a_black_and_white_write_is_blue_not_orange(tmp_path):
+    from pinball_decryptor.plugins.stern import scene_edit as X
+    a = str(tmp_path)
+    scenes, pics = _four_scenes(a)
+    cp.store_asset_profile(a, BW)
+    for p in pics:                                            # All images, Black and white
+        cp.set_asset_slot(a, "images", p, True)
+    X.mark_built(a)
+    assert X.scene_colour_states(a) == {d: "written" for d in scenes}
+    cp.store_asset_profile(a, NO_CHANGE)                      # All images, No change
+    assert X.scene_colour_states(a) == {d: "all" for d in scenes}
+    # one picture switched off is a change of its own
+    cp.set_asset_slot(a, "images", pics[0], False)
+    assert X.scene_colour_states(a) == dict({d: "all" for d in scenes}, **{scenes[0]: "edited"})
+    cp.set_asset_slot(a, "images", pics[0], True)
+    # written: the card has the game's own colors, as shipped, so no dot
+    X.mark_built(a)
+    assert X.scene_colour_states(a) == {}
+    # No change on pictures no Write ever colored changes nothing either
+    cp.set_asset_slot(a, "images", "images/scene_textures/radimg_8x8_9.png", True)
+    assert X.scene_colour_states(a) == {}
+
+
+def test_one_font_color_on_the_lines_of_many_scenes_is_blue(tmp_path):
+    from pinball_decryptor.plugins.stern import scene_edit as X
+    a = str(tmp_path)
+    cards = ["/g/auto_loaded/s%d/scene.radium" % i for i in range(1, 6)]
+    X.mark_built(a)
+    red = {"op": "text_colour", "rgb": [1.0, 0.16, 0.1], "pick": "#ff2a1a", "bright": 100}
+    for c in cards:                                           # Apply to all lines of text
+        X.set_ops(a, c, [dict(red, node=7), dict(red, node=9)])
+    assert X.scene_states(a) == {c: "all" for c in cards}
+    # a scene with an edit of its own besides, or a color of its own, stays orange
+    X.set_ops(a, cards[0], [dict(red, node=7), dict(red, node=9),
+                            {"op": "move", "node": 3, "dx": 1.0, "dy": 0.0}])
+    X.set_ops(a, cards[1], [dict(red, node=7), dict(red, node=9, pick="#00ff00")])
+    states = X.scene_states(a)
+    assert states[cards[0]] == "edited" and states[cards[1]] == "edited"
+    assert all(states[c] == "all" for c in cards[2:])
+    # written, then Default for all: blue again, then nothing
+    X.set_ops(a, cards[0], [dict(red, node=7), dict(red, node=9)])
+    X.set_ops(a, cards[1], [dict(red, node=7), dict(red, node=9)])
+    X.mark_built(a)
+    assert X.scene_states(a) == {c: "written" for c in cards}
+    for c in cards:
+        X.set_ops(a, c, [])
+    assert X.scene_states(a) == {c: "all" for c in cards}
+    # one or two scenes alike are not "all"
+    X.mark_built(a)
+    X.set_ops(a, cards[0], [dict(red, node=7)])
+    X.set_ops(a, cards[1], [dict(red, node=7)])
+    assert X.scene_states(a) == {cards[0]: "edited", cards[1]: "edited"}

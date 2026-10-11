@@ -625,9 +625,12 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                    for card, st in scene_edit.scene_states(self.assets_dir).items()}
         except Exception:                            # noqa: BLE001
             return {}
+        # the one not written that says most: edited, then all (a scene whose font color
+        # change went to all its lines alike, PAD-528), then written
+        rank = {"edited": 3, "all": 2, "written": 1}
         try:
             for d, st in scene_edit.scene_colour_states(self.assets_dir).items():
-                if out.get(d) != "edited":
+                if rank.get(st, 0) > rank.get(out.get(d), 0):
                     out[d] = st
         except Exception:                            # noqa: BLE001
             log.exception("scene colour states")

@@ -786,7 +786,7 @@ def own_size(size, want):
     return (pad(size[0]), pad(size[1])) != (int(want[0]), int(want[1]))
 
 
-def pending_pictures(assets_dir, bake=True, paths=True):
+def pending_pictures(assets_dir, bake=True, paths=True, identity=False):
     """The Images tab's picks, as a scene render uses them: ``{picture rel: {"path":
     replacement file or None, "keep": keep its own size, "colour": the chosen-files profile
     baked into it, or None}}``.  A pick not built yet is drawn from its own file, so a
@@ -797,7 +797,9 @@ def pending_pictures(assets_dir, bake=True, paths=True):
     passes it by and it shows its own colours (PAD-325).  *bake* False is the preview's
     Individual files switch turned off (PAD-330): no picture gets its correction drawn in.
     *paths* False leaves the game's own pictures' snapshot paths out (``None``), for a caller
-    that wants only the colours (PAD-524: one look on disk per picture)."""
+    that wants only the colours (PAD-524: one look on disk per picture).  *identity*: a
+    picture switched on whose profile is No change has it as its colour too, where it is
+    otherwise ``None`` (PAD-528: the Scenes list's dots)."""
     try:
         from ...core import staged_changes, colour_profile
         data = staged_changes.peek(assets_dir) or {}
@@ -806,7 +808,7 @@ def pending_pictures(assets_dir, bake=True, paths=True):
     keep = set(data.get("image_keep_size") or ())
     try:
         # each picture's own profile (PAD-368), else the project's
-        resolve = colour_profile.asset_resolver(assets_dir, data)
+        resolve = colour_profile.asset_resolver(assets_dir, data, identity=identity)
         settings = colour_profile.asset_settings(assets_dir)
     except Exception:
         resolve, settings = None, None
