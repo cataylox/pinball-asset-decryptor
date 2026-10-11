@@ -4028,6 +4028,14 @@ on through a Side ramp shot; `Disco_Intro` once in its place and the loop again 
 `MainPlayLoop_DrNo` over it; the game's own main-play loop back when the mode stopped it. No abort. Not measured: a
 machine; Bond Pro 1.06 (no line yet).
 
+Just asked for, or right after a full-screen clip of the mode's, the loop takes the surface at once, over whatever the
+game has there. The game's own main-play video (`MainPlayLoop_<film>`) can take the surface the moment a clip of ours
+ends (end-to-end run e3: the loop played after the intro and the game's dots were back 30 ms later, until they ran
+out); with `text backdrop_idle MainPlayLoop` the runtime watches the game's asks for the bank's surface (one hook on
+`surface_set_video`, shared with PAD-446's clip variants) and gives the loop the surface back on the next tick. Any
+other clip of the game's is waited out. Runs e4-e6 (the same sequence) kept the loop from the intro's end to the mode's;
+the game did not ask for its main-play video in them, so the take-back itself has not been seen yet.
+
 ### The game's status bar (PAD-521)
 
 James Bond LE shows each of its own modes in a coloured bar under the TV: the mode's name in the game's lettering, the
@@ -4059,6 +4067,13 @@ value status_colour_vfn 0x4c     value status_tint_vfn 0x44
 **Measured (emulator, stock Bond LE 1.06 card, 2026-10-11, rig 1):** a green bar named YOLT WIZARD with its wipe full
 and at 40, the Goldfinger background looping in the TV above it, through a Side ramp shot; a blue DIAMOND DEATH THREAT
 with no wipe; the empty bar back when given back. No abort. Not measured: a machine; Bond Pro 1.06 (no line yet).
+
+**End to end (emulator, 2026-10-11, the stock Bond LE 1.06 card, rig 1, runs e2-e6):** a blocks mode YOLT WIZARD built by
+Try it's own code (`mode_write.build_tryit_set`: its words-alone screen into the HUD scene, four clips into the bank,
+the mode compiled), started by its trigger: "YOLT WIZARD" in large white letters over its intro clip and the green bar
+under the TV with its clock full; its loop in the TV after the intro, the bar draining; a Side ramp shot put "JACKPOT"
+over the loop and its one-shot in the loop's place, the loop back after; ended, "TOTAL 2,000,000" over its total clip
+with the bar full, both given back 3 s later. No abort.
 
 ### A full-screen clip on a machine: drawn at the frame hand-over (PAD-301)
 

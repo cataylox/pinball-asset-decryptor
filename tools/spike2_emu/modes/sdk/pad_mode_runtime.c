@@ -2345,6 +2345,21 @@ static unsigned char *disp_layered_mgr;   /* the layered display's manager (disp
  * the clip on the surface is ours. */
 static int bd_v2;
 static void *clip2_surface(void);
+/* PAD-521: one hook on surface_set_video for everything that watches the bank's surface (PAD-446's clip variants, the
+ * clip v2 backdrop's idle-video watch) - a site takes one hook */
+static int sv_clipv, sv_bd, sv_hooked, bd2_in;
+static void on_clipv_set_video(unsigned *r);
+static void bd2_seen(unsigned *r);
+static void on_surface_set_video(unsigned *r)
+{
+    if (sv_bd) bd2_seen(r);
+    if (sv_clipv) on_clipv_set_video(r);
+}
+static int sv_hook(void)
+{
+    if (!sv_hooked) sv_hooked = hook(fn("surface_set_video"), on_surface_set_video);
+    return sv_hooked;
+}
 
 static unsigned bd_surface_state(void)
 {
@@ -2477,19 +2492,47 @@ static void bd2_play(void *surf)
             once ? "once" : bd.plays == 1 ? "looped" : "again");
 }
 
-/* PAD-521: every tick (clip_tick): play the loop again once the surface is idle; a one-shot asked for plays at once */
+/* PAD-521: the game asks the bank's surface for a clip (surface_set_video(surface, &name)). Its own main-play video
+ * (`text backdrop_idle`, a name prefix: Bond's MainPlayLoop_<film>) takes the surface the moment one of ours ends
+ * (emulator run e3: the intro over, the loop played, and the game's dots took the TV back 30 ms later); while a mode
+ * wants its loop that one is no clip to wait out: the loop takes the surface back the next tick. Any other clip of the
+ * game's (it means something) is waited out as before. */
+static void bd2_seen(unsigned *r)
+{
+    const unsigned *s = (const unsigned *)(unsigned long)r[1];
+    const char *name, *idle = pm_port_text("backdrop_idle");
+    void *bank;
+    unsigned i;
+    static unsigned said;
+    if (bd2_in || !bd.on || !s || !idle || !idle[0]) return;
+    name = (const char *)(unsigned long)s[0];
+    if (!name) return;
+    for (i = 0; idle[i] && name[i] == idle[i]; i++) ;
+    if (idle[i]) return;
+    bd2_in = 1;
+    bank = clip2_surface();
+    bd2_in = 0;
+    if (!bank || (unsigned)(unsigned long)bank != r[0]) return;
+    bd.pending = 1;
+    if (said++ < 5) say("backdrop: the game asked for its main-play video %s - the loop takes the surface back", name);
+}
+
+/* PAD-521: every tick (clip_tick): play the loop again once the surface is idle. Just asked for, a one-shot asked for, or
+ * a full-screen clip of ours just over, it plays at once over whatever the game has there (its main-play video takes
+ * the surface the moment ours ends: emulator run e2, the loop waited 5 s behind it); a clip of the game's is waited out */
 static void bd2_tick(void)
 {
     void *surf;
     if (!bd_v2 || !bd.on) return;
-    if (clip.on) {                        /* a full-screen clip of ours has the surface: the loop after it */
+    if (clip.on) {                        /* a full-screen clip of ours has the surface: the loop right after it */
         bd.obj = 0;
+        bd.pending = 1;
         return;
     }
     surf = clip2_surface();
     if (!surf) return;
-    if (bd.pending && bd.once[0]) { bd2_play(surf); return; }
-    if (pm_ms() - bd.since < 500) return;  /* just asked: the surface may not say "playing" yet */
+    if (bd.pending) { bd2_play(surf); return; }
+    if (pm_ms() - bd.since < 500) return;  /* just played: the surface may not say "playing" yet */
     if (((int (*)(void *))(unsigned long)fn("surface_state"))(surf) == (int)pm_port_value("surface_playing", 2)) return;
     bd2_play(surf);                       /* its end, the one-shot's or the game's clip over: the loop (again) */
 }
@@ -2558,6 +2601,10 @@ static void backdrop_arm(void)
         bd_v2 = 1;
         can |= PM_CAN_BACKDROP;
         say("backdrop: on - a mode's clip loops on the video bank's surface, behind the game's own videos");
+        if (pm_port_text("backdrop_idle") && (sv_bd = 1, sv_hook()))
+            say("backdrop: the game's own main-play video (%s...) gives the loop the surface back",
+                pm_port_text("backdrop_idle"));
+        else sv_bd = 0;
         return;
     }
     static const char *const s[] = { "backdrop_draw", "scene_show", "clip_play", "clip_stop", "video_player",
@@ -8798,11 +8845,12 @@ static void clipv_arm(void)
         say("clip variants: %u clip(s) play one of several at random (clip_play 0x%08x)", n_clipv, fn("clip_play"));
     } else if (have_sites(v2_s) && have_data(v2_d) && have_values(v2_v)
                && (pm_scene_id("video_bank") || site("video_surface"))
-               && hook(fn("surface_set_video"), on_clipv_set_video)) {
+               && (sv_clipv = 1, sv_hook())) {
         say("clip variants: %u clip(s) play one of several at random (surface_set_video 0x%08x, the bank's "
             "surface only)", n_clipv, fn("surface_set_video"));
     } else {
         n_clipv = 0;
+        sv_clipv = 0;
         say("clip variants: off - the port has no clip_play, and no clip v2 lines that match this build; "
             "every clip plays the game's own");
     }

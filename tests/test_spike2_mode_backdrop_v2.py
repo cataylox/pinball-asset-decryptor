@@ -58,8 +58,9 @@ static void tick(unsigned long ms) { now_ms += ms; bd2_tick(); }
 int main(void)
 {
     tick(16);                                       /* nothing asked: nothing played */
+    state = 2;                                      /* the game's main-play video on the surface */
     pm_backdrop("LOOP");
-    tick(16);                                       /* the next tick plays it */
+    tick(16);                                       /* the next tick plays it, over the game's */
     tick(16); tick(400);                            /* playing: left alone */
     printf("showing %d\n", pm_backdrop_showing());
     state = 0; tick(16);                            /* its end: again */
@@ -68,7 +69,7 @@ int main(void)
     state = 0; tick(600);                           /* its end: the loop */
     clip.on = 1; state = 2; tick(600);              /* a full-screen clip of ours has the surface */
     printf("showing %d\n", pm_backdrop_showing());
-    clip.on = 0; state = 0; tick(600);              /* over: the loop again */
+    clip.on = 0; state = 2; tick(16);               /* over, the game's video already there: the loop at once */
     state = 2; printf("game clip\n"); tick(600);    /* the surface busy (the game's or ours): left alone */
     state = 0; tick(600);
     pm_backdrop(0);                                 /* the mode ends it: ours stopped */
@@ -115,3 +116,19 @@ def test_only_the_build_it_was_seen_on_opts_in():
     on = sorted(p.name for p in ports.glob("*.port")
                 if re.search(r"^value\s+backdrop_surface\s+1\b", p.read_text(encoding="utf-8"), re.M))
     assert on == ["james_bond_le-1.06.port"]
+
+
+def test_the_games_main_play_video_gives_the_loop_the_surface_back():
+    """Emulator run e3: the intro over, the loop played, and the game put its own main-play video (MainPlayLoop_<film>)
+    on the surface 30 ms later; the loop waited it out. The port names that video (`text backdrop_idle`), the runtime
+    watches the game's asks (one shared hook on surface_set_video, with PAD-446's clip variants) and takes the surface
+    back for the loop; any other clip of the game's is waited out."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    seen = _lift(src, "static void bd2_seen(unsigned *r)\n{")
+    assert 'pm_port_text("backdrop_idle")' in seen and "bd.pending = 1;" in seen
+    assert "(unsigned)(unsigned long)bank != r[0]" in seen               # the bank's surface only
+    one = _lift(src, "static void on_surface_set_video(unsigned *r)")
+    assert "bd2_seen(r)" in one and "on_clipv_set_video(r)" in one
+    assert src.count('hook(fn("surface_set_video")') == 1                # a site takes one hook
+    port = (RUNTIME.parent / "ports" / "james_bond_le-1.06.port").read_text(encoding="utf-8")
+    assert re.search(r"^text backdrop_idle MainPlayLoop$", port, re.M)
