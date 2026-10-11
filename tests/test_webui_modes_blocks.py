@@ -260,4 +260,10 @@ def test_light_the_mode_at_a_shot_offers_the_cards_inserts(tmp_path, preview_on)
         lit["insert"] = "MASER READY"
         assert w.call("modes.blocks_save", "lit", prog)["problems"] == []
         with open(tmp_path / "le" / "modes" / "lit" / "lit.c", encoding="utf-8") as f:
-            assert '"MASER READY", 0xffd000u, PM_LAMP_BLINK, 500u },   /* Right ramp */' in f.read()
+            assert '"MASER READY", 0xffd000u, PM_LAMP_BLINK, 500u, "", 0x000000u },   /* Right ramp */' in f.read()
+        # PAD-521: several inserts (a chase across them) and one more held solid, as the game's own look
+        lit.update(insert="MASER READY,SHOOT AGAIN (X2)", pattern="chase", solid="MASER READY", solid_color="#ffffff")
+        assert w.call("modes.blocks_save", "lit", prog)["problems"] == []
+        with open(tmp_path / "le" / "modes" / "lit" / "lit.c", encoding="utf-8") as f:
+            assert ('"MASER READY,SHOOT AGAIN (X2)", 0xffd000u, PM_LAMP_CHASE, 150u, "MASER READY", 0xffffffu }'
+                    in f.read())
