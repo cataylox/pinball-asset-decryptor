@@ -616,13 +616,21 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
 
     def _scene_states(self):
         """``{scene dir: "edited" | "written"}`` (DragonRR: colour the list by what is not
-        written to a card yet and what is)."""
+        written to a card yet and what is).  A color profile on one of its pictures or lines
+        counts as a change too (PAD-524); either not written yet makes the scene not written."""
         try:
             from ..plugins.stern import scene_edit
-            return {card.replace("\\", "/").rsplit("/", 1)[0]: st
-                    for card, st in scene_edit.scene_states(self.assets_dir).items()}
+            out = {card.replace("\\", "/").rsplit("/", 1)[0]: st
+                   for card, st in scene_edit.scene_states(self.assets_dir).items()}
         except Exception:                            # noqa: BLE001
             return {}
+        try:
+            for d, st in scene_edit.scene_colour_states(self.assets_dir).items():
+                if out.get(d) != "edited":
+                    out[d] = st
+        except Exception:                            # noqa: BLE001
+            log.exception("scene colour states")
+        return out
 
     def _restate_list(self):
         """The list's colours again (after an edit, a Reset, a Write), rows unchanged."""

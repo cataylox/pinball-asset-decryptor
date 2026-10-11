@@ -468,12 +468,13 @@ def mark_built(assets_dir):
     """Record the current edits as the ones the last Write built (called when a Write run from
     this project folder succeeds).  A project with no scene edits at all records nothing."""
     edits = load(assets_dir)
+    colours = colour_marks(assets_dir)
     path = _built_path(assets_dir)
-    if not edits and not os.path.isfile(path):
+    if not edits and not colours and not os.path.isfile(path):
         return False
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"edits": edits}, f, indent=1, sort_keys=True)
+        json.dump({"edits": edits, "colours": colours}, f, indent=1, sort_keys=True)
     # PAD-403: the card built now shows every one of them; a project extracted from it knows so
     try:
         keep_states(assets_dir, states_to_save(assets_dir, edits, trees_of(assets_dir)))
@@ -510,6 +511,95 @@ def scene_states(assets_dir):
                 out[card] = "written"
         else:
             out[card] = "edited"
+    return out
+
+
+def scene_dir(card):
+    """The scene a card path belongs to, as the Scenes list names it."""
+    card = (card or "").replace("\\", "/")
+    if "/scene.assets/" in card:
+        return card.rsplit("/scene.assets/", 1)[0]
+    return card.rsplit("/", 1)[0] or card
+
+
+def colour_marks(assets_dir):
+    """``{scene dir: [[rel, profile key]]}``: the pictures and lines of text of each scene the
+    next Write bakes a color profile into, each with the profile's numbers (DragonRR, PAD-524:
+    a scene whose only change is a line's yellow profile showed as not changed).  A scene
+    with none is absent."""
+    from ...core import colour_profile as cp, staged_changes
+    from . import scene_render
+    out = {}
+
+    def add(card, rel, prof):
+        out.setdefault(scene_dir(card), set()).add((rel, prof.key()))
+    try:
+        pending = scene_render.pending_pictures(assets_dir, paths=False)
+    except Exception:                                    # noqa: BLE001
+        pending = {}
+    coloured = {rel: v["colour"] for rel, v in pending.items()
+                if isinstance(v, dict) and v.get("colour") is not None}
+    if coloured:
+        for name in ("radium_images.txt", "manifest.txt"):
+            try:
+                with open(os.path.join(assets_dir, *RELDIR, name), "r", encoding="utf-8",
+                          errors="replace") as f:
+                    rows = [ln.rstrip("\r\n").split("\t") for ln in f
+                            if ln.strip() and not ln.startswith("#")]
+            except OSError:
+                continue
+            for cols in rows:
+                rel = cols[0].replace("\\", "/") if len(cols) >= 2 else ""
+                if rel in coloured:
+                    add(cols[1], "images/" + rel, coloured[rel])
+        for card, ops in load(assets_dir).items():
+            for op in ops:
+                rel = op.get("image") if op.get("op") == "add_picture" else None
+                if rel in coloured:
+                    add(card, "images/" + rel, coloured[rel])
+    data = staged_changes.peek(assets_dir)
+    lines = cp.text_lines_on(assets_dir, data)
+    for card, ops in load(assets_dir).items():
+        lines.update(cp.text_rel(card, op["id"]) for op in ops
+                     if op.get("op") == "add_text" and op.get("color")
+                     and op.get("id") is not None)
+    if lines:
+        resolve = cp.asset_resolver(assets_dir, data)
+        for rel in lines:
+            prof = resolve("text", rel)
+            if prof is not None:
+                add(rel.rsplit("#", 1)[0], rel, prof)
+    return {d: sorted([list(m) for m in marks]) for d, marks in out.items()}
+
+
+def built_colours(assets_dir):
+    """:func:`colour_marks` as the last Write built them, or ``None`` when no Write has been
+    recorded (a Write recorded before PAD-524 kept none: ``{}``)."""
+    try:
+        with open(_built_path(assets_dir), "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    colours = data.get("colours")
+    return colours if isinstance(colours, dict) else {}
+
+
+def scene_colour_states(assets_dir):
+    """``{scene dir: "edited" | "written"}`` for every scene with a color profile baked into
+    one of its pictures or lines now or at the last Write, as :func:`scene_states` for edits:
+    *edited* = not what the last Write baked, *written* = exactly that."""
+    now = colour_marks(assets_dir)
+    built = built_colours(assets_dir)
+    out = {}
+    for d in set(now) | set(built or {}):
+        marks = now.get(d) or []
+        if built is not None and marks == (built.get(d) or []):
+            if marks:
+                out[d] = "written"
+        else:
+            out[d] = "edited"
     return out
 
 

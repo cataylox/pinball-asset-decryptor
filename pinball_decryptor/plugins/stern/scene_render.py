@@ -786,7 +786,7 @@ def own_size(size, want):
     return (pad(size[0]), pad(size[1])) != (int(want[0]), int(want[1]))
 
 
-def pending_pictures(assets_dir, bake=True):
+def pending_pictures(assets_dir, bake=True, paths=True):
     """The Images tab's picks, as a scene render uses them: ``{picture rel: {"path":
     replacement file or None, "keep": keep its own size, "colour": the chosen-files profile
     baked into it, or None}}``.  A pick not built yet is drawn from its own file, so a
@@ -795,7 +795,9 @@ def pending_pictures(assets_dir, bake=True):
     the Write bakes it.  ``"skip"`` is True for the user's own picture whose colour switch is
     OFF (red in the Layers list): with :func:`render_tree`'s *as_made* the machine screen
     passes it by and it shows its own colours (PAD-325).  *bake* False is the preview's
-    Individual files switch turned off (PAD-330): no picture gets its correction drawn in."""
+    Individual files switch turned off (PAD-330): no picture gets its correction drawn in.
+    *paths* False leaves the game's own pictures' snapshot paths out (``None``), for a caller
+    that wants only the colours (PAD-524: one look on disk per picture)."""
     try:
         from ...core import staged_changes, colour_profile
         data = staged_changes.peek(assets_dir) or {}
@@ -833,7 +835,7 @@ def pending_pictures(assets_dir, bake=True):
             from ...core import staged_originals
             for rel in colour_profile.stock_image_rels(assets_dir, set(data.get("image") or ())):
                 out[rel[len("images/"):]] = {
-                    "path": staged_originals.snapshot_path(assets_dir, rel),
+                    "path": staged_originals.snapshot_path(assets_dir, rel) if paths else None,
                     "keep": False, "colour": prof_of(rel), "skip": False, "stock": True}
         except Exception:
             pass
