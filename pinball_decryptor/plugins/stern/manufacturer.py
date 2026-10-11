@@ -155,7 +155,7 @@ _WHITESTAR_PREREQS = (
 )
 
 _EXT4_GROW_REASON = (
-    "Full-size video replacement, longer sounds, the opt-in blip-free "
+    "Full-size video replacement, longer sounds, the blip-free "
     "callouts, and different-size file swaps in the Partition Explorer: "
     "resizes files inside the card's ext4 partition through the platform's "
     "Linux filesystem path. Without it an oversized replacement clip is "
@@ -185,15 +185,14 @@ def _bigger_card_words(platform=None, capital=False):
 
 def _ext4_grow_prereqs(platform):
     """The platform dependency of :mod:`...core.ext4_grow` — what full-size
-    video replacement and the (now opt-in) blip-free cave ride on.  It became
+    video replacement and the blip-free cave ride on.  It became
     load-bearing for AUDIO quality the moment the blip-free cave started
     growing ``game_real``, but was never declared, so the strip said "All
     prerequisites OK" on machines whose every build was quietly falling back
     to the scrap-remains build — a tester burned two hardware tests that way
-    (Elvira spinner, 2026-07-30).  Blip-free going opt-in in v0.104.0 takes
-    the audio half of that off the default path, but does not retire the
-    declaration: video still needs it, and a build that opts back in still
-    falls back silently without it.  Missing is not fatal (the build still
+    (Elvira spinner, 2026-07-30).  Blip-free was opt-in from v0.104.0 and is
+    always on again since PAD-523, so every Spike 2 build with a replaced
+    sound rides on this once more.  Missing is not fatal (the build still
     degrades gracefully and the completion dialog now says so); declaring it
     makes the gap visible BEFORE a card is built and tested.
 
