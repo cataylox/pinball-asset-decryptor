@@ -636,6 +636,12 @@ export function clearAt(h, see, x, y) {
   return !((bits[i >> 3] >> (7 - (i & 7))) & 1);
 }
 
+// PAD-515 (DragonRR): what the game does to a box as it plays, which colors its outline on the
+// preview: "filled" (teal) the game fills its words in (PAD-485), "painted" (violet) the game
+// paints its colors (PAD-507), "" anything else.  *h* is an outline, a layer or the selection.
+// An outline shows only under the mouse and on the selection, the same for every kind.
+export const outlineKind = (h) => (!h ? "" : h.filled ? "filled" : h.painted || h.game_colors ? "painted" : "");
+
 // PAD-447 (DragonRR): a click whose mouse jiggles a pixel or two picks a picture or a line of
 // text without moving it.  A press moves, resizes or scales nothing until the pointer has gone
 // DRAG_SLOP px on the screen from where it went down; from then on it follows the pointer from
@@ -841,6 +847,7 @@ const rowTip = (l, cs) => ({
   lines: [
     l.edits || l.kind,
     ...filledLines(l.filled),
+    l.painted ? "The game paints it as it plays: the colors the machine shows it in are picked in the Selected panel." : null,
     l.state_off ? "Off in the preview: the part it sits in shows another of its looks. Its eye turns it on here."
       : l.part_off && !l.view_off ? "The look it sits in is off in the preview: it shows when that look is on."
       : !l.drawn && !l.view_off ? "Not on the screen at this moment." : null,
@@ -1016,8 +1023,9 @@ function TreeLayers({ t }) {
       <button type="button" class=${cx("ly-eye", (l.view_off || l.state_off) && "shut", t.solo === l.id && "solo")}
         aria-label="Shown in the preview" ...${tip(eyeTip(l, t.solo))} onClick=${(e) => eyeClick(l, e)}>
         <${Icon} name=${l.view_off || l.state_off ? "eye-off" : "eye"} /></button>
-      <span class="sc-t ellip">${l.filled ? html`<span class="ly-filled" aria-label="Filled in by the game" ...${tip(filledTip(l.filled))}><${Icon} name="gear" /></span>` : null}${l.name}${l.added ? " (added)" : ""}</span>
-      <span class=${cx("sc-i small ellip", l.hidden ? "in-game" : "muted")}>${l.edits || (l.filled ? "game fills it" : l.kind)}</span>
+      <span class="sc-t ellip">${l.filled ? html`<span class="ly-filled" aria-label="Filled in by the game" ...${tip(filledTip(l.filled))}><${Icon} name="gear" /></span>`
+        : l.painted ? html`<span class="ly-filled ly-painted" aria-label="Painted by the game" ...${tip(GAME_COLORS_TIP)}><${Icon} name="brush" /></span>` : null}${l.name}${l.added ? " (added)" : ""}</span>
+      <span class=${cx("sc-i small ellip", l.hidden ? "in-game" : "muted")}>${l.edits || (l.filled ? "game fills it" : l.painted ? "game paints it" : l.kind)}</span>
       <button type="button" class=${cx("ly-game", l.hidden && "on")} aria-label="Hidden in the game"
         aria-pressed=${l.hidden ? "true" : "false"} ...${tip(gameTip(l))}
         onClick=${(e) => { e.stopPropagation(); call("text_scenes.tree_visible", l.id, l.hidden); }}>
@@ -1395,9 +1403,11 @@ function TreeCanvas({ s }) {
   const busy = !loading && (s.tree_busy || !!(pend && pend.ops.some((o) => o.want == null || o.want > shownRev)));
   const hov = hover != null && !sels.includes(hover) ? (t.hits || []).filter((h) => h.id === hover) : [];
   const selPolys = boxLive ? [] : (t.hits || []).filter((h) => sels.includes(h.id));
-  // PAD-485: the boxes the game fills in as it plays keep their own outline
-  const filledPolys = (t.hits || []).filter((h) => h.filled && !sels.includes(h.id) && h.id !== live);
-  const filledSel = boxLive ? [] : (t.hits || []).filter((h) => h.filled && sels.includes(h.id));
+  // PAD-515: a box the game fills in or paints is outlined in its own color, under the mouse
+  // and selected (no longer always, under the selection too)
+  const pk = multi ? "" : outlineKind(p);
+  const poly = (h, key, cls) => html`<polygon key=${key} points=${h.pts.map((q) => q.join(",")).join(" ")}
+    class=${cx(cls, outlineKind(h))} />`;
   return html`<div class=${cx("scenes-canvas tree-canvas", loading && "loading")} ref=${box} tabIndex="0" onKeyDown=${key}
       style=${`background:${s.bg_rgb || "#101014"};aspect-ratio:${W} / ${H}`}
       onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerLeave=${() => setHover(null)}>
@@ -1409,17 +1419,15 @@ function TreeCanvas({ s }) {
       : full ? html`<img src=${mediaUrl(full.srcs[0])} alt="" draggable="false" />`
       : html`<span class="scenes-msg">${s.canvas_msg}</span>`}
     ${loading ? null : html`<svg viewBox=${`0 0 ${W} ${H}`} preserveAspectRatio="none" class="tree-svg">
-      ${filledPolys.map((h, i) => html`<polygon key=${"f" + i} points=${h.pts.map((q) => q.join(",")).join(" ")} class="tree-filled" />`)}
-      ${hov.map((h, i) => html`<polygon key=${"h" + i} points=${h.pts.map((q) => q.join(",")).join(" ")} class="tree-hover" />`)}
+      ${hov.map((h, i) => poly(h, "h" + i, "tree-hover"))}
       <g transform=${svgTf(lineOps)}>
-        ${selPolys.map((h, i) => html`<polygon key=${"s" + i} points=${h.pts.map((q) => q.join(",")).join(" ")} class="tree-sel" />`)}
-        ${filledSel.map((h, i) => html`<polygon key=${"fs" + i} points=${h.pts.map((q) => q.join(",")).join(" ")} class="tree-filled" />`)}
-        ${selBox ? html`<rect x=${selBox.x} y=${selBox.y} width=${selBox.w} height=${selBox.h} class="tree-box" />` : null}
+        ${selPolys.map((h, i) => poly(h, "s" + i, "tree-sel"))}
+        ${selBox ? html`<rect x=${selBox.x} y=${selBox.y} width=${selBox.w} height=${selBox.h} class=${cx("tree-box", pk)} />` : null}
         ${multi ? (t.sel_boxes || []).map(([bx, by, bw, bh], i) =>
           html`<rect key=${"b" + i} x=${bx} y=${by} width=${bw} height=${bh} class="tree-box" />`) : null}
         ${selBox ? [[selBox.x, selBox.y], [selBox.x + selBox.w, selBox.y], [selBox.x, selBox.y + selBox.h],
           [selBox.x + selBox.w, selBox.y + selBox.h]].map(([hx, hy], i) =>
-          html`<rect key=${"k" + i} x=${hx - 7} y=${hy - 7} width="14" height="14" class="tree-handle" />`) : null}
+          html`<rect key=${"k" + i} x=${hx - 7} y=${hy - 7} width="14" height="14" class=${cx("tree-handle", pk)} />`) : null}
       </g>
     </svg>`}
     ${busy ? html`<div class="tree-busy" role="status"><${Spinner} /><span>Updating</span></div>` : null}
@@ -1434,10 +1442,38 @@ const GAME_COLORS_TIP = { head: "Painted by the game", lines: [
   "Pick one and Write makes the machine show it, in every player's box: the game program paints it, and that kind of line goes white in the scene. The preview draws the boxes the same way.",
   "A score line with the color profile switched on puts the profile on these too, unless a color is picked here." ] };
 const gameColorSrc = (r) => r.picked ? "picked" : r.profiled ? "color profile" : "the game's own";
+
+// PAD-515 (DragonRR: "it is extremely easy to forget this exists"): what the game does to the
+// selected box as it plays, a bar each, like Switchable parts: always there, lit in its own
+// color (as its outline on the preview) when the game does it, greyed out when it does not,
+// so the panel keeps its shape from one pick to the next
+const FILLS_OFF_TIP = { head: "Filled in by the game", lines: [
+  "Not this one: the game does not put words of its own in it.",
+  "A box the game fills in as it plays is lit here in teal, with the game's line and a button to find it on the Replace Text tab. On the preview its outline is teal." ] };
+const PAINTS_OFF_TIP = { head: "Painted by the game", lines: [
+  "Not this one: the game does not paint its colors as it plays, so its Tint and its color profile (or a line's own color, from the Font bar) are what the machine shows.",
+  "A line the game paints (the score panel's) is lit here in violet, with the colors the machine shows it in. On the preview its outline is violet." ] };
+function GameFills({ p }) {
+  const f = p.filled;
+  const who = f ? (f.modes || []).join(", ") : "";
+  return html`<div class=${cx("tree-game fills", !f && "off")}>
+    <div class="tree-row tg-head">
+      <span class="tg-name" ...${tip(f ? filledTip(f) : FILLS_OFF_TIP)}><${Icon} name="gear" /><span class="eyebrow">Filled in by the game</span></span>
+      <span class="grow"></span>
+      <${Button} size="xs" kind="ghost" icon="text" disabled=${!f}
+        title=${!f ? "Only a box the game fills in has a line of the game's" : f.line ? "Find the game's line on the Replace Text tab" : "List that mode's lines on the Replace Text tab"}
+        onClick=${() => call("text_scenes.activate", filledJump(f))}>${f && !f.line ? "Its lines" : "Its line"}<//>
+    </div>
+    <div class="small ellip tg-what">${!f ? "Not this one"
+      : f.line ? html`With <b>${f.line}</b>${who ? ` (${who})` : ""}` : html`During <b>${who}</b>`}</div>
+  </div>`;
+}
 export function GameColors({ g }) {
-  return html`<div class="tree-game-colors">
-    <div class="small tree-filled-note" ...${tip(GAME_COLORS_TIP)}><${Icon} name="gear" /><span>Painted by the game as it plays</span></div>
-    ${g.roles.map((r) => html`<div key=${r.role} class="tree-row tgc-row" ...${tip({ head: r.label, lines: [
+  return html`<div class=${cx("tree-game paints", !g && "off")}>
+    <div class="tree-row tg-head">
+      <span class="tg-name" ...${tip(g ? GAME_COLORS_TIP : PAINTS_OFF_TIP)}><${Icon} name="brush" /><span class="eyebrow">Painted by the game</span></span>
+    </div>
+    ${!g ? html`<div class="small tg-what">Not this one</div>` : g.roles.map((r) => html`<div key=${r.role} class="tree-row tgc-row" ...${tip({ head: r.label, lines: [
         `On the machine: ${r.hex} (${gameColorSrc(r)}). As the game ships: ${r.game}.`,
         r.mine ? "This line is drawn in it." : "Another line of the score panel is drawn in it.",
         ["Click the swatch", "pick a color"],
@@ -1458,20 +1494,24 @@ const WORDS_TIP = { head: "Words", lines: [
   "The words this line shows. Change them and press Enter (or click away): the preview draws them at once, and Write puts them on the card.",
   "A line of the game's is the same edit as on the Text tab, which lists it too. A line you added keeps its words in this scene (Undo takes a change back).",
   "Type \\n for a line break." ] };
+// PAD-515: greyed out, not gone, on anything whose words cannot be changed here
+const wordsOff = (p) => (p.kind === "Text" ? "Its words cannot be changed here"
+  : "Only a line of text has words");
 function Words({ p, find, searching }) {
-  const w = p.words;
+  const off = !p.words;
+  const w = p.words || { text: "" };
   const [draft, setDraft] = useState(w.text);
   useEffect(() => { setDraft(w.text); }, [p.id, w.text]);
   const len = [...draft].length;
   const over = w.limit != null && len > w.limit;
   const apply = (v) => { if (v !== w.text && v.trim()) call("text_scenes.tree_words", p.id, v); };
-  const where = find && find.pos ? `${find.pos} of ${find.n}` : "";
+  const where = find && find.pos && !off ? `${find.pos} of ${find.n}` : "";
   const what = searching ? "line with the words searched for" : "line of text, in this scene or the next";
   return html`<div class="tree-words">
     <div class="tree-row">
-      <span class="lbl" ...${tip(WORDS_TIP)}>Words</span>
+      <span class=${cx("lbl", off && "tree-off")} ...${tip(off ? wordsOff(p) : WORDS_TIP)}>Words</span>
       <${Field} key=${p.id} sm cls="grow" value=${w.text} onChange=${setDraft} onCommit=${apply} bad=${over}
-        title=${WORDS_TIP} />
+        disabled=${off} title=${off ? wordsOff(p) : WORDS_TIP} />
       <${Button} size="xs" kind="ghost" icon="up" label="Previous line" disabled=${!(find && find.n)}
         title=${`Previous ${what.replace("next", "one before")} (Shift+Enter in the search box)`}
         onClick=${() => call("text_scenes.find_step", -1)} />
@@ -1480,6 +1520,7 @@ function Words({ p, find, searching }) {
         onClick=${() => call("text_scenes.find_step", 1)} />
     </div>
     <div class="tree-row">
+      ${off ? html`<span class="small muted tree-off">${wordsOff(p)}</span>` : null}
       ${w.limit != null ? html`<span class=${cx("small nw", over ? "err-ink" : "muted")}
         ...${tip(over ? "Too long: a line of a scene can take this many bytes at most." : "Its length, and the most a line of a scene can take.")}>
         ${len} / ${w.limit} bytes</span>` : null}
@@ -1499,9 +1540,9 @@ function TreeSide({ t, play, playFrame, openFont, find, searching }) {
   const [keepShape, setKeepShape] = useState(true);
   const isText = !!p && p.kind === "Text";
   useEffect(() => { if (p) setTint(p.tint); }, [p && p.id, p && p.tint]);
-  const num = (label, value, onCommit, title) => html`<label class="tree-num" ...${tip(title)}>
+  const num = (label, value, onCommit, title, off) => html`<label class=${cx("tree-num", off && "tree-off")} ...${tip(title)}>
     <span class="lbl">${label}</span>
-    <div class="field sm"><input type="number" value=${value ?? ""} onChange=${(e) => onCommit(e.target.value)} /></div>
+    <div class=${cx("field sm", off && "disabled")}><input type="number" value=${value ?? ""} disabled=${!!off} onChange=${(e) => onCommit(e.target.value)} /></div>
   </label>`;
   return html`<div class="tree-side">
     <span class="eyebrow">Moment</span>
@@ -1552,35 +1593,36 @@ function TreeSide({ t, play, playFrame, openFont, find, searching }) {
       : p.peek ? html`<div class="small muted">The game does not draw this at this moment. It is shown on top while it is selected; an edit holds wherever the game shows it.</div>` : null}
       ${p.hidden ? html`<div class="small in-game">Hidden in the game: Write leaves it out of the card.${p.view_off ? "" : " Its eye is open, so the preview still shows it."}</div>`
       : p.hid_in ? html`<div class="small in-game">It sits in ${p.hid_in}, hidden in the game: Write leaves it out of the card.</div>` : null}
-      ${p.filled ? html`<div class="small tree-filled-note" ...${tip(filledTip(p.filled))}><${Icon} name="gear" /><span>${p.filled.line
-          ? html`Filled in by the game with <b>${p.filled.line}</b>${(p.filled.modes || []).length ? ` (${p.filled.modes.join(", ")})` : ""}`
-          : html`Filled in by the game during <b>${(p.filled.modes || []).join(", ")}</b>`}</span>
-        <${Button} size="xs" kind="ghost" icon="text" title=${p.filled.line ? "Find the game's line on the Replace Text tab" : "List that mode's lines on the Replace Text tab"}
-          onClick=${() => call("text_scenes.activate", filledJump(p.filled))}>${p.filled.line ? "Its line" : "Its lines"}<//></div>` : null}
-      ${p.game_colors ? html`<${GameColors} g=${p.game_colors} />` : null}
-      ${p.words ? html`<${Words} p=${p} find=${find} searching=${searching} />` : null}
-      ${p.pic ? html`<div class="tree-row">
-        <span class="small muted" ...${tip("The picture's own size, and how much the game scales it to draw it here. Anything but 100% is resized by the game as it draws, which can leave jagged edges: make the picture at the size it shows, replace it on the Images tab with \"Keep this picture's own size\" ticked, then press Draw 1:1.")}>
-          Picture ${p.pic.w} x ${p.pic.h} px, drawn at ${p.pic.sx === p.pic.sy ? p.pic.sx : `${p.pic.sx} x ${p.pic.sy}`}%</span>
-        <${Button} size="xs" disabled=${p.pic.sx === 100 && p.pic.sy === 100}
-          title="Draw the picture pixel for pixel (100%), keeping its top-left corner where it is"
+      <${GameFills} p=${p} />
+      <${GameColors} g=${p.game_colors} />
+      <${Words} p=${p} find=${find} searching=${searching} />
+      <div class=${cx("tree-row tree-pic", !p.pic && "tree-off")}>
+        <span class="small muted ellip" ...${tip(p.pic ? "The picture's own size, and how much the game scales it to draw it here. Anything but 100% is resized by the game as it draws, which can leave jagged edges: make the picture at the size it shows, replace it on the Images tab with \"Keep this picture's own size\" ticked, then press Draw 1:1."
+          : "Only a picture has a size of its own to draw it at.")}>
+          ${p.pic ? `Picture ${p.pic.w} x ${p.pic.h} px at ${p.pic.sx === p.pic.sy ? p.pic.sx : `${p.pic.sx} x ${p.pic.sy}`}%` : "No picture of its own"}</span>
+        <${Button} size="xs" disabled=${!p.pic || (p.pic.sx === 100 && p.pic.sy === 100)}
+          title=${p.pic ? "Draw the picture pixel for pixel (100%), keeping its top-left corner where it is" : "Only a picture is drawn 1:1"}
           onClick=${() => call("text_scenes.tree_one_to_one", p.id)}>Draw 1:1<//>
-      </div>` : null}
-      ${p.x != null ? html`<div class="tree-row">
-        ${num("X", p.x, (v) => call("text_scenes.tree_move", p.id, Number(v) - p.x, 0), "Left edge on the glass (px)")}
-        ${num("Y", p.y, (v) => call("text_scenes.tree_move", p.id, 0, Number(v) - p.y), "Top edge on the glass (px)")}
-      </div>` : html`<div class="small muted">Not on the glass at this moment.</div>`}
-      ${p.w != null ? html`<div class="tree-row">
+      </div>
+      ${p.x != null ? null : html`<div class="small muted">Not on the glass at this moment.</div>`}
+      <div class="tree-row">
+        ${num("X", p.x, (v) => call("text_scenes.tree_move", p.id, Number(v) - p.x, 0), "Left edge on the glass (px)", p.x == null)}
+        ${num("Y", p.y, (v) => call("text_scenes.tree_move", p.id, 0, Number(v) - p.y), "Top edge on the glass (px)", p.x == null)}
+      </div>
+      <div class="tree-row">
         ${num("W px", p.w, (v) => call("text_scenes.tree_set_pixels", p.id, v, null, keepShape), isText
           ? "The width of its box on the screen, in pixels. The words stay their size and wrap to fit inside it (the corner handles do the same)."
-          : "Its width on the screen, in pixels (the screen is 1360 x 768)")}
+          : "Its width on the screen, in pixels (the screen is 1360 x 768)", p.w == null)}
         ${num("H px", p.h, (v) => call("text_scenes.tree_set_pixels", p.id, null, v, keepShape), isText
           ? "The height of its box on the screen, in pixels. The words stay their size."
-          : "Its height on the screen, in pixels")}
+          : "Its height on the screen, in pixels", p.w == null)}
       </div>
-      ${isText ? null : html`<label class="tree-row small tree-keep" title="On: a new width or height resizes it both ways, so it keeps its shape. Off: it stretches one way only.">
-        <input type="checkbox" checked=${keepShape} onChange=${(e) => setKeepShape(e.target.checked)} /> Keep its shape
-      </label>`}` : null}
+      <label class=${cx("tree-row small tree-keep", (isText || p.w == null) && "tree-off")} ...${tip(isText
+        ? "A line of text's box takes any width and height: its words keep their size."
+        : "On: a new width or height resizes it both ways, so it keeps its shape. Off: it stretches one way only.")}>
+        <input type="checkbox" checked=${keepShape && !isText} disabled=${isText || p.w == null}
+          onChange=${(e) => setKeepShape(e.target.checked)} /> Keep its shape
+      </label>
       <div class="tree-row">
         ${num("Size %", p.scale === p.scale_y ? p.scale : "", (v) => call("text_scenes.tree_set_scale", p.id, v), isText
           ? "The size of the words (and their box with them), both ways at once; 100 = the size the game ships"
@@ -1613,11 +1655,13 @@ function TreeSide({ t, play, playFrame, openFont, find, searching }) {
         <${Button} size="xs" onClick=${() => call("text_scenes.tree_order", p.id, "back")}>To back<//>
         <${Button} size="xs" onClick=${() => call("text_scenes.tree_reset", p.id)}>${p.added ? "Remove" : "As shipped"}<//>
       </div>
-      ${p.kind === "Text" && p.font && openFont ? html`<div class="tree-row">
-        <${Button} size="xs" icon="text" title=${{ head: "Font controls", lines: [
-          "Opens the Font bar on the right edge: this line's font, size, italic, letter width, spacing, wrapping, where its words sit in its box, Fit box to text and its drop shadow."] }}
+      ${openFont ? html`<div class=${cx("tree-row", !(isText && p.font) && "tree-off")}>
+        <${Button} size="xs" icon="text" disabled=${!(isText && p.font)} title=${{ head: "Font controls", lines: [
+          "Opens the Font bar on the right edge: this line's font, size, italic, letter width, spacing, wrapping, where its words sit in its box, Fit box to text and its drop shadow.",
+          isText && p.font ? null : isText ? "Not for this line: its font is not known." : "Only a line of text has a font."] }}
           onClick=${openFont}>Font controls<//>
-        <span class="small muted ellip">${p.font.style ? `${p.font.style}, ${p.font.size} px` : `${p.font.size} px`}</span>
+        <span class="small muted ellip">${!(isText && p.font) ? (isText ? "Its font is not known" : "Only a line of text has a font")
+          : p.font.style ? `${p.font.style}, ${p.font.size} px` : `${p.font.size} px`}</span>
       </div>` : null}
     </div>` : html`<div class="small muted">Click a picture or a line of text in the preview, or a row in Layers. Ctrl-click (or Shift-click) to pick several and move them together.</div>`}
     ${(t.notes || []).length ? html`<div class="small warn-ink">${t.notes.join("; ")}</div>` : null}

@@ -863,6 +863,7 @@ class TreeEditMixin:
         w, h = int(man["stage"][0]), int(man["stage"][1])
         hits = []
         filled = self._tree_filled(card, man)
+        painted = self._tree_painted(man)
         for d in self._tdraws:
             if d["mul"][3] <= 0.01 or d["kind"] not in ("bitmap", "text", "flip"):
                 continue
@@ -871,6 +872,8 @@ class TreeEditMixin:
                          # PAD-512: the picture, for its clear parts (tree_see)
                          "img": d.get("image") if d["kind"] != "text" else None,
                          "filled": d["node"] in filled,
+                         # PAD-515: a line the game paints gets an outline of its own
+                         "painted": d["node"] in painted,
                          "pts": [[round(x, 1), round(y, 1)] for x, y in
                                  scene_eval.outline(d)]})
         rest = self._tree_default(card)
@@ -936,6 +939,7 @@ class TreeEditMixin:
                            "shown": n["id"] in (self._tforce.get(card) or ()),
                            "added": bool(n.get("added")),
                            "filled": filled.get(n["id"]),
+                           "painted": n["id"] in painted,
                            "hidden": any(op["op"] == "visible" and op.get("node") == n["id"]
                                          for op in ops),
                            "view_off": n["id"] in view,
@@ -1007,6 +1011,17 @@ class TreeEditMixin:
                 "words": self._tree_words_of(card, man, n, ops),
                 "game_colors": self._tree_game_colors(man, nid)}
 
+    def _tree_painted(self, man):
+        """The lines of scene manifest *man* the game program paints itself as it plays
+        (PAD-515, DragonRR: "it is extremely easy to forget this exists"): Godzilla's score
+        panel (PAD-507), ``{node id: "up" | "rest"}``."""
+        from ..plugins.stern import score_colours as sc
+        try:
+            return sc.panel_lines(man)
+        except Exception:                            # noqa: BLE001
+            log.exception("score panel lines")
+            return {}
+
     def _tree_game_colors(self, man, nid):
         """PAD-507 (DragonRR): a line of Godzilla's score panel, which the game program
         paints itself: each colour the machine shows the panel in, the game's own, picked by
@@ -1056,7 +1071,11 @@ class TreeEditMixin:
         the jackpot screen's GIGAN JACKPOT for the game's GIGAN JACKPOT!), or when a mode's
         code names it with this screen (``engine.program_mode_boxes``: the battle vs Gigan's
         Award_Textbox.Title_Instance, filled with its award line; the line itself is not
-        known, the mode is).  Memoised per scene until the text edits change."""
+        known, the mode is).  On a screen whose text boxes a mode's code names, the words only
+        count on those boxes, or for a line of a mode that names the screen: Tank Attack's
+        code names only the instruction line on its start screen, and its MULTIBALL title
+        read as filled with a MULTIBALL the game shows elsewhere (DragonRR, PAD-513).
+        Memoised per scene until the text edits change."""
         memo = getattr(self, "_filled_memo", None)
         if memo is None or memo[0] != self.assets_dir:
             memo = self._filled_memo = (self.assets_dir, {}, None)
@@ -1075,35 +1094,48 @@ class TreeEditMixin:
                             boxes.setdefault(key, {}).setdefault(p, [])
                             if R.mode_label(cls) not in boxes[key][p]:
                                 boxes[key][p].append(R.mode_label(cls))
-                index = (R.filled_index(rows), boxes)
+                screens = {}
+                for cls, keys in engine.program_mode_scenes(self.assets_dir).items():
+                    for key in keys:
+                        screens.setdefault(key, set()).add(R.mode_label(cls))
+                index = (R.filled_index(rows), boxes, screens)
             except Exception:                        # noqa: BLE001
-                index = ({}, {})
+                index = ({}, {}, {})
             self._filled_memo = (self.assets_dir, memo[1], index)
-        lines, boxes = index
+        lines, boxes, screens = index
         d = card.replace("\\", "/").rsplit("/", 1)[0]
-        named = {}
+        named, own = {}, set()
         for key, per in boxes.items():
             if d.endswith("/" + key) or d == key:
                 named.update(per)
-        out = {}
-        parent, names = {}, {}
+        for key, labels in screens.items():
+            if d.endswith("/" + key) or d == key:
+                own |= labels
+        parent, names, texts = {}, {}, []
         for n, p, _depth in _walk_man(man):
             parent[n["id"]] = p["id"] if p else None
             names[n["id"]] = n.get("name") or ""
-            if _kind_of(man, n) != "Text" or n.get("added"):
-                continue
-            words = R.stand_in_words(_text_of(man, n, "Text"), True)
-            hit = lines.get(words) if words else None
-            if hit:
-                out[n["id"]] = {"line": hit[0][0], "modes": list(hit[0][1])}
-                continue
+            if _kind_of(man, n) == "Text" and not n.get("added"):
+                texts.append(n)
+        mode_named = {}
+        for n in texts:
             parts, cur = [], n["id"]
             while cur is not None:
                 parts.append(names[cur])
                 cur = parent.get(cur)
-            path = ".".join(reversed(parts))
-            labels = named.get(path) or named.get(names[n["id"]])
-            if labels:
+            mode_named[n["id"]] = (named.get(".".join(reversed(parts)))
+                                   or named.get(names[n["id"]]))
+        some_named = any(mode_named.values())
+        out = {}
+        for n in texts:
+            words = R.stand_in_words(_text_of(man, n, "Text"), True)
+            hits = lines.get(words) if words else None
+            labels = mode_named[n["id"]]
+            if hits and some_named and not labels:
+                hits = [h for h in hits if own & set(h[1])]
+            if hits:
+                out[n["id"]] = {"line": hits[0][0], "modes": list(hits[0][1])}
+            elif labels:
                 out[n["id"]] = {"line": None, "modes": list(labels)}
         memo[1][card] = out
         return out

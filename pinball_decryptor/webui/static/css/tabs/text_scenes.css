@@ -130,19 +130,42 @@
 .scenes-prep-bar { max-width: 420px; }
 @media (prefers-reduced-motion: reduce) { .scenes-shimmer { animation: none; } .tree-busy { animation-duration: .01s; } }
 .tree-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+/* PAD-515: what the game does to a box as it plays, a color each - teal it fills its words in
+   (PAD-485), violet it paints its colors (PAD-507) - on its outline, its Layers row and its
+   bar in the Selected panel */
+:root { --game-fills: #2dd4bf; --game-paints: #c084fc; }
+:root.light { --game-fills: #0f9488; --game-paints: #9333ea; }
 .tree-hover { fill: rgba(255, 255, 255, 0.06); stroke: rgba(255, 255, 255, 0.7); stroke-width: 2; stroke-dasharray: 8 6; vector-effect: non-scaling-stroke; }
 .tree-sel { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-/* PAD-485: a box the game fills in as it plays keeps an outline of its own (teal, dotted) */
-.tree-filled { fill: none; stroke: #2dd4bf; stroke-width: 2.5; stroke-dasharray: 2 6; stroke-linecap: round; vector-effect: non-scaling-stroke; opacity: .95; }
-.ly-filled { display: inline-flex; vertical-align: -2px; color: #2dd4bf; margin-right: 4px; }
+/* an outline of its own kind shows the same way (under the mouse, selected), in its own color
+   and dashes: teal dots for a box the game fills, violet dash-dots for a line it paints */
+.tree-hover.filled { fill: rgba(45, 212, 191, .08); stroke: var(--game-fills); stroke-width: 2.5; stroke-dasharray: 2 6; stroke-linecap: round; }
+.tree-hover.painted { fill: rgba(192, 132, 252, .08); stroke: var(--game-paints); stroke-width: 2.5; stroke-dasharray: 10 4 2 4; }
+.tree-sel.filled, .tree-box.filled { stroke: var(--game-fills); }
+.tree-sel.painted, .tree-box.painted { stroke: var(--game-paints); }
+.tree-handle.filled { fill: var(--game-fills); }
+.tree-handle.painted { fill: var(--game-paints); }
+.ly-filled { display: inline-flex; vertical-align: -2px; color: var(--game-fills); margin-right: 4px; }
+.ly-filled.ly-painted { color: var(--game-paints); }
 .ly-filled .i { width: 13px; height: 13px; }
-.tree-filled-note { display: flex; align-items: center; gap: 6px; color: #2dd4bf; flex-wrap: wrap; }
-.tree-filled-note .i { flex: none; }
-.tree-filled-note b { color: var(--ink); }
-/* PAD-507: the colors the game paints Godzilla's score panel in */
-.tree-game-colors { display: flex; flex-direction: column; gap: 4px; }
-.tree-game-colors .tree-filled-note { flex-wrap: nowrap; align-items: flex-start; }
-.tree-row.tgc-row { flex-wrap: nowrap; }
+/* the Selected panel's bars, like Switchable parts: lit in their color when the game does it,
+   greyed out when it does not */
+.tree-game { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--line-2); border-radius: 6px; padding: 5px 8px; }
+.tree-game .tg-head { flex-wrap: nowrap; min-height: 24px; }
+.tree-game .tg-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.tree-game .tg-name .i { flex: none; width: 15px; height: 15px; }
+.tree-game .tg-name .eyebrow { margin: 0; color: inherit; white-space: nowrap; }
+.tree-game .tg-what b { color: var(--ink); }
+.tree-game.fills { border-color: var(--game-fills); color: var(--game-fills); background: rgba(45, 212, 191, .06); }
+.tree-game.paints { border-color: var(--game-paints); color: var(--game-paints); background: rgba(192, 132, 252, .06); }
+.tree-game.off { border-color: var(--line); color: var(--ink-3); background: none; }
+.tree-game.off .tg-name, .tree-game.off .tg-what { opacity: .6; }
+/* a control that does not apply to the selection is greyed out, not taken away */
+.tree-off .lbl, .tree-off > .small, .lbl.tree-off, .small.tree-off, label.tree-off { opacity: .6; }
+.tree-row.tgc-row { flex-wrap: nowrap; color: var(--ink); }
+/* the picture's size and Draw 1:1 on one line, a picture or not */
+.tree-row.tree-pic { flex-wrap: nowrap; }
+.tree-pic .btn { flex: none; }
 .tgc-row .tree-color { width: 32px; height: 22px; flex: none; }
 .tgc-label { flex: 1 1 auto; min-width: 0; }
 .tgc-src { flex: none; }
