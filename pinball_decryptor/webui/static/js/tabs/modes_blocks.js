@@ -31,6 +31,7 @@ const PATTERNS = [["solid", "solid"], ["blink", "blinking"], ["pulse", "pulsing"
   ["hurry", "blinking faster"]];
 const PACED = ["blink", "pulse", "chase"];
 const LIT_PATTERNS = PATTERNS.filter(([p]) => p !== "hurry");   // PAD-503: no clock runs while a mode is lit
+const LIT_INSERTS_MAX = 8;                                        // PAD-521: block_modes.LIT_INSERTS_MAX
 const OPS = [["+", "+"], ["-", "−"], ["*", "×"], ["/", "÷"]];
 const CMPS = [["<", "<"], ["<=", "≤"], ["=", "="], ["!=", "≠"], [">=", "≥"], [">", ">"]];
 const SCOOP_WHICH = [["next", "the next ball"], ["every", "every ball"]];   // PAD-395
@@ -99,7 +100,12 @@ const TIP = {
   shake: "Shakes the cabinet's shaker motor for this long, the way the game shakes it: the operator's Shaker Motor setting still applies (switched off, or no shaker fitted: nothing). A strength the game itself shakes at (some games have one only), never longer than the game's own longest at that strength. One at a time, never over one of the game's own, 20 shakes and 15 seconds of shaking a minute at most; the mode, the ball or the game ending stops it, except a shake in When the mode ends, which runs out.",
   shakeGame: "Plays one of the game's own shakes, as the game does: on Godzilla its hit (a battle's shot), its big hit, its jackpot (every super jackpot), its long rumble or its multiball start (five shakes over 4 seconds); on the other games the one it plays most of each length (a tap, a short, medium or long shake, a rumble). The same limits as Shake the cabinet.",
   gameShow: "One of the game's own playfield light shows, played as the game plays it, for its own few seconds; a new one takes the place of one still playing. Only while the mode runs or as it ends (When the mode ends), never as the ball drains: the game stops its own shows then.",
-  lightMode: "Lights this mode for the player up, as the game lights one of its own mini-wizards: the shot's lights and the insert picked (a villain's) shine in this colour while the mode is not running, ball after ball, and that shot made starts the mode. As the game's own do, it waits while the game says one of its modes is in the way (on James Bond: a henchman, villain or Q Branch mode, or one of its mini-wizards) and, as this mode is set, while another of the game's modes or a multiball runs; it stays lit for the next shot. Once it could start, its shot is its own: the game does not start one of its own modes on it (on James Bond's Right ramp, a henchman or villain), which waits for a later shot. It stays lit when a ball or one of the game's modes ends. Starting, however it starts, puts the light out, and so does a new game. Each player's is their own.",
+  lightMode: "Lights this mode for the player up, as the game lights one of its own mini-wizards: the shot's lights and the inserts picked (a villain's; several take turns with Chase) shine in this colour while the mode is not running, ball after ball, and that shot made starts the mode. As the game's own do, it waits while the game says one of its modes is in the way (on James Bond: a henchman, villain or Q Branch mode, or one of its mini-wizards) and, as this mode is set, while another of the game's modes or a multiball runs; it stays lit for the next shot. Once it could start, its shot is its own: the game does not start one of its own modes on it (on James Bond's Right ramp, a henchman or villain), which waits for a later shot. It stays lit when a ball or one of the game's modes ends. Starting, however it starts, puts the light out, and so does a new game. Each player's is their own.",
+  litMore: "Another insert lit with it. With more than one, Chase runs the light across them in turn, as James Bond cycles its villains on the Right ramp while one of its mini-wizards is lit; the other patterns light them all at once.",
+  litSolid: "One insert more, held solid in its own colour while the mode is lit and handed back with the rest: the film's insert (Y.O.L.T., DIAMONDS ARE FOREVER) as the game holds it for one of its own mini-wizards.",
+  bar: "While it runs, its name goes in the game's own status bar under the screen, in this colour, with its clock draining along it, as the game shows its own modes (James Bond: Goldfinger's Jackpot in gold). At the end the bar stays full through its total, then the game has it back; a drain gives it back at once.",
+  barOff: "This card's game has no status bar a mode can use: the mode runs the same without it.",
+  screenStyle: "As a panel: its name on a panel in the middle of the screen, there all the time it runs, its TOTAL on it at the end. As words over the video: no panel, its words alone, large and white over the game's video as the game letters its own - its name over its intro for 4 s, a Words block's line for 3 s, its TOTAL over its end for 3 s.",
   gameWizard: "Hands the player one of the game's own mini-wizards, the game's mode itself with its own shots, lights, screens, sounds and award. Light it (where the game lights that one for a start shot): it waits for the game's own start shot, as when the game lights one. Start it: it begins at once, or the moment none of the game's own modes is in its way (nor this mode holding the game's modes off), that ball. On James Bond 007, until it starts it is the only one lit, so the game's own choosing cannot swap it for another, and the game no longer lights one named here by itself; on the other games the game's own rules still light and start their mini-wizards too. Works whether this mode runs or not: in When the game does an event it is a mini-wizard for that event. One the player has played this game plays again.",
   shield: "Turns the platform the shield targets sit on (about a second) and keeps it there while the mode runs: the game's ball search swings it, and it is turned back after. Where they are: stop keeping them. Only while the mode runs, never while one of the game's own modes runs, 1.5 s between moves, 12 a minute at most; the mode ending, the ball draining or a tilt turns them back where they were. They stay turned only while the game's modes cannot start and its own shield feature does not keep counting.",
 };
@@ -298,14 +304,25 @@ function StmtBody({ b, path, ed }) {
     case "end_mode": return html`<span class="bk-w">End the mode</span>`;
     case "light_mode": {
       // PAD-503: lit at a shot, with one more insert of the card's (a villain's), as the game's mini-wizards are
+      // PAD-521: several inserts (a chase runs across them, as the game cycles its villains), and one more held solid
       const ins = ed.ch.inserts || [];
-      const cur = b.insert ? b.insert : "-";
+      const opts = [["-", "none"], ...ins.map((n) => [n, n])];
+      const names = String(b.insert || "").split(",").map((n) => n.trim()).filter(Boolean);
+      const setNames = (list) => set("insert", list.filter(Boolean).join(","));
+      const none = ins.length ? undefined : "This card's game has no inserts a mode can light: only the mode is lit.";
+      const more = ins.find((n) => !names.includes(n));
       return html`<span class="bk-w" ...${tip(TIP.lightMode)}>Light the mode at</span><${Pick} value=${b.shot} options=${shots} onChange=${(v) => set("shot", v)} />
-        <span class="bk-w">and the insert</span><${Pick} value=${cur} options=${[["-", "none"], ...ins.map((n) => [n, n])]} missing="(not on this game)"
-          width=${200} title=${ins.length ? undefined : "This card's game has no inserts a mode can light: only the mode is lit."}
-          onChange=${(v) => set("insert", v === "-" ? "" : v)} />
+        <span class="bk-w">and the insert${names.length > 1 ? "s" : ""}</span>
+        ${(names.length ? names : ["-"]).map((n, i) => html`<${Pick} value=${n} options=${opts} missing="(not on this game)" width=${200} title=${none}
+          onChange=${(v) => { const l = [...names]; if (v === "-") l.splice(i, 1); else l[i] = v; setNames(l); }} />`)}
+        ${names.length && names.length < LIT_INSERTS_MAX && more ? html`<button type="button" class="bk-add" onClick=${() => setNames([...names, more])}
+          ...${tip(TIP.litMore)}>+ insert</button>` : null}
         <input type="color" class="bk-color" value=${b.color || "#ffd000"} onInput=${(e) => set("color", e.target.value)} ...${tip("The lights' colour")} />
-        <${Pick} value=${b.pattern} options=${LIT_PATTERNS} onChange=${(v) => set("pattern", v)} />`;
+        <${Pick} value=${b.pattern} options=${LIT_PATTERNS} onChange=${(v) => set("pattern", v)} />
+        <span class="bk-w" ...${tip(TIP.litSolid)}>and hold</span><${Pick} value=${b.solid || "-"} options=${opts} missing="(not on this game)" width=${200}
+          title=${none} onChange=${(v) => set("solid", v === "-" ? "" : v)} />
+        ${b.solid ? html`<input type="color" class="bk-color" value=${b.solid_color || "#ffffff"} onInput=${(e) => set("solid_color", e.target.value)}
+          ...${tip("That insert's colour")} />` : null}<span class="bk-w">solid</span>`;
     }
     case "score": return html`<span class="bk-w">Score</span><${Slot} kind="num" value=${b.points} path=${[...path, "points"]} ed=${ed} /><span class="bk-w">points</span>`;
     case "set": return html`<span class="bk-w">Set</span><${Pick} value=${b.var} options=${ed.vars.map((v) => v.name)} missing="(no such variable)" onChange=${(v) => set("var", v)} />
@@ -917,6 +934,8 @@ export function BlocksEditor({ s, c }) {
         <${Num} value=${prog.seconds} width=${56} title=${TIP.seconds} onChange=${(v) => ed.set(["seconds"], v)} /><span class="small muted">seconds</span>
         <${Check} checked=${prog.ends_on_drain !== false} label="ends when the ball drains" title=${TIP.drain} onChange=${(v) => ed.set(["ends_on_drain"], v)} />
         <${Check} checked=${!!prog.screen} label="its own screen" title=${TIP.screen} onChange=${(v) => ed.set(["screen"], v)} />
+        ${prog.screen ? html`<${Select} sm value=${prog.screen_style || "panel"} title=${TIP.screenStyle} onChange=${(v) => ed.set(["screen_style"], v)}
+          options=${[{ value: "panel", label: "as a panel" }, { value: "words", label: "as words over the video" }]} />` : null}
         <${Check} checked=${!!prog.wait_multiball} label="waits out a multiball" title=${TIP.wait} onChange=${(v) => ed.set(["wait_multiball"], v)} />
         <span class="lbl" ...${tip(TIP.displayPriority)}>Display priority</span>
         <${Select} sm value=${String(prog.priority || 0)} title=${TIP.displayPriority} onChange=${(v) => ed.set(["priority"], Number(v))}
@@ -925,6 +944,10 @@ export function BlocksEditor({ s, c }) {
               // PAD-375: a HUD keeps a priority of its own, so its words wait under the game's displays
               label: value === 0 && (prog.hud || {}).on ? "the HUD's (180)" : label }))} />
         <${Check} checked=${!!(prog.hud || {}).on} label="its HUD" title=${TIP.hud} onChange=${(v) => ed.set(["hud", "on"], v)} />
+        ${ed.ch.status_bar || (prog.bar || {}).on ? html`<${Check} checked=${!!(prog.bar || {}).on} label="its name in the game's bar"
+          title=${ed.ch.status_bar ? TIP.bar : TIP.barOff} onChange=${(v) => ed.set(["bar", "on"], v)} />
+          ${(prog.bar || {}).on ? html`<input type="color" class="bk-color" value=${(prog.bar || {}).color || "#00c040"}
+            onInput=${(e) => ed.set(["bar", "color"], e.target.value)} ...${tip("The bar's colour")} />` : null}` : null}
       </div>
       <${GameModes} prog=${prog} ed=${ed} />
       <${Variables} prog=${prog} ed=${ed} />

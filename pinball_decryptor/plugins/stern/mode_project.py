@@ -98,6 +98,8 @@ class TitleProfile:
     wizard_claims: bool = False      # PAD-457: one a mode hands out is its mode's: the game's own lighting leaves it
     inserts: tuple = ()              # PAD-503: the names of every insert the port names a mode can light (a villain's
     #                                  on Bond's Right ramp, shot or not); () = none it can light on this title
+    status_bar: bool = False         # PAD-521: the port names the game's own status bar (`site status_bar`): a mode's
+    #                                  name, colour and clock can go in it (Bond LE: the coloured bar under the TV)
 
     def lcd(self, which):
         """``assets/lcd/<tree>/<scene id>`` of the title's ``"bank"`` or ``"hud"`` scene."""
@@ -2004,6 +2006,7 @@ def profile_from_port(path):
         wizard_shot=port["text"].get("wizard_shot", "").strip(),
         wizard_lights=_wizard_lights(port),                  # PAD-473
         wizard_claims=_wizard_route(port) == 1 and "wizard_light" in port["site"],
+        status_bar=all(n in port["site"] for n in ("status_bar", "set_text", "string_new")),   # PAD-521
     )
 
 

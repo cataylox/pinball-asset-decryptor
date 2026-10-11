@@ -4004,6 +4004,77 @@ stop; the renderer presenting every frame. Not measured: a machine; another titl
 lines); a battle's background (the backdrop only takes the city's place, so ANGUIRUS, inside a battle,
 does not use it).
 
+### The backdrop on a clip v2 build: the loop on the bank's surface (PAD-521)
+
+A James Bond owner wanted their own mini-wizards to look like the game's: a video cycling all through the mode and
+back again after a shot's video. Bond LE plays a mode's clips on the video bank's own surface (clip v2, "Clips on the
+newer builds"), which the game draws in the TV frame above the score panel; it has no background element to take
+over, so `pm_backdrop` answered 0 and a loop played once. With
+
+```
+value backdrop_surface 1        # james_bond_le-1.06: the clip v2 lines are needed too
+```
+
+`pm_backdrop` / `pm_backdrop_once` work there: the runtime plays the loop on the surface again whenever it is idle
+while the mode wants it - its own end, a one-shot in its place (played at once), a full-screen clip of the mode's
+(`pm_clip`, the same surface: the loop after it), a clip of the game's on that surface. `pm_backdrop(0)`, `pm_end`
+and a ball end stop ours, and the game's own clips come back. The boot log says `backdrop: on - a mode's clip loops
+on the video bank's surface, behind the game's own videos`; each play is a `backdrop: "<clip>" looped / once / again
+on the video bank's surface` line.
+
+**Measured (emulator, stock Bond LE 1.06 card, 2026-10-11, rig 1, the game's own clips by name):** the loop
+(`GLDFNGR_Wizard_Mode_Background`) waited for the game's clip then on the surface and played in the TV frame,
+on through a Side ramp shot; `Disco_Intro` once in its place and the loop again by itself after it; a full-screen
+`MainPlayLoop_DrNo` over it; the game's own main-play loop back when the mode stopped it. No abort. Not measured: a
+machine; Bond Pro 1.06 (no line yet).
+
+Just asked for, or right after a full-screen clip of the mode's, the loop takes the surface at once, over whatever the
+game has there. The game's own main-play video (`MainPlayLoop_<film>`) can take the surface the moment a clip of ours
+ends (end-to-end run e3: the loop played after the intro and the game's dots were back 30 ms later, until they ran
+out); with `text backdrop_idle MainPlayLoop` the runtime watches the game's asks for the bank's surface (one hook on
+`surface_set_video`, shared with PAD-446's clip variants) and gives the loop the surface back on the next tick. Any
+other clip of the game's is waited out. Runs e4-e6 (the same sequence) kept the loop from the intro's end to the mode's;
+the game did not ask for its main-play video in them, so the take-back itself has not been seen yet.
+
+### The game's status bar (PAD-521)
+
+James Bond LE shows each of its own modes in a coloured bar under the TV: the mode's name in the game's lettering, the
+bar in the mode's colour (Goldfinger's Jackpot gold), and its clock as a wipe draining along it. That bar is the port's
+scene `hud` (6fb39344/7de1c159: `StatusBar_Instance` with `bar_Color_Instance`, `Progress_Instance`, `Text_Instance`),
+and it belongs to the score display. A mode puts itself there the same way:
+
+```c
+pm_status_bar("YOLT WIZARD", PM_RGB(0, 192, 64), percent);   /* percent 0-100 of the wipe, -1 = no wipe */
+pm_status_bar(0, 0, 0);                                     /* given back as it was */
+```
+
+How the game does it (read off the game program): the score display is a singleton (`site status_bar`, its getter
+0x1862dc); its frame update shows the bar, its words, its colour and its wipe from four bytes at +0x11e, and moves the
+wipe to frame (+0x11c) + 1. The game's own modes set the words by a message id and the colour by a palette index, and
+both setters end in the nodes' own calls: the text node (+0x118) through `set_text`, the bar_Color node (+0x114)
+through its vfn +0x4c and +0x44, each (node, r, g, b, 1.0). The runtime makes those calls with the mode's words and any
+colour, sets the four bytes, keeps them while it holds the bar (a display of the game's that hides it is answered the
+next tick, words and colour sent again) and gives back the bytes it found - unless the game took the bar for a display
+of its own since - when the mode gives it back, or once the game has been over 30 s. Port lines (defaults shown):
+
+```
+site status_bar       0x001862dc 0xe92d4038 0xe30e48f8    # james_bond_le-1.06
+value status_flags_at 0x11e      value status_frame_at 0x11c
+value status_text_at  0x118      value status_colour_at 0x114
+value status_colour_vfn 0x4c     value status_tint_vfn 0x44
+```
+
+**Measured (emulator, stock Bond LE 1.06 card, 2026-10-11, rig 1):** a green bar named YOLT WIZARD with its wipe full
+and at 40, the Goldfinger background looping in the TV above it, through a Side ramp shot; a blue DIAMOND DEATH THREAT
+with no wipe; the empty bar back when given back. No abort. Not measured: a machine; Bond Pro 1.06 (no line yet).
+
+**End to end (emulator, 2026-10-11, the stock Bond LE 1.06 card, rig 1, runs e2-e6):** a blocks mode YOLT WIZARD built by
+Try it's own code (`mode_write.build_tryit_set`: its words-alone screen into the HUD scene, four clips into the bank,
+the mode compiled), started by its trigger: "YOLT WIZARD" in large white letters over its intro clip and the green bar
+under the TV with its clock full; its loop in the TV after the intro, the bar draining; a Side ramp shot put "JACKPOT"
+over the loop and its one-shot in the loop's place, the loop back after; ended, "TOTAL 2,000,000" over its total clip
+with the bar full, both given back 3 s later. No abort.
+
 ### A full-screen clip on a machine: drawn at the frame hand-over (PAD-301)
 
 On David's Premium 1.16 (2026-10-01, a traced card and a phone video) a mode's full-screen clip (`pm_clip`:

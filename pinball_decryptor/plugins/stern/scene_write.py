@@ -1382,7 +1382,8 @@ def add_screens(data, screens, stock=None, clips=None, font_source=None, huds=No
         group, ids = screen(sub, s["name"], s["art_rgba"], s["words"], s.get("x", 360.0),
                             s.get("y", 200.0), s.get("words_at"), art_name=s.get("art_name"),
                             words_name=words_name, scale=s.get("scale", 1.0),
-                            words_scale=s.get("words_scale", 1.0))
+                            words_scale=s.get("words_scale", 1.0),
+                            words_rgba=s.get("words_rgba", (1.0, 0.9, 0.0, 1.0)))
         next_id += 7
         for nid in ids:
             if struct.pack("<I", FLAG | nid) in data:

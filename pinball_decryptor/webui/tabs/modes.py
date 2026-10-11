@@ -2755,6 +2755,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "wizard_claims": bool(getattr(p, "wizard_claims", False)) if p is not None else False,
                 # PAD-503: the inserts a Light the mode at block may light beside its shot's (a villain's)
                 "inserts": list(getattr(p, "inserts", ()) or ()) if p is not None else [],
+                # PAD-521: the game's own status bar a mode's name, colour and clock can go in (Bond LE)
+                "status_bar": bool(getattr(p, "status_bar", False)) if p is not None else False,
                 "game_wizards_off": ("Not on this game: " + p.why_not("wizard")) if p is not None and not p.can("wizard")
                                     else "" if p is not None else "No card picked yet.",
                 "block_off": ("" if gms or p is None else

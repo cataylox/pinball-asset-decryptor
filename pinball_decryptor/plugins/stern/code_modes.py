@@ -12,6 +12,8 @@ code mode, or one of its Examples). What it plays of its own sits beside it, nam
       "screen_art": "screen.png",    the picture ("" = a generated panel with the name)
       "words_on_art": true,          its progress words sit on the picture's bottom band
       "screen_layout": {"x": 40, ...},  where the screen goes (PAD-323; {} = placed automatically)
+      "screen_style": "words",       PAD-521: no panel - its words alone, large and white, where the game
+                                     letters its own (James Bond: over the TV); "" = the panel
       "clip": "clip.mp4",            its start clip ("" = none)
       "music": "music.wav",          its own music bed ("" = none)
       "calls": {"sever": "sever.wav", "spike": {"wav": "spike.wav", "priority": 3}},
@@ -89,6 +91,7 @@ class CodeAssets:
     panel_color: str = "#146e28"
     title_color: str = "#ffe600"
     screen_layout: dict = field(default_factory=dict)   # PAD-323: as a form mode's (mode_assets.LAYOUT_KEYS)
+    screen_style: str = ""                        # PAD-521: "words" = no panel, its words large and white
     clip: str = ""
     music: str = ""
     calls: dict = field(default_factory=dict)

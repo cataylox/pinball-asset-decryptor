@@ -34,6 +34,10 @@ THE PROGRAM (``blocks.json``)::
       "clips": [{"name": "sever", "file": "sever.mp4"}],      PAD-374: its own clips and sounds,
       "sounds": [{"name": "roar", "file": "roar.wav", "priority": 4}],   files in its folder
       "music": "music.wav",       its own music bed while it runs ("" = the game's music)
+      "screen_style": "words",    PAD-521: its own screen as words alone, large and white over the game's video (the
+                                  game's own look: a name over its intro, the TOTAL over its end); "panel" = the panel
+      "bar": {"on": true, "color": "#00c040"},   PAD-521: its name in the game's own status bar (James Bond: the
+                                  coloured bar under the TV), in this colour, its clock draining along it
       "scripts": [
         {"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"},
          "do": [{"op": "if", "cond": {...}, "then": [...], "else": [...]}, ...]}
@@ -81,6 +85,10 @@ the Right ramp kept starting one of the game's villains instead - it is where Bo
 modes, and the game handles a shot before the modes hear of it. So (3) while the mode would start on its lit shot,
 it CLAIMS the shot every tick (pm_lit_claim): a hit on that switch holds the game's own starts off while the game
 handles it, and the shot starts the lit mode; the game's henchman or villain waits for a later shot.
+The same owner then (PAD-521) wanted their modes to look like the game's own: while one of its mini-wizards is
+qualified the Right ramp's villain inserts cycle and the film's insert is solid. So the block's ``insert`` may name
+several inserts, separated by commas as pm_lamp_set takes them (up to LIT_INSERTS_MAX; a Chase runs across them in
+that order), and ``solid`` / ``solid_color`` one insert more held solid while it is lit (the film's).
 
 What a mode in C does with the kit (``sdk/examples/intricate_kit.h``), PAD-377 gives the blocks:
 
@@ -217,6 +225,7 @@ RATE_MIN, RATE_MAX = 20, 5000    # a blink's, pulse's or chase's pace, ms
 #: PAD-503: a mode lit at a shot shows it in one of these (no clock runs while it is lit, so no hurry)
 LIT_PATTERNS = ("solid", "blink", "pulse", "chase")
 INSERT_MAX = 39                  # an insert's name (pad_mode_runtime.c struct lamp keeps 39 letters)
+LIT_INSERTS_MAX = 8              # PAD-521: a mode lit at a shot lights up to this many inserts more (a chase runs across them)
 # ---- light shows (PAD-376): the kit's kit_show, steps of a pattern over the placed inserts ----
 #: a step's pattern: its C name, and the words the page shows
 FX = {"burst": ("FX_BURST", "a ring bursting out"), "implode": ("FX_IMPLODE", "a ring closing in"),
@@ -344,6 +353,7 @@ def normalize(data):
         out["seconds"] = 30
     out["ends_on_drain"] = bool(out.get("ends_on_drain", True))
     out["screen"] = bool(out.get("screen", False))
+    out["screen_style"] = out.get("screen_style") if out.get("screen_style") in SCREEN_STYLES else "panel"   # PAD-521
     if out.get("game_modes") not in GAME_MODES:          # PAD-373; PAD-398: our modes run alone by default
         out["game_modes"] = "block"
     keep = out.get("keep_rules") if isinstance(out.get("keep_rules"), list) else []      # PAD-398
@@ -363,6 +373,7 @@ def normalize(data):
     out["music"] = str(out.get("music") or "")
     out["scripts"] = [s for s in (out.get("scripts") or []) if isinstance(s, dict)]
     out["hud"] = _norm_hud(out.get("hud"))
+    out["bar"] = _norm_bar(out.get("bar"))
     for s in out["scripts"]:
         for b in _walk(s.get("do")):
             # PAD-372: Add seconds takes a value; one saved before held a plain number
@@ -370,6 +381,19 @@ def normalize(data):
             if b.get("op") == "add_time" and isinstance(secs, (int, float)) and not isinstance(secs, bool):
                 b["seconds"] = {"k": "num", "v": b["seconds"]}
     return out
+
+
+BAR_COLOR = "#00c040"            # PAD-521: the status bar's colour unless one is picked
+#: PAD-521: its own screen - the panel with its name, or its words alone over the game's video, as the game's own
+SCREEN_STYLES = {"panel": "a panel", "words": "words over the video"}
+WORDS_NAME_MS, WORDS_SHOW_MS = 4000, 3000   # words alone: its name at the start, a Words block's line, then gone
+
+
+def _norm_bar(b):
+    """PAD-521: the game's own status bar - off unless ticked, in a colour of its own."""
+    b = b if isinstance(b, dict) else {}
+    return {"on": bool(b.get("on", False)),
+            "color": b.get("color") if COLOR_RE.match(str(b.get("color") or "")) else BAR_COLOR}
 
 
 def _norm_hud(h):
@@ -507,7 +531,8 @@ def _sync_assets(project, slug, program):
     changed = (spec.name != (program["name"] or slug.upper()) or bool(spec.screen) != program["screen"]
                or spec.seconds != max(1, program["seconds"] or 60)
                or (spec.clips or {}) != clips or (spec.calls or {}) != calls
-               or (spec.music or "") != program["music"] or dict(spec.hud or {}) != hud)
+               or (spec.music or "") != program["music"] or dict(spec.hud or {}) != hud
+               or (getattr(spec, "screen_style", "") or "panel") != program["screen_style"])
     if changed or not os.path.isfile(os.path.join(MP.mode_folder(project, slug), CM.ASSETS_FILE)):
         spec.name = program["name"] or slug.upper()
         spec.screen = program["screen"]
@@ -516,6 +541,7 @@ def _sync_assets(project, slug, program):
         spec.clips = clips
         spec.calls = calls
         spec.music = program["music"]
+        spec.screen_style = "words" if program["screen_style"] == "words" else ""
         CM.save(project, slug, spec)
 
 
@@ -1059,11 +1085,43 @@ def _check_stack(stack, depth, where, ctx):
                 ctx["out"].append("%s lights the mode in no colour." % where)
             if b.get("pattern") not in LIT_PATTERNS:
                 ctx["out"].append("%s lights the mode in no pattern." % where)
-            insert = b.get("insert") or ""
-            if not isinstance(insert, str) or "," in insert or len(insert) > INSERT_MAX:
+            names = lit_inserts(b.get("insert"))
+            if names is None:
                 ctx["out"].append("%s lights an insert that is not one." % where)
-            elif insert and ctx["inserts"] and insert not in ctx["inserts"]:
-                ctx["out"].append("%s lights the insert %s, which this card's game does not have." % (where, insert))
+            else:
+                if len(names) > LIT_INSERTS_MAX:
+                    ctx["out"].append("%s lights more than %d inserts." % (where, LIT_INSERTS_MAX))
+                for insert in names:
+                    if ctx["inserts"] and insert not in ctx["inserts"]:
+                        ctx["out"].append("%s lights the insert %s, which this card's game does not have."
+                                          % (where, insert))
+            solid = b.get("solid") or ""                # PAD-521: one insert more, held solid (the film's)
+            if not isinstance(solid, str) or "," in solid or len(solid) > INSERT_MAX:
+                ctx["out"].append("%s holds an insert solid that is not one." % where)
+            elif solid and ctx["inserts"] and solid not in ctx["inserts"]:
+                ctx["out"].append("%s holds the insert %s solid, which this card's game does not have." % (where, solid))
+            elif solid and not COLOR_RE.match(str(b.get("solid_color") or "#ffffff")):
+                ctx["out"].append("%s holds an insert solid in no colour." % where)
+
+
+def lit_inserts(value):
+    """PAD-521: the inserts a Light the mode at block names (its ``insert``: one name, or several separated by commas,
+    as the runtime's pm_lamp_set takes them; "" = none), in order and each once; None when that is not a list of
+    names."""
+    if value is None:
+        return []
+    if not isinstance(value, str):
+        return None
+    out = []
+    for n in value.split(","):
+        n = n.strip()
+        if not n:
+            continue
+        if len(n) > INSERT_MAX:
+            return None
+        if n not in out:
+            out.append(n)
+    return out
 
 
 def _check_ms(ms, lo, hi, where, ctx):
@@ -1228,7 +1286,8 @@ class _Gen:
         self.game_show = False          # PAD-418: a block plays one of the game's own light shows
         self.game_wizard = False        # PAD-436: a block hands the player one of the game's own mini-wizards
         self.wizard_names = []          # PAD-457: ... which ones: the mode claims them as it loads
-        self.lit = []                   # PAD-503: each Light the mode at's (shot index, insert, rgb, pattern, ms)
+        self.lit = []                   # PAD-503: each Light the mode at's (shot index, inserts, rgb, pattern, ms,
+                                        # PAD-521: the insert held solid and its rgb)
         self.lit_asked = False          # PAD-503: a condition asks whether the mode is lit
 
     def var(self, i, p="P()"):
@@ -1497,10 +1556,13 @@ class _Gen:
                 pat, ms = PATTERNS[pattern]
                 color = str(b.get("color") or "")
                 rgb = int(color[1:], 16) if COLOR_RE.match(color) else 0xFFD000
-                insert = b.get("insert") if isinstance(b.get("insert"), str) else ""
-                if "," in insert or len(insert) > INSERT_MAX:
-                    insert = ""
-                spec = (self.shot_i(b.get("shot")), insert, rgb, pat, ms)
+                insert = ",".join((lit_inserts(b.get("insert")) or [])[:LIT_INSERTS_MAX])
+                solid = b.get("solid") if isinstance(b.get("solid"), str) else ""
+                if "," in solid or len(solid) > INSERT_MAX:
+                    solid = ""
+                scol = str(b.get("solid_color") or "#ffffff")
+                srgb = int(scol[1:], 16) if COLOR_RE.match(scol) else 0xFFFFFF
+                spec = (self.shot_i(b.get("shot")), insert, rgb, pat, ms, solid, srgb if solid else 0)
                 if spec not in self.lit:
                     self.lit.append(spec)
                 out.append(pad + "light_mode(%d);" % self.lit.index(spec))
@@ -1591,6 +1653,7 @@ def to_c(program, slug):
     # PAD-375: a mode with a HUD or a screen of its own watches the game's displays (the kit's
     # kit_display): its words step aside under one, so it holds a display priority while it runs
     watch = has_hud or program["screen"]
+    has_bar = program["bar"]["on"]          # PAD-521: its name, colour and clock in the game's own status bar
     live = []                           # (counter 0-2, C of its value): counters that follow a value
     gauge_live = None
     if has_hud:
@@ -1630,6 +1693,12 @@ def to_c(program, slug):
              % (program["priority"] or (HUD_PRIORITY if has_hud else 0)))
     L.append("#define TIMER_MAX_MS     %dL" % TIMER_MAX_MS)
     L.append("#define ENDING_MS        3000        /* the total its own screen shows at the end */")
+    words_only = program["screen"] and program["screen_style"] == "words"
+    L.append("#define WORDS_ONLY       %d          /* PAD-521: its screen is words alone: shown a moment, not all along */"
+             % (1 if words_only else 0))
+    if has_bar:
+        L.append("#define BAR_RGB          0x%06xu   /* PAD-521: its colour in the game's own status bar */"
+                 % int(program["bar"]["color"][1:], 16))
     L.append("#define UNUSED __attribute__((unused))   /* a helper the blocks may not call */")
     L.append("")
     gm = program["game_modes"]                           # PAD-373: as a form mode's (PAD-363)
@@ -1686,9 +1755,12 @@ def to_c(program, slug):
     L.append("    uint64_t total;")
     L.append("} run;")
     L.append("static int sec_changed, ending;")
+    L.append("static unsigned flash_ticks;           /* PAD-521: words alone: how long its words stay up */")
     L.append("static void *screen, *screen_words;")
     L.append("static unsigned hide_ticks, poll;")
     L.append("static unsigned ended_begun;          /* PAD-413: pm_begun() at its end, while its total shows */")
+    if has_bar:
+        L.append("static unsigned bar_max, bar_hold;     /* PAD-521: the clock's most ticks; the bar kept through the total */")
     if watch:
         L.append("static int screen_away;                /* its screen hidden: a game display or mode has the middle */")
     if has_hud:
@@ -1727,6 +1799,8 @@ def to_c(program, slug):
     L.append("    return run.on && RUN_SECONDS ? (run.ticks_left + TICKS_PER_SECOND - 1) / TICKS_PER_SECOND : 0;")
     L.append("}")
     L.append("")
+    if has_bar:
+        L.extend(_BAR_C.split("\n"))
     L.append("/* a timer: ms from now (0 or less stops it); the milliseconds it has left */")
     L.append("UNUSED static void timer_start(int i, long long ms)")
     L.append("{")
@@ -1765,6 +1839,10 @@ def to_c(program, slug):
     L.append("        pm_set_text(screen_words, line);")
     L.append("    } else {")
     L.append("        pm_set_text(screen_words, text);")
+    L.append("    }")
+    L.append("    if (WORDS_ONLY && run.on && screen) {   /* PAD-521: words alone stay up a moment */")
+    L.append("        flash_ticks = %d * TICKS_PER_SECOND / 1000;" % WORDS_SHOW_MS)
+    L.append("        if (!screen_away) pm_show(screen, 1);" if watch else "        pm_show(screen, 1);")
     L.append("    }")
     L.append("}")
     L.append("")
@@ -1958,6 +2036,10 @@ def to_c(program, slug):
     L.append("    run.elapsed = 0;")
     L.append("    run.shots = 0;")
     L.append("    run.total = 0;")
+    if has_bar:
+        L.append("    bar_max = run.ticks_left;")
+        L.append("    bar_hold = 0;")
+        L.append("    bar_show(1);                      /* PAD-521: its name in the game's bar */")
     if g.mech:
         L.append("    scoop_next = 0;")
     L.append("    hide_ticks = 0;")
@@ -1967,6 +2049,8 @@ def to_c(program, slug):
     L.append("    if (screen) {")
     L.append("        words(MODE_NAME, 0, 0);")
     L.append("        pm_show(screen, 1);")
+    L.append("        if (WORDS_ONLY) flash_ticks = %d * TICKS_PER_SECOND / 1000;   /* PAD-521: its name over the intro */"
+             % WORDS_NAME_MS)
     L.append("    }")
     if has_hud:
         L.append("    {")
@@ -2007,7 +2091,13 @@ def to_c(program, slug):
         L.append("    }")
         L.append("    pa_end(&own);                     /* its music fades, the game's comes back */")
     L.append("    unlight_all();                    /* a show it ends with paints on, then hands back */")
+    if has_bar:
+        L.append("    bar_show(0);                      /* PAD-521: the bar full, kept through its total */")
+        L.append("    bar_hold = ENDING_MS / 1000 * TICKS_PER_SECOND;")
+        L.append("    ended_begun = pm_begun();")
     L.append("    if (screen) {")
+    L.append("        flash_ticks = 0;")
+    L.append("        if (WORDS_ONLY) pm_show(screen, 1);   /* PAD-521: its TOTAL over the game's video */")
     L.append('        words("TOTAL", (long long)run.total, 1);')
     L.append("        hide_ticks = %d * TICKS_PER_SECOND;" % (TOTAL_MS // 1000))
     L.append("        ended_begun = pm_begun();")
@@ -2043,6 +2133,9 @@ def to_c(program, slug):
     L.append("{")
     L.append("    end(why);")
     L.append("    hide_ticks = 0;")
+    if has_bar:
+        L.append("    bar_hold = 0;")
+        L.append("    pm_status_bar(0, 0, 0);           /* PAD-521: the game's display comes at once */")
     L.append("    if (screen) pm_show(screen, 0);")
     L.append("    if (DISPLAY_PRIORITY) pm_display_priority(0);")
     if has_hud:
@@ -2135,6 +2228,11 @@ def to_c(program, slug):
     L.append("        if (screen) pm_show(screen, 0);")
     L.append('        pm_log("its total gives way - another mode began");')
     L.append("    }")
+    if has_bar:
+        L.append("    if (bar_hold && !run.on && (pm_begun() != ended_begun || --bar_hold == 0)) {")
+        L.append("        bar_hold = 0;")
+        L.append("        pm_status_bar(0, 0, 0);       /* PAD-521: the bar back (not if another mode of ours has it) */")
+        L.append("    }")
     L.append("    if (hide_ticks && --hide_ticks == 0 && !run.on && screen) pm_show(screen, 0);")
     timer_scripts = scripts_of("timer_done")
     if timer_scripts:
@@ -2168,6 +2266,9 @@ def to_c(program, slug):
     L.append("        }")
     L.append("    }")
     L.append("    (void)seconds;")
+    L.append("    if (WORDS_ONLY && flash_ticks && --flash_ticks == 0 && screen) pm_show(screen, 0);   /* PAD-521 */")
+    if has_bar:
+        L.append("    bar_show(1);                      /* PAD-521: the clock along the bar */")
     L.append("    lamps_tick();")
     if g.mech:
         L.append("    scoop_tick();")
@@ -2178,7 +2279,7 @@ def to_c(program, slug):
         L.append("    if (run.on && screen) {           /* its screen out of the way of the game's (PAD-375) */")
         L.append("        int away = pm_display_covered() || pm_aside();")
         L.append("        if (away != screen_away) {")
-        L.append("            pm_show(screen, !away);")
+        L.append("            pm_show(screen, !away && (!WORDS_ONLY || flash_ticks));")
         L.append("            screen_away = away;")
         L.append("        }")
         L.append("    }")
@@ -2572,13 +2673,36 @@ UNUSED static void game_wizard(const char *name, int start)
 }
 """
 
+#: PAD-521: the game's own status bar (MODE_SDK.md "The game's status bar")
+_BAR_C = r"""/* PAD-521: its name in the game's own status bar (James Bond: the coloured bar under the TV), in BAR_RGB, the clock
+ * draining along it as the game's own modes show theirs; full through its total, then given back. A game without
+ * one shows nothing here. */
+static void bar_show(int clock)
+{
+    int pct = -1;
+    if (clock && RUN_SECONDS) {
+        if (run.ticks_left > bar_max) bar_max = run.ticks_left;    /* time added: the bar is full again */
+        pct = bar_max ? (int)((run.ticks_left * 100u + bar_max - 1) / bar_max) : 0;
+    }
+    pm_status_bar(MODE_NAME, BAR_RGB, pct);
+}
+"""
+
 #: PAD-503: the mode lit at a shot, as the game lights one of its mini-wizards; %(n)d Light the mode at blocks
 _LIT_C = r"""/* ---- the mode lit at a shot (PAD-503), as the game lights one of its mini-wizards: for the player up, the shot's
  * inserts and one insert more held in its colour while the mode is not running, ball after ball, until that shot
  * starts it (as Start the mode does: it may wait, and stays lit). Starting, however it starts, puts the light out;
  * a new game too. Each player's is their own. ---- */
 #define N_LIT_AT %(n)d
-static const struct { int shot; const char *insert; unsigned rgb; int pattern; unsigned ms; } LIT_AT[N_LIT_AT] = {
+static const struct {
+    int shot;
+    const char *insert;                 /* one insert or several, separated by commas: a chase runs across them */
+    unsigned rgb;
+    int pattern;
+    unsigned ms;
+    const char *solid;                  /* PAD-521: one insert more held solid while it is lit (the film's), "" = none */
+    unsigned solid_rgb;
+} LIT_AT[N_LIT_AT] = {
 %(rows)s};
 static int lit_as[5];                   /* per player: 1 + the LIT_AT it is lit as; 0 = not lit */
 static unsigned lit_player;             /* whose light lit_shown is; 0 = hold it again */
@@ -2604,6 +2728,7 @@ static void lit_off(void)
     if (k < 0) return;
     if (S[LIT_AT[k].shot] && !LIT[LIT_AT[k].shot].on) pm_lamp_release_shot(S[LIT_AT[k].shot]);
     if (LIT_AT[k].insert[0]) pm_lamp_release(LIT_AT[k].insert);
+    if (LIT_AT[k].solid[0]) pm_lamp_release(LIT_AT[k].solid);
     lit_shown = 0;
 }
 
@@ -2626,6 +2751,7 @@ static void lit_tick(void)
     k = want - 1;
     if (S[LIT_AT[k].shot]) pm_lamp_shot(S[LIT_AT[k].shot], LIT_AT[k].rgb, LIT_AT[k].pattern, LIT_AT[k].ms);
     if (LIT_AT[k].insert[0]) pm_lamp_set(LIT_AT[k].insert, LIT_AT[k].rgb, LIT_AT[k].pattern, LIT_AT[k].ms);
+    if (LIT_AT[k].solid[0]) pm_lamp_set(LIT_AT[k].solid, LIT_AT[k].solid_rgb, PM_LAMP_SOLID, 0);
     lit_shown = want;
     lit_player = p;
 }
@@ -2660,9 +2786,9 @@ static void lit_started(unsigned p)
 def _lit_c(g):
     """PAD-503: the C of the mode lit at a shot, one LIT_AT row per Light the mode at block."""
     rows = []
-    for shot, insert, rgb, pat, ms in g.lit:
-        rows.append("    { %d, %s, 0x%06xu, %s, %du },   /* %s */" % (
-            shot, _c_str(insert), rgb, pat, ms, _comment(g.shots[shot] or "no shot")))
+    for shot, insert, rgb, pat, ms, solid, srgb in g.lit:
+        rows.append("    { %d, %s, 0x%06xu, %s, %du, %s, 0x%06xu },   /* %s */" % (
+            shot, _c_str(insert), rgb, pat, ms, _c_str(solid), srgb, _comment(g.shots[shot] or "no shot")))
     return _LIT_C % {"n": len(g.lit), "rows": "\n".join(rows) + "\n"}
 
 _MECH_C = """/* ---- the mechanisms (PAD-395; MODE_SDK.md "The magnet", "The scoop") ---- */

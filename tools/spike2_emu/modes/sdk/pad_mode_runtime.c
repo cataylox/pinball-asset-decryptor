@@ -2084,6 +2084,7 @@ static volatile int disp_clip_ours, disp_clip_lost;
 static char disp_clip_name[96], disp_lost_name[64];
 static void display_tick(void);           /* the display priority section, below */
 static void block_tick(void);             /* PAD-347: a mode that keeps the game's modes from starting */
+static void bd2_tick(void);               /* PAD-521: the backdrop on the bank's surface, below */
 
 int pm_clip(const char *name)
 {
@@ -2177,6 +2178,7 @@ static void clip_tick(void)
     long playing = pm_port_value("surface_playing", 2);
     display_tick();                           /* item 154 display: the hold, the covered state */
     block_tick();                             /* PAD-347: a block ends with its mode */
+    bd2_tick();                               /* PAD-521: the loop on the bank's surface */
     if (!clip.on && clip_v2 && !clip2_hidden && pm_ms() - clip2_tried > 1000) {
         clip2_tried = pm_ms();                /* a grafted surface out of sight, once its scene is up */
         clip2_show(0);
@@ -2335,6 +2337,29 @@ static struct {
     unsigned plays, frames;
 } bd;
 static unsigned char *disp_layered_mgr;   /* the layered display's manager (display priority, below) */
+/* PAD-521: THE BACKDROP ON CLIP V2 (James Bond LE). A build whose clips play on the video bank's own surface
+ * (clip v2, below) has no background element to take over, and the game keeps its own videos in front of that
+ * surface: what the bank shows is behind them. So the loop is simply the bank's clip, played again whenever the
+ * surface is idle while the mode wants it - after its end, after a one-shot in its place, after a full-screen clip
+ * of ours. A port opts in with `value backdrop_surface 1` once its loop was seen on the glass. bd.obj is 1 while
+ * the clip on the surface is ours. */
+static int bd_v2;
+static void *clip2_surface(void);
+/* PAD-521: one hook on surface_set_video for everything that watches the bank's surface (PAD-446's clip variants, the
+ * clip v2 backdrop's idle-video watch) - a site takes one hook */
+static int sv_clipv, sv_bd, sv_hooked, bd2_in;
+static void on_clipv_set_video(unsigned *r);
+static void bd2_seen(unsigned *r);
+static void on_surface_set_video(unsigned *r)
+{
+    if (sv_bd) bd2_seen(r);
+    if (sv_clipv) on_clipv_set_video(r);
+}
+static int sv_hook(void)
+{
+    if (!sv_hooked) sv_hooked = hook(fn("surface_set_video"), on_surface_set_video);
+    return sv_hooked;
+}
 
 static unsigned bd_surface_state(void)
 {
@@ -2349,7 +2374,13 @@ static void bd_field(unsigned obj, unsigned v)
 
 static void bd_release(const char *why)
 {
-    if (bd.obj) {
+    if (bd.obj && bd_v2) {                /* PAD-521: ours off the bank's surface (a full-screen clip of ours stays) */
+        void *surf = clip2_surface();
+        if (surf && !clip.on && ((int (*)(void *))(unsigned long)fn("surface_state"))(surf)
+                                   == (int)pm_port_value("surface_playing", 2))
+            ((void (*)(void *))(unsigned long)fn("surface_stop"))(surf);
+        say("backdrop: taken away (%s) after %u play(s)", why, bd.plays);
+    } else if (bd.obj) {
         bd_field(bd.obj, 0);
         say("backdrop: taken away (%s) after %u play(s), %u frame(s)", why, bd.plays, bd.frames);
     }
@@ -2433,12 +2464,85 @@ static void on_scene_show(unsigned *r)
     bd_play(e);                        /* asked, a one-shot or the game's clip over: play (again) */
 }
 
+/* PAD-521: the loop (or the one-shot asked for) on the bank's surface */
+static void bd2_play(void *surf)
+{
+    const char *name = bd.once[0] ? bd.once : bd.loop;
+    int once = name == bd.once;
+    unsigned str;
+    char was[96];
+    unsigned i;
+    if (!name[0]) return;
+    for (i = 0; name[i] && i + 1 < sizeof was; i++) was[i] = name[i];
+    was[i] = 0;
+    if (once) bd.once[0] = 0;
+    bd.pending = 0;
+    bd.since = pm_ms();
+    str = std_string(was);
+    if (!((int (*)(void *, unsigned *))(unsigned long)fn("surface_set_video"))(surf, &str)) {
+        say("backdrop: the video bank has no clip \"%s\"", was);
+        if (!once) bd.on = 0;             /* no loop to play: not asked again every tick */
+        return;
+    }
+    ((int (*)(void *, int, int))(unsigned long)fn("surface_play"))(surf, 0, -1);
+    bd.obj = 1;
+    bd.playing_once = once;
+    if (bd.plays++ < 60)
+        say("backdrop: \"%s\" %s on the video bank's surface, behind the game's own videos", was,
+            once ? "once" : bd.plays == 1 ? "looped" : "again");
+}
+
+/* PAD-521: the game asks the bank's surface for a clip (surface_set_video(surface, &name)). Its own main-play video
+ * (`text backdrop_idle`, a name prefix: Bond's MainPlayLoop_<film>) takes the surface the moment one of ours ends
+ * (emulator run e3: the intro over, the loop played, and the game's dots took the TV back 30 ms later); while a mode
+ * wants its loop that one is no clip to wait out: the loop takes the surface back the next tick. Any other clip of the
+ * game's (it means something) is waited out as before. */
+static void bd2_seen(unsigned *r)
+{
+    const unsigned *s = (const unsigned *)(unsigned long)r[1];
+    const char *name, *idle = pm_port_text("backdrop_idle");
+    void *bank;
+    unsigned i;
+    static unsigned said;
+    if (bd2_in || !bd.on || !s || !idle || !idle[0]) return;
+    name = (const char *)(unsigned long)s[0];
+    if (!name) return;
+    for (i = 0; idle[i] && name[i] == idle[i]; i++) ;
+    if (idle[i]) return;
+    bd2_in = 1;
+    bank = clip2_surface();
+    bd2_in = 0;
+    if (!bank || (unsigned)(unsigned long)bank != r[0]) return;
+    bd.pending = 1;
+    if (said++ < 5) say("backdrop: the game asked for its main-play video %s - the loop takes the surface back", name);
+}
+
+/* PAD-521: every tick (clip_tick): play the loop again once the surface is idle. Just asked for, a one-shot asked for, or
+ * a full-screen clip of ours just over, it plays at once over whatever the game has there (its main-play video takes
+ * the surface the moment ours ends: emulator run e2, the loop waited 5 s behind it); a clip of the game's is waited out */
+static void bd2_tick(void)
+{
+    void *surf;
+    if (!bd_v2 || !bd.on) return;
+    if (clip.on) {                        /* a full-screen clip of ours has the surface: the loop right after it */
+        bd.obj = 0;
+        bd.pending = 1;
+        return;
+    }
+    surf = clip2_surface();
+    if (!surf) return;
+    if (bd.pending) { bd2_play(surf); return; }
+    if (pm_ms() - bd.since < 500) return;  /* just played: the surface may not say "playing" yet */
+    if (((int (*)(void *))(unsigned long)fn("surface_state"))(surf) == (int)pm_port_value("surface_playing", 2)) return;
+    bd2_play(surf);                       /* its end, the one-shot's or the game's clip over: the loop (again) */
+}
+
 int pm_backdrop(const char *name)
 {
     unsigned i;
     if (!(can & PM_CAN_BACKDROP)) return 0;
     if (!name || !*name) {
-        if (bd.on && !clip.on && bd.obj && bd_surface_state() == (unsigned)pm_port_value("surface_playing", 2))
+        if (!bd_v2 && bd.on && !clip.on && bd.obj && bd_surface_state() == (unsigned)pm_port_value("surface_playing", 2))
             ((void (*)(void))(unsigned long)fn("clip_stop"))();
         bd.on = 0;
         bd.loop[0] = bd.once[0] = 0;
@@ -2450,6 +2554,7 @@ int pm_backdrop(const char *name)
     for (i = 0; name[i] && i + 1 < sizeof bd.loop; i++) bd.loop[i] = name[i];
     bd.loop[i] = 0;
     bd.on = bd.pending = 1;
+    if (bd_v2) bd.since = 0;              /* PAD-521: the next tick plays it */
     return 1;
 }
 
@@ -2487,6 +2592,21 @@ static void bd_reset(const char *why)
 static int have_sites(const char *const *names);
 static void backdrop_arm(void)
 {
+    static const char *const s2[] = { "surface_state", "surface_set_video", "surface_play", "surface_stop", 0 };
+    if (pm_port_value("backdrop_surface", 0)) {          /* PAD-521: the loop on the bank's surface (clip v2) */
+        if (!(can & PM_CAN_CLIPS) || !clip_v2 || !have_sites(s2)) {
+            say("backdrop: off - backdrop_surface needs the clip v2 lines");
+            return;
+        }
+        bd_v2 = 1;
+        can |= PM_CAN_BACKDROP;
+        say("backdrop: on - a mode's clip loops on the video bank's surface, behind the game's own videos");
+        if (pm_port_text("backdrop_idle") && (sv_bd = 1, sv_hook()))
+            say("backdrop: the game's own main-play video (%s...) gives the loop the surface back",
+                pm_port_text("backdrop_idle"));
+        else sv_bd = 0;
+        return;
+    }
     static const char *const s[] = { "backdrop_draw", "scene_show", "clip_play", "clip_stop", "video_player",
                                      "video_surface", "surface_state", 0 };
     static const char *const d[] = { "backdrop_city_vtable", 0 };
@@ -2500,6 +2620,151 @@ static void backdrop_arm(void)
         say("backdrop: on - a mode's clip plays behind the HUD in the main-play background's place "
             "(draw 0x%08x, scene show 0x%08x)", fn("backdrop_draw"), fn("scene_show"));
     }
+}
+
+/* ---- the game's own status bar (PAD-521) ---------------------------------------------------------------
+ * James Bond LE 1.06 (read off the game program, docs/plans/bond_film_wizards.md "PAD-521"): the coloured bar under
+ * the TV is scene hud (7de1c159), and it belongs to the score display, a singleton (`site status_bar`, its getter,
+ * 0x1862dc). That object's frame update shows the bar, its words, its colour and its progress wipe from four bytes
+ * (`value status_flags_at`, in that order) and moves the wipe to frame +status_frame_at + 1 (0-100). The words are its
+ * text node's (+status_text_at), set as every text is (`site set_text`); the colour is the bar_Color node's
+ * (+status_colour_at) two colour calls, vfn +status_colour_vfn and +status_tint_vfn, each (node, r, g, b, 1.0) - what
+ * the game's own colour setter does once it has looked the colour up in its palette. The game's own modes raise it
+ * the same way (Goldfinger's Jackpot, 0xbf2b8: bar, words, colour, wipe, then the wipe from its clock). */
+static struct {
+    int held, sent;
+    unsigned char was[5], now[5];     /* the wipe's frame, then bar, words, colour, wipe: as found / as held */
+    char words[64];
+    unsigned rgb;
+    unsigned long out_since;
+    const struct pm_mode *owner;      /* the mode holding it: only it gives it back (another may take it over) */
+} sb;
+
+static unsigned char *sb_obj(void)
+{
+    return (unsigned char *)((void *(*)(void))(unsigned long)fn("status_bar"))();
+}
+
+static unsigned char *sb_at(unsigned char *o, int k)    /* 0 = the wipe's frame, 1-4 = the four flags */
+{
+    return k ? o + pm_port_value("status_flags_at", 0x11e) + k - 1 : o + pm_port_value("status_frame_at", 0x11c);
+}
+
+/* the words and the colour onto the bar's own nodes */
+static void sb_send(unsigned char *o)
+{
+    void *text = (void *)(unsigned long)*(unsigned *)(o + pm_port_value("status_text_at", 0x118));
+    void *bar = (void *)(unsigned long)*(unsigned *)(o + pm_port_value("status_colour_at", 0x114));
+    float r = (float)((sb.rgb >> 16) & 255u) / 255.0f, g = (float)((sb.rgb >> 8) & 255u) / 255.0f,
+          b = (float)(sb.rgb & 255u) / 255.0f;
+    if (text) {
+        unsigned str = std_string(sb.words);
+        ((void (*)(void *, unsigned *))(unsigned long)fn("set_text"))(text, &str);
+    }
+    if (bar) {
+        unsigned *vt = (unsigned *)(unsigned long)*(unsigned *)bar;
+        ((void (*)(void *, float, float, float, float))(unsigned long)
+            vt[pm_port_value("status_colour_vfn", 0x4c) / 4])(bar, r, g, b, 1.0f);
+        ((void (*)(void *, float, float, float, float))(unsigned long)
+            vt[pm_port_value("status_tint_vfn", 0x44) / 4])(bar, r, g, b, 1.0f);
+    }
+    sb.sent = 1;
+}
+
+static void sb_put(unsigned char *o)
+{
+    int k;
+    for (k = 0; k < 5; k++) *sb_at(o, k) = sb.now[k];
+    if (!sb.sent) sb_send(o);
+}
+
+/* given back: the bytes as they were found - unless the game has taken the bar for a display of its own since */
+static void sb_release(const char *why)
+{
+    unsigned char *o;
+    int k, ours = 1;
+    if (!sb.held) return;
+    o = sb_obj();
+    if (o) {
+        for (k = 1; k < 5; k++) ours &= *sb_at(o, k) == sb.now[k];
+        if (ours) for (k = 0; k < 5; k++) *sb_at(o, k) = sb.was[k];
+    }
+    sb.held = 0;
+    sb.words[0] = 0;
+    say("status bar: given back (%s)%s", why, ours ? "" : " - the game's own display has it now");
+}
+
+int pm_status_bar(const char *words, unsigned rgb, int percent)
+{
+    unsigned char *o;
+    int k;
+    if (!(can & PM_CAN_STATUS_BAR)) return 0;
+    if (!words || !*words) {
+        if (sb.held && sb.owner && current && sb.owner != current) return 1;   /* another mode of ours has it now */
+        sb_release("the mode gave it back");
+        return 1;
+    }
+    o = sb_obj();
+    if (!o) return 0;
+    if (!sb.held) {
+        for (k = 0; k < 5; k++) sb.was[k] = *sb_at(o, k);
+        sb.held = 1;
+        sb.sent = 0;
+        sb.out_since = 0;
+        say("status bar: taken for \"%s\" in %06x%s", words, rgb & 0xffffffu, percent < 0 ? "" : ", with its wipe");
+    }
+    if (!str_eq(sb.words, words) || sb.rgb != rgb) {
+        unsigned n = 0;
+        while (words[n]) n++;
+        str_copy(sb.words, sizeof sb.words, words, n);
+        sb.rgb = rgb;
+        sb.sent = 0;
+    }
+    sb.owner = current;
+    if (percent > 100) percent = 100;
+    sb.now[0] = percent < 0 ? 0 : (unsigned char)percent;
+    sb.now[1] = sb.now[2] = sb.now[3] = 1;
+    sb.now[4] = percent >= 0;
+    sb_put(o);
+    return 1;
+}
+
+/* every tick: held up against a display of the game's that hides it (its words and colour sent again), given back
+ * once the game is over (pm_in_game() 0 for 30 s: Bond ends play at its own big modes' ends until the drain) */
+static void sb_tick(void)
+{
+    unsigned char *o;
+    int k, moved = 0;
+    if (!sb.held) return;
+    if (!pm_in_game()) {
+        if (!sb.out_since) sb.out_since = pm_ms() | 1;
+        else if (pm_ms() - sb.out_since > 30000) sb_release("out of a game");
+        return;
+    }
+    sb.out_since = 0;
+    o = sb_obj();
+    if (!o) return;
+    for (k = 1; k < 5; k++) moved |= *sb_at(o, k) != sb.now[k];
+    if (moved) {
+        static unsigned long said_at;
+        if (!said_at || pm_ms() - said_at > 10000) say("status bar: a display of the game's moved it - held again");
+        said_at = pm_ms() | 1;
+        sb.sent = 0;
+    }
+    sb_put(o);
+}
+
+static void status_bar_arm(void)
+{
+    static const char *const s[] = { "status_bar", "set_text", "string_new", 0 };
+    if (!site("status_bar")) return;                    /* a port without it: silent */
+    if (!have_sites(s)) {
+        say("status bar: off - the port's status bar lines are incomplete");
+        return;
+    }
+    can |= PM_CAN_STATUS_BAR;
+    say("status bar: on - a mode can put its name, colour and clock in the game's own bar (getter 0x%08x)",
+        fn("status_bar"));
 }
 
 /* ---- display priority (item 154 display) --------------------------------------------------------
@@ -7512,6 +7777,7 @@ static void on_tick(unsigned *r)
         EACH_MODE(m) if (m->init) { current = m; m->init(); }
     }
     clip_tick();
+    sb_tick();                                /* PAD-521: the status bar held */
     sound_fades_tick();                       /* item 150 follow-up: fades end in silence */
     sound_swaps_tick();                       /* item 163: swapped carrier keys come back */
     events_deliver();
@@ -8579,11 +8845,12 @@ static void clipv_arm(void)
         say("clip variants: %u clip(s) play one of several at random (clip_play 0x%08x)", n_clipv, fn("clip_play"));
     } else if (have_sites(v2_s) && have_data(v2_d) && have_values(v2_v)
                && (pm_scene_id("video_bank") || site("video_surface"))
-               && hook(fn("surface_set_video"), on_clipv_set_video)) {
+               && (sv_clipv = 1, sv_hook())) {
         say("clip variants: %u clip(s) play one of several at random (surface_set_video 0x%08x, the bank's "
             "surface only)", n_clipv, fn("surface_set_video"));
     } else {
         n_clipv = 0;
+        sv_clipv = 0;
         say("clip variants: off - the port has no clip_play, and no clip v2 lines that match this build; "
             "every clip plays the game's own");
     }
@@ -8847,6 +9114,7 @@ static void pad_mode_start(void)
     display_arm();                            /* item 154 display: the clip_play hook, display priority */
     block_arm();                              /* PAD-347: a mode may keep the game's modes from starting */
     backdrop_arm();                           /* hud-layers: a clip behind the HUD */
+    status_bar_arm();                         /* PAD-521: the game's own status bar */
     frame_arm();                              /* PAD-301: a full-screen clip drawn at the frame hand-over */
     if (can & PM_CAN_OWN_SOUND) hook(fn("sound_lookup"), on_sound_lookup);
     /* item 163: with /dump/soundlog.on there at the start, every request the game's sound worker
@@ -8889,7 +9157,7 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
@@ -8897,7 +9165,8 @@ static void pad_mode_start(void)
         can & PM_CAN_BACKDROP ? " backdrop" : "", can & PM_CAN_COILS ? " magnet" : "",
         can & PM_CAN_SCOOP ? " scoop" : "", can & PM_CAN_SHIELD ? " shield" : "",
         can & PM_CAN_BUILDING ? " building" : "", can & PM_CAN_GAME_SHOWS ? " game-shows" : "",
-        can & PM_CAN_SHAKER ? " shaker" : "", can & PM_CAN_GAME_WIZARDS ? " game-wizards" : "");
+        can & PM_CAN_SHAKER ? " shaker" : "", can & PM_CAN_GAME_WIZARDS ? " game-wizards" : "",
+        can & PM_CAN_STATUS_BAR ? " status-bar" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }

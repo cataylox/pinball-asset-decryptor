@@ -1344,13 +1344,13 @@ def test_light_the_mode_at_a_shot_is_checked():
     assert BM.problems(p, SHOTS, GZ.events, inserts=[]) == []      # no insert a mode can light here: lit without it
     bad = prog([{"hat": {"kind": "event", "event": "skill_shot", "when": "any"}, "do": [
         dict(LIT, shot="Moon ramp", insert="BLOFELD", color="gold", pattern="hurry"),
-        dict(LIT, insert="A, B")]}])
+        dict(LIT, insert=["A"]), dict(LIT, insert="X" * 40)]}])
     assert BM.problems(bad, SHOTS, GZ.events, inserts=["MASER READY"]) == [
         "Script 1's Light the mode at names Moon ramp, a shot this card does not have.",
         "Script 1 lights the mode in no colour.",
         "Script 1 lights the mode in no pattern.",
         "Script 1 lights the insert BLOFELD, which this card's game does not have.",
-        "Script 1 lights an insert that is not one."]
+        "Script 1 lights an insert that is not one."]                       # both: said once
     # a mode with no such block makes the C it always made: no lit-at code in it
     assert "lit_" not in BM.to_c(BM.starter("RAMP FRENZY", SHOTS), "ramp_frenzy")
 
@@ -1359,13 +1359,51 @@ def test_the_lit_c_only_calls_what_the_header_declares():
     src = BM.to_c(_lit_prog(), "lit")
     used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", src))
     assert used <= _header_calls(), used - _header_calls()
-    assert '{ 0, "MASER READY", 0xffd000u, PM_LAMP_BLINK, 500u },   /* Right ramp */' in src
+    assert '{ 0, "MASER READY", 0xffd000u, PM_LAMP_BLINK, 500u, "", 0x000000u },   /* Right ramp */' in src
     # the same block twice is one row; "the mode is lit" with no such block is never lit
     two = prog([{"hat": {"kind": "event", "event": "skill_shot", "when": "any"}, "do": [dict(LIT), dict(LIT)]}])
-    assert BM.to_c(two, "lit").count("PM_LAMP_BLINK, 500u }") == 1
+    assert BM.to_c(two, "lit").count("PM_LAMP_BLINK, 500u, ") == 1
     asked = prog([{"hat": {"kind": "ball_end"}, "do": [
         {"op": "if", "cond": {"k": "lit"}, "then": [{"op": "log", "text": "x"}], "else": None}]}])
     assert "static int lit_now(void) { return 0; }" in BM.to_c(asked, "asked")
+
+
+BOND_VILLAINS = "DR. NO-RIGHT RAMP,ROSA KLEBB,GOLDFINGER-RIGHT RAMP,LARGO,BLOFELD,MR. HENDERSON"
+
+
+def test_a_lit_mode_cycles_several_inserts_and_holds_one_solid_as_the_games_own():
+    """The Bond owner (PAD-521): their own mini-wizards should look like the game's own - while one is qualified the
+    Right ramp's villain inserts cycle and the film's insert is solid. Light the mode at names several inserts (a chase
+    runs across them, as pm_lamp_set takes a list) and one more held solid in its own colour."""
+    ok = prog([{"hat": {"kind": "event", "event": "skill_shot", "when": "any"}, "do": [
+        dict(LIT, insert=BOND_VILLAINS, pattern="chase", solid="Y.O.L.T.", solid_color="#ffffff")]}])
+    bond = BOND_VILLAINS.split(",") + ["Y.O.L.T.", "RIGHT RAMP ARROW"]
+    assert BM.problems(ok, SHOTS, GZ.events, inserts=bond) == []
+    assert BM.lit_inserts(" A, B ,A,, ") == ["A", "B"] and BM.lit_inserts("") == [] and BM.lit_inserts(3) is None
+    src = BM.to_c(ok, "lit")
+    assert ('{ 0, "%s", 0xffd000u, PM_LAMP_CHASE, 150u, "Y.O.L.T.", 0xffffffu },   /* Right ramp */' % BOND_VILLAINS
+            in src)
+    assert "pm_lamp_set(LIT_AT[k].solid, LIT_AT[k].solid_rgb, PM_LAMP_SOLID, 0);" in src
+    assert "pm_lamp_release(LIT_AT[k].solid);" in src
+    bad = prog([{"hat": {"kind": "event", "event": "skill_shot", "when": "any"}, "do": [
+        dict(LIT, insert=",".join("I%d" % i for i in range(9)), solid="FILM, TWO"),
+        dict(LIT, solid="NOPE"), dict(LIT, solid="Y.O.L.T.", solid_color="white")]}])
+    assert BM.problems(bad, SHOTS, GZ.events, inserts=bond + ["MASER READY"] + ["I%d" % i for i in range(9)]) == [
+        "Script 1 lights more than 8 inserts.",
+        "Script 1 holds an insert solid that is not one.",
+        "Script 1 holds the insert NOPE solid, which this card's game does not have.",
+        "Script 1 holds an insert solid in no colour."]
+
+
+def test_a_lit_mode_chases_its_inserts_and_holds_the_solid_one_on_the_harness(tmp_path):
+    lit = dict(LIT, insert="MASER READY,TANK 2,HEAT RAY", pattern="chase", solid="SKILL SHOT", solid_color="#ffffff")
+    p = prog([{"hat": {"kind": "event", "event": "skill_shot", "when": "any"}, "do": [lit]}], seconds=5)
+    out = play(tmp_path, p, "event", "skill_shot", "secs", 0.2, "lamps", "shot", "Right ramp", "secs", 0.2, "lamps")
+    held = re.findall(r"HELD (RIGHT RAMP|MASER READY|TANK 2|HEAT RAY|SKILL SHOT|none)( \w+ \w+)?", out)
+    assert [h for h, _c in held] == ["RIGHT RAMP", "MASER READY", "SKILL SHOT", "TANK 2", "HEAT RAY", "none"]
+    assert "LAMP MASER READY ffd000 chase 150 TEST MODE" in out and "LAMP SKILL SHOT ffffff solid 0 TEST MODE" in out
+    assert "START (its lit shot): player 1" in out
+    assert "LAMP OFF SKILL SHOT TEST MODE" in out and "LAMP OFF HEAT RAY TEST MODE" in out
 
 
 def test_the_bond_le_offers_its_villains_inserts():
@@ -1465,3 +1503,88 @@ def test_a_lit_mode_claims_its_shot_while_it_would_start_there(tmp_path):
     # lit; the game's own mode in the way; clear again; it started
     assert re.findall(r"LITCLAIM (\w+) TEST MODE", out) == ["200000", "0", "200000", "0"]
     assert "START (its lit shot)" in out
+
+
+# ---- PAD-521: the game's own status bar (James Bond: the coloured bar under the TV) ---------------------------------
+def test_the_bar_is_off_unless_ticked_and_keeps_a_colour():
+    p = BM.normalize({"name": "X"})
+    assert p["bar"] == {"on": False, "color": "#00c040"}
+    assert BM.normalize({"bar": {"on": 1, "color": "blue"}})["bar"] == {"on": True, "color": "#00c040"}
+    assert "pm_status_bar" not in BM.to_c(BM.starter("RAMP FRENZY", SHOTS), "ramp_frenzy")
+    src = BM.to_c(prog([], bar={"on": True, "color": "#1060ff"}), "blk")
+    assert "#define BAR_RGB          0x1060ffu" in src
+    used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", src))
+    assert used <= _header_calls(), used - _header_calls()
+
+
+def test_the_bar_shows_the_name_and_its_clock_then_the_total_then_goes(tmp_path):
+    """The Bond owner (PAD-521): the game's own mini-wizards show their name in a coloured bar under the TV, the clock
+    draining along it, kept through the total. Started, it is full; the clock runs it down; at the end it is full again
+    for the total's 3 s, then given back. A drain gives it back at once."""
+    p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]}],
+             seconds=4, bar={"on": True, "color": "#00c040"}, name="YOLT WIZARD")
+    out = play(tmp_path, p, "shot", "Left ramp", "secs", 2, "secs", 2.5, "secs", 3.5)
+    bars = re.findall(r"^\s*(\d+) STATUSBAR (-?\d+|OFF) ?(\w*)", out, re.M)
+    pcts = [int(b[1]) for b in bars if b[1] not in ("OFF",)]
+    running = [x for x in pcts if x >= 0]
+    assert pcts[0] == 100 and pcts[-1] == -1                           # full at the start; full (no wipe) at the end
+    assert running == sorted(running, reverse=True) and min(running) <= 5   # it drained with the clock
+    assert bars[-1][1] == "OFF"
+    end = _at_any(out, r"END \(time ran out\)")
+    off = int(bars[-1][0])
+    assert 2900 <= off - end <= 3200                                   # through the total
+    assert "STATUSBAR 100 00c040 YOLT WIZARD" in out
+    out = play(tmp_path, p, "shot", "Left ramp", "secs", 1, "ball_end", "secs", 0.2)
+    bars = re.findall(r"^\s*(\d+) STATUSBAR (-?\d+|OFF)", out, re.M)
+    assert bars[-1][1] == "OFF" and int(bars[-1][0]) - _at_any(out, r"END \(ball ended\)") <= 40
+
+
+def test_only_a_title_whose_port_names_the_bar_offers_it():
+    assert MP.profile("james_bond_le_1_06").status_bar is True
+    assert MP.profile("godzilla_le_1_16").status_bar is False
+
+
+# ---- PAD-521: its own screen as words alone, over the game's video ---------------------------------------------------
+def test_words_alone_is_a_screen_style_and_reaches_the_assets(tmp_path):
+    assert BM.normalize({})["screen_style"] == "panel"
+    assert BM.normalize({"screen_style": "words"})["screen_style"] == "words"
+    assert BM.normalize({"screen_style": "big"})["screen_style"] == "panel"
+    project = str(tmp_path)
+    slug, _c = BM.new_blocks_mode(project, "YOLT WIZARD")
+    BM.save(project, slug, BM.normalize({"name": "YOLT WIZARD", "screen": True, "screen_style": "words",
+                                         "scripts": []}))
+    from pinball_decryptor.plugins.stern import code_modes as CM, mode_assets as MA
+    spec = CM.load(project, slug)
+    assert spec.screen_style == "words"
+    scr = MA.code_screen(project, slug, spec)
+    assert scr["words"] == "YOLT WIZARD" and scr["words_rgba"] == (1.0, 1.0, 1.0, 1.0)
+    assert scr["art_rgba"].shape == (200, 920, 4) and not scr["art_rgba"].any()   # clear: no panel
+    assert (scr["x"], scr["y"]) == MA.WORDS_AT and scr["words_scale"] == 2.0
+    BM.save(project, slug, BM.normalize({"name": "YOLT WIZARD", "screen": True, "scripts": []}))
+    assert CM.load(project, slug).screen_style == ""                               # the panel again
+
+
+def test_words_alone_show_the_name_then_a_line_then_the_total(tmp_path):
+    """The Bond owner (PAD-521): the game letters a mode's name over its intro and its TOTAL over its end picture, and
+    shows nothing of the kind in between. Words alone: the name at the start for 4 s, a Words block's line for 3 s,
+    the TOTAL at the end for 3 s - each then hidden."""
+    p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]},
+              {"hat": {"kind": "shot", "shot": "Right ramp", "when": "running"},
+               "do": [{"op": "score", "points": num(500)}, {"op": "words", "text": "JACKPOT"}]}],
+             seconds=12, screen=True, screen_style="words")
+    out = play(tmp_path, p, "shot", "Left ramp", "secs", 5, "shot", "Right ramp", "secs", 12)
+    shows = [(int(t), int(on)) for t, on in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Screen (\d)$", out, re.M)]
+    start = _at_any(out, r"START \(a block\)")
+    shot = _at_any(out, r"WORDS PadMode_blk_Screen_Words: JACKPOT")
+    end = _at_any(out, r"END \(time ran out\)")
+    on_at = [t for t, on in shows if on]
+    off_at = [t for t, on in shows if not on]
+    assert any(abs(t - start) <= 40 for t in on_at)
+    assert any(3900 <= t - start <= 4100 for t in off_at)                         # the name, 4 s
+    assert any(abs(t - shot) <= 40 for t in on_at) and any(2900 <= t - shot <= 3100 for t in off_at)
+    assert re.search(r"WORDS PadMode_blk_Screen_Words: TOTAL 500", out)
+    assert any(abs(t - end) <= 40 for t in on_at) and any(2900 <= t - end <= 3200 for t in off_at)
+    # the panel stays up all along, as ever
+    out = play(tmp_path, dict(p, screen_style="panel"), "shot", "Left ramp", "secs", 6)
+    assert not [t for t, on in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Screen (\d)$", out, re.M) if on == "0"
+                and int(t) > 100]
