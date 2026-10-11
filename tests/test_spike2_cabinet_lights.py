@@ -368,8 +368,12 @@ def test_a_section_shows_once_its_board_has_spoken(pf):
     # the speakers speak through the `seen` plane before they light
     b[pf.SEEN_OFF + 7 * 96 + 0] = 1
     _c, grew = cab.tick(bytes(b))
-    assert grew and [s["key"] for s in cab.spec()] == ["speaker:7", "expression:2"]
+    spec = cab.spec()
+    assert grew and [s["key"] for s in spec] == ["speaker:7", "expression:2"]
     assert "R=channel 286" in cab.describe(top) and "Cabinet Lights" in cab.describe(top)
+    # the speakers are a ring, in chain order (Sam, 2026-10-11)
+    assert len(spec[0]["ring"]) == 23 and "row" not in spec[0]
+    assert cab.pixels[spec[0]["ring"][0]]["name"] == "SPEAKER 1"
 
 
 def test_a_topper_left_off_the_bus_gets_no_section(pf, monkeypatch):
@@ -416,7 +420,7 @@ def test_the_tick_box_is_kept_and_takes_effect(pf):
 def test_the_schematic_drops_the_blades_and_speakers_blocks(pf):
     S = object.__new__(pf.Schematic)
     S.cab = pf.CabinetLights(False)
-    S.leds = types.SimpleNamespace(spec=lambda: {"gen": 1, "blocks": [
+    S.leds = types.SimpleNamespace(cells=[], spec=lambda: {"gen": 1, "blocks": [
         {"node": 2, "cells": []}, {"node": 7, "cells": []}, {"node": 8, "cells": []}]})
     S.bar, S.info, S.entries, S.trough = "", [], [], None
     spec = S.spec()
@@ -424,6 +428,42 @@ def test_the_schematic_drops_the_blades_and_speakers_blocks(pf):
     assert spec["cab_panel"]["expression"] is False
     S.cab = pf.CabinetLights(True)
     assert [b["node"] for b in S.spec()["grid"]["blocks"]] == [2, 7, 8]
+
+
+def test_the_grid_draws_the_speakers_as_a_ring_and_the_blades_as_columns(pf):
+    """Sam, 2026-10-11: "Expression Speaker Lights ... in a circle instead of
+    a grid, and the Expression Light Kit in columns". The grid's own cells,
+    from the wire, go into the shape by their channels; a pixel the wire has
+    not shown keeps its slot empty, and a cell no pixel claims stays a cell."""
+    grid = pf.LedGrid(pf.load_led_names())
+    b = _block()
+    struct.pack_into("<I", b, pf.LED_DECODED_OFF, 1)      # a write was decoded
+    for ch in (0, 1, 2, 3, 4, 5):                        # speakers 1 and 2
+        b[pf.LED_HDR + 7 * 96 + ch] = 0x40
+    for ch in (0, 1, 2):                                 # L 1
+        b[pf.LED_HDR + 2 * 96 + ch] = 0x80
+    for ch in (144, 145, 146, 287):                      # R 49, R 96-B: in hi
+        b[coilmap.HI_OFF + 2 * coilmap.HI_IDX + ch - 96] = 0xFF
+    b[pf.LED_HDR + 7 * 96 + 90] = 0x10                   # past the 23 pixels
+    grid.tick(bytes(b), 0.0)
+    S = object.__new__(pf.Schematic)
+    S.cab, S.leds = pf.CabinetLights(True), grid
+    S.bar, S.info, S.entries, S.trough = "", [], [], None
+    blocks = {blk["node"]: blk for blk in S.spec()["grid"]["blocks"]}
+    ring = blocks[7]["ring"]
+    assert len(ring) == 23 and ring[:2] == ["7:SPEAKER 1", "7:SPEAKER 2"]
+    assert ring[2:] == [None] * 21
+    assert "7:7.90" in [c["k"] for c in blocks[7]["cells"]]
+    left, right = blocks[2]["bars"]
+    assert len(left) == len(right) == 48 and "ring" not in blocks[2]
+    assert left[0] == "2:EXPRESSIVE LIGHTING L 1"          # bottom first
+    assert right[0] == "2:EXPRESSIVE LIGHTING R 49"
+    assert right[-1] == "2:EXPRESSIVE LIGHTING R 96"
+    assert left[1:] == [None] * 47
+    # the tick box off takes both blocks out, shapes and all
+    S.cab = pf.CabinetLights(False)
+    assert 2 not in {blk["node"] for blk in S.spec()["grid"]["blocks"]}
+    assert pf.CabinetLights(False).grid_shapes(grid.cells) == {}
 
 
 # ------------------------------------------------------------------ the page --
@@ -438,7 +478,7 @@ def test_the_column_layout():
         {"key": "topper:12", "label": "Topper", "node": 12, "board": "Topper",
          "pos": [[0, 20, 30], [1, 286, 30], [2, 150, 56]]},
         {"key": "speaker:7", "label": "Speaker lighting", "node": 7, "board": "",
-         "row": list(range(10, 33))},
+         "ring": list(range(10, 33))},
         {"key": "expression:2", "label": "Expression lighting", "node": 2, "board": "",
          "bars": [list(range(100, 148)), list(range(148, 196))]},
     ]
@@ -460,12 +500,57 @@ def test_the_column_layout():
     # the topper keeps its drawing's shape; the speakers come after it
     assert by[0]["x"] < by[2]["x"] < by[1]["x"] and by[0]["y"] == by[1]["y"] < by[2]["y"]
     assert by[10]["y"] > by[2]["y"]
+    # the speakers a ring: pixel 1 at the top, the next one clockwise, every
+    # one the same distance from the middle
+    ring = [by[c] for c in range(10, 33)]
+    cx = sum(m["x"] for m in ring) / 23.0
+    cy = sum(m["y"] for m in ring) / 23.0
+    radii = [((m["x"] - cx) ** 2 + (m["y"] - cy) ** 2) ** 0.5 for m in ring]
+    assert max(radii) - min(radii) < 0.01 and min(radii) > 20
+    assert by[10]["y"] == min(m["y"] for m in ring) and abs(by[10]["x"] - cx) < 0.01
+    assert by[11]["x"] > by[10]["x"] and by[32]["x"] < by[10]["x"]
     # each blade bottom first, the left one left, both below the speakers
     assert by[100]["y"] > by[147]["y"] and by[148]["y"] > by[195]["y"]
-    assert by[100]["x"] < by[148]["x"] and by[147]["y"] > by[32]["y"]
+    assert by[100]["x"] < by[148]["x"]
+    assert by[147]["y"] - by[147]["h"] / 2 > max(m["y"] + m["r"] for m in ring)
     assert [lb["text"] for lb in got["labels"]] == ["Topper", "Speaker lighting",
                                                     "Expression lighting"]
     assert got["hit"] == 147
+
+
+@pytest.mark.skipif(_node() is None, reason="needs Node.js")
+def test_the_grid_ring_and_columns():
+    ring = ["7:SPEAKER %d" % n for n in range(1, 24)]
+    ring[5] = None                                       # not shown yet
+    bars = [["2:L %d" % n for n in range(1, 49)], ["2:R %d" % n for n in range(49, 97)]]
+    js = ("const { gridRing, gridBars } = require(%s);\n"
+          "process.stdout.write(JSON.stringify({ring: gridRing(%s), bars: gridBars(%s)}));"
+          % (json.dumps(PF_JS), json.dumps(ring), json.dumps(bars)))
+    r = subprocess.run([_node(), "-e", js], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout)
+    R, B = got["ring"], got["bars"]
+    at = {a["k"]: a for a in R["at"]}
+    assert len(at) == 22 and "7:SPEAKER 6" not in at      # its slot stays empty
+    for a in R["at"]:                                       # inside the block
+        assert 0 <= a["x"] and a["x"] + a["w"] <= R["w"] <= 152
+        assert 0 <= a["y"] and a["y"] + a["h"] <= R["h"]
+    top = at["7:SPEAKER 1"]
+    assert top["y"] == min(a["y"] for a in R["at"])         # pixel 1 at the top
+    assert at["7:SPEAKER 2"]["x"] > top["x"] > at["7:SPEAKER 23"]["x"]
+    # no two of the ring's round cells overlap
+    cells = R["at"]
+    for i, a in enumerate(cells):
+        for b in cells[i + 1:]:
+            assert ((a["x"] - b["x"]) ** 2 + (a["y"] - b["y"]) ** 2) ** 0.5 >= a["w"]
+    # the blades: a column a side, pixel 1 at the bottom, the left one left
+    at = {a["k"]: a for a in B["at"]}
+    assert len(at) == 96
+    assert at["2:L 1"]["x"] == at["2:L 48"]["x"] < at["2:R 49"]["x"]
+    assert at["2:L 1"]["y"] > at["2:L 2"]["y"] > at["2:L 48"]["y"] == 0
+    assert at["2:L 1"]["y"] == at["2:R 49"]["y"]
+    assert at["2:L 1"]["y"] + at["2:L 1"]["h"] <= B["h"]
+    assert at["2:R 49"]["x"] + at["2:R 49"]["w"] == B["w"]
 
 
 # ------------------------------------------------------------------ the shim --

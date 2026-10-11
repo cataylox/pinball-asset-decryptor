@@ -104,6 +104,9 @@ select.sel { height: 28px; border-radius: 6px; border: 1px solid var(--line-2); 
 .pf-grid .hdr { font: 600 12px var(--mono); color: var(--key); height: 18px; }
 .pf-grid .cells { display: grid; grid-template-columns: repeat(8, 12px); gap: 4px; }
 .pf-grid .c { width: 12px; height: 12px; border: 1px solid #333; background: var(--field); }
+.pf-grid .shape { position: relative; margin-bottom: 4px; }
+.pf-grid .shape .c { position: absolute; }
+.pf-grid .shape.ring .c { border-radius: 50%; }
 .pf-rows { flex: 1 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 8px 10px; column-width: 250px; column-fill: auto; column-gap: 18px; background: var(--field); }
 .pf-rows .hdr { font: 600 12px var(--mono); color: var(--key); height: 19px; line-height: 19px; padding-left: 16px; break-after: avoid; }
 .pf-rows .r { display: flex; align-items: center; gap: 6px; height: 19px; font: 12px var(--mono); color: #d8d8d8; border-radius: 4px; padding: 0 4px; cursor: pointer; white-space: pre; break-inside: avoid; }

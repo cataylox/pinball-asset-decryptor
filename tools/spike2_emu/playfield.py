@@ -2712,8 +2712,8 @@ class CabinetLights:
 
     def spec(self):
         """What the page lays out, top to bottom. A positioned topper sends
-        its pixels' own x, y; a strip sends them in chain order; the blades
-        send their sides, bottom first."""
+        its pixels' own x, y; the speakers a ring and any other strip a row,
+        both in chain order; the blades send their sides, bottom first."""
         out = []
         for S in self.shown():
             px = S["pixels"]
@@ -2724,9 +2724,38 @@ class CabinetLights:
             elif S["positioned"]:
                 sec["pos"] = [[P["cid"], round(P["x"], 1), round(P["y"], 1)]
                               for P in px]
+            elif S["role"] == cablights.SPEAKER:
+                # the speaker lights are rings round the backbox speakers
+                # (Sam, 2026-10-11: "in a circle instead of a grid")
+                sec["ring"] = [P["cid"] for P in px]
             else:
                 sec["row"] = [P["cid"] for P in px]
             out.append(sec)
+        return out
+
+    def grid_shapes(self, cells):
+        """The switch list's swatch grid draws the speakers' block as a ring
+        and the blades' as their two bars, as the column does (Sam,
+        2026-10-11): {node: {"ring": [key, ...]}} or {node: {"bars": [[key,
+        ...], ...]}}, a slot per pixel in the column's order, holding the grid
+        cell that carries that pixel's channels - None while the wire has not
+        shown it, so the shape never reflows. A cell no pixel claims stays in
+        the block's ordinary grid."""
+        at = {}
+        for C in cells:
+            for ch in C["channels"].values():
+                at.setdefault(tuple(ch), C["key"])
+        out = {}
+        for S in self.sections:
+            if S["role"] not in cablights.EXPRESSION_ROLES:
+                continue
+            slots = [next((at[ch] for ch in sorted(P["channels"].values())
+                           if ch in at), None) for P in S["pixels"]]
+            if S["bars"]:
+                out[S["node"]] = {"bars": [[slots[k] for k in bar]
+                                           for bar in S["bars"]]}
+            else:
+                out[S["node"]] = {"ring": slots}
         return out
 
     def dyn(self):
@@ -3992,9 +4021,10 @@ class Schematic:
     def spec(self):
         grid = self.leds.spec()
         hide = self._hidden()
-        if hide:
-            grid = dict(grid, blocks=[b for b in grid["blocks"]
-                                      if b["node"] not in hide])
+        shapes = self.cab.grid_shapes(self.leds.cells)
+        grid = dict(grid, blocks=[dict(b, **shapes.get(b["node"], {}))
+                                  for b in grid["blocks"]
+                                  if b["node"] not in hide])
         return {"kind": "schematic", "bar": self.bar, "info": self.info,
                 "entries": self.entries,
                 "grid": grid,
