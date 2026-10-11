@@ -214,8 +214,29 @@ def test_godzilla_s_two_toppers_go_by_their_boards_names(tmp_path):
              for n in range(9)]
     gz = {2: 4, 4: 0, 5: 1, 6: 8, 7: 9}
     secs, left = cablights.sections(rows, gz, _ident(tmp_path, GZ_IDENT))
-    assert [(S["label"], S["node"]) for S in secs] == [("Topper", 12), ("Topper Lights", 14)]
+    assert [(S["label"], S["node"]) for S in secs] == [("Topper", 12),
+                                                       ("Topper Expression Light", 14)]
     assert all(S["positioned"] for S in secs) and left == []
+
+
+def test_node_14_is_the_topper_expression_light_not_the_game_s_name(tmp_path):
+    # "Node 14 Topper Lights should be renamed Topper Expression Light ... in
+    # order to avoid confusion with regular topper" (peanuts, PAD-522): the
+    # add-on's name, alone on a title as with its own topper, and the game's
+    # "Topper Lights" nowhere - not even as the board's name under it
+    rows = [_row("led", "ETOPPER L DOME LED %d-%s" % (n // 3 + 1, "RGB"[n % 3]), 3, n,
+                 73 + 6 * (n // 3), 279, "System/TestMode/universal_topper_scaled")
+            for n in range(9)]
+    secs, _ = cablights.sections(rows, {2: 4, 4: 0, 5: 1}, _ident(tmp_path, GZ_IDENT))
+    assert [(S["label"], S["node"], S["board"]) for S in secs] == [
+        ("Topper Expression Light", 14, "")]
+    # John Wick names its OWN topper on node 12 "Topper Lights" too: that one
+    # is still the title's topper
+    jw = GZ_IDENT.replace("group=8 name=Topper\n", "group=8 name=Topper Lights\n")
+    rows = [_row("led", "TOPPER %d-%s" % (n // 3 + 1, "GRB"[n % 3]), 8, n) for n in range(6)]
+    secs, _ = cablights.sections(rows, {}, _ident(tmp_path, jw))
+    assert [(S["label"], S["node"], S["board"]) for S in secs] == [
+        ("Topper", 12, "Topper Lights")]
 
 
 #: King Kong Pro 0.97's directory, in its order: the topper is node 12 at
