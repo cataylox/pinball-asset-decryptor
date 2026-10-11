@@ -7,7 +7,8 @@ not inserts and that no playfield picture has a place for:
   TOPPER       the topper's lamps and strips. A title can have two: its own
                topper (Godzilla's tanks and heat ray on node 12, "Topper") and
                the universal one (ETOPPER dome and front LEDs, node 14 "Topper
-               Lights", on Godzilla, Deadpool, Star Wars and Elvira).
+               Lights", on Godzilla, Deadpool, Star Wars and Elvira), shown as
+               the accessory Stern sells it as, "Topper Expression Light".
   EXPRESSION   the cabinet's expressive-lighting blades, "EXPRESSIVE LIGHTING
                L/R n": 96 RGB pixels a side on node 2, "Cabinet Lights" (John
                Wick, King Kong, Led Zeppelin, Metallica, Rush). John Wick, King
@@ -44,6 +45,14 @@ EXPRESSION_ROLES = (EXPRESSION, SPEAKER)
 #: How each role is labelled when its board has no name of its own.
 LABEL = {TOPPER: "Topper", EXPRESSION: "Expression lighting",
          SPEAKER: "Speaker lighting"}
+
+#: Node 14 is the universal topper on every title, and every title names it
+#: "Topper Lights" - which John Wick also calls its own topper on node 12. It
+#: is the add-on Stern sells as the "Topper Expression Light" (peanuts,
+#: PAD-522: "in order to avoid confusion with regular topper"), so it is
+#: shown by that name and never by the game's.
+EXPRESSION_TOPPER_NODE = 14
+EXPRESSION_TOPPER = "Topper Expression Light"
 
 #: The column's order, top to bottom: the topper sits above the backbox, the
 #: speakers in it, the blades down the cabinet below.
@@ -262,6 +271,9 @@ def sections(dev_rows, group_node, board_map, expression=True,
     if len(tops) > 1:
         for S in tops:
             S["label"] = S["board"] or "Topper (node %d)" % S["node"]
+    for S in tops:
+        if S["node"] == EXPRESSION_TOPPER_NODE:
+            S["label"], S["board"] = EXPRESSION_TOPPER, ""
     left_out = [(which, n, how) for (which, _h), (n, how) in sorted(left.items())]
     return out, left_out
 
