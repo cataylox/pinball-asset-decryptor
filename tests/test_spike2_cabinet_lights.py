@@ -142,6 +142,18 @@ def test_a_v1_table_places_nothing(tmp_path):
     assert cablights.boards(str(tmp_path / "gone.txt")) == {}
 
 
+def test_a_v1_table_says_the_game_must_start_again(tmp_path):
+    # PAD-532: godzilla_le's rig still had its pre-PAD-500 directory, and the
+    # box blamed the title ("group 3 has no board") for every cabinet light
+    bm = _ident(tmp_path, GZ_LE_IDENT.replace("# nbdir v2", "# nbdir v1").replace(
+        " group=", " was="))
+    assert cablights.resolve("topper", 3, {}, bm) == (None, cablights.OLD_DIRECTORY)
+    assert cablights.resolve("topper", 3, {}, {}) == (None, cablights.NO_DIRECTORY)
+    # a v2 directory that has no board at the place still says so
+    bm = _ident(tmp_path, GZ_LE_IDENT)
+    assert "group 11 has no board" in cablights.resolve("topper", 11, {}, bm)[1]
+
+
 def test_the_measured_map_first_then_a_place_the_board_confirms(tmp_path):
     bm = _ident(tmp_path, RUSH_IDENT)
     assert cablights.resolve("expression", 1, RUSH_MEASURED, bm) == (2, "directory")
@@ -217,6 +229,40 @@ def test_godzilla_s_two_toppers_go_by_their_boards_names(tmp_path):
     assert [(S["label"], S["node"]) for S in secs] == [("Topper", 12),
                                                        ("Topper Expression Light", 14)]
     assert all(S["positioned"] for S in secs) and left == []
+
+
+#: godzilla_le 1.36's, as nbdir derives it on the rig (PAD-532): the topper on
+#: group 9, the speakers on group 10 - not the Pro's 8 and 9
+GZ_LE_IDENT = """# nbdir v2 elf=game nodes=9 src=game 7962924 bytes
+node=1 type=pinnode code=2 part=0x00020023 group=5 name=Cabinet
+node=2 type=ws2812node code=24 part=0x2c40102b group=1 name=Cabinet Lights
+node=4 type=node4 code=30 part=0x00140040 group=2 name=QR Scanner
+node=7 type=ws2812node code=24 part=0x2c40102b group=10 name=Backbox Speaker Lights
+node=8 type=pinnode code=5 part=0x00020023 group=6 name=Lower Playfield
+node=9 type=pinnode code=5 part=0x00020023 group=7 name=Upper Playfield
+node=10 type=tmc5041node code=33 part=0x2c40102b group=8 name=Stepper Motor Board
+node=12 type=ws2812node code=21 part=0x2c40102b group=9 name=Topper
+node=14 type=ws2812node code=24 part=0x2c40102b group=3 name=Topper Lights
+# skipped node=0 code=42 reason=no-type (CPU/bridge or reserved) group=4 name=CPU / Bridge
+"""
+
+
+def test_godzilla_le_draws_both_toppers_and_its_speakers(tmp_path):
+    # the three the ticket's box called "not shown": topper 103 channels on
+    # group 9, the universal topper 275 on group 3, the speakers 69 on group 10
+    rows = [_row("led", "TANK 1A-%s" % c, 9, i, 45 + i, 133, "Test/scaled_godzilla_topper")
+            for i, c in enumerate("GRB")]
+    rows += [_row("led", "ETOPPER L DOME LED 1-%s" % c, 3, i, 73, 279,
+                  "System/TestMode/universal_topper_scaled") for i, c in enumerate("RGB")]
+    rows += [_row("led", "SPEAKER %d-%s" % (n // 3 + 1, "GRB"[n % 3]), 10, n)
+             for n in range(69)]
+    measured = {2: 4, 4: 0, 5: 1, 6: 8, 7: 9, 8: 10}
+    secs, left = cablights.sections(rows, measured, _ident(tmp_path, GZ_LE_IDENT))
+    assert left == []
+    assert [(S["role"], S["node"], S["label"]) for S in secs] == [
+        ("topper", 12, "Topper"), ("topper", 14, "Topper Expression Light"),
+        ("speaker", 7, "Speaker lighting")]
+    assert len(secs[2]["pixels"]) == 23
 
 
 def test_node_14_is_the_topper_expression_light_not_the_game_s_name(tmp_path):
@@ -436,6 +482,30 @@ def test_the_tick_box_is_kept_and_takes_effect(pf):
     ctl.view.cab = old
     pf.Playfield.api_expression(ctl, True)
     assert [S["key"] for S in ctl.view.cab.shown()] == ["expression:2"]
+
+
+def test_the_box_folds_and_is_kept_folded(pf):
+    # PAD-532: open until first folded; folded is kept beside the tick box,
+    # in the state file, because the page's own storage is private to a run
+    assert pf.CabinetLights(True).panel()["open"] is True
+    ctl = types.SimpleNamespace()
+    with open(pf.STATE, "w") as f:
+        json.dump({"expression_lights": False}, f)
+    assert pf.Playfield.api_cab_open(ctl, False) is False
+    assert json.load(open(pf.STATE)) == {"expression_lights": False,
+                                         "cab_panel_open": False}
+    assert pf.CabinetLights(True).panel()["open"] is False
+    pf.Playfield.api_cab_open(ctl, True)
+    assert pf.CabinetLights(True).panel()["open"] is True
+
+
+def test_the_page_folds_the_box_like_game_hardware():
+    js = open(os.path.join(RIG, "pfpage", "pf.js"), encoding="utf-8").read()
+    body = js[js.index("function cabPanel("):js.index("// ======", js.index("function cabPanel("))]
+    assert 'el("details", "kp-acc pf-cabp")' in body
+    assert "sum.tabIndex = -1" in body            # the space bar is the Action Button
+    assert 'api("cab_open"' in body and "spec.open" in body
+    assert "Expression lights" in body
 
 
 def test_the_schematic_drops_the_blades_and_speakers_blocks(pf):

@@ -714,11 +714,22 @@ function startMain() {
   // The side panel's CABINET LIGHTS box (PAD-500): which boards the column
   // holds, and the "Expression lights" tick box - the blades and the speaker
   // lights in or out of this window, kept for the next run by playfield.py.
+  // It folds like GAME HARDWARE (PAD-532), and playfield.py keeps whether it
+  // was left open too: the page's own storage does not outlive the run.
   function cabPanel(spec) {
-    const box = el("div", "pf-cabp");
-    const head = el("div", "hd");
-    head.append(el("span", "h", "CABINET LIGHTS"));
-    box.append(head);
+    const acc = el("details", "kp-acc pf-cabp");
+    acc.open = spec.open !== false;
+    const sum = el("summary", null, "CABINET LIGHTS");
+    // never keep the keyboard: a focused summary would eat the space bar
+    sum.tabIndex = -1;
+    sum.addEventListener("mousedown", (ev) => ev.preventDefault());
+    // setting `open` above queues a toggle of its own: only a change is kept
+    let was = acc.open;
+    acc.addEventListener("toggle", () => {
+      if (acc.open !== was) { was = acc.open; api("cab_open", was); }
+    });
+    const box = el("div", "body");
+    acc.append(sum, box);
     const rows = el("div", "kp-kv");
     for (const [k, v, n] of spec.lines) {
       const row = el("div", "r");
@@ -739,7 +750,7 @@ function startMain() {
         + "speaker lights - out of this window. Only what this window shows: the game is not changed.";
       box.append(opt);
     }
-    return { el: box };
+    return { el: acc };
   }
 
   // ================================================== the schematic view
