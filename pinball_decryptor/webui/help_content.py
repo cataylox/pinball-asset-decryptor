@@ -681,6 +681,9 @@ HELP_CONTENT = {
             "- **Moment** picks the point in the timeline; Play runs it, Stop goes back.\n"
             "- **Switchable parts** previews each look the game's code picks between "
             "(which monster Battle Select shows). Preview only.\n"
+            "- A layer drawn in only some of a part's looks names them on its Layers row "
+            "(the Planet X map's icons: Loop, Select, Destroyed, each in the same place). "
+            "Select it and **Show this look** switches the part to that look.\n"
             "- A greyed layer isn't drawn at this moment: click it to show and edit it. "
             "Edits hold at every moment.",
             "### Eyes and hiding",

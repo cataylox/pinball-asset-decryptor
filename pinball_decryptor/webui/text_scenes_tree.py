@@ -887,6 +887,12 @@ class TreeEditMixin:
             opts = [{"value": "", "label": "As it rests"}]
             opts += [{"value": str(f), "label": "%s (%d)" % (n, f)}
                      for n, f in sorted(labels, key=lambda x: x[1])]
+            # PAD-531: a layer's Show this look pins the frame it shows best at, maybe no label's
+            if nid in pins and not any(o["value"] == str(pins[nid]) for o in opts):
+                at = next((n for n, a, b in scene_eval.sections(labels, frames)
+                           if a <= pins[nid] <= b), None)
+                opts.append({"value": str(pins[nid]), "label": "%s (%d)" % (at, pins[nid])
+                             if at else "Frame %d" % pins[nid]})
             states.append({"node": nid, "name": path[-1], "path": " › ".join(path),
                            "value": str(pins[nid]) if nid in pins else "", "options": opts})
         ops = self._tree_ops(card)
@@ -898,6 +904,7 @@ class TreeEditMixin:
         view = self._tree_view_hidden(card)
         layers = []
         index = scene_edit._man_index(man)
+        looks = scene_eval.looks(man)
         have, memo = {}, {}
         # PAD-312: each picture's colour switch (the chosen-files profile baked into it)
         from ..core import colour_profile as _cp
@@ -944,6 +951,8 @@ class TreeEditMixin:
                            "hidden": any(op["op"] == "visible" and op.get("node") == n["id"]
                                          for op in ops),
                            "view_off": n["id"] in view,
+                           # PAD-531: the look of a switchable part it is drawn in
+                           "look": _look_of(looks.get(n["id"])),
                            "edits": "; ".join(edited_nodes.get(n["id"], []))})
         sel = self._tsel if self._tsel in index else None
         self._tsel = sel
@@ -1010,7 +1019,19 @@ class TreeEditMixin:
                 "font": self._tree_font_of(man, n, ops),
                 "filled": self._tree_filled(card, man).get(nid),
                 "words": self._tree_words_of(card, man, n, ops),
-                "game_colors": self._tree_game_colors(man, nid)}
+                "game_colors": self._tree_game_colors(man, nid),
+                "look": self._tree_look(card, man, nid)}
+
+    def _tree_look(self, card, man, nid):
+        """PAD-531 (DragonRR): the look of a switchable part layer *nid* is drawn in, for the
+        Selected panel: which part, which looks, and whether the preview shows one now."""
+        from ..plugins.stern import scene_eval
+        look = scene_eval.looks(man).get(nid)
+        if look is None:
+            return None
+        return dict(_look_of(look), part=look["part"], frame=look["frame"],
+                    pinned=(self._tpins.get(card) or {}).get(look["part"]),
+                    shown=nid in self._tlit)
 
     def _tree_painted(self, man):
         """The lines of scene manifest *man* the game program paints itself as it plays
@@ -3749,6 +3770,15 @@ def _added_text_op(ops, node):
     """The ``add_text`` edit that made added line *node*, or None."""
     return next((op for op in ops or () if op.get("op") == "add_text"
                  and op.get("id") is not None and int(op["id"]) == int(node)), None)
+
+
+def _look_of(look):
+    """The Layers row's word for :func:`scene_eval.looks`'s *look*: ``{"part_name", "looks",
+    "short"}``, or None for a layer drawn in every look (or in no switchable part)."""
+    if look is None:
+        return None
+    return {"part_name": look["part_name"], "looks": list(look["looks"]),
+            "short": " / ".join(look["short"])}
 
 
 def _kind_of(man, n):

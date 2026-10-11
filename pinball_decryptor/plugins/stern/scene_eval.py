@@ -572,6 +572,74 @@ def seekable(man):
     return out
 
 
+def sections(labels, frames):
+    """A seekable sprite's looks, ``[(label, first frame, last frame)]``: each label runs to
+    the next, and an ``X_End`` label closes ``X`` (Godzilla's map icons: ``PowerLoop`` 1,
+    ``PowerLoop_End`` 48, ``PowerSelect`` 49, ``PowerSelect_End`` 69, ``Power_Destroyed`` 70
+    are three looks)."""
+    labels = sorted(((n, int(f)) for n, f in labels), key=lambda x: x[1])
+    names = {n.lower() for n, _f in labels}
+    heads = [(n, f) for n, f in labels
+             if not (n.lower().endswith("_end") and n[:-4].lower() in names)]
+    out = []
+    for i, (n, f) in enumerate(heads):
+        end = heads[i + 1][1] - 1 if i + 1 < len(heads) else max(f, int(frames or 1))
+        out.append((n, f, max(f, end)))
+    return out
+
+
+def _short_looks(names):
+    """*names* without the part's own name in front (``Bridge_Destroyed`` -> ``Destroyed``),
+    cut only where a word starts."""
+    if len(names) < 2:
+        return {n: n for n in names}
+    pre = os.path.commonprefix(list(names))
+    while pre and not all(len(n) > len(pre) and (n[len(pre)] == "_" or n[len(pre)].isupper())
+                          for n in names):
+        pre = pre[:-1]
+    return {n: n[len(pre):].lstrip("_") or n for n in names} if pre else {n: n for n in names}
+
+
+def looks(man):
+    """Which look of a switchable part each layer belongs to (DragonRR, PAD-531: "multiple
+    icons in each of the three locations and it is hard to know why"): ``{node id: {"part":
+    sprite node id, "part_name", "looks": [label], "short": [label without the part's name],
+    "frame": the frame of the part that shows it best}}``.  A layer the part draws in every
+    one of its looks is left out; one inside a look's layer has that look too, unless a part
+    nested deeper names its own."""
+    objects = man["objects"]
+    out = {}
+
+    def visit(n, look):
+        for _s, oid in n["comps"]:
+            o = objects.get(str(oid)) or {}
+            if o.get("kind") not in ("Sprite", "StreamingFlipbook"):
+                continue
+            secs = sections(o.get("labels") or (), o.get("frames", 1))
+            short = _short_looks([s[0] for s in secs])
+            for k in o.get("kids") or ():
+                mine = look
+                got, best = [], None
+                for name, a, b in (secs if len(secs) > 1 else ()):
+                    on = [f for f in range(a, b + 1) if visible_at(k, f)]
+                    if not on:
+                        continue
+                    got.append(name)
+                    if best is None:
+                        # the frame it is most opaque at: a look that fades in starts clear
+                        best = max(on, key=lambda f: (tint_at(k, f)[0][3], -f))
+                if got and len(got) < len(secs):
+                    mine = {"part": n["id"], "part_name": n["name"], "looks": got,
+                            "short": [short[g] for g in got], "frame": best}
+                if mine is not None:
+                    out[k["id"]] = mine
+                visit(k, mine)
+
+    for n in man["root"]["kids"]:
+        visit(n, None)
+    return out
+
+
 def default_frame(man):
     """The root frame a still preview shows: the first frame at which the most elements are
     on the glass - a screen's resting state, after its fade-in and before its fade-out (Battle

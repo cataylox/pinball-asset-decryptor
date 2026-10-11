@@ -72,6 +72,36 @@ def test_a_labelled_sprite_rests_settled_unless_pinned_and_a_plain_one_plays():
     assert [s[0] for s in E.seekable(m)] == [1]
 
 
+def test_an_end_label_closes_its_look():
+    labels = [["PowerLoop", 1], ["PowerLoop_End", 48], ["PowerSelect", 49],
+              ["PowerSelect_End", 69], ["Power_Destroyed", 70]]
+    assert E.sections(labels, 70) == [("PowerLoop", 1, 48), ("PowerSelect", 49, 69),
+                                      ("Power_Destroyed", 70, 70)]
+    # an _End with no look of that name is a look of its own
+    assert E.sections([["A", 1], ["B_End", 5]], 8) == [("A", 1, 4), ("B_End", 5, 8)]
+
+
+def test_each_layer_names_the_looks_of_its_part_it_is_drawn_in():
+    """PAD-531 (DragonRR): the Planet X map's Bridge holds its Loop, Select and Destroyed
+    pictures in one place; each layer says which look it is."""
+    icon = {"kind": "Sprite", "frames": 8, "labels": [["BridgeLoop", 1], ["BridgeSelect", 4],
+                                                      ["Bridge_Destroyed", 8]],
+            "kids": [N(10, "Score", [9]),                                   # every look
+                     N(11, "Idle", [5], kf=((1, 1), (8, 0))),               # Loop and Select
+                     N(12, "Pick", [9], kf=((1, 0), (4, 1), (8, 0)),
+                       col=((4, (1, 1, 1, 0), (0,) * 4), (6, (1, 1, 1, 1), (0,) * 4))),
+                     N(13, "Dead", [9], kf=((1, 0), (8, 1)))]}
+    inner = {"kind": "Sprite", "frames": 1, "labels": [], "kids": [N(14, "IdlePic", [9])]}
+    m = man([N(1, "IconBridge", [2])], {2: icon, 5: inner, 9: BMP})
+    got = E.looks(m)
+    assert set(got) == {11, 12, 13, 14}                       # Score shows in every look
+    assert got[13]["looks"] == ["Bridge_Destroyed"] and got[13]["short"] == ["Destroyed"]
+    assert got[13]["part"] == 1 and got[13]["frame"] == 8
+    assert got[11]["short"] == ["Loop", "Select"] and got[14] is got[11]   # inside its look
+    assert got[12]["frame"] == 6                              # the Select fades in: shown opaque
+    assert E._short_looks(["Level0", "Level1"]) == {"Level0": "Level0", "Level1": "Level1"}
+
+
 def test_the_default_still_is_the_fullest_frame_on_the_glass():
     m = man([N(1, "In", [9], kf=((1, 1), (6, 0))),
              N(2, "Late", [9], kf=((1, 0), (4, 1))),
