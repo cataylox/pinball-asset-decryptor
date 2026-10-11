@@ -1344,13 +1344,13 @@ def test_light_the_mode_at_a_shot_is_checked():
     assert BM.problems(p, SHOTS, GZ.events, inserts=[]) == []      # no insert a mode can light here: lit without it
     bad = prog([{"hat": {"kind": "event", "event": "skill_shot", "when": "any"}, "do": [
         dict(LIT, shot="Moon ramp", insert="BLOFELD", color="gold", pattern="hurry"),
-        dict(LIT, insert="A, B")]}])
+        dict(LIT, insert=["A"]), dict(LIT, insert="X" * 40)]}])
     assert BM.problems(bad, SHOTS, GZ.events, inserts=["MASER READY"]) == [
         "Script 1's Light the mode at names Moon ramp, a shot this card does not have.",
         "Script 1 lights the mode in no colour.",
         "Script 1 lights the mode in no pattern.",
         "Script 1 lights the insert BLOFELD, which this card's game does not have.",
-        "Script 1 lights an insert that is not one."]
+        "Script 1 lights an insert that is not one."]                       # both: said once
     # a mode with no such block makes the C it always made: no lit-at code in it
     assert "lit_" not in BM.to_c(BM.starter("RAMP FRENZY", SHOTS), "ramp_frenzy")
 
@@ -1359,13 +1359,51 @@ def test_the_lit_c_only_calls_what_the_header_declares():
     src = BM.to_c(_lit_prog(), "lit")
     used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", src))
     assert used <= _header_calls(), used - _header_calls()
-    assert '{ 0, "MASER READY", 0xffd000u, PM_LAMP_BLINK, 500u },   /* Right ramp */' in src
+    assert '{ 0, "MASER READY", 0xffd000u, PM_LAMP_BLINK, 500u, "", 0x000000u },   /* Right ramp */' in src
     # the same block twice is one row; "the mode is lit" with no such block is never lit
     two = prog([{"hat": {"kind": "event", "event": "skill_shot", "when": "any"}, "do": [dict(LIT), dict(LIT)]}])
-    assert BM.to_c(two, "lit").count("PM_LAMP_BLINK, 500u }") == 1
+    assert BM.to_c(two, "lit").count("PM_LAMP_BLINK, 500u, ") == 1
     asked = prog([{"hat": {"kind": "ball_end"}, "do": [
         {"op": "if", "cond": {"k": "lit"}, "then": [{"op": "log", "text": "x"}], "else": None}]}])
     assert "static int lit_now(void) { return 0; }" in BM.to_c(asked, "asked")
+
+
+BOND_VILLAINS = "DR. NO-RIGHT RAMP,ROSA KLEBB,GOLDFINGER-RIGHT RAMP,LARGO,BLOFELD,MR. HENDERSON"
+
+
+def test_a_lit_mode_cycles_several_inserts_and_holds_one_solid_as_the_games_own():
+    """The Bond owner (PAD-521): their own mini-wizards should look like the game's own - while one is qualified the
+    Right ramp's villain inserts cycle and the film's insert is solid. Light the mode at names several inserts (a chase
+    runs across them, as pm_lamp_set takes a list) and one more held solid in its own colour."""
+    ok = prog([{"hat": {"kind": "event", "event": "skill_shot", "when": "any"}, "do": [
+        dict(LIT, insert=BOND_VILLAINS, pattern="chase", solid="Y.O.L.T.", solid_color="#ffffff")]}])
+    bond = BOND_VILLAINS.split(",") + ["Y.O.L.T.", "RIGHT RAMP ARROW"]
+    assert BM.problems(ok, SHOTS, GZ.events, inserts=bond) == []
+    assert BM.lit_inserts(" A, B ,A,, ") == ["A", "B"] and BM.lit_inserts("") == [] and BM.lit_inserts(3) is None
+    src = BM.to_c(ok, "lit")
+    assert ('{ 0, "%s", 0xffd000u, PM_LAMP_CHASE, 150u, "Y.O.L.T.", 0xffffffu },   /* Right ramp */' % BOND_VILLAINS
+            in src)
+    assert "pm_lamp_set(LIT_AT[k].solid, LIT_AT[k].solid_rgb, PM_LAMP_SOLID, 0);" in src
+    assert "pm_lamp_release(LIT_AT[k].solid);" in src
+    bad = prog([{"hat": {"kind": "event", "event": "skill_shot", "when": "any"}, "do": [
+        dict(LIT, insert=",".join("I%d" % i for i in range(9)), solid="FILM, TWO"),
+        dict(LIT, solid="NOPE"), dict(LIT, solid="Y.O.L.T.", solid_color="white")]}])
+    assert BM.problems(bad, SHOTS, GZ.events, inserts=bond + ["MASER READY"] + ["I%d" % i for i in range(9)]) == [
+        "Script 1 lights more than 8 inserts.",
+        "Script 1 holds an insert solid that is not one.",
+        "Script 1 holds the insert NOPE solid, which this card's game does not have.",
+        "Script 1 holds an insert solid in no colour."]
+
+
+def test_a_lit_mode_chases_its_inserts_and_holds_the_solid_one_on_the_harness(tmp_path):
+    lit = dict(LIT, insert="MASER READY,TANK 2,HEAT RAY", pattern="chase", solid="SKILL SHOT", solid_color="#ffffff")
+    p = prog([{"hat": {"kind": "event", "event": "skill_shot", "when": "any"}, "do": [lit]}], seconds=5)
+    out = play(tmp_path, p, "event", "skill_shot", "secs", 0.2, "lamps", "shot", "Right ramp", "secs", 0.2, "lamps")
+    held = re.findall(r"HELD (RIGHT RAMP|MASER READY|TANK 2|HEAT RAY|SKILL SHOT|none)( \w+ \w+)?", out)
+    assert [h for h, _c in held] == ["RIGHT RAMP", "MASER READY", "SKILL SHOT", "TANK 2", "HEAT RAY", "none"]
+    assert "LAMP MASER READY ffd000 chase 150 TEST MODE" in out and "LAMP SKILL SHOT ffffff solid 0 TEST MODE" in out
+    assert "START (its lit shot): player 1" in out
+    assert "LAMP OFF SKILL SHOT TEST MODE" in out and "LAMP OFF HEAT RAY TEST MODE" in out
 
 
 def test_the_bond_le_offers_its_villains_inserts():

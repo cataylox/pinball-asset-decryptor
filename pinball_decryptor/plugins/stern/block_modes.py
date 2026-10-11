@@ -81,6 +81,10 @@ the Right ramp kept starting one of the game's villains instead - it is where Bo
 modes, and the game handles a shot before the modes hear of it. So (3) while the mode would start on its lit shot,
 it CLAIMS the shot every tick (pm_lit_claim): a hit on that switch holds the game's own starts off while the game
 handles it, and the shot starts the lit mode; the game's henchman or villain waits for a later shot.
+The same owner then (PAD-521) wanted their modes to look like the game's own: while one of its mini-wizards is
+qualified the Right ramp's villain inserts cycle and the film's insert is solid. So the block's ``insert`` may name
+several inserts, separated by commas as pm_lamp_set takes them (up to LIT_INSERTS_MAX; a Chase runs across them in
+that order), and ``solid`` / ``solid_color`` one insert more held solid while it is lit (the film's).
 
 What a mode in C does with the kit (``sdk/examples/intricate_kit.h``), PAD-377 gives the blocks:
 
@@ -217,6 +221,7 @@ RATE_MIN, RATE_MAX = 20, 5000    # a blink's, pulse's or chase's pace, ms
 #: PAD-503: a mode lit at a shot shows it in one of these (no clock runs while it is lit, so no hurry)
 LIT_PATTERNS = ("solid", "blink", "pulse", "chase")
 INSERT_MAX = 39                  # an insert's name (pad_mode_runtime.c struct lamp keeps 39 letters)
+LIT_INSERTS_MAX = 8              # PAD-521: a mode lit at a shot lights up to this many inserts more (a chase runs across them)
 # ---- light shows (PAD-376): the kit's kit_show, steps of a pattern over the placed inserts ----
 #: a step's pattern: its C name, and the words the page shows
 FX = {"burst": ("FX_BURST", "a ring bursting out"), "implode": ("FX_IMPLODE", "a ring closing in"),
@@ -1059,11 +1064,43 @@ def _check_stack(stack, depth, where, ctx):
                 ctx["out"].append("%s lights the mode in no colour." % where)
             if b.get("pattern") not in LIT_PATTERNS:
                 ctx["out"].append("%s lights the mode in no pattern." % where)
-            insert = b.get("insert") or ""
-            if not isinstance(insert, str) or "," in insert or len(insert) > INSERT_MAX:
+            names = lit_inserts(b.get("insert"))
+            if names is None:
                 ctx["out"].append("%s lights an insert that is not one." % where)
-            elif insert and ctx["inserts"] and insert not in ctx["inserts"]:
-                ctx["out"].append("%s lights the insert %s, which this card's game does not have." % (where, insert))
+            else:
+                if len(names) > LIT_INSERTS_MAX:
+                    ctx["out"].append("%s lights more than %d inserts." % (where, LIT_INSERTS_MAX))
+                for insert in names:
+                    if ctx["inserts"] and insert not in ctx["inserts"]:
+                        ctx["out"].append("%s lights the insert %s, which this card's game does not have."
+                                          % (where, insert))
+            solid = b.get("solid") or ""                # PAD-521: one insert more, held solid (the film's)
+            if not isinstance(solid, str) or "," in solid or len(solid) > INSERT_MAX:
+                ctx["out"].append("%s holds an insert solid that is not one." % where)
+            elif solid and ctx["inserts"] and solid not in ctx["inserts"]:
+                ctx["out"].append("%s holds the insert %s solid, which this card's game does not have." % (where, solid))
+            elif solid and not COLOR_RE.match(str(b.get("solid_color") or "#ffffff")):
+                ctx["out"].append("%s holds an insert solid in no colour." % where)
+
+
+def lit_inserts(value):
+    """PAD-521: the inserts a Light the mode at block names (its ``insert``: one name, or several separated by commas,
+    as the runtime's pm_lamp_set takes them; "" = none), in order and each once; None when that is not a list of
+    names."""
+    if value is None:
+        return []
+    if not isinstance(value, str):
+        return None
+    out = []
+    for n in value.split(","):
+        n = n.strip()
+        if not n:
+            continue
+        if len(n) > INSERT_MAX:
+            return None
+        if n not in out:
+            out.append(n)
+    return out
 
 
 def _check_ms(ms, lo, hi, where, ctx):
@@ -1228,7 +1265,8 @@ class _Gen:
         self.game_show = False          # PAD-418: a block plays one of the game's own light shows
         self.game_wizard = False        # PAD-436: a block hands the player one of the game's own mini-wizards
         self.wizard_names = []          # PAD-457: ... which ones: the mode claims them as it loads
-        self.lit = []                   # PAD-503: each Light the mode at's (shot index, insert, rgb, pattern, ms)
+        self.lit = []                   # PAD-503: each Light the mode at's (shot index, inserts, rgb, pattern, ms,
+                                        # PAD-521: the insert held solid and its rgb)
         self.lit_asked = False          # PAD-503: a condition asks whether the mode is lit
 
     def var(self, i, p="P()"):
@@ -1497,10 +1535,13 @@ class _Gen:
                 pat, ms = PATTERNS[pattern]
                 color = str(b.get("color") or "")
                 rgb = int(color[1:], 16) if COLOR_RE.match(color) else 0xFFD000
-                insert = b.get("insert") if isinstance(b.get("insert"), str) else ""
-                if "," in insert or len(insert) > INSERT_MAX:
-                    insert = ""
-                spec = (self.shot_i(b.get("shot")), insert, rgb, pat, ms)
+                insert = ",".join((lit_inserts(b.get("insert")) or [])[:LIT_INSERTS_MAX])
+                solid = b.get("solid") if isinstance(b.get("solid"), str) else ""
+                if "," in solid or len(solid) > INSERT_MAX:
+                    solid = ""
+                scol = str(b.get("solid_color") or "#ffffff")
+                srgb = int(scol[1:], 16) if COLOR_RE.match(scol) else 0xFFFFFF
+                spec = (self.shot_i(b.get("shot")), insert, rgb, pat, ms, solid, srgb if solid else 0)
                 if spec not in self.lit:
                     self.lit.append(spec)
                 out.append(pad + "light_mode(%d);" % self.lit.index(spec))
@@ -2578,7 +2619,15 @@ _LIT_C = r"""/* ---- the mode lit at a shot (PAD-503), as the game lights one of
  * starts it (as Start the mode does: it may wait, and stays lit). Starting, however it starts, puts the light out;
  * a new game too. Each player's is their own. ---- */
 #define N_LIT_AT %(n)d
-static const struct { int shot; const char *insert; unsigned rgb; int pattern; unsigned ms; } LIT_AT[N_LIT_AT] = {
+static const struct {
+    int shot;
+    const char *insert;                 /* one insert or several, separated by commas: a chase runs across them */
+    unsigned rgb;
+    int pattern;
+    unsigned ms;
+    const char *solid;                  /* PAD-521: one insert more held solid while it is lit (the film's), "" = none */
+    unsigned solid_rgb;
+} LIT_AT[N_LIT_AT] = {
 %(rows)s};
 static int lit_as[5];                   /* per player: 1 + the LIT_AT it is lit as; 0 = not lit */
 static unsigned lit_player;             /* whose light lit_shown is; 0 = hold it again */
@@ -2604,6 +2653,7 @@ static void lit_off(void)
     if (k < 0) return;
     if (S[LIT_AT[k].shot] && !LIT[LIT_AT[k].shot].on) pm_lamp_release_shot(S[LIT_AT[k].shot]);
     if (LIT_AT[k].insert[0]) pm_lamp_release(LIT_AT[k].insert);
+    if (LIT_AT[k].solid[0]) pm_lamp_release(LIT_AT[k].solid);
     lit_shown = 0;
 }
 
@@ -2626,6 +2676,7 @@ static void lit_tick(void)
     k = want - 1;
     if (S[LIT_AT[k].shot]) pm_lamp_shot(S[LIT_AT[k].shot], LIT_AT[k].rgb, LIT_AT[k].pattern, LIT_AT[k].ms);
     if (LIT_AT[k].insert[0]) pm_lamp_set(LIT_AT[k].insert, LIT_AT[k].rgb, LIT_AT[k].pattern, LIT_AT[k].ms);
+    if (LIT_AT[k].solid[0]) pm_lamp_set(LIT_AT[k].solid, LIT_AT[k].solid_rgb, PM_LAMP_SOLID, 0);
     lit_shown = want;
     lit_player = p;
 }
@@ -2660,9 +2711,9 @@ static void lit_started(unsigned p)
 def _lit_c(g):
     """PAD-503: the C of the mode lit at a shot, one LIT_AT row per Light the mode at block."""
     rows = []
-    for shot, insert, rgb, pat, ms in g.lit:
-        rows.append("    { %d, %s, 0x%06xu, %s, %du },   /* %s */" % (
-            shot, _c_str(insert), rgb, pat, ms, _comment(g.shots[shot] or "no shot")))
+    for shot, insert, rgb, pat, ms, solid, srgb in g.lit:
+        rows.append("    { %d, %s, 0x%06xu, %s, %du, %s, 0x%06xu },   /* %s */" % (
+            shot, _c_str(insert), rgb, pat, ms, _c_str(solid), srgb, _comment(g.shots[shot] or "no shot")))
     return _LIT_C % {"n": len(g.lit), "rows": "\n".join(rows) + "\n"}
 
 _MECH_C = """/* ---- the mechanisms (PAD-395; MODE_SDK.md "The magnet", "The scoop") ---- */
