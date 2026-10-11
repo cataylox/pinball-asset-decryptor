@@ -1179,7 +1179,9 @@ HELP_CONTENT = {
          "down tints it. To pick a line's color outright, use **Color** in the "
          "Scenes **Font** bar. A line with a color of its own is drawn in exactly "
          "it and the profile leaves it alone; the Colors bar's **Font text color** "
-         "row shows it (or **Default**)."),
+         "row shows it (or **Default**). **Apply to all lines of text…** under "
+         "it gives that color (or Default) to every unlocked line in every scene, "
+         "as one Undo step."),
         ("Machine screen (Spike 2, preview only)",
          "Not a correction but your machine's screen itself. It is never written to "
          "the card, and Revert all leaves it alone.\n\n"
