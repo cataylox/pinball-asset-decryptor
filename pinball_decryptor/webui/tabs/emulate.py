@@ -157,6 +157,10 @@ class EmulateTab(TabService):
                                             rig.COUNTRY_GAME)
         self.emulate_power_var = self.var("power", "str",
                                           rig.POWER_CHOICES[0][0])
+        # PAD-519: which model the board says the machine is (Premium, LE,
+        # SLE ...); "" is the card's own.  Not remembered: the choices are the
+        # card's, so each session starts on the card's own model.
+        self.emulate_edition_var = self.var("edition", "str", "")
         # -- the panel's own ---------------------------------------------
         vol0, mute0 = load_audio_ctl()
         self._volume_var = self.var("volume", "float", round(vol0 * 100))
@@ -246,6 +250,9 @@ class EmulateTab(TabService):
         self._spike3_probed = None
         self._mains_note = ""       # PAD-173: what this game does about 50 Hz
         self._mains_key = None
+        # PAD-519: the editions the picked card's game takes, read off its binary
+        self._editions = None       # {"built", "choices"} once the probe answers
+        self._editions_key = None
         self._slots_rows = None
         self._slots_total = None
         self._slots_free = None
@@ -282,6 +289,8 @@ class EmulateTab(TabService):
             countries=[rig.COUNTRY_GAME] + list(rig.COUNTRIES),
             powers=[label for label, _env in rig.POWER_CHOICES],
             country_tip=rig.COUNTRY_TIP, power_tip=rig.POWER_TIP,
+            edition_tip=rig.EDITION_TIP, editions=[], editions_on=False,
+            edition_note="",
             topper_tip=rig.TOPPER_TIP, states_tip=rig.STATES_TIP,
             launch_tip=rig.LAUNCH_TIP, select_tip=rig.SELECT_TIP_IDLE,
             vals=dict(self._vals), state_kind="", state_tip="", host_tip="",
@@ -481,6 +490,7 @@ class EmulateTab(TabService):
         self._select_probe_kick()
         self._which_kick()
         self._mains_kick()
+        self._editions_kick()
 
     # -- which card this is, next to the project (PAD-199) ----------------
     def _which_kick(self):
@@ -774,6 +784,60 @@ class EmulateTab(TabService):
             return
         self._mains_note = note
         self.set(mains_note=note)
+
+    # -- the edition (PAD-519) ---------------------------------------------
+    #
+    # A Premium/LE card runs every Premium, LE and SLE of its title; the board
+    # says which one the machine is (plugins/stern/cabinet_model.py).  The
+    # choices are the card's own game program's answer, read when the card is
+    # picked, so a Pro card (which is Pro whatever the board says) gets none.
+    def _editions_kick(self):
+        card = self._card()
+        from ...plugins.stern import mains_check
+        key = (card, mains_check.cache_stamp(card)) if card else None
+        if key == self._editions_key:
+            return
+        self._editions_key = key
+        self._editions = None
+        self._editions_paint()
+        if not card or key[1] is None:
+            return
+
+        def run():
+            from ...plugins.stern import cabinet_model
+            _title, ed = cabinet_model.editions_card(card)
+            self._post(self._editions_apply, key, ed)
+
+        self._thread(run)
+
+    def _editions_apply(self, key, ed):
+        if key != self._editions_key:   # the card moved on
+            return
+        self._editions = ed
+        self._editions_paint()
+
+    def _editions_paint(self):
+        ed = self._editions or {}
+        built, choices = ed.get("built") or "", ed.get("choices") or []
+        own = rig.edition_own_label(built)
+        options = [{"value": "", "label": own}] + [
+            {"value": name, "label": name} for name, _code in choices
+            if name != built]
+        if self.emulate_edition_var.get() not in [o["value"] for o in options]:
+            self.emulate_edition_var.set("")
+        self.set(editions=options, editions_on=bool(choices),
+                 edition_note=rig.edition_note(self._editions, built))
+
+    def _edition_env(self):
+        """PAD_MODEL for the run: the picked edition's code, or the engine's
+        "999" (the card's own) - always sent for a card that has choices, so a
+        board an earlier run made an SLE goes back to the card's own."""
+        choices = dict((self._editions or {}).get("choices") or [])
+        if not choices:
+            return []
+        from ...plugins.stern import cabinet_model
+        code = choices.get(self.emulate_edition_var.get(), cabinet_model.WILDCARD)
+        return ["PAD_MODEL=%s" % code]
 
     # -- the machine row (PAD-149) -----------------------------------------
     def _machine_env(self):
@@ -2396,7 +2460,8 @@ class EmulateTab(TabService):
         # tab's run is the one that has a window and a Volume / Mute.
         env = ["PAD_AUDIO=1", "PAD_AUDIO_DUMP=30",
                "PAD_AUDIO_CTL=" + audio_ctl_file()] + \
-            list(src) + self._machine_env() + self._screen_env()
+            list(src) + self._machine_env() + self._edition_env() + \
+            self._screen_env()
         if self._launch_slot:
             env.append("PAD_SELECT=0")
         elif self._select_touched:

@@ -260,13 +260,14 @@ fi
 # PAD-149's machine row rides the same list: the CPU board's country DIP
 # switches (PAD_CAB_DIP), the country stored in the machine (PAD_COUNTRY), the
 # mains (PAD_MAINS_HZ) and which mains the board was built for
-# (PAD_FACTORY_HZ). Unset is the rig's own machine, exactly as it was.
+# (PAD_FACTORY_HZ), and the model the board says the machine is (PAD_MODEL,
+# PAD-519). Unset is the rig's own machine, exactly as it was.
 # PAD_CARD_MODES=0 is the opt-out from a card's own modes (modes/cardmodes.sh). That
 # feature needs nothing from out here - run_game.sh reads the card inside the box - but
 # a "no" has to be able to cross, for the same reason PAD_SELECT=0 does.
 for v in PAD_GAME PAD_PLAYFIELD PAD_AUDIO PAD_AUTO_ATTRACT \
          PAD_SELECT PAD_SELECT_TIMEOUT PAD_SELECT_MEDIA PAD_CARD_MODES \
-         PAD_CAB_DIP PAD_COUNTRY PAD_MAINS_HZ PAD_FACTORY_HZ LOG; do
+         PAD_CAB_DIP PAD_COUNTRY PAD_MAINS_HZ PAD_FACTORY_HZ PAD_MODEL LOG; do
     [ -n "${!v:-}" ] && RUN_ARGS+=(-e "$v=${!v}")
 done
 

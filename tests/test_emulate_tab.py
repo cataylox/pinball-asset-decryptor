@@ -533,15 +533,17 @@ def test_the_rig_carries_the_machine_row_to_the_game():
     assert scans >= 2 and len(applied) == scans
     assert re.search(r"bits\[k\] = idle\[k\];.*?cab_dip_apply\(bits\);\s*"
                      r"have = 1;", shim, re.S)
-    # The board and the stored country are set on a loaded chip and on a
-    # blank one, after the identity seed and before any probe's poke.
+    # The board, its model (PAD-519) and the stored country are set on a
+    # loaded chip and on a blank one, after the identity seed and before any
+    # probe's poke.
     assert len(re.findall(r"nv_ident_seed\(\);\s*nv_factory_hz_apply\(\);\s*"
+                          r"nv_model_apply\(\);\s*"
                           r"nv_country_apply\(\);\s*nv_poke_apply\(\);",
                           shim)) == 2
     box = (_RIG / "docker" / "padbox.sh").read_text(encoding="utf-8")
     forwarded = box.split("for v in PAD_GAME", 1)[1].split("; do", 1)[0]
     for name in ("PAD_CAB_DIP", "PAD_COUNTRY", "PAD_MAINS_HZ",
-                 "PAD_FACTORY_HZ"):
+                 "PAD_FACTORY_HZ", "PAD_MODEL"):
         assert name in forwarded, name
 
 

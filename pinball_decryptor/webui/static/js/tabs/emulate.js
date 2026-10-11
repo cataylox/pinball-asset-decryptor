@@ -177,7 +177,11 @@ function CardSource({ s }) {
         <${Select} id="emu-country" ns="emulate" k="country" value=${s.country} options=${countries} title=${s.country_tip} /></div>
       <div class="stack emu-lblf"><label class="lbl" for="emu-power">Power</label>
         <${Select} id="emu-power" ns="emulate" k="power" value=${s.power} options=${powers} title=${s.power_tip} /></div>
+      <div class="stack emu-lblf"><label class="lbl" for="emu-edition">Edition</label>
+        <${Select} id="emu-edition" ns="emulate" k="edition" value=${s.edition || ""} options=${s.editions || []}
+          disabled=${!s.editions_on} title=${s.edition_tip} /></div>
     </div>
+    ${s.edition_note ? html`<div class="small muted emu-edition-note" role="status">${s.edition_note}</div>` : null}
     ${s.mains_note ? html`<div class="note warn emu-mains" role="status">
       <span class="small warn-ink">${s.mains_note}</span></div>` : null}
     <div class="row emu-flags">
