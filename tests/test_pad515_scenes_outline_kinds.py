@@ -173,7 +173,9 @@ def test_the_selected_panel_keeps_every_section_greyed_out_not_gone():
     assert "disabled=${off}" in words and "const off = !p.words;" in words
     fills = src[src.index("function GameFills("):]
     fills = fills[:fills.index("\n}\n")]
-    assert 'cx("tree-game fills", !f && "off")' in fills and "disabled=${!f}" in fills
+    # PAD-513: the button is greyed out too when the game writes words of its own
+    assert 'cx("tree-game fills", !f && "off")' in fills and "disabled=${!filledFinds(f)}" in fills
+    assert "const filledFinds = (f) => !!(f && " in src
     paints = src[src.index("function GameColors("):]
     paints = paints[:paints.index("\n}\n")]
     assert 'cx("tree-game paints", !g && "off")' in paints
