@@ -23,6 +23,7 @@ const T = {
   name: "What the mode is called. It is the title on its screen and clip unless you give those their own.",
   startShot: "The shot that starts the mode.",
   itsShot: "The mode starts when its shot is made that many times in one ball.",
+  startOr: "Another shot whose hits count toward starting the mode, together with its shot's: pick the three pop bumpers and 120 starts it on the 120th hit of any of them.",
   alsoShot: "Another shot the player has to make as well, that many times in the same ball, before the mode starts. The shots can be made in any order.",
   sequence: "The mode starts when the player makes these shots in this order, in one ball: a combo of your own. A shot of the sequence made out of turn sends the player back to the start (it counts as the first shot again if it is the first). Pick a shot in the next list to add one; up to 8.",
   seqReset: "On: every other shot of the game made out of turn sends the player back to the start too, so only the sequence, cleanly, starts the mode. Off: other shots do not matter, only the order of these.",
@@ -363,6 +364,10 @@ function ModePage({ s, f, off, dis, rs }) {
   const alsoOpts = (v) => withValue([{ value: ALSO_NONE, label: ALSO_NONE }, ...shots.map((x) => ({ value: x, label: x }))], v);
   const afterOpts = withValue([{ value: AFTER_NONE, label: AFTER_NONE }, ...(s.other_modes || []).map((x) => ({ value: x, label: x }))], f.after_mode);
   const afterOff = off || !f.after_mode || f.after_mode === AFTER_NONE;
+  // PAD-518: up to two more shots whose hits count with the start shot's
+  const OR_NONE = "(no other shot)";
+  const orOpts = (v) => withValue([{ value: OR_NONE, label: OR_NONE }, ...shots.filter((x) => x !== f.start_shot).map((x) => ({ value: x, label: x }))], v);
+  const orSet = [0, 1].some((i) => f["start_or_" + i] && f["start_or_" + i] !== OR_NONE);
   const mbOff = off || dis.multiball;
   const mbIn = mbOff || !f.multiball;
   const bsOff = off || dis.ball_save || f.multiball;
@@ -437,8 +442,14 @@ function ModePage({ s, f, off, dis, rs }) {
         <div class="row wrap">
           <${Radio} name="m-starts" value="shot" label="its shot" checked=${f.starts_kind !== "event" && !seqOn} disabled=${off} title=${T.itsShot} onChange=${(v) => setF("starts_kind", v, true)} />
           <${Select} value=${f.start_shot} options=${shotOpts} ns="modes" k="f:start_shot" disabled=${off || !shots.length} width=${180} title=${T.startShot} />
+        </div>
+        <div class="row wrap" style="padding-left:26px">
+          ${[0, 1].map((i) => html`<span key=${"or" + i} class="row nw" style="gap:8px"><span class="dim nw">or</span>
+            <${Select} value=${f["start_or_" + i] || OR_NONE} options=${orOpts(f["start_or_" + i])} ns="modes" k=${"f:start_or_" + i} disabled=${off || !shots.length} width=${170} title=${T.startOr} /></span>`)}
+        </div>
+        <div class="row wrap" style="padding-left:26px">
           <span class="row nw" style="gap:8px"><${Num} k="start_count" value=${f.start_count} disabled=${off} width=${64} />
-          <span class="dim nw">times in one ball</span></span>
+          <span class="dim nw">${orSet ? "hits in one ball, all of them together" : "times in one ball"}</span></span>
         </div>
         <div class="row wrap">
           <${Radio} name="m-starts" value="event" label="an event" checked=${f.starts_kind === "event"} disabled=${evOff} onChange=${(v) => setF("starts_kind", v, true)} />

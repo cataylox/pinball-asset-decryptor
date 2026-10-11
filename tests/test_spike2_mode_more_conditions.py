@@ -131,7 +131,7 @@ def test_an_event_start_keeps_its_other_shots():
 
 @pytest.mark.parametrize("also, words", [
     ([["Nowhere", 1]], "has no shot called 'Nowhere'"),
-    ([["Left ramp", 0]], "1 to 20 times"),
+    ([["Left ramp", 0]], "1 to 999 times"),
     ([["Left ramp", 1]] * 4, "up to 3"),
     ("Left ramp", "up to 3"),
 ])
