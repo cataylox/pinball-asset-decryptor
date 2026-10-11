@@ -140,7 +140,9 @@ def test_the_led_swatches_are_never_a_press_target():
     something a press tries to close."""
     js = _schematic_js()
     i = js.index("for (const c of blk.cells)")
-    cell = js[i:js.index("cs.append(d);", i)]
+    # to the end of the block: the speakers' ring and the blades' columns
+    # (PAD-500) place the same cells, and must not make them pressable either
+    cell = js[i:js.index("grid.append(b);", i)]
     assert 'addEventListener("pointermove"' in cell
     assert "pointerdown" not in cell and "api(" not in cell
 

@@ -140,8 +140,9 @@ function pfHit(view, fx, scale, px, py) {
 // PAD-500: where every one of the cabinet's own lights goes in a W x H column
 // beside the artwork. The sections come from playfield.py in column order
 // (topper, speakers, blades): a topper on its own drawing keeps that drawing's
-// shape in at most a third of the column, a strip (the speakers, a topper with
-// no drawing) wraps in chain order, and the blades stand in whatever height is
+// shape in at most a third of the column, the speakers are a ring (they ring
+// the backbox speakers; pixel 1 at the top, clockwise in chain order), any
+// other strip wraps in chain order, and the blades stand in whatever height is
 // left, one bar a side with pixel 1 at the BOTTOM - where King Kong's picture
 // puts it. PURE, so Node can test it: marks are {cid, x, y, r} (a dot) or
 // {cid, x, y, w, h} (a bar segment), centred; labels {text, sub, x, y}.
@@ -174,6 +175,16 @@ function cabLayout(sections, W, H) {
       const ox = CAB_PAD + (inner - bw * k) / 2;
       for (const [cid, px, py] of s.pos) marks.push({ cid, x: ox + (px - x0) * k, y: y + r + (py - y0) * k, r });
       y += bh * k + 2 * r + 10;
+    } else if (s.ring) {
+      const n = Math.max(1, s.ring.length);
+      const R = Math.max(8, Math.min(inner / 2 - 6, H / 8));
+      const r = Math.max(1.5, Math.min(5, 0.8 * Math.PI * R / n));
+      const cx = CAB_PAD + inner / 2, cy = y + R + r;
+      s.ring.forEach((cid, i) => {
+        const a = -Math.PI / 2 + 2 * Math.PI * i / n;
+        marks.push({ cid, x: cx + R * Math.cos(a), y: cy + R * Math.sin(a), r });
+      });
+      y += 2 * (R + r) + 10;
     } else {
       const p = Math.max(6, Math.min(11, inner / 10));
       const per = Math.max(1, Math.floor(inner / p));
@@ -182,6 +193,35 @@ function cabLayout(sections, W, H) {
     }
   }
   return { marks, labels };
+}
+
+// The switch list's swatch grid gives the same two boards the same shapes: the
+// speakers' block a ring of round cells, pixel 1 at the top and clockwise, and
+// the blades' block a column a side, pixel 1 at the bottom. Slots are grid
+// cell keys in order, null where the wire has not shown that pixel yet (it
+// gets no cell, and the others keep their places). PURE: {w, h, at: [{k, x,
+// y, w, h}]}, top-left corners inside a w x h box. CELL is .pf-grid .c's size.
+const CELL = 12, GRID_W = 152;
+function gridRing(slots) {
+  const n = Math.max(1, slots.length);
+  const R = Math.min((GRID_W - CELL) / 2, Math.max(24, n * (CELL + 4) / (2 * Math.PI)));
+  const c = Math.max(5, Math.min(CELL, 2 * Math.PI * R / n - 3));
+  const at = [];
+  slots.forEach((k, i) => {
+    if (k == null) return;
+    const a = -Math.PI / 2 + 2 * Math.PI * i / n;
+    at.push({ k, x: R + R * Math.cos(a) + (CELL - c) / 2, y: R + R * Math.sin(a) + (CELL - c) / 2, w: c, h: c });
+  });
+  return { w: 2 * R + CELL, h: 2 * R + CELL, at };
+}
+function gridBars(bars) {
+  const n = Math.max(1, ...bars.map((b) => b.length));
+  const pitch = n <= 60 ? 8 : Math.max(4, Math.floor(480 / n));
+  const GAP = 14, at = [];
+  bars.forEach((bar, j) => bar.forEach((k, i) => {
+    if (k != null) at.push({ k, x: j * (CELL + GAP), y: (n - 1 - i) * pitch, w: CELL, h: pitch - 2 });
+  }));
+  return { w: bars.length * CELL + (bars.length - 1) * GAP, h: n * pitch - 2, at };
 }
 
 // the mark under a point, for the tooltip: a dot is hit a little past its
@@ -732,15 +772,32 @@ function startMain() {
     for (const blk of V.grid.blocks) {
       const b = el("div", "blk");
       b.append(el("div", "hdr", "node " + blk.node + "  (" + blk.cells.length + ")"));
-      const cs = el("div", "cells");
+      const made = {};
       for (const c of blk.cells) {
         const d = el("div", "c");
         d.addEventListener("pointermove", (e) => showTip(c.tip, e.clientX, e.clientY));
         d.addEventListener("pointerleave", hideTip);
-        cells[c.k] = d;
-        cs.append(d);
+        cells[c.k] = made[c.k] = d;
       }
-      b.append(cs);
+      // the speakers' ring and the blades' columns (PAD-500), as gridRing()
+      // and gridBars() place them; what they leave goes in the grid below
+      const shape = blk.ring ? gridRing(blk.ring) : blk.bars ? gridBars(blk.bars) : null;
+      if (shape) {
+        const sh = el("div", "shape" + (blk.ring ? " ring" : ""));
+        sh.style.width = shape.w + "px";
+        sh.style.height = shape.h + "px";
+        for (const a of shape.at) {
+          const d = made[a.k];
+          if (!d) continue;
+          Object.assign(d.style, { left: a.x + "px", top: a.y + "px", width: a.w + "px", height: a.h + "px" });
+          sh.append(d);
+          delete made[a.k];
+        }
+        b.append(sh);
+      }
+      const cs = el("div", "cells");
+      for (const c of blk.cells) if (made[c.k]) cs.append(made[c.k]);
+      if (cs.childNodes.length) b.append(cs);
       grid.append(b);
     }
     const paintCell = (k) => {
@@ -1232,4 +1289,4 @@ function startLcd() {
 }
 
 // Node (the tests) takes the pure part; a browser has no `module`.
-if (typeof module !== "undefined") module.exports = { pfHit, cabLayout, cabHit };
+if (typeof module !== "undefined") module.exports = { pfHit, cabLayout, cabHit, gridRing, gridBars };
