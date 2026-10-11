@@ -16,6 +16,8 @@ layers go to the console.
   intro, whose code fills BRIDGE, ATTACK and MULTIBALL; ``--scene 99cd5ccc.../49ac2e40...
   --pick Line1_Left_Instance``, the battle vs Ebirah's screen, whose LEFT / CENTER / RIGHT the
   code does not name.
+- Round 4, with --text <words>: then the Text tab with that scene's line of those words picked
+  (a line the game writes itself takes no new words).
 
 Needs Playwright (the user site-packages one) and the installed Edge.
 """
@@ -48,7 +50,7 @@ def _opt(name, default):
 
 def main():
     args = [a for i, a in enumerate(sys.argv[1:], 1)
-            if not a.startswith("--") and sys.argv[i - 1] not in ("--scene", "--pick")]
+            if not a.startswith("--") and sys.argv[i - 1] not in ("--scene", "--pick", "--text")]
     repo, out = args[:2]
     source = args[2] if len(args) > 2 else r"C:\Users\david\OneDrive\Desktop\gzho"
     scene, pick = LCD + _opt("--scene", SCENE), _opt("--pick", PICK)
@@ -102,7 +104,25 @@ def main():
             rig._wait(lambda: not scenes().get("tree_busy"), 60)
             time.sleep(2.5)
             props = (scenes().get("tree_view") or {}).get("props") or {}
-            print("picked:", props.get("name"), "filled:", props.get("filled"), flush=True)
+            print("picked:", props.get("name"), "filled:", props.get("filled"),
+                  "words:", props.get("words"), flush=True)
+            words = _opt("--text", "")
+            if words:
+                # round 4: the same line on the Text tab, picked in its list
+                text = lambda: webui_shot.state(url).get("text") or {}    # noqa: E731
+                page.locator(".rail").get_by_text("Text", exact=True).first.click()
+                rig._wait(lambda: text().get("rows") and not text().get("scanning"), 300, 0.5)
+                box = page.locator(".text-page .search input").first
+                box.click()
+                box.fill(words)
+                time.sleep(1.5)
+                rows = text().get("rows") or []
+                hit = next(i for i, r in enumerate(rows)
+                           if r and r.get("o") == words and r.get("sc") != "game program"
+                           and scene.rsplit("/", 1)[-1][:5] in (r.get("sc") or ""))
+                api("text.select", hit)
+                time.sleep(1.5)
+                print("text row:", rows[hit], "locked:", text().get("locked"), flush=True)
             page.mouse.move(5, 995)
             time.sleep(1.5)
             page.screenshot(path=out)

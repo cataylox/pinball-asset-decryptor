@@ -32,6 +32,7 @@ import threading
 import time
 
 from .. import compat
+from .. import game_filled
 from .. import text_rules as R
 from .base import TabService, rpc
 
@@ -541,14 +542,17 @@ class TextTab(TabService):
         if r is None:
             return False
         self._current = i
-        if R.row_is_scene(r):
+        locked = self._locked(r)
+        if locked:
+            note = game_filled.LOCKED_NOTE
+        elif R.row_is_scene(r):
             note = R.scene_note(r, self._scene_name(r["path"]))
         else:
             note = R.program_note(r)
         # Pre-fill with the current effective text so the user edits from
         # what's shown today.
         self.set(sel=i, orig=r["original"], scene_note=note, can_edit=True,
-                 sel_edited=R.is_edited(r))
+                 sel_edited=R.is_edited(r), locked=locked)
         self.text_new_var.set(r["replacement"] or r["original"])
         self._update_budget()
         return True
@@ -558,7 +562,7 @@ class TextTab(TabService):
         self.text_new_var.set("")
         self.text_budget_var.set("")
         self.set(sel=None, orig="", scene_note="", can_edit=False,
-                 budget_over=False, sel_edited=False)
+                 budget_over=False, sel_edited=False, locked=False)
 
     def _update_budget(self):
         i, r = self._row(self._current)
@@ -580,18 +584,28 @@ class TextTab(TabService):
             return False
         orig = r["original"]
         new = self.text_new_var.get()
+        if new != orig and self._locked(r):
+            compat.messagebox.showinfo("The game writes this line", game_filled.LOCKED_NOTE)
+            return False
         if R.row_len(r, new) > R.row_budget(r):
             compat.messagebox.showwarning("Replacement too long",
                                           R.too_long_message(r, new))
             return False
         eff = "" if new == orig else new
         if self._apply_all(r):
+            # a scene line the game writes itself keeps its words (PAD-513)
             targets = [rr for rr in self._text_rows
-                       if rr["original"] == orig and not R.row_part(rr)]
+                       if rr["original"] == orig and not R.row_part(rr)
+                       and (rr is r or not eff or not self._locked(rr))]
         else:
             targets = [r]
         self._set_replacements([(rr, eff) for rr in targets])
         return True
+
+    def _locked(self, r):
+        """PAD-513 (DragonRR): a scene line every box of which the game writes as it plays
+        (:mod:`..game_filled`): new words for it would never show, so they are refused."""
+        return game_filled.is_locked(self._text_scan_dir or self._assets_path(), r)
 
     def _apply_all(self, r):
         """Does an edit of row *r* go to every row with its original? Never
@@ -849,11 +863,17 @@ class TextTab(TabService):
 
     MAX_LISTED = 200
 
+    def _replace_plan(self, find, repl, case):
+        """Replace everywhere's plan without the scene lines the game writes itself (PAD-513),
+        and how many those were."""
+        plan = R.replace_plan(self._text_rows, find or "", repl or "", bool(case))
+        keep = [p for p in plan if p["new"] == p["row"]["original"] or not self._locked(p["row"])]
+        return keep, len(plan) - len(keep)
+
     @rpc
     def replace_plan(self, find, repl, case=True):
         """The dialog's live readout: count line, Apply enable, misfits."""
-        plan = R.replace_plan(self._text_rows, find or "", repl or "",
-                              bool(case))
+        plan, locked = self._replace_plan(find, repl, case)
         fits = [p for p in plan if p["fits"]]
         n, m = len(fits), len(plan)
         already = sum(1 for p in fits
@@ -869,6 +889,9 @@ class TextTab(TabService):
             if already:
                 text += " (%d already edited: their edit is replaced)" \
                         % already
+            if locked:
+                text += "; %d line(s) the game writes itself are left as they are" \
+                        % locked
         misfits = [p for p in plan if not p["fits"]]
         rows = [{"o": p["row"]["original"], "n": p["new"],
                  "b": R.row_len(p["row"], p["new"]),
@@ -882,8 +905,7 @@ class TextTab(TabService):
     def replace_apply(self, find, repl, case=True):
         """Apply: land every fitting row through the per-row path, then name
         the skipped rows.  Returns ``{applied, skipped}`` or None."""
-        plan = R.replace_plan(self._text_rows, find or "", repl or "",
-                              bool(case))
+        plan, _locked = self._replace_plan(find, repl, case)
         fits = [p for p in plan if p["fits"]]
         if not fits:
             return None
@@ -1324,6 +1346,9 @@ class TextTab(TabService):
         if not rows:
             return None
         new = original if new is None else new
+        if new != original and self._locked(rows[0]):
+            compat.messagebox.showinfo("The game writes this line", game_filled.LOCKED_NOTE)
+            return False
         if R.row_len(rows[0], new) > R.row_budget(rows[0]):
             compat.messagebox.showwarning("Replacement too long",
                                           R.too_long_message(rows[0], new))
