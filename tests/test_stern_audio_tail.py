@@ -1296,13 +1296,14 @@ def test_encoders_apply_slot_seed(monkeypatch):
     assert int(np.abs(captured["tgt"]).max()) == 0     # gated out -> silent
 
 
-def test_encoders_seed_near_silence_only_when_blip_free_opted_in(monkeypatch):
-    """The anti-degenerate seed rides with the blip-free cave, which is opt-in.
+def test_encoders_seed_near_silence_whenever_blip_free_is_on(monkeypatch):
+    """The anti-degenerate seed rides with the blip-free cave, which is always
+    on (PAD-523).
 
     Only Path A skips the master-directory restore, so only Path A can leave a
     silent body silent everywhere (which the codec can't round-trip -- it
-    decodes to loud garbage).  A standard build restores stock bytes, so a
-    silent replacement must stay untouched."""
+    decodes to loud garbage).  A build with the cave switched off restores
+    stock bytes, so a silent replacement must stay untouched there."""
     import numpy as np
     from pinball_decryptor.plugins.stern import engine as E
     monkeypatch.delenv("PAD_STERN_SLOT_SEED_DB", raising=False)
@@ -1322,14 +1323,15 @@ def test_encoders_seed_near_silence_only_when_blip_free_opted_in(monkeypatch):
     monkeypatch.setattr(E, "_verify_encoded", lambda *a, **k: None)
     E._encode_mono(None, FakeGR(), {"length": 4000, "chan": 1, "idx": 1},
                    "x.wav", np)
-    assert int(np.abs(captured["tgt"]).max()) == 0     # default build -> no seed
+    assert int(np.abs(captured["tgt"]).max()) > 0      # default build -> seeded
 
-    monkeypatch.setenv("PAD_STERN_BLIP_FREE", "1")     # checkbox ticked
+    monkeypatch.setenv("PAD_STERN_BLIP_FREE", "0")     # engine-level off
     captured.clear()
     E._encode_mono(None, FakeGR(), {"length": 4000, "chan": 1, "idx": 1},
                    "x.wav", np)
-    assert int(np.abs(captured["tgt"]).max()) > 0      # blip-free on -> seeded
+    assert int(np.abs(captured["tgt"]).max()) == 0
 
+    monkeypatch.setenv("PAD_STERN_BLIP_FREE", "1")
     monkeypatch.setenv("PAD_STERN_SKIP_KEYPATCH", "1")  # kill switch wins
     captured.clear()
     E._encode_mono(None, FakeGR(), {"length": 4000, "chan": 1, "idx": 1},
@@ -1420,6 +1422,7 @@ def test_explicit_seed_unchanged_on_a_standard_build(monkeypatch):
     from pinball_decryptor.plugins.stern import engine as E
 
     pk = _seed_peak_for_silent_slot(monkeypatch, np, E,
+                                    PAD_STERN_BLIP_FREE="0",
                                     PAD_STERN_SLOT_SEED_DB="-65")
     assert 5 <= pk <= 40, pk
 
@@ -1477,70 +1480,35 @@ def test_cold_consumed_cache_derive_reports_progress_and_says_why(monkeypatch):
     assert "re-derived" in why and "different version" in why
 
 
-def test_blip_free_gate_is_opt_in_and_the_kill_switch_still_wins(monkeypatch):
-    """The cave is opt-in: only an explicit "1" builds it.
+def test_blip_free_gate_is_always_on_and_the_kill_switch_still_wins(monkeypatch):
+    """The cave is always on (PAD-523): unset builds it.
 
-    Unset must mean OFF, and for the same reason it once had to mean on --
-    spawned encode workers and headless callers never go through the GUI's env
-    mirroring, so whatever unset means is what they build.  After three field
-    boot loops the direction to be wrong in is the build that changes no game
-    code.  Requiring "1" rather than "not 0" also makes a stale or misspelled
-    value fail towards the standard build."""
+    Spawned encode workers and headless callers never go through the GUI, so
+    unset has to mean the build the app makes.  Only an exact "0" turns it
+    off, so a stale "1" from the opt-in era (or any other value) keeps meaning
+    on, and PAD_STERN_SKIP_KEYPATCH=1 still wins over everything."""
     from pinball_decryptor.plugins.stern import engine as E
     for var in ("PAD_STERN_BLIP_FREE", "PAD_STERN_SKIP_KEYPATCH"):
         monkeypatch.delenv(var, raising=False)
-    assert E._pathA_enabled() is False
-
-    monkeypatch.setenv("PAD_STERN_BLIP_FREE", "1")      # checkbox ticked
     assert E._pathA_enabled() is True
+
+    for on in ("1", "true", "", "01", " 0"):
+        monkeypatch.setenv("PAD_STERN_BLIP_FREE", on)
+        assert E._pathA_enabled() is True, on
 
     monkeypatch.setenv("PAD_STERN_BLIP_FREE", "0")
     assert E._pathA_enabled() is False
-
-    # Anything that isn't exactly "1" is off, not on.
-    for junk in ("true", "True", "yes", "", "01", " 1"):
-        monkeypatch.setenv("PAD_STERN_BLIP_FREE", junk)
-        assert E._pathA_enabled() is False, junk
 
     monkeypatch.setenv("PAD_STERN_BLIP_FREE", "1")
     monkeypatch.setenv("PAD_STERN_SKIP_KEYPATCH", "1")  # kill switch wins
     assert E._pathA_enabled() is False
 
 
-def test_gui_blip_free_option_round_trips_to_the_engine_var(monkeypatch):
-    """The Advanced Audio Options checkbox has to reach the encoder, and only
-    the ON case may set a var -- an unset PAD_STERN_BLIP_FREE means off."""
-    import os
-    from pinball_decryptor.app import App
-    from pinball_decryptor.plugins.stern import engine as E
-
-    monkeypatch.delenv("PAD_STERN_SKIP_KEYPATCH", raising=False)
-    app = object.__new__(App)
-
-    monkeypatch.delenv("PAD_STERN_BLIP_FREE", raising=False)
-    App._apply_audio_advanced_env(app, {})                 # defaults
-    assert "PAD_STERN_BLIP_FREE" not in os.environ
-    assert E._pathA_enabled() is False
-
-    App._apply_audio_advanced_env(app, {"blip_free_optin": True})
-    assert os.environ["PAD_STERN_BLIP_FREE"] == "1"
-    assert E._pathA_enabled() is True
-
-    App._apply_audio_advanced_env(app, {"blip_free_optin": False})
-    assert "PAD_STERN_BLIP_FREE" not in os.environ
-    assert E._pathA_enabled() is False
-
-
-def test_a_default_era_settings_file_cannot_re_arm_the_cave(monkeypatch):
-    """A settings.json from when the cave was the default must not opt in.
-
-    While blip-free shipped on, "blip_free": true got written into settings.json
-    by anyone who opened Advanced Audio Options and pressed OK for some
-    unrelated knob, so that value records the shipped default and not a
-    decision.  Honouring it under the new default would re-arm the firmware
-    patch for exactly the users who never chose it, which is the mistake the
-    v0.102.5 rename was written to avoid in the other direction.  The key is
-    therefore a new one and the old value is inert."""
+def test_gui_has_no_blip_free_switch(monkeypatch):
+    """Advanced Audio Options no longer carries a blip-free option, and the
+    app's env mirroring never touches PAD_STERN_BLIP_FREE -- whatever an older
+    settings.json saved (the v0.102 "blip_free" key or the v0.104
+    "blip_free_optin" one), the build stays blip-free."""
     import os
     from pinball_decryptor.app import App
     from pinball_decryptor.plugins.stern import engine as E
@@ -1550,22 +1518,20 @@ def test_a_default_era_settings_file_cannot_re_arm_the_cave(monkeypatch):
     monkeypatch.delenv("PAD_STERN_BLIP_FREE", raising=False)
     app = object.__new__(App)
 
-    # The exact dict a v0.102.6 install persisted, replayed into v0.104.0.
-    App._apply_audio_advanced_env(app, {"head_mode": "encode",
-                                        "leadout": "silence",
-                                        "blip_free": True})
-    assert "PAD_STERN_BLIP_FREE" not in os.environ
-    assert E._pathA_enabled() is False, "a stale blip_free:true re-armed the cave"
+    for saved in ({}, {"blip_free_optin": False}, {"blip_free_optin": True},
+                  {"head_mode": "encode", "leadout": "silence",
+                   "blip_free": False}):
+        App._apply_audio_advanced_env(app, saved)
+        assert "PAD_STERN_BLIP_FREE" not in os.environ, saved
+        assert E._pathA_enabled() is True, saved
 
-    # A deliberate OFF from that era is equally inert, and lands in the same
-    # place because off is now the default.
-    App._apply_audio_advanced_env(app, {"blip_free": False})
-    assert E._pathA_enabled() is False
-
-    # Both defaults tables agree, so the dialog and the engine can't drift.
-    assert App._AUDIO_ADV_DEFAULTS["blip_free_optin"] is False
-    assert audio_tab.ADV_DEFAULTS["blip_free_optin"] is False
-    assert "blip_free" not in App._AUDIO_ADV_DEFAULTS
+    # Neither defaults table offers the switch, so the dialog can't show it.
+    for table in (App._AUDIO_ADV_DEFAULTS, audio_tab.ADV_DEFAULTS):
+        assert not [k for k in table if k.startswith("blip_free")]
+    assert "blip_free_optin" not in open(
+        os.path.join(os.path.dirname(audio_tab.__file__), os.pardir,
+                     "static", "js", "tabs", "audio.js"),
+        encoding="utf-8").read()
 
 
 class _CaveRig:

@@ -6471,19 +6471,13 @@ class App:
     # for the Spike 2 trigger-pop hunt: each maps to a PAD_STERN_* env var the
     # Stern encoder reads, and a value at its default clears the var so the
     # engine baseline stays authoritative.
-    # The blip-free key is deliberately NOT the old "blip_free".  While the cave
-    # was the default build, a settings.json got "blip_free": true written into
-    # it by anyone who opened this dialog and pressed OK for some unrelated knob
-    # -- that value records the shipped default, not a decision.  Reading it
-    # under the new opt-in default would re-arm a firmware patch that has now
-    # boot-looped a real machine on three separate releases, for users who never
-    # chose it.  A fresh key means the old one is ignored and everybody starts
-    # from off; a deliberate ON has to be ticked once more, which is the safe
-    # direction to be wrong in.
+    # Blip-free callouts are not here any more: they are always on (PAD-523),
+    # so a "blip_free" / "blip_free_optin" left in an older settings.json is
+    # ignored and never reaches PAD_STERN_BLIP_FREE.
     _AUDIO_ADV_DEFAULTS = {
         "head_mode": "encode", "leadout": "silence", "previews": False,
         "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
-        "blip_free_optin": False, "audio_grow": False,
+        "audio_grow": False,
         "loudness": "match", "loudness_db": 0,
     }
 
@@ -6533,18 +6527,11 @@ class App:
             setenv("PAD_STERN_SLOT_SEED_DB", -max(min(mag, 90), 40))
         else:
             setenv("PAD_STERN_SLOT_SEED_DB", None)
-        # Blip-free callouts: OFF is the engine baseline now, so only the ON
-        # case sets a var and the engine requires an explicit "1".  The polarity
-        # matters beyond tidiness: spawned encode workers and headless callers
-        # inherit os.environ without ever going through this dialog, so whatever
-        # "unset" means is what they build.  Unset now means the standard build,
-        # which touches no game code at all.
-        setenv("PAD_STERN_BLIP_FREE",
-               "1" if d.get("blip_free_optin", False) else None)
-        # Replacements longer than their slot.  Same polarity rule and the same
-        # reason: unset means the build every headless caller and every spawned
-        # encode worker already makes, which trims a long clip to fit.  Only an
-        # explicit "1" grows the sound bank.
+        # Replacements longer than their slot.  Only the ON case sets a var:
+        # spawned encode workers and headless callers inherit os.environ
+        # without ever going through this dialog, so unset means the build
+        # they already make, which trims a long clip to fit.  Only an explicit
+        # "1" grows the sound bank.
         setenv("PAD_STERN_AUDIO_GROW",
                "1" if d.get("audio_grow", False) else None)
 

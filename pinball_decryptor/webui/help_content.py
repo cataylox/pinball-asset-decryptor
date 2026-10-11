@@ -300,17 +300,19 @@ HELP_CONTENT = {
          "- On Stern games with a Sound Test menu, the dialog suggests the menu's "
          "names (also saved in sound_test_names.csv). Play a number on the "
          "machine's Sound Test menu, then type that number to find its entry."),
-        ("Blip-free callouts (Advanced Audio Options)",
-         "Removes a tiny scrap of the original sound from every replacement. "
-         "Optional; works on real machines.\n\n"
-         "- Without it, the machine needs a few bytes of each original sound at "
-         "boot, so about 6 ms of the original plays twice inside every "
-         "replacement. A tester listening for it could not hear it.\n"
-         "- With it, those bytes are kept in the game program instead, and your "
-         "audio plays all the way through.\n"
+        ("Blip-free callouts (always on)",
+         "Every replaced sound plays your audio all the way through, with no "
+         "scrap of the original inside it. There is nothing to switch on.\n\n"
+         "- The machine needs a few bytes of each original sound at boot. The "
+         "build keeps those bytes in the game program, so the card can carry "
+         "only your audio.\n"
          "- It makes the game program slightly bigger, so it needs the card "
          "built as an image (the Linux filesystem driver, as full-size videos "
-         "do). A Direct-SD write skips it."),
+         "do). A Direct-SD write can't do that, so about 6 ms of the original "
+         "plays twice inside each replacement there.\n"
+         "- Write Complete says which one your card got.\n"
+         "- To get rid of the scrap on a card built before, just build it "
+         "again: every replaced sound is redone from your files."),
         ("Longer replacements (Advanced Audio Options)",
          "Lets a Spike 2 replacement be longer than the sound it replaces. "
          "Optional; confirmed on a real machine (no loop, correct cut-off).\n\n"

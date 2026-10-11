@@ -7530,28 +7530,20 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # imports).  The one place he will look is this log.
         log("Replacement loudness: %s." % _loudness_log_phrase(), "info")
         if not _pathA_enabled():
-            log("Blip-free callouts OFF for this build (the default): a "
+            log("Blip-free callouts switched OFF for this build "
+                "(PAD_STERN_BLIP_FREE=0 or PAD_STERN_SKIP_KEYPATCH=1): a "
                 "re-encoded sound keeps a ~6 ms scrap of the original at the "
                 "two master-directory windows, and no code is added to the game "
                 "firmware (only the long-standing 4-byte validator bypass).",
-                "info")
+                "warning")
         else:
-            # Warning, not info: this is an opt-in firmware patch that has
-            # boot-looped the only machine it has ever reached, so the build log
-            # has to say so where somebody diagnosing a dead machine will see it.
-            log("Blip-free callouts ON for this build -- this is the "
-                "experimental setting, and it is not known to boot. Patching "
-                "game_real so the boot-derive reads stock master-directory "
-                "windows means re-encoded callouts play your audio for their "
-                "whole length with no ~6 ms original scrap. Every card built "
-                "this way that has reached a machine has looped through the "
-                "startup screen, most recently on v0.102.6 after two faults in "
-                "the patch were fixed, and none has been confirmed to boot. If "
-                "yours does that, clear the box in Advanced Audio Options and "
-                "rebuild from your original image. Needs the Linux filesystem "
-                "driver because it grows the game binary; falls back to the "
-                "standard build for any firmware or host it can't safely "
-                "handle.", "warning")
+            log("Blip-free callouts ON (always, since PAD-523): game_real is "
+                "patched so the boot-derive reads stock master-directory "
+                "windows, and re-encoded callouts play your audio for their "
+                "whole length with no ~6 ms original scrap. Needs the Linux "
+                "filesystem driver because it grows the game binary; falls "
+                "back to the standard build for a direct-SD write or any "
+                "firmware or host it can't safely handle.", "info")
         if _slot_seed_dbfs() is not None:
             log("Anti-pop seed ON (%.0f dBFS): mixing an inaudible low tone into "
                 "replacements so a callout is never digitally silent -- aimed at "
@@ -14806,9 +14798,9 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
 
 # --------------------------------------------------------------------------
 # Blip-free callouts — derive-read redirect firmware cave (the callout "blip"
-# COMPLETE fix).  OPT-IN since v0.104.0 (PAD_STERN_BLIP_FREE=1 / the GUI's
-# Advanced Audio Options checkbox); PAD_STERN_SKIP_KEYPATCH=1 also forces it
-# off — see _pathA_enabled, and the field record at the end of this comment.
+# COMPLETE fix).  ALWAYS ON since PAD-523 (it was opt-in from v0.104.0 until
+# then); PAD_STERN_BLIP_FREE=0 or PAD_STERN_SKIP_KEYPATCH=1 force it off -- see
+# _pathA_enabled, and the field record at the end of this comment.
 #
 # The firmware's boot-derive reads two ~512 B "windows" out of each sound's body
 # to set up that sound's (and, via a forward chain, every later sound's) codec
@@ -14855,7 +14847,7 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
 # Anything the locator can't pin down, a firmware with no free address space in
 # branch reach, a host that can't grow ext4 files, or a firmware that fails the
 # post-build integrity assert falls back to the standard
-# _restore_masterdir_consumed build.  PAD_STERN_BLIP_FREE=1 opts IN;
+# _restore_masterdir_consumed build.  PAD_STERN_BLIP_FREE=0 opts out;
 # PAD_STERN_SKIP_KEYPATCH=1 forces the fallback everywhere and wins.
 #
 # WHY THIS CAVE HAD NEVER ACTUALLY BOOTED, and what was wrong with it.  Every
@@ -15058,32 +15050,30 @@ _CAVE_MAX_BRANCH = 1 << 25  # ARM b reach (+/-32 MB); the fn<->cave hop must fit
 _PT_GNU_STACK = 0x6474E551  # advisory phdr the cave's PT_LOAD is carved from
 
 
-_BLIP_FREE_OFF_REASON = ("not switched on for this build; it is off by default "
-                         "(Advanced Audio Options)")
+_BLIP_FREE_OFF_REASON = ("switched off for this build by "
+                         "PAD_STERN_BLIP_FREE=0 or PAD_STERN_SKIP_KEYPATCH=1")
 
 
 def _pathA_enabled():
     """True when the blip-free firmware cave should be built for this write.
 
-    **Opt-in since v0.104.0**, surfaced as the "Blip-free callouts" checkbox in
-    the GUI's Advanced Audio Options.  It requires an explicit
-    ``PAD_STERN_BLIP_FREE=1``; ``PAD_STERN_SKIP_KEYPATCH=1`` forces it off and
-    wins, so anything that already sets the historical kill switch keeps
-    working.  Either way the build falls back to
-    :func:`_restore_masterdir_consumed`, which touches no game code at all --
-    and so does any firmware or host the cave can't safely handle.
+    **Always on since PAD-523** (David, 2026-10-11: "Make blip free callouts
+    always on"): the cave has booted on real machines since the PAD-56 /
+    PAD-160 fixes, so the Advanced Audio Options checkbox that made it opt-in
+    is gone.  A build the cave can't serve -- a direct-SD write, a host
+    without the ext4 grow driver, a firmware the locator can't pin down --
+    still falls back to :func:`_restore_masterdir_consumed` exactly as before,
+    and the Write Complete note says which one the card got.
 
-    Unset means OFF, and the polarity is the point.  Headless callers and the
-    spawned encode workers inherit ``os.environ`` without ever passing through
-    the GUI's env mirroring, so whatever "unset" means is what they build; it
-    now means the build that changes no game code.  Requiring "1" rather than
-    accepting "not 0" is the same argument: a stale or misspelled value fails
-    towards the standard build instead of towards a firmware patch that has
-    boot-looped a real machine on every release it has been delivered by.
+    Two engine-level off switches remain for support and for tests, neither
+    of them in the GUI: ``PAD_STERN_BLIP_FREE=0`` and the historical kill
+    switch ``PAD_STERN_SKIP_KEYPATCH=1`` (which wins over everything).  Only
+    an exact "0" turns it off, so a stale ``PAD_STERN_BLIP_FREE=1`` from the
+    opt-in era keeps meaning on.
     """
     if os.environ.get("PAD_STERN_SKIP_KEYPATCH") == "1":
         return False
-    return os.environ.get("PAD_STERN_BLIP_FREE") == "1"
+    return os.environ.get("PAD_STERN_BLIP_FREE") != "0"
 
 
 def _cave_va2off(segs, va):

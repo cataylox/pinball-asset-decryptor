@@ -72,7 +72,7 @@ _SORT_DEFAULT_DESC = {c: d for c, _h, d in _SORT_CFG}
 ADV_DEFAULTS = {
     "head_mode": "encode", "leadout": "silence", "previews": False,
     "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
-    "blip_free_optin": False, "audio_grow": False,
+    "audio_grow": False,
     "loudness": "match", "loudness_db": 0,
 }
 LOUDNESS_CHOICES = (
@@ -3070,7 +3070,6 @@ class AudioTab(FindOriginalsMixin, TabService):
             "experiment_idxs": idxs,
             "slot_seed": bool(cfg.get("slot_seed")),
             "slot_seed_db": num(cfg.get("slot_seed_db"), 40, 90, 65),
-            "blip_free_optin": bool(cfg.get("blip_free_optin")),
             "audio_grow": bool(cfg.get("audio_grow")),
             "loudness": cfg.get("loudness") if cfg.get("loudness")
             in dict(LOUDNESS_CHOICES) else "match",

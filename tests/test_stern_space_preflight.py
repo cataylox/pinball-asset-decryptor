@@ -871,11 +871,20 @@ def test_a_grown_bank_that_cannot_fit_is_refused_before_it_is_staged(
     e = ei.value
     assert [name for _n, name in e.items] == [
         "the sound bank with the longer sounds"]
-    # the bank's exact grown length, less the 3 blocks image.bin holds now
+    # the bank's exact grown length, less the 3 blocks image.bin holds now,
+    # plus the margin a blip-free build (always on, PAD-523) keeps for the
+    # longer game program
     bank = engine._grown_bank_bytes(
         MD_OFF, COUNT, [engine._grown_body_bytes(audio[5], 3 * 44100)])
-    assert e.need == (-(-bank // BS) - 3 + engine._SPACE_SLACK_BLOCKS) * BS
+    exact = (-(-bank // BS) - 3 + engine._SPACE_SLACK_BLOCKS) * BS
+    assert e.need == exact + engine._SPACE_MARGIN
     assert e.fits == "16G"
+
+    # with blip-free switched off there is no margin: the bank alone
+    monkeypatch.setenv("PAD_STERN_BLIP_FREE", "0")
+    with pytest.raises(cs.WontFit) as ei:
+        _compute(rig, card, proj, _budget(card))
+    assert ei.value.need == exact
 
 
 def test_the_bank_budget_trims_to_the_room_instead_of_failing(rig, audio):
