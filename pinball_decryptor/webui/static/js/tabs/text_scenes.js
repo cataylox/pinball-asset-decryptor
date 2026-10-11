@@ -1594,7 +1594,7 @@ function TreeSide({ t, play, playFrame, openFont, find, searching }) {
       <div class=${cx("tree-row tree-pic", !p.pic && "tree-off")}>
         <span class="small muted ellip" ...${tip(p.pic ? "The picture's own size, and how much the game scales it to draw it here. Anything but 100% is resized by the game as it draws, which can leave jagged edges: make the picture at the size it shows, replace it on the Images tab with \"Keep this picture's own size\" ticked, then press Draw 1:1."
           : "Only a picture has a size of its own to draw it at.")}>
-          ${p.pic ? `Picture ${p.pic.w} x ${p.pic.h} px, drawn at ${p.pic.sx === p.pic.sy ? p.pic.sx : `${p.pic.sx} x ${p.pic.sy}`}%` : "No picture of its own"}</span>
+          ${p.pic ? `Picture ${p.pic.w} x ${p.pic.h} px at ${p.pic.sx === p.pic.sy ? p.pic.sx : `${p.pic.sx} x ${p.pic.sy}`}%` : "No picture of its own"}</span>
         <${Button} size="xs" disabled=${!p.pic || (p.pic.sx === 100 && p.pic.sy === 100)}
           title=${p.pic ? "Draw the picture pixel for pixel (100%), keeping its top-left corner where it is" : "Only a picture is drawn 1:1"}
           onClick=${() => call("text_scenes.tree_one_to_one", p.id)}>Draw 1:1<//>
