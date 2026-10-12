@@ -562,6 +562,8 @@ class ModePlan:
     clips_file: str = ""
     #: PAD-494: ``sounds.cfg`` beside the mode files, the music modes' descriptors ("" = none)
     sounds_file: str = ""
+    #: PAD-537: ``picture.cfg`` beside the mode files, the picture settings ("" = none)
+    picture_file: str = ""
     #: PAD-446: the names of the modes on the card ([] for a card of random clips only)
     mode_names: list = field(default_factory=list)
 
@@ -769,7 +771,7 @@ def mode_file_text(project, slug, spec, own_sounds):
 def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_ok=(True, ""),
          log=None, end_sound="choose", own_sounds=None, progress=None, stock_font=b"", hud_font=b"",
          modes_on=True, variants=False, variants_prof=None, cancel=None, sound_modes="",
-         sound_modes_prof=None):
+         sound_modes_prof=None, picture="", picture_prof=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -785,7 +787,10 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
 
     PAD-494: *sound_modes* is the music modes' ``sounds.cfg`` the engine wrote (the bank already
     holds their files), put beside the mode files; with no mode and no random clip it is a plan of
-    its own, for *sound_modes_prof*."""
+    its own, for *sound_modes_prof*.
+
+    PAD-537: *picture* is the picture settings' ``picture.cfg`` the engine wrote, put beside the
+    mode files; with nothing else it is a plan of its own, for *picture_prof*."""
     from . import mode_assets
     log = log or (lambda *a, **k: None)
     modes = card_modes(project, project_modes(project)) if modes_on else []
@@ -796,10 +801,15 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                                    progress=progress, cancel=cancel)
             if result is not None:
                 result.sounds_file = sound_modes or ""
+                result.picture_file = picture or ""
                 return result
         if sound_modes:
-            return sound_modes_plan(project, game_elf, sound_modes_prof or variants_prof,
-                                    sound_modes)
+            result = sound_modes_plan(project, game_elf, sound_modes_prof or variants_prof,
+                                      sound_modes)
+            result.picture_file = picture or ""
+            return result
+        if picture:
+            return picture_plan(project, game_elf, picture_prof or variants_prof, picture)
         return None
     titles = {spec.title for _s, spec in modes}
     if len(titles) > 1:
@@ -873,6 +883,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         variants_into(project, result, stock_bank, tree, only=False, log=log, progress=progress,
                       cancel=cancel)
     result.sounds_file = sound_modes or ""
+    result.picture_file = picture or ""
     return result
 
 
@@ -894,6 +905,25 @@ def sound_modes_plan(project, game_elf, prof, cfg):
                              "music modes on" % prof.label) from None
     result = ModePlan(project=project, profile=prof, port=port, build=None)
     result.sounds_file = cfg
+    return result
+
+
+# ---- PAD-537: the picture settings ---------------------------------------------------------------
+def picture_plan(project, game_elf, prof, cfg):
+    """A plan carrying only the picture settings (:mod:`.picture_settings`): no mode, no scene;
+    the runtime and the title's port on p2 with the engine's ``picture.cfg`` (which says
+    ``only``)."""
+    from . import picture_settings as PS
+    why = PS.title_refusal(prof)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        port = find_port(prof, game_elf)
+    except ModeWriteError:
+        raise ModeWriteError("this card's game program is not the %s the app knows how to change "
+                             "the picture on" % prof.label) from None
+    result = ModePlan(project=project, profile=prof, port=port, build=None)
+    result.picture_file = cfg
     return result
 
 
@@ -1345,6 +1375,11 @@ def p2_payload(result, out_dir, project=None):
             from . import sound_modes as SMo
             dst = os.path.join(out_dir, SMo.CFG_NAME)
             shutil.copyfile(result.sounds_file, dst)
+            extras.append(dst)
+        if getattr(result, "picture_file", ""):        # PAD-537: picture.cfg, the picture settings
+            from . import picture_settings as PS
+            dst = os.path.join(out_dir, PS.CFG_NAME)
+            shutil.copyfile(result.picture_file, dst)
             extras.append(dst)
     except OSError as e:
         raise ModeWriteError("the modes' system-partition files could not be staged (%s)"

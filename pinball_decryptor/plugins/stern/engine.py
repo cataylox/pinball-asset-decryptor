@@ -7497,6 +7497,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-495: EDITION in the operator menu, the setting a multi-boot card of
     # this game's editions boots by
     editions = _editions_for_build(assets_dir, log)
+    # PAD-537: BRIGHTNESS, CONTRAST and SATURATION in the operator menu, which the
+    # runtime applies to the whole screen live (the modes' delivery, as the music modes')
+    picture_prof = _picture_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
 
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
@@ -7504,6 +7507,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             and not tree_edits
             and not boot_edits and not mode_list and not code_list
             and not variant_slots and not sound_modes and not editions
+            and picture_prof is None
             and not stock_mode_edits and shader_prof is None
             and not own_clips and not score_edits):
         raise NothingToWrite(
@@ -8390,8 +8394,14 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                      log) if sound_modes_cfg else None)
         # PAD-495: EDITION beside it, one category table for both
         edition_menu = _EditionMenu(len(editions), editions, log) if editions else None
-        menu_job = (_MenuJobs(music_menu, edition_menu)
-                    if music_menu is not None or edition_menu is not None else None)
+        # PAD-537: the picture settings take the spare settings those two leave
+        from . import picture_settings as _PS
+        picture_menus = ([_PictureMenu(_k, log) for _k in _PS.KEYS]
+                         if picture_prof is not None else [])
+        menu_job = (_MenuJobs(music_menu, edition_menu, *picture_menus)
+                    if music_menu is not None or edition_menu is not None
+                    or picture_menus else None)
+        picture_cfg = ""
         if (text_edits or shader_prof is not None or clip_job is not None
                 or menu_job is not None):
             if progress:
@@ -8409,6 +8419,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             if music_menu is not None and not music_menu.ok:
                 # PAD-494: no MUSIC MODE, no other mode's sounds
                 sound_modes_cfg = ""
+            # PAD-537: the rows that went in, and the runtime's table for them
+            picture_cfg = _picture_cfg(picture_menus, grown_text,
+                                       not (mode_list or code_list),
+                                       grow_work, log)
             if cancel():
                 return None, None, None, None, None
             gfw = grown_text.get("fw")
@@ -8603,13 +8617,14 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         _modes_on = bool(mode_list or code_list)
         # PAD-446: a build of random clips and no mode says so in its own words
         _who = ("Modes" if _modes_on else "Random clips" if variant_slots
-                else "Music modes")
-        if _modes_on or variant_slots or sound_modes_cfg:
+                else "Music modes" if sound_modes_cfg else "Picture settings")
+        if _modes_on or variant_slots or sound_modes_cfg or picture_cfg:
             t0 = time.monotonic()
             if progress:
                 progress(91, 100, "Building the project's modes..." if _modes_on
                          else "Adding the random clips to the video bank..."
-                         if variant_slots else "Adding the music modes...")
+                         if variant_slots else "Adding the music modes..."
+                         if sound_modes_cfg else "Adding the picture settings...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
                 if mode_list:
@@ -8620,7 +8635,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     if _mprof is None:
                         raise _MW.ModeWriteError(_CM.NO_TITLE)
                 else:
-                    _mprof = variant_prof or sound_modes_prof
+                    _mprof = variant_prof or sound_modes_prof or picture_prof
                 _mnodes = {"": None}
                 for _rel in _MW.scene_rels(_mprof):
                     if not _rel or (not _modes_on and (
@@ -8663,7 +8678,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                               if _hudfont_node is not None else b""),
                     modes_on=_modes_on, variants=bool(variant_slots),
                     variants_prof=variant_prof, cancel=cancel,
-                    sound_modes=sound_modes_cfg, sound_modes_prof=sound_modes_prof)
+                    sound_modes=sound_modes_cfg, sound_modes_prof=sound_modes_prof,
+                    picture=picture_cfg, picture_prof=picture_prof)
                 if mode_plan is None:
                     raise _MW.ModeWriteError("none of the project's random clips can go on "
                                              "this card")
@@ -8694,7 +8710,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                               if _modes_on else "adding %d random clip(s)"
                               % len(mode_plan.variants.new)
                               if mode_plan.variants is not None
-                              else "adding the music modes"), t0)
+                              else "adding the music modes" if sound_modes_cfg
+                              else "adding the picture settings"), t0)
 
         # PAD-444: the own copies' bank entries and files, on the bank the
         # modes just rewrote when they did.  The program part already landed
@@ -8948,6 +8965,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 "music_modes": ([("%s (mode %d)" % (os.path.basename(u["rel"]), u["mode"]))
                                  for u in sound_mode_used]
                                 if getattr(mode_plan, "sounds_file", "") else []),
+                # PAD-537: the picture settings the operator menu got
+                "picture": ([m.setting.caption.upper() for m in picture_menus
+                             if m.ok and m.setting is not None]
+                            if getattr(mode_plan, "picture_file", "") else []),
                 "lines": list(mode_plan.lines),
                 "added": [r for r, _s in mode_plan.new],
                 "rewritten": ([r for r, _s in mode_plan.replaced]
@@ -9840,6 +9861,98 @@ class _EditionMenu(_MusicModeMenu):
                  "warning")
 
 
+class _PictureMenu(_MusicModeMenu):
+    """PAD-537: one of BRIGHTNESS, CONTRAST and SATURATION (:mod:`.picture_settings`),
+    on a spare setting of the game's."""
+
+    def __init__(self, key, log):
+        from . import picture_settings as _PS
+        super().__init__(_PS.VALUES, (), log)
+        self.KEY = key
+
+    def wanted(self):
+        from . import picture_settings as _PS
+        return self.KEY, _PS.VALUES, (), {"default": _PS.NORMAL, "help_text": _PS.HELP[self.KEY]}
+
+    def done(self):
+        from . import picture_settings as _PS
+        self.ok = True
+        self.log("Picture settings: %s is in the operator menu (%s), values 1 to %d, %d "
+                 "(no change) to start with." % (self.setting.caption.upper(), _PS.menu_path(),
+                                                 self.count, _PS.NORMAL), "info")
+
+    def fail(self, why):
+        if self.why or self.ok:
+            return
+        from . import menu_settings as _MSet
+        self.why = str(why).rstrip(".") or "unknown"
+        self.log("Picture settings: %s could not be added to the operator menu (%s)."
+                 % (_MSet.SETTINGS[self.KEY][1], self.why), "warning")
+
+
+def _picture_for_build(assets_dir, dest_is_device, log, ext4_available=None):
+    """PAD-537: the title of the card the picture settings go on, or ``None`` when the
+    project does not ask for them or they are left out (one warning says why). The music
+    modes' gate: an image file, a host that can add files to it, a title they were proven on."""
+    from . import mode_write as _MW
+    from . import picture_settings as _PS
+    if not _PS.load(assets_dir):
+        return None
+    if dest_is_device:
+        why = ("a direct-SD write cannot add files to the card or grow its game program; build "
+               "an image file to carry them")
+    else:
+        why = _MW.host_refusal()
+        if not why:
+            if ext4_available is None:
+                from ...core import ext4_grow
+                ext4_available = ext4_grow.available
+            ok, e4 = ext4_available()
+            if not ok:
+                why = "this system cannot write new files into the card image (%s)" % e4
+    prof = None
+    if not why:
+        prof = _PS.project_title(assets_dir, probe=True)
+        why = _PS.title_refusal(prof)
+    if why:
+        log("Picture settings: BRIGHTNESS, CONTRAST and SATURATION are left out of this build: "
+            "%s." % why.rstrip("."), "warning")
+        return None
+    log("Picture settings: this card gets BRIGHTNESS, CONTRAST and SATURATION in its operator "
+        "menu, applied to the screen as soon as they are changed.", "info")
+    return prof
+
+
+def _picture_cfg(menus, grown, only, work, log):
+    """PAD-537: ``picture.cfg`` for the rows in *menus* that went into the menu, written
+    under *work*; ``""`` when none did or the program cannot be re-pointed (said why)."""
+    from . import picture_settings as _PS
+    settings = [m.setting for m in menus or () if m.ok and m.setting is not None]
+    if not settings:
+        if menus:
+            log("Picture settings: none of the three went into the operator menu, so the "
+                "card carries none.", "warning")
+        return ""
+    fw = (grown or {}).get("fw") or {}
+    try:
+        with open(_lp(fw["path"]), "rb") as f:
+            slots = _PS.import_slots(f.read())
+    except (KeyError, OSError, _PS.PictureError) as e:
+        log("Picture settings: the rows are in the menu but cannot change the screen (%s)."
+            % (e if isinstance(e, _PS.PictureError) else "the game program was not read"),
+            "warning")
+        return ""
+    path = os.path.join(work, _PS.CFG_NAME)
+    with open(path, "w", encoding="ascii", newline="\n") as f:
+        f.write(_PS.cfg_text(slots, settings, only))
+    left = [k.upper() for k in _PS.KEYS if k not in {s.key for s in settings}]
+    log("Picture settings: the mode runtime applies %s live, with the Color profile tab's "
+        "test card on the screen for %d s after a change%s." % (
+            ", ".join(s.caption.upper() for s in settings), _PS.CARD_MS // 1000,
+            (" (%s: no spare setting left)" % ", ".join(left)) if left else ""), "info")
+    return path
+
+
 class _MenuJobs:
     """Settings of ours that go into one game program together (PAD-494's
     MUSIC MODE, PAD-495's EDITION): their same-size writes, and ONE category
@@ -10479,9 +10592,12 @@ def _install_modes(output_path, modes, landed, planned, log):
     make it would be a card that looks modded and is not.  Returns
     ``(record, ok)`` - *record* is what the build record keeps."""
     from . import mode_write as _MW
-    # PAD-446: a card of random clips and no mode; PAD-494: of music modes only
-    who = ("Modes" if modes.get("names") or not (modes.get("variants") or modes.get("music_modes"))
-           else "Random clips" if modes.get("variants") else "Music modes")
+    # PAD-446: a card of random clips and no mode; PAD-494: of music modes only;
+    # PAD-537: of picture settings only
+    who = ("Modes" if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")
+                                                 or modes.get("picture"))
+           else "Random clips" if modes.get("variants") else "Music modes"
+           if modes.get("music_modes") else "Picture settings")
     if landed < planned:
         if who == "Modes":
             log("Modes: not every file reached the card, so the mode runtime was "
@@ -10494,6 +10610,11 @@ def _install_modes(output_path, modes, landed, planned, log):
             log("Music modes: not every file reached the card, so the program "
                 "that picks them was NOT put on the system partition. The grown "
                 "sound bank and game program may already be on it, so do not use "
+                "this card: fix the issue above and Write again.", "error")
+        elif who == "Picture settings":
+            log("Picture settings: not every file reached the card, so the program "
+                "that applies them was NOT put on the system partition. The game "
+                "program with the menu rows may already be on it, so do not use "
                 "this card: fix the issue above and Write again.", "error")
         else:
             # words a copy with the mode maker switched off may show (PAD-446)
@@ -10508,8 +10629,10 @@ def _install_modes(output_path, modes, landed, planned, log):
     except Exception as e:                   # the executor's CommandError too
         log("%s: the %s could not be put on the card's system partition, so "
             "this card carries no %s: %s"
-            % (who, "mode runtime" if who == "Modes" else "program that picks them",
-               {"Modes": "modes", "Random clips": "random clips"}.get(who, "music modes"), e),
+            % (who, "mode runtime" if who == "Modes" else "program that applies them"
+               if who == "Picture settings" else "program that picks them",
+               {"Modes": "modes", "Random clips": "random clips",
+                "Picture settings": "picture settings"}.get(who, "music modes"), e),
             "error")
         return None, False
     for rel in modes.get("added") or ():
@@ -10520,7 +10643,8 @@ def _install_modes(output_path, modes, landed, planned, log):
         log("%s: added %s/%s on the system partition." % (who, _MW.P2_DIR, name),
             "info")
     log("%s: /etc/init.d/game_monitor now loads the %s (port %s)."
-        % (who, "mode runtime" if who == "Modes" else "program that picks them",
+        % (who, "mode runtime" if who == "Modes" else "program that applies them"
+           if who == "Picture settings" else "program that picks them",
            modes.get("port")), "info")
     snd = modes.get("end_sound")
     if snd:
@@ -10530,7 +10654,8 @@ def _install_modes(output_path, modes, landed, planned, log):
         log("Modes: request %d (sound idx %d) plays %s's own %s."
             % (own["request"], own["idx"], own["name"],
                _MW.sound_words(own["key"])), "info")
-    if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")):
+    if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")
+                                  or modes.get("picture")):
         log("Modes: %d mode(s) on the card: %s."
             % (len(modes.get("names") or ()), ", ".join(modes.get("names") or ())),
             "success")
@@ -10538,12 +10663,15 @@ def _install_modes(output_path, modes, landed, planned, log):
         log("Music modes: %d file(s) for the other music modes on the card, played while the "
             "operator menu's MUSIC MODE says their mode: %s."
             % (len(modes["music_modes"]), ", ".join(modes["music_modes"])), "success")
+    if modes.get("picture"):
+        log("Picture settings: %s in the operator menu change the whole screen as soon as "
+            "the operator accepts a value." % ", ".join(modes["picture"]), "success")
     if modes.get("variants"):
         log("Random clips: %d clip(s) on the card play one of several at random "
             "each time the game plays them: %s."
             % (len(modes["variants"]), ", ".join(modes["variants"])), "success")
     rec = {k: modes.get(k) for k in ("names", "added", "rewritten", "port",
-                                     "p2", "end_sound", "variants", "music_modes")}
+                                     "p2", "end_sound", "variants", "music_modes", "picture")}
     if modes.get("own_sounds"):
         rec["own_sounds"] = modes.get("own_sounds")
     return rec, True

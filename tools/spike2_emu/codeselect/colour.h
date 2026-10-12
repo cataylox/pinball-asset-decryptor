@@ -16,12 +16,16 @@
  * THE MATHS are the profile's (core/colour_profile.py):
  *   1. saturation: each pixel mixed toward its Rec.601 grey (1 = unchanged)
  *   2. per channel: out = lift + (1 - lift) * clip(in * gain) ^ gamma
+ * with the brightness and contrast (PAD-537: the operator's plain controls)
+ * folded into gain and gamma first, as Profile.curve() folds them: the shader
+ * has no slot of their own, so colour_folded() is what it is written with.
  */
 #ifndef CODESELECT_COLOUR_H
 #define CODESELECT_COLOUR_H
 
 struct colour {
     float gamma[3], gain[3], lift[3], sat;
+    float bright, contrast;      /* 1 = unchanged; folded in by colour_folded */
 };
 
 /* The ranges the menu's controls move in: the Color profile tab's own
@@ -36,19 +40,31 @@ struct colour {
 #define COLOUR_LIFT_MAX  0.30f
 #define COLOUR_SAT_MIN   0.00f
 #define COLOUR_SAT_MAX   2.00f
+#define COLOUR_BRIGHT_MIN   0.50f
+#define COLOUR_BRIGHT_MAX   1.50f
+#define COLOUR_CONTRAST_MIN 0.50f
+#define COLOUR_CONTRAST_MAX 2.00f
 
 void colour_identity(struct colour *c);
+/* *c with its brightness and contrast folded into gain and gamma (both then
+ * 1): Profile.curve()'s maths, clip(in * b * k) ^ ct then clip(y * gain) ^
+ * gamma being clip(in * b * k * gain ^ (1 / ct)) ^ (ct * gamma) with
+ * k = 2 * 0.5 ^ (1 / ct), so contrast turns about the middle grey */
+void colour_folded(const struct colour *c, struct colour *out);
 /* equal as the shader spells them (%.6f), which is what decides whether a
  * copy of the program would differ from the one on the card */
 int  colour_equal(const struct colour *a, const struct colour *b);
 /* 0 when every number is inside the profile file's range (colour_profile.parse:
- * gamma 0.1-5, gain 0-4, lift 0-0.9, saturation 0-4), else -1 with why */
+ * gamma 0.1-5, gain 0-4, lift 0-0.9, saturation 0-4, brightness 0-4,
+ * contrast 0.1-4), else -1 with why */
 int  colour_valid(const struct colour *c, char *why, int whylen);
 
 /* "<gamma r g b>|<gain r g b>|<lift r g b>|<saturation>" - the four fields of
  * an images.conf color= line after its index, and of a values-file line
- * after its device.  colour_parse takes the four fields already split; 0 ok,
- * -1 with why.  colour_format writes them back (%.4f). */
+ * after its device.  colour_parse takes the four fields already split (the
+ * brightness and contrast are 1); 0 ok, -1 with why.  colour_format writes
+ * them back (%.4f), and a fifth, "<brightness> <contrast>", when either is
+ * not 1 - which a values-file line may carry (colour_file_get). */
 int  colour_parse(char *const fld[4], struct colour *out, char *why, int whylen);
 void colour_format(const struct colour *c, char *out, int outlen);
 
@@ -63,7 +79,7 @@ void colour_lut_build(struct colour_lut *l, const struct colour *c);
 void colour_lut_apply(const struct colour_lut *l, unsigned char *px, int w, int h, int stride);
 
 /* THE OPERATOR'S VALUES (DEF_COLOUR_FILE on /data).  One line per image:
- *   <device>|<gamma r g b>|<gain r g b>|<lift r g b>|<saturation>
+ *   <device>|<gamma r g b>|<gain r g b>|<lift r g b>|<saturation>[|<brightness> <contrast>]
  * with '#' comments.  colour_file_get: 1 = a line for `device` (into *out),
  * 0 = none (or the file is missing), a bad line is skipped.  colour_file_put
  * rewrites the file atomically (tmp + fsync + rename) with `device`'s line
@@ -73,7 +89,7 @@ int  colour_file_get(const char *path, const char *device, struct colour *out);
 int  colour_file_put(const char *path, const char *device, const struct colour *c);
 
 /* THE APPLY STEP (--apply-color): copy `program` to `out` with every pad_cp
- * slot rewritten to *c.  Refused - nothing left at `out` - when the program
+ * slot rewritten to *c (folded: colour_folded).  Refused - nothing left at `out` - when the program
  * carries no pad_cp, when any pad_cp is not in the fixed shape, or when the
  * RAM it would take is not there.  Returns the number of functions rewritten
  * (> 0), or -1 with the reason in msg. */

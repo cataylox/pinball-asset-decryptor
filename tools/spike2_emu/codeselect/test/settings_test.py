@@ -11,6 +11,9 @@ bytes at 1068), so no switch table is needed.
              values file holds exactly that line; BACK, BACK TO THE GAMES, and
              the countdown - which never runs inside Settings - boots the card
              the menu opened on, never the tile.
+  1b. plain - PAD-537: BRIGHTNESS, CONTRAST and SATURATION (the rows after START
+             FROM) are stepped and saved; the line carries the brightness and
+             contrast as a fifth field.
   2. all   - "Save for every game" puts one set on both adjustable images.
   3. hold  - a flipper HELD while a value is being changed repeats the step.
   4. idle  - nothing pressed inside Settings: it closes by itself
@@ -18,7 +21,9 @@ bytes at 1068), so no switch table is needed.
   5. apply - --apply-color writes a copy of a program whose pad_cp numbers are
              the saved ones (the same template shader_profile.py writes), refuses
              one whose pad_cp is in the old shape, and says "nothing to do" for
-             an image with no line.
+             an image with no line; a line with a brightness and contrast is
+             written folded into gain and gamma, the numbers the PC's own
+             Profile.curve() makes of it.
 
 The emulator comes from the environment ($QEMU), never argv: the rig's teardown
 does pkill -f 'arm-binfmt|qemu-arm' and this script's command line must not
@@ -26,6 +31,7 @@ match it."""
 import os
 import re
 import struct
+import importlib.util
 import subprocess
 import sys
 import time
@@ -67,6 +73,17 @@ def pad_cp(sat, gain, gamma, lift):
         out = out.replace("#" * 8, "%.6f" % v, 1)
     return ("highp vec4 pad_cp(highp vec4 f){highp float a=f.a;highp vec3 c=clamp(f.rgb,0.0,1.0);"
             + out + "return vec4(c,a);}")
+
+
+def _colour_profile():
+    """core/colour_profile.py of the repo this test sits in (it imports nothing of the app)"""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..",
+                        "pinball_decryptor", "core", "colour_profile.py")
+    spec = importlib.util.spec_from_file_location("pad_colour_profile", path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def main():
@@ -127,14 +144,17 @@ def main():
     def lines_of(vals):
         return [ln for ln in (vals or "").splitlines() if ln and not ln.startswith("#")]
 
+    # the colour screen's rows (two adjustable images): GAME 0, START FROM 1, BRIGHTNESS 2,
+    # CONTRAST 3, SATURATION 4, MIDDLE SHADES 5-7, COLOR LEVEL 8-10, DARKEST SHADES 11, SAVE 12,
+    # SAVE FOR EVERY GAME 13, BACK 14
     # 1. walk: card 1 (the default) -> RIGHT RIGHT = the tile (card 4 of 4)
     walk = ["right", "right", "start",          # the tile opens Settings
             "start",                            # Color correction, on image 1
-            "right", "right",                   # GAME, START FROM, -> MIDDLE SHADES red
+            "right", "right", "right", "right", "right",   # -> 5 = MIDDLE SHADES red
             "start", "right", "right", "start",  # +2 steps: 1.10 -> 1.20
-            "left", "left", "left", "left", "left",   # 2 -> 1 -> 0 -> 12 -> 11 -> 10 = SAVE
+            "right", "right", "right", "right", "right", "right", "right",   # 5 -> 12 = SAVE
             "start",
-            "right", "right", "start",          # 10 -> 12 = BACK (nothing unsaved)
+            "right", "right", "start",          # 12 -> 14 = BACK (nothing unsaved)
             "right", "start"]                   # BACK TO THE GAMES
     rc, o, e, vals, ch = run("walk", walk)
     for want in ("[select] settings: open",
@@ -152,6 +172,22 @@ def main():
         fail("(walk) rc %s choice %r" % (rc, ch), o, e)
     if lines_of(vals) != ["p7:img1|1.2000 1.2000 1.3500|1.0000 1.0000 1.0000|0.0000 0.0000 0.0000|0.9000"]:
         fail("(walk) the values file holds %r" % vals)
+
+    # 1b. plain: BRIGHTNESS +2 (110%), CONTRAST +3 (115%), SATURATION -2 (90% -> 80%), SAVE
+    plain = ["right", "right", "start", "start",
+             "right", "right", "start", "right", "right", "start",            # 2 BRIGHTNESS
+             "right", "start", "right", "right", "right", "start",            # 3 CONTRAST
+             "right", "start", "left", "left", "start",                       # 4 SATURATION
+             "right", "right", "right", "right", "right", "right", "right", "right",   # 4 -> 12 SAVE
+             "start",
+             "right", "right", "start", "right", "start"]
+    rc, o, e, vals, ch = run("plain", plain)
+    want_line = ("p7:img1|1.1000 1.2000 1.3500|1.0000 1.0000 1.0000|0.0000 0.0000 0.0000|0.8000"
+                 "|1.1000 1.1500")
+    if lines_of(vals) != [want_line]:
+        fail("(plain) the values file holds %r, expected %r" % (vals, want_line), o, e)
+    if "[select] color: image 1 (TMNT 1987) saved: " + want_line.split("|", 1)[1] not in o:
+        fail("(plain) not saved as %r" % want_line, o, e)
 
     # 2. all: START FROM -> Black and white (3 steps: As built, Recommended, No change, B&W),
     # then SAVE FOR EVERY GAME
@@ -172,9 +208,9 @@ def main():
         fail("(all) image 2 not saved as built", o)
 
     # 3. hold: change the red middle shades and HOLD the right flipper 1.5 s
-    hold = ["right", "right", "start", "start", "right", "right", "start",
+    hold = ["right", "right", "start", "start", "right", "right", "right", "right", "right", "start",
             ("right", 1.5), "start",
-            "left", "left", "left", "left", "left", "start",          # SAVE
+            "right", "right", "right", "right", "right", "right", "right", "start",   # 5 -> 12 SAVE
             "right", "right", "start", "right", "start"]
     rc, o, e, vals, ch = run("hold", hold)
     m = re.search(r"saved: (\d\.\d+) ", o)
@@ -236,6 +272,25 @@ def main():
     rc, o = apply(1, old)
     if rc != 2 or "in the adjustable shape" not in o or os.path.exists(out):
         fail("(apply) the old shape: rc %d" % rc, o)
+    # PAD-537: brightness and contrast have no slot of their own: the copy carries them folded
+    # into gain and gamma exactly as the PC's Profile.curve() folds them
+    with open(values, "w") as f:
+        f.write("p7:img1|1.10 1.20 1.35|1 1 1|0 0 0|0.80|1.10 1.15\n")
+    rc, o = apply(1)
+    if rc != 0 or "3 color function(s) rewritten" not in o:
+        fail("(apply) brightness/contrast: rc %d" % rc, o)
+    got = re.search(rb"c=mix\(vec3\(dot\(c,vec3\(0\.299,0\.587,0\.114\)\)\),c,([0-9.]{8})\);"
+                    rb"c=pow\(clamp\(c\*vec3\(([0-9.]{8}),([0-9.]{8}),([0-9.]{8})\),0\.0,1\.0\),"
+                    rb"vec3\(([0-9.]{8}),([0-9.]{8}),([0-9.]{8})\)\);", open(out, "rb").read())
+    if not got:
+        fail("(apply) brightness/contrast: no pad_cp in the copy")
+    got = [float(v) for v in got.groups()]
+    cp = _colour_profile()
+    gamma, gain, _lift = cp.Profile(gamma=(1.10, 1.20, 1.35), saturation=0.80, brightness=1.10,
+                                    contrast=1.15).curve()
+    expect = [0.80] + list(gain) + list(gamma)
+    if any(abs(a - b) > 2e-6 for a, b in zip(got, expect)):
+        fail("(apply) brightness/contrast folded to %r, the PC folds them to %r" % (got, expect))
     # 6. settings=off: the owner left the card out - the menu has the images' cards alone
     off = os.path.join(t, "off.conf")
     with open(off, "w") as f:
@@ -251,8 +306,8 @@ def main():
         fail("(off) with the card on, card 4 is not the settings card", snaps[0][1])
     if snaps[1][0] == 0 or "out of range (3 cards)" not in snaps[1][1]:
         fail("(off) settings=off still has a fourth card", snaps[1][1])
-    print("settings_test: OK (walk, save for every game, a held flipper, the idle exit, --apply-color, "
-          "settings=off)")
+    print("settings_test: OK (walk, brightness/contrast/saturation, save for every game, a held flipper, "
+          "the idle exit, --apply-color, settings=off)")
 
 
 if __name__ == "__main__":

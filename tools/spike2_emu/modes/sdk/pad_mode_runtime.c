@@ -9182,6 +9182,465 @@ static void sndm_arm(void)
         sndm_force ? " - FORCED by the file" : "", fn("sound_resolve"));
 }
 
+/* ---- picture settings (PAD-537): BRIGHTNESS, CONTRAST and SATURATION in the operator's menu -------
+ * An owner asked for "simple colour and brightness controls in the service menu" with "a test card
+ * showing Saturation, Brightness, Contrast". The game's menu gets the three rows (menu_settings.py:
+ * settings the game no longer reads, re-captioned, on the LCD brightness page); this is what makes
+ * them do something, LIVE, while the game runs.
+ *
+ * Every pixel the game draws comes out of a fragment shader it hands GL as text (shader_profile.py).
+ * So the four GL imports the game program calls through its own PLT are re-pointed at wrappers here,
+ * by writing the program's import slots (their addresses are worked out by the build from the game
+ * program's relocations and named in picture.cfg; the program is not position independent and has
+ * no read-only relocations, measured on Godzilla LE and Pro 1.16):
+ *
+ *   glShaderSource   a fragment shader gets its main() renamed pad_main0 and a new main that runs it
+ *                    and passes its colour through pad_picf(): brightness and contrast as the Color
+ *                    profile tab's Profile.curve() folds them (contrast turns about the middle grey),
+ *                    saturation toward the Rec.601 grey, on the un-premultiplied colour; and, inside
+ *                    a rectangle of the screen, the Color profile tab's TEST CARD in place of the
+ *                    game's pixels. Two uniforms carry the numbers; a program that never had them set
+ *                    reads zeros, which pad_picf passes through untouched.
+ *   glLinkProgram    a relinked program's uniform locations are looked up again
+ *   glUseProgram     the program's uniforms are brought up to date when they are stale (one compare)
+ *   eglSwapBuffers   once a frame, the three settings' values are read (one word each, in .nonvol);
+ *                    a change re-sends them, and shows the test card for `card` ms from that change
+ *
+ * Only GL calls the game itself makes are used, so the emulator's GL bridge (glbridge.c) carries
+ * them as it carries the game's. The real functions come from dlsym on the libraries themselves: the
+ * game takes some GL functions' addresses, so their names resolve to ITS PLT entries, which now lead
+ * here. Nothing is touched unless picture.cfg names all four slots and each holds what an unbound or
+ * bound import slot holds.
+ *
+ * picture.cfg (/usr/local/padmode/picture.cfg on a card, /dump/picture.cfg in the rig), one
+ * TAB-separated line each:
+ *
+ *     only                                      the card carries no modes: arm this and nothing else
+ *     got <TAB> <symbol> <TAB> <addr>            an import slot of the game program
+ *     setting <TAB> <which> <TAB> <live> <TAB> <pm 1> ... <TAB> <pm n>
+ *                                               which = brightness | contrast | saturation; the
+ *                                               adjustment's value v (1..n) is the factor pm v / 1000,
+ *                                               any other value 1000 (a store from another card)
+ *     card <TAB> <x> <TAB> <y> <TAB> <w> <TAB> <h> <TAB> <ms>
+ *                                               the test card's rectangle in GL pixels (origin bottom
+ *                                               left) and how long it stays after a change
+ *     force <TAB> <which> <TAB> <v>              a rig run's own value (the build never writes it) */
+#define PIC_FILE_MAX    8192
+#define PIC_VALUES      16
+#define PIC_PROGS       512
+#define PIC_SRC_MAX     (128 * 1024)
+#define PIC_RTLD_NOW    2
+#define PIC_RTLD_NOLOAD 4
+extern void *dlopen(const char *, int);
+extern void *dlsym(void *, const char *);
+
+static const char *const PIC_FILES[] = { "/usr/local/padmode/picture.cfg", "/dump/picture.cfg" };
+enum { PIC_B, PIC_C, PIC_S, PIC_N };
+static const char *const PIC_NAMES[PIC_N] = { "brightness", "contrast", "saturation" };
+enum { PIC_SOURCE, PIC_LINK, PIC_USE, PIC_SWAP, PIC_GOTS };
+static const char *const PIC_SYMS[PIC_GOTS] = { "glShaderSource", "glLinkProgram", "glUseProgram",
+                                                "eglSwapBuffers" };
+static char pic_raw[PIC_FILE_MAX + 1];
+static unsigned pic_got[PIC_GOTS];
+static struct {
+    unsigned live, n, force, last;
+    unsigned short pm[PIC_VALUES];
+} pic_set[PIC_N];
+static int pic_only, pic_bad, pic_ticks;
+static unsigned pic_card[4], pic_card_ms = 10000;
+static unsigned long pic_card_until;
+static unsigned pic_gen = 1, pic_cur;
+static float pic_u[4], pic_r[4];
+static struct { unsigned prog, gen; int loc, rloc, looked; } pic_prog[PIC_PROGS];
+static char pic_src[PIC_SRC_MAX];
+static unsigned pic_rewritten, pic_passed, pic_long;
+static void (*pic_real_source)(unsigned, int, const char *const *, const int *);
+static void (*pic_real_link)(unsigned);
+static void (*pic_real_use)(unsigned);
+static unsigned (*pic_real_swap)(void *, void *);
+static int (*pic_get_loc)(unsigned, const char *);
+static void (*pic_uniform4f)(int, float, float, float, float);
+
+/* the colour step every fragment shader gets (two %s: the shader's colour output) */
+static const char PIC_GLSL[] =
+    "\nuniform mediump vec4 pad_pic;\nuniform mediump vec4 pad_tcr;\n"
+    "mediump vec3 pad_tcc(mediump vec2 p){"
+    "mediump vec3 c=vec3(24.0/255.0);"
+    "if(p.x>=16.0&&p.x<624.0){mediump float x=p.x-16.0;"
+    "if(p.y>=16.0&&p.y<76.0){mediump float i=floor(x/38.0);mediump float g;"
+    "if(i<4.0)g=8.0*i;else if(i<11.0)g=32.0+16.0*(i-4.0);else if(i<12.0)g=160.0;"
+    "else if(i<13.0)g=192.0;else if(i<14.0)g=224.0;else if(i<15.0)g=240.0;else g=255.0;"
+    "c=vec3(g/255.0);}"
+    "else if(p.y>=88.0&&p.y<302.0){mediump float j=floor(x/(608.0/6.0));"
+    "if(p.y<138.0||(p.y>=140.0&&p.y<190.0)){mediump vec3 f;"
+    "if(j<1.0)f=vec3(1.0,0.0,0.0);else if(j<2.0)f=vec3(0.0,1.0,0.0);else if(j<3.0)f=vec3(0.0,0.0,1.0);"
+    "else if(j<4.0)f=vec3(0.0,1.0,1.0);else if(j<5.0)f=vec3(1.0,0.0,1.0);else f=vec3(1.0,1.0,0.0);"
+    "c=p.y<138.0?f:f*(127.0/255.0);}"
+    "else if(p.y>=202.0&&p.y<250.0){"
+    "if(j<1.0)c=vec3(8.0,24.0,40.0);else if(j<2.0)c=vec3(8.0,32.0,56.0);else if(j<3.0)c=vec3(12.0,48.0,80.0);"
+    "else if(j<4.0)c=vec3(16.0,64.0,104.0);else if(j<5.0)c=vec3(24.0,80.0,128.0);else c=vec3(32.0,96.0,152.0);"
+    "c/=255.0;}"
+    "else if(p.y>=254.0){"
+    "if(j<1.0)c=vec3(255.0,224.0,196.0);else if(j<2.0)c=vec3(234.0,192.0,160.0);"
+    "else if(j<3.0)c=vec3(198.0,145.0,110.0);else if(j<4.0)c=vec3(160.0,105.0,75.0);"
+    "else if(j<5.0)c=vec3(110.0,70.0,50.0);else c=vec3(70.0,45.0,32.0);"
+    "c/=255.0;}}"
+    "else if(p.y>=314.0&&p.y<384.0)c=vec3(min(x/607.0,1.0));}"
+    "return c;}\n"
+    "mediump vec4 pad_picf(mediump vec4 f){mediump vec3 c=f.rgb;mediump float a=f.a;"
+    "if(pad_tcr.z>0.0){mediump vec2 q=(gl_FragCoord.xy-pad_tcr.xy)/pad_tcr.zw;"
+    "if(q.x>=0.0&&q.x<1.0&&q.y>=0.0&&q.y<1.0){c=pad_tcc(vec2(q.x*640.0,(1.0-q.y)*400.0));a=1.0;}}"
+    "if(pad_pic.w<0.5)return vec4(c,a);"
+    "if(a>0.0)c=clamp(c/a,0.0,1.0);"
+    "c=mix(vec3(dot(c,vec3(0.299,0.587,0.114))),c,pad_pic.z);"
+    "c=pow(clamp(c*(pad_pic.x*2.0*pow(0.5,1.0/pad_pic.y)),0.0,1.0),vec3(pad_pic.y));"
+    "return vec4(c*a,a);}\n";
+
+static void pic_line(char *s)
+{
+    const char *p;
+    char *f[3 + PIC_VALUES];
+    unsigned n = 0, k, w;
+    int ok;
+    while (*s == ' ') s++;
+    if (*s == '#' || !*s) return;
+    for (;;) {
+        if (n < sizeof f / sizeof f[0]) f[n++] = s;
+        while (*s && *s != '\t') s++;
+        if (!*s) break;
+        *s++ = 0;
+    }
+    if (n == 1 && str_eq(f[0], "only")) { pic_only = 1; return; }
+    if (n >= 3 && str_eq(f[0], "got")) {
+        for (k = 0; k < PIC_GOTS; k++)
+            if (str_eq(f[1], PIC_SYMS[k])) {
+                p = f[2];
+                pic_got[k] = (unsigned)number(&p, &ok);
+                if (!ok) { pic_got[k] = 0; pic_bad++; }
+                return;
+            }
+        pic_bad++;
+        return;
+    }
+    for (w = 0; w < PIC_N && n >= 2 && !str_eq(f[1], PIC_NAMES[w]); w++) {}
+    if (n >= 5 && str_eq(f[0], "setting") && w < PIC_N) {
+        p = f[2];
+        pic_set[w].live = (unsigned)number(&p, &ok);
+        if (!ok) { pic_set[w].live = 0; pic_bad++; return; }
+        for (k = 3; k < n && k - 3 < PIC_VALUES; k++) {
+            p = f[k];
+            pic_set[w].pm[k - 3] = (unsigned short)number(&p, &ok);
+            if (!ok || pic_set[w].pm[k - 3] > 4000) { pic_set[w].n = 0; pic_bad++; return; }
+        }
+        pic_set[w].n = k - 3;
+        return;
+    }
+    if (n >= 3 && str_eq(f[0], "force") && w < PIC_N) {
+        p = f[2];
+        pic_set[w].force = (unsigned)number(&p, &ok);
+        return;
+    }
+    if (n >= 6 && str_eq(f[0], "card")) {
+        for (k = 0; k < 4; k++) {
+            p = f[k + 1];
+            pic_card[k] = (unsigned)number(&p, &ok);
+        }
+        p = f[5];
+        pic_card_ms = (unsigned)number(&p, &ok);
+        return;
+    }
+    pic_bad++;
+}
+
+static int pic_read(void)
+{
+    long n = -1, i, start = 0;
+    unsigned k;
+    for (k = 0; k < sizeof PIC_FILES / sizeof PIC_FILES[0] && n < 0; k++)
+        n = pm_read_file(PIC_FILES[k], pic_raw, PIC_FILE_MAX);
+    if (n <= 0) return 0;
+    pic_raw[n] = 0;
+    for (i = 0; i <= n; i++)
+        if (i == n || pic_raw[i] == '\n' || pic_raw[i] == '\r') {
+            pic_raw[i] = 0;
+            pic_line(pic_raw + start);
+            start = i + 1;
+        }
+    return 1;
+}
+
+/* setting w's value now: the rig's forced one, else the adjustment's word (0: none) */
+static unsigned pic_value(unsigned w)
+{
+    if (pic_set[w].force) return pic_set[w].force;
+    if (!pic_set[w].live) return 0;
+    return *(volatile const unsigned *)(unsigned long)pic_set[w].live;
+}
+
+static float pic_factor(unsigned w)
+{
+    unsigned v = pic_value(w);
+    return v >= 1 && v <= pic_set[w].n ? (float)pic_set[w].pm[v - 1] / 1000.0f : 1.0f;
+}
+
+/* the uniforms from the settings and the card's state; a new generation for every program */
+static void pic_compute(void)
+{
+    float b = pic_factor(PIC_B), c = pic_factor(PIC_C), s = pic_factor(PIC_S);
+    int card = pic_card_until != 0 && pic_card[2] && pic_card[3];
+    if (c < 0.05f) c = 0.05f;
+    pic_u[0] = b;
+    pic_u[1] = c;
+    pic_u[2] = s;
+    pic_u[3] = (b != 1.0f || c != 1.0f || s != 1.0f) ? 1.0f : 0.0f;
+    pic_r[0] = card ? (float)pic_card[0] : 0.0f;
+    pic_r[1] = card ? (float)pic_card[1] : 0.0f;
+    pic_r[2] = card ? (float)pic_card[2] : 0.0f;
+    pic_r[3] = card ? (float)pic_card[3] : 0.0f;
+    pic_gen++;
+}
+
+/* bring program `prog` (the one in use) up to date */
+static void pic_apply(unsigned prog)
+{
+    unsigned i = prog % PIC_PROGS;
+    if (!prog) return;
+    if (pic_prog[i].prog != prog) {
+        pic_prog[i].prog = prog;
+        pic_prog[i].looked = 0;
+        pic_prog[i].gen = 0;
+    }
+    if (pic_prog[i].gen == pic_gen) return;
+    if (!pic_prog[i].looked) {
+        pic_prog[i].loc = pic_get_loc(prog, "pad_pic");
+        pic_prog[i].rloc = pic_get_loc(prog, "pad_tcr");
+        pic_prog[i].looked = 1;
+    }
+    if (pic_prog[i].loc >= 0) pic_uniform4f(pic_prog[i].loc, pic_u[0], pic_u[1], pic_u[2], pic_u[3]);
+    if (pic_prog[i].rloc >= 0) pic_uniform4f(pic_prog[i].rloc, pic_r[0], pic_r[1], pic_r[2], pic_r[3]);
+    pic_prog[i].gen = pic_gen;
+}
+
+/* once a frame: has the operator changed a setting, or has the test card's time run out? */
+static void pic_tick(void)
+{
+    unsigned w, v, changed = 0, card = 0;
+    unsigned long now = pm_ms();
+    for (w = 0; w < PIC_N; w++) {
+        v = pic_value(w);
+        if (v != pic_set[w].last) {
+            if (pic_ticks) say("picture: %s %u -> %u", PIC_NAMES[w], pic_set[w].last, v);
+            /* the operator's change, not the game reading its store at boot (0, before it has) */
+            if (pic_ticks && pic_set[w].last >= 1 && pic_set[w].last <= pic_set[w].n) card = 1;
+            pic_set[w].last = v;
+            changed = 1;
+        }
+    }
+    if (card) pic_card_until = now + pic_card_ms + 1;
+    if (!changed && pic_card_until && now >= pic_card_until) {
+        pic_card_until = 0;
+        changed = 1;
+        say("picture: test card off");
+    }
+    if (changed) {
+        pic_compute();
+        say("picture: brightness %.2f contrast %.2f saturation %.2f%s", (double)pic_u[0], (double)pic_u[1],
+            (double)pic_u[2], pic_r[2] > 0.0f ? ", test card on" : "");
+    }
+    pic_ticks++;
+}
+
+static int pic_ident(int c)
+{
+    return c == '_' || (c >= '0' && c <= '9') || ((c | 32) >= 'a' && (c | 32) <= 'z');
+}
+
+/* where the name of the shader's main() is: "void main" then "(" (spaces allowed); the 'm' */
+static long pic_find_main(const char *s, long n)
+{
+    long i, j, k;
+    for (i = 0; i + 9 <= n; i++) {
+        if (s[i] != 'v' || s[i + 1] != 'o' || s[i + 2] != 'i' || s[i + 3] != 'd') continue;
+        if (i > 0 && pic_ident(s[i - 1])) continue;
+        for (j = i + 4; j < n && (s[j] == ' ' || s[j] == '\t' || s[j] == '\n' || s[j] == '\r'); j++) {}
+        if (j == i + 4 || j + 4 > n || s[j] != 'm' || s[j + 1] != 'a' || s[j + 2] != 'i' || s[j + 3] != 'n')
+            continue;
+        k = j;
+        j += 4;
+        while (j < n && (s[j] == ' ' || s[j] == '\t')) j++;
+        if (j < n && s[j] == '(') return k;
+    }
+    return -1;
+}
+
+static int pic_has(const char *s, long n, const char *w)
+{
+    long i, k;
+    for (i = 0; i < n; i++) {
+        for (k = 0; w[k] && i + k < n && s[i + k] == w[k]; k++) {}
+        if (!w[k]) return 1;
+    }
+    return 0;
+}
+
+/* the colour output of a fragment shader: gl_FragColor (GLSL ES 1.00) or the "out [prec] vec4
+ * NAME;" of a GLSL ES 3.00 one, into out; 0 for a vertex shader or anything else */
+static int pic_output(const char *s, long n, char *out, unsigned cap)
+{
+    long i, j, e;
+    if (pic_has(s, n, "gl_Position")) return 0;
+    if (pic_has(s, n, "gl_FragColor")) { str_copy(out, cap, "gl_FragColor", 12); return 1; }
+    for (i = 0; i + 4 < n; i++) {
+        if (s[i] != 'o' || s[i + 1] != 'u' || s[i + 2] != 't' || (s[i + 3] != ' ' && s[i + 3] != '\t')) continue;
+        if (i > 0 && s[i - 1] != ' ' && s[i - 1] != '\n' && s[i - 1] != '\t' && s[i - 1] != ';') continue;
+        for (j = i + 3; j < n && (s[j] == ' ' || s[j] == '\t'); j++) {}
+        if (j + 5 < n && (s[j] == 'l' || s[j] == 'm' || s[j] == 'h')) {     /* lowp / mediump / highp */
+            while (j < n && s[j] != ' ' && s[j] != '\t') j++;
+            while (j < n && (s[j] == ' ' || s[j] == '\t')) j++;
+        }
+        if (j + 5 >= n || s[j] != 'v' || s[j + 1] != 'e' || s[j + 2] != 'c' || s[j + 3] != '4') continue;
+        for (j += 4; j < n && (s[j] == ' ' || s[j] == '\t'); j++) {}
+        for (e = j; e < n && pic_ident(s[e]); e++) {}
+        if (e == j || e - j >= (long)cap) continue;
+        str_copy(out, cap, s + j, (unsigned)(e - j));
+        return 1;
+    }
+    return 0;
+}
+
+static long pic_strlen(const char *s)
+{
+    long n = 0;
+    while (s && s[n]) n++;
+    return n;
+}
+
+/* append the n characters at t to pic_src at *at; 0 when they do not fit */
+static int pic_put(long *at, const char *t, long n)
+{
+    long k;
+    if (*at + n >= PIC_SRC_MAX) return 0;
+    for (k = 0; k < n; k++) pic_src[*at + k] = t[k];
+    *at += n;
+    pic_src[*at] = 0;
+    return 1;
+}
+
+static void pic_source(unsigned shader, int count, const char *const *strings, const int *lengths)
+{
+    long n = 0, at, len, ol;
+    int k;
+    char outv[64];
+    const char *one;
+    for (k = 0; k < count; k++) {
+        len = lengths && lengths[k] >= 0 ? lengths[k] : pic_strlen(strings[k]);
+        if (n + len >= PIC_SRC_MAX - (long)sizeof PIC_GLSL - 256) { pic_long++; goto plain; }
+        for (at = 0; at < len; at++) pic_src[n + at] = strings[k][at];
+        n += len;
+    }
+    pic_src[n] = 0;
+    if (pic_has(pic_src, n, "pad_picf") || !pic_output(pic_src, n, outv, sizeof outv)) goto plain;
+    at = pic_find_main(pic_src, n);
+    if (at < 0) goto plain;
+    /* "main" -> "pad_main0": what follows it moves 5 along */
+    for (len = n - 1; len >= at + 4; len--) pic_src[len + 5] = pic_src[len];
+    for (k = 0; k < 9; k++) pic_src[at + k] = "pad_main0"[k];
+    n += 5;
+    pic_src[n] = 0;
+    ol = pic_strlen(outv);
+    if (!pic_put(&n, PIC_GLSL, (long)sizeof PIC_GLSL - 1) || !pic_put(&n, "void main(){pad_main0();", 24)
+            || !pic_put(&n, outv, ol) || !pic_put(&n, "=pad_picf(", 10) || !pic_put(&n, outv, ol)
+            || !pic_put(&n, ");}\n", 4)) {
+        pic_long++;
+        goto plain;
+    }
+    one = pic_src;
+    pic_real_source(shader, 1, &one, 0);
+    if (!pic_rewritten++) say("picture: first fragment shader carries the picture step (output %s)", outv);
+    return;
+plain:
+    pic_passed++;
+    pic_real_source(shader, count, strings, lengths);
+}
+
+static void pic_link(unsigned prog)
+{
+    pic_real_link(prog);
+    if (prog && pic_prog[prog % PIC_PROGS].prog == prog) {
+        pic_prog[prog % PIC_PROGS].looked = 0;
+        pic_prog[prog % PIC_PROGS].gen = 0;
+    }
+}
+
+static void pic_use(unsigned prog)
+{
+    pic_real_use(prog);
+    pic_cur = prog;
+    pic_apply(prog);
+}
+
+static unsigned pic_swap(void *dpy, void *surf)
+{
+    pic_tick();
+    if (pic_cur) pic_apply(pic_cur);
+    return pic_real_swap(dpy, surf);
+}
+
+/* from the constructor, after the port gate and before the game's main(): read picture.cfg, find
+ * the real functions, check the four slots and re-point them. All or nothing. */
+static void pic_arm(void)
+{
+    void *gles, *egl, *real[PIC_GOTS];
+    void *const wrap[PIC_GOTS] = { (void *)pic_source, (void *)pic_link, (void *)pic_use, (void *)pic_swap };
+    unsigned k, w, any = 0;
+    if (!pic_read()) return;
+    if (pic_bad) say("picture: %d line(s) of picture.cfg not read", pic_bad);
+    for (w = 0; w < PIC_N; w++) {
+        if (pic_set[w].live && !maps_has(pic_set[w].live, 4, MAP_R)) {
+            say("picture: %s's value at 0x%08x is not in the game's memory - it stays at normal",
+                PIC_NAMES[w], pic_set[w].live);
+            pic_set[w].live = 0;
+        }
+        if ((pic_set[w].live || pic_set[w].force) && pic_set[w].n) any = 1;
+        pic_set[w].last = 0xffffffffu;
+    }
+    if (!any) { say("picture: picture.cfg names no setting - nothing hooked"); return; }
+    gles = dlopen("libGLESv2.so.2", PIC_RTLD_NOW | PIC_RTLD_NOLOAD);
+    egl = dlopen("libEGL.so.1", PIC_RTLD_NOW | PIC_RTLD_NOLOAD);
+    if (!gles || !egl) { say("picture: off - libGLESv2/libEGL are not loaded in the game"); return; }
+    for (k = 0; k < PIC_GOTS; k++) {
+        real[k] = dlsym(k == PIC_SWAP ? egl : gles, PIC_SYMS[k]);
+        if (!real[k]) { say("picture: off - no %s in the GL libraries", PIC_SYMS[k]); return; }
+        if (!pic_got[k] || !maps_has(pic_got[k], 4, MAP_R | MAP_GAME)) {
+            say("picture: off - picture.cfg names no import slot of the game's program for %s", PIC_SYMS[k]);
+            return;
+        }
+        {
+            unsigned v = *(volatile const unsigned *)(unsigned long)pic_got[k];
+            if (v != (unsigned)(unsigned long)real[k] && !maps_has(v & ~1u, 4, MAP_R | MAP_X | MAP_GAME)) {
+                say("picture: off - %s's slot 0x%08x holds 0x%08x, not the game's own import", PIC_SYMS[k],
+                    pic_got[k], v);
+                return;
+            }
+        }
+    }
+    pic_get_loc = (int (*)(unsigned, const char *))dlsym(gles, "glGetUniformLocation");
+    pic_uniform4f = (void (*)(int, float, float, float, float))dlsym(gles, "glUniform4f");
+    if (!pic_get_loc || !pic_uniform4f) { say("picture: off - no glGetUniformLocation/glUniform4f"); return; }
+    pic_real_source = (void (*)(unsigned, int, const char *const *, const int *))real[PIC_SOURCE];
+    pic_real_link = (void (*)(unsigned))real[PIC_LINK];
+    pic_real_use = (void (*)(unsigned))real[PIC_USE];
+    pic_real_swap = (unsigned (*)(void *, void *))real[PIC_SWAP];
+    for (k = 0; k < PIC_GOTS; k++)
+        *(volatile unsigned *)(unsigned long)pic_got[k] = (unsigned)(unsigned long)wrap[k];
+    say("picture: armed - brightness %u value(s) at 0x%08x, contrast %u at 0x%08x, saturation %u at 0x%08x%s; "
+        "the test card %ux%u at %u,%u for %u ms after a change; %s, %s, %s and %s re-pointed",
+        pic_set[PIC_B].n, pic_set[PIC_B].live, pic_set[PIC_C].n, pic_set[PIC_C].live, pic_set[PIC_S].n,
+        pic_set[PIC_S].live, (pic_set[PIC_B].force | pic_set[PIC_C].force | pic_set[PIC_S].force)
+        ? " (FORCED by the file)" : "", pic_card[2], pic_card[3], pic_card[0], pic_card[1], pic_card_ms,
+        PIC_SYMS[0], PIC_SYMS[1], PIC_SYMS[2], PIC_SYMS[3]);
+}
+
 __attribute__((constructor))
 static void pad_mode_start(void)
 {
@@ -9204,10 +9663,11 @@ static void pad_mode_start(void)
     if (!port_gate()) return;
     clipv_arm();                              /* PAD-446: before the score gate - a clip variant scores nothing */
     sndm_arm();                               /* PAD-494: nor does a music mode */
-    if (clipv_only || sndm_only) {
-        say("armed: %s only (%s says the card has no modes) - nothing else is hooked",
-            clipv_only && sndm_only ? "clip variants and music modes" : clipv_only ? "clip variants" : "music modes",
-            clipv_only ? "clips.cfg" : "sounds.cfg");
+    pic_arm();                                /* PAD-537: nor do the picture settings */
+    if (clipv_only || sndm_only || pic_only) {
+        say("armed: %s%s%s only (%s says the card has no modes) - nothing else is hooked",
+            clipv_only ? "clip variants " : "", sndm_only ? "music modes " : "", pic_only ? "picture settings " : "",
+            clipv_only ? "clips.cfg" : sndm_only ? "sounds.cfg" : "picture.cfg");
         return;
     }
     if (!insider_arm()) return;               /* no score gate, no modes: see insider_arm */

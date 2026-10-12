@@ -192,6 +192,20 @@ effect at the next power-up. The editions share the machine's settings,
 so they must all carry the same ones: give every edition music modes, or
 none.
 
+### Picture settings in the service menu
+
+On the same games, **Picture settings in the service menu** on the
+Write tab gives the card **Brightness**, **Contrast** and **Saturation**
+under Adjustments > Machine Settings > LCD/Lamp, so whoever owns the
+machine can tune the screen without a computer. Each goes from 1 to 9,
+and 5 changes nothing (Saturation 1 is black and white). A value takes
+effect on the whole screen the moment it is accepted, on top of the
+colors the card was built with, and the Color profile tab's test card
+shows in the corner for 15 seconds so the change can be judged. The rows
+use the game's spare settings, the same ones music modes and editions use:
+with one of those on the card Saturation is left out, with both only
+Brightness fits.
+
 ### What the replace tabs look like
 
 <p>

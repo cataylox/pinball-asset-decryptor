@@ -20,6 +20,8 @@
 #define STEP_GAIN  0.02f
 #define STEP_SAT   0.05f
 #define STEP_LIFT  0.005f
+#define STEP_BRIGHT   0.05f
+#define STEP_CONTRAST 0.05f
 
 /* THE STARTING POINTS the Color profile tab offers (core/colour_profile.py
  * PRESETS - tests/test_stern_shader_profile.py holds these numbers to that
@@ -41,9 +43,11 @@ static void preset_colour(int k, struct colour *out)
     memcpy(out->gain, PRESETS[k].gain, sizeof out->gain);
     memcpy(out->lift, PRESETS[k].lift, sizeof out->lift);
     out->sat = PRESETS[k].sat;
+    out->bright = out->contrast = 1.0f;
 }
 
-enum row_kind { R_GAME, R_PRESET, R_GAMMA, R_GAIN, R_SAT, R_LIFT, R_SAVE, R_SAVE_ALL, R_LEAVE };
+enum row_kind { R_GAME, R_PRESET, R_BRIGHT, R_CONTRAST, R_SAT, R_GAMMA, R_GAIN, R_LIFT,
+                R_SAVE, R_SAVE_ALL, R_LEAVE };
 struct row { int kind, ch; };
 
 enum screen { S_LIST, S_COLOR, S_DONE };
@@ -131,6 +135,12 @@ static void value_text(const struct row *r, const struct colour *c, char *out, i
     case R_SAT:
         snprintf(out, (size_t)n, "%d%%", (int)lroundf(c->sat * 100.0f));
         break;
+    case R_BRIGHT:
+        snprintf(out, (size_t)n, "%d%%", (int)lroundf(c->bright * 100.0f));
+        break;
+    case R_CONTRAST:
+        snprintf(out, (size_t)n, "%d%%", (int)lroundf(c->contrast * 100.0f));
+        break;
     case R_LIFT: {
         float l = lift_of(c);
         if (l < 0.002f) snprintf(out, (size_t)n, "off");
@@ -174,6 +184,12 @@ static int step_row(struct state *st, int dir)
     case R_SAT:
         c->sat = stepped(c->sat, STEP_SAT, dir, COLOUR_SAT_MIN, COLOUR_SAT_MAX);
         break;
+    case R_BRIGHT:
+        c->bright = stepped(c->bright, STEP_BRIGHT, dir, COLOUR_BRIGHT_MIN, COLOUR_BRIGHT_MAX);
+        break;
+    case R_CONTRAST:
+        c->contrast = stepped(c->contrast, STEP_CONTRAST, dir, COLOUR_CONTRAST_MIN, COLOUR_CONTRAST_MAX);
+        break;
     case R_LIFT: {
         float l = stepped(lift_of(c), STEP_LIFT, dir, COLOUR_LIFT_MIN, COLOUR_LIFT_MAX);
         c->lift[0] = c->lift[1] = c->lift[2] = l;
@@ -190,9 +206,13 @@ static void build_rows(struct state *st)
     int k, n = 0;
     if (st->nimg > 1) st->rows[n++] = (struct row){ R_GAME, 0 };
     st->rows[n++] = (struct row){ R_PRESET, 0 };
+    /* PAD-537: the plain controls first - what an owner reaches for - then
+     * the per-channel ones the Color profile tab has */
+    st->rows[n++] = (struct row){ R_BRIGHT, 0 };
+    st->rows[n++] = (struct row){ R_CONTRAST, 0 };
+    st->rows[n++] = (struct row){ R_SAT, 0 };
     for (k = 0; k < 3; k++) st->rows[n++] = (struct row){ R_GAMMA, k };
     for (k = 0; k < 3; k++) st->rows[n++] = (struct row){ R_GAIN, k };
-    st->rows[n++] = (struct row){ R_SAT, 0 };
     st->rows[n++] = (struct row){ R_LIFT, 0 };
     st->rows[n++] = (struct row){ R_SAVE, 0 };
     if (st->nimg > 1) st->rows[n++] = (struct row){ R_SAVE_ALL, 0 };
@@ -310,7 +330,9 @@ static const char *row_label(const struct state *st, const struct row *r)
     case R_PRESET: return "START FROM";
     case R_GAMMA: return r->ch == 0 ? "MIDDLE SHADES" : "";
     case R_GAIN: return r->ch == 0 ? "COLOR LEVEL" : "";
-    case R_SAT: return "COLOR STRENGTH";
+    case R_BRIGHT: return "BRIGHTNESS";
+    case R_CONTRAST: return "CONTRAST";
+    case R_SAT: return "SATURATION";
     case R_LIFT: return "DARKEST SHADES";
     case R_SAVE: return st->nimg > 1 ? "SAVE FOR THIS GAME" : "SAVE";
     case R_SAVE_ALL: return "SAVE FOR EVERY GAME";
@@ -327,7 +349,7 @@ static void draw_colour(struct state *st)
     int W = e->g->w, img = st->imgs[st->cur], k;
     const struct colour *v = &st->work[img];
     int px = (int)(36 * s), pw = (int)(600 * s), y0 = (int)(124 * s);
-    int rh = st->nrows > 12 ? (int)(39 * s) : (int)(42 * s);
+    int rh = st->nrows > 14 ? (int)(36 * s) : st->nrows > 12 ? (int)(39 * s) : (int)(42 * s);
     float tpx = 22 * s;
     char buf[300], val[120];
 

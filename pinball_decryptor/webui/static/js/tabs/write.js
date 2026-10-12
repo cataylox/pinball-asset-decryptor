@@ -219,6 +219,7 @@ function Destination({ s }) {
     ${s.card_size_cap && !direct ? html`<${CardSize} s=${s} />` : null}
     ${s.card_fit_cap && !direct ? html`<${CardFit} s=${s} />` : null}
     ${s.editions_cap && !direct ? html`<${Editions} s=${s} />` : null}
+    ${s.picture_cap && !direct ? html`<${Picture} s=${s} />` : null}
   <//>`;
 }
 
@@ -234,6 +235,17 @@ function Editions({ s }) {
       <${Button} onClick=${() => call("write.edit_editions")} disabled=${s.running}>Name the editions...<//>
     </div>
     ${s.editions_note ? html`<span class=${cx("small", s.editions_note_kind === "err" ? "err-ink" : "muted")}>${s.editions_note}</span>` : null}
+  </div>`;
+}
+
+// PAD-537: BRIGHTNESS, CONTRAST and SATURATION in the game's operator menu,
+// applied live.  The tick, and a note: where the rows land and how many fit
+// beside Music Mode and Edition, or, in red, why this game cannot have them.
+function Picture({ s }) {
+  return html`<div class="stack wr-build">
+    <${Check} checked=${s.picture_on} wrap label=${s.picture_label} title=${s.picture_tip}
+      disabled=${s.running} onChange=${(v) => call("write.set_picture", v)} />
+    ${s.picture_note ? html`<span class=${cx("small", s.picture_note_kind === "err" ? "err-ink" : "muted")}>${s.picture_note}</span>` : null}
   </div>`;
 }
 

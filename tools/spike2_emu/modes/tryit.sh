@@ -123,7 +123,7 @@ case "$cmd" in
         # have a later stock run take THOSE out.
         rm -f "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/mode.start "$DUMP"/mode[1-7].start \
               "$DUMP"/mode.stop "$DUMP"/mode.clip "$DUMP"/mode.log "$DUMP"/cardmodes.from \
-              "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/gamecheck.on \
+              "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/gamecheck.on \
               "$DUMP"/census.mark
         put "$S/pad_mode.so" "$LIB/pad_mode.so" || die "could not copy the mode object into $LIB"
         put "$S/game.port" "$DUMP/game.port" || die "could not copy the port into $DUMP"
@@ -149,6 +149,10 @@ case "$cmd" in
         if [ -f "$S/sounds.cfg" ]; then
             put "$S/sounds.cfg" "$DUMP/sounds.cfg" || die "could not copy sounds.cfg"
         fi
+        # PAD-537: the picture settings, read beside the mode files
+        if [ -f "$S/picture.cfg" ]; then
+            put "$S/picture.cfg" "$DUMP/picture.cfg" || die "could not copy picture.cfg"
+        fi
         a=0
         for f in "$S"/*.assets; do       # a code mode's own assets (the build's carriers)
             [ -f "$f" ] || continue
@@ -164,7 +168,7 @@ case "$cmd" in
         # game reads them as root), so it is said, not fatal.
         if [ "$(id -u)" = 0 ]; then
             given=("$LIB/pad_mode.so" "$DUMP/game.port")
-            for f in "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/gamecheck.on; do
+            for f in "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/gamecheck.on; do
                 [ -f "$f" ] && given+=("$f")
             done
             pad_give_back "${given[@]}"

@@ -543,8 +543,9 @@ Its picture is a menu gear the selector draws itself (`gfx_gear`: eight teeth, a
 the card's title colour, so no file rides on the card): in the picture panel when the menu has
 artwork, above the words when it does not.  START on it opens a list - COLOR CORRECTION, BACK TO THE GAMES -
 and Color correction shows, per game, the Color profile tab's own controls: START FROM (As built,
-Recommended, No change, Black and white), MIDDLE SHADES and COLOR LEVEL for red, green and blue,
-COLOR STRENGTH, DARKEST SHADES; then SAVE FOR THIS GAME, SAVE FOR EVERY GAME (two or more
+Recommended, No change, Black and white), BRIGHTNESS, CONTRAST and SATURATION (PAD-537: the plain
+controls an owner reaches for; saturation is the tab's "Color strength"), MIDDLE SHADES and COLOR
+LEVEL for red, green and blue, DARKEST SHADES; then SAVE FOR THIS GAME, SAVE FOR EVERY GAME (two or more
 adjustable images) and BACK / LEAVE WITHOUT SAVING.  A GAME row picks which image is being set.
 The right half is the tab's test card, corrected on the CPU with the same maths the shaders run,
 so a press moves the picture.  Flippers (or Service -/+) move between rows; START / ACTION (or
@@ -562,7 +563,10 @@ eight characters.  `mkmulticard` reads each tree's game program (`tree_colour`) 
 numbers it was built with as `color_profile=<image>|<gamma>|<gain>|<lift>|<saturation>|<name>`;
 that line is what makes an image adjustable and what "As built" puts back.  Saved numbers go to
 `/data/codeselect.color`, one `<device>|...` line per image (a line equal to the build's is
-removed rather than written).  A v1.60 build (its `pad_cp` leaves out terms it did not need) has
+removed rather than written).  BRIGHTNESS and CONTRAST have no shader slot of their own: a line
+carries them as a fifth field (`|<brightness> <contrast>`, only when either is not 1) so the menu
+shows them again, and the apply step and the test card fold them into gain and gamma the way the
+Color profile tab's `Profile.curve()` does (`colour_folded`; settings_test holds the two together).  A v1.60 build (its `pad_cp` leaves out terms it did not need) has
 no slot to write into and gets no line.
 
 **How they reach the game.**  `select.sh` (`own_color`, after the image is mounted and its scores
