@@ -114,6 +114,17 @@ EDITIONS_TIP = (
     "EDITION setting names\" ticked: the card shows no menu, and the edition "
     "the setting names boots at the next power-up.")
 EDITIONS_NONE = "None. This card is not one of several editions."
+#: PAD-537: BRIGHTNESS, CONTRAST and SATURATION in the operator menu, applied live
+#: (plugins/stern/picture_settings.py)
+PICTURE_LABEL = "Picture settings in the service menu"
+PICTURE_TIP = (
+    "Gives the card BRIGHTNESS, CONTRAST and SATURATION in its operator menu "
+    "(Adjustments > Machine Settings > LCD/Lamp), values 1 to 9, 5 for no change. "
+    "A value the operator accepts changes the whole screen at once, on top of the "
+    "colors the card was built with, and the Color profile tab's test card shows "
+    "in the corner for a few seconds so they can see what it did. They share the "
+    "game's spare settings with the Audio tab's music choice and with Editions: with "
+    "both on the card, only Brightness fits.")
 EDITABLE_HINT = (
     "Tip: edit your audio (.wav), images (.webp), and video (.ogv) "
     "files in pck/_EDITABLE ASSETS/ inside your Modified Assets "
@@ -542,7 +553,9 @@ class WriteTab(TabService):
                  card_fit_label=CARD_FIT_LABEL, card_fit_tip=CARD_FIT_TIP,
                  editions_cap=False, editions_text="", editions_note="",
                  editions_note_kind="", editions_label=EDITIONS_LABEL,
-                 editions_tip=EDITIONS_TIP)
+                 editions_tip=EDITIONS_TIP, picture_cap=False, picture_on=False,
+                 picture_note="", picture_note_kind="",
+                 picture_label=PICTURE_LABEL, picture_tip=PICTURE_TIP)
         self._hook_mirrors()
 
     # ------------------------------------------------------------------
@@ -682,6 +695,7 @@ class WriteTab(TabService):
         self._refresh_prebuild_notes()
         self._refresh_card_size()
         self._publish_editions()
+        self._publish_picture()
         self._sync_buttons()
 
     @staticmethod
@@ -1756,6 +1770,77 @@ class WriteTab(TabService):
         return True
 
     # ------------------------------------------------------------------
+    # PAD-537: Picture settings in the service menu
+    # ------------------------------------------------------------------
+    def _picture_rows(self, assets):
+        """How many of the three rows fit beside the project's other menu settings."""
+        from ...plugins.stern import editions as _Ed
+        from ...plugins.stern import sound_modes as _SMo
+        taken = int(bool(_Ed.count(_Ed.load(assets))))
+        try:
+            taken += int(bool(_SMo.load(assets).count))
+        except Exception:                               # noqa: BLE001 - unreadable: none
+            pass
+        return max(0, 3 - taken)
+
+    def _publish_picture(self):
+        """The tick, and under it where the rows land, how many fit, or in red
+        why this project's game cannot have them."""
+        if not self._editions_applies():
+            self.set(picture_cap=False)
+            return
+        from ...plugins.stern import picture_settings as _PS
+        assets = self._info_assets_dir()
+        on = bool(assets) and _PS.load(assets)
+        note, kind = "", ""
+        if on:
+            why = _PS.title_refusal(_PS.project_title(assets))
+            if why:
+                note, kind = why, "err"
+            else:
+                n = self._picture_rows(assets)
+                rows = ["Brightness", "Contrast", "Saturation"][:n]
+                if not rows:
+                    note, kind = ("The Audio tab's music choice and Editions use the game's spare settings, "
+                                  "so none of the three fits on this card."), "err"
+                else:
+                    note = "The card gets %s in %s." % (
+                        " and ".join([", ".join(rows[:-1]), rows[-1]] if len(rows) > 1 else rows),
+                        _PS.menu_path())
+                    if n < 3:
+                        note += (" The Audio tab's music choice and Editions use the game's other spare "
+                                 "settings, so %s left out." % (
+                                     "Saturation is" if n == 2 else "Contrast and Saturation are"))
+        self.set(picture_cap=True, picture_on=on, picture_note=note,
+                 picture_note_kind=kind)
+
+    @rpc
+    def set_picture(self, on):
+        """Tick or untick the picture settings for this project."""
+        from ...core import history_log
+        from ...plugins.stern import picture_settings as _PS
+        if self.window._running or not self._editions_applies():
+            return False
+        assets = self._info_assets_dir()
+        if not assets:
+            compat.messagebox.showinfo(
+                "Picture settings", "Set the project folder on the Extract tab first.")
+            self._publish_picture()
+            return False
+        was = _PS.save(assets, bool(on))
+        hist = history_log.diff_scalar("write  picture settings", "on" if was else "off",
+                                       "on" if on else "off")
+        history_log.record(assets, [hist] if hist else [])
+        self.log("Picture settings: %s." % (
+            "the card gets BRIGHTNESS, CONTRAST and SATURATION in its operator menu"
+            if on else "the card gets no picture settings"), "info")
+        cb = self.window.cb.get("on_folder_state_written")
+        if cb is not None:
+            cb(assets)
+        self._publish_picture()
+        return True
+
+    # ------------------------------------------------------------------
     # Modified Files: the scan
     # ------------------------------------------------------------------
     def _log_scan(self, text):
@@ -2602,6 +2687,7 @@ class WriteTab(TabService):
         # the original may have been replaced on disk since it was read
         self._refresh_card_size()
         self._publish_editions()
+        self._publish_picture()
         self.set_admin_warning_collapsed(self._shared_admin_collapsed())
 
     def on_close(self):

@@ -43,6 +43,12 @@ notice until the machine was in front of them.
 
 The value is read on the machine by the mode runtime (pad_mode_runtime.c "music modes"), from the
 setting's own eight bytes, whose address :func:`plan` returns.
+
+PAD-537: BRIGHTNESS, CONTRAST and SATURATION (:mod:`.picture_settings`) take no adjustment of their
+own: each takes whichever DEPRECATED one the card's other settings of ours leave (``SETTINGS``
+names None for them), so a card with neither MUSIC MODE nor EDITION has all three, one with both
+has BRIGHTNESS only. Their range is 1..9 with 5 (normal) the default, and their help is a line of
+their own rather than a list of names.
 """
 from __future__ import annotations
 
@@ -56,17 +62,28 @@ MUSIC_MODE = "music_mode"
 #: PAD-495: which of a multi-boot card's editions of the game boots at the next power-up
 #: (tools/spike2_emu/codeselect reads it off the NVM mirror before the game starts)
 EDITION = "edition"
+#: PAD-537: the picture settings (:mod:`.picture_settings`)
+BRIGHTNESS = "brightness"
+CONTRAST = "contrast"
+SATURATION = "saturation"
 #: each setting of ours: the adjustment it takes over, its descriptor caption, its row caption and
 #: the menu category whose page lists it. EDITION sits on Attract Mode (16), beside the game's own
 #: BOOT SCREEN and 70TH BOOT SCREEN, which is where an operator already picks how the game looks.
+#: The picture settings take no adjustment of their own (None: a spare one, :func:`plan_many`) and
+#: sit on LCD/Lamp (11), beside the game's own LCD BRIGHTNESS.
 SETTINGS = {
     MUSIC_MODE: ("AD_GI_MAX_BRIGHTNESS", "MUSIC MODE", "Music Mode", 13),
     EDITION: ("AD_LED_MAX_BRIGHTNESS", "EDITION", "Edition", 16),
+    BRIGHTNESS: (None, "BRIGHTNESS", "Brightness", 11),
+    CONTRAST: (None, "CONTRAST", "Contrast", 11),
+    SATURATION: (None, "SATURATION", "Saturation", 11),
 }
 #: the firmware's own word for an adjustment nothing reads any more
 DEPRECATED = "DEPRECATED"
-#: how many values a setting of ours may offer
+#: how many values a setting of ours may offer (the picture settings' 9 are their own)
 MAX_VALUES = 8
+#: the most any setting of ours offers
+VALUES_CEILING = 9
 #: a category table record: {category, kind, id}; kind 3 is an adjustment row
 REC = 12
 KIND_ADJUSTMENT = 3
@@ -87,6 +104,7 @@ class MenuSetting:
     values: int             # 1..values
     live: int               # the address of its value in the running game (.nonvol)
     category: int           # the page that lists it
+    default: int = 1        # the value a fresh store starts at
 
 
 @dataclass(frozen=True)
@@ -247,24 +265,49 @@ def _shortened(name, n, shared):
     return " ".join(words)[:n].rstrip()
 
 
-def plan(table, key, values, names=()):
+def spare(table, taken=()):
+    """The adjustments a setting of ours may take (PAD-537): every one the game captions as
+    DEPRECATED, and every one a previous Write already gave a caption of ours, by name, highest id
+    first, less the ids in *taken*."""
+    ours = {v[1] for v in SETTINGS.values()}
+    out = []
+    for name, i in sorted(table.by_name.items(), key=lambda kv: -kv[1]):
+        if i in taken:
+            continue
+        label = menu_label(table, i)
+        if label.upper().startswith(DEPRECATED) or label in ours:
+            out.append(name)
+    return out
+
+
+def plan(table, key, values, names=(), ad=None, default=1, help_text=None):
     """``(MenuSetting, {file offset: bytes}, CategoryTable or None)``: the same-size writes that
     make setting *key* (values 1..*values*, its help naming *names*), and the category table to
     give one more record (:func:`table_writes`) - ``None`` when a previous Write already did. Raises
-    :class:`MenuSettingError` when this program cannot take it (the reason is the message)."""
+    :class:`MenuSettingError` when this program cannot take it (the reason is the message).
+    PAD-537: *ad* is the adjustment to take over (a picture setting's, :func:`plan_many` picks
+    one), *default* the value a fresh store starts at, *help_text* a help line of the setting's
+    own in place of the names."""
     from . import menu_visibility as MV
     if key not in SETTINGS:
         raise MenuSettingError("no such setting: %s" % key)
-    ad, caption, row_caption, category = SETTINGS[key]
+    fixed, caption, row_caption, category = SETTINGS[key]
+    ad = ad or fixed
+    if ad is None:
+        raise MenuSettingError("the game has no spare setting left for %s" % caption)
     values = int(values)
-    if not 2 <= values <= MAX_VALUES:
-        raise MenuSettingError("a setting of ours offers 2 to %d values, not %d" % (MAX_VALUES, values))
+    ceiling = MAX_VALUES if help_text is None else VALUES_CEILING
+    if not 2 <= values <= ceiling:
+        raise MenuSettingError("a setting of ours offers 2 to %d values, not %d" % (ceiling, values))
+    if not 1 <= int(default) <= values:
+        raise MenuSettingError("a default of %s is not one of the values 1 to %d" % (default, values))
     if ad not in table.by_name:
         raise MenuSettingError("the game has no %s to take over" % ad)
     i = table.by_name[ad]
     desc = table._off(table.table_va + i * table.elem)
     label = menu_label(table, i)
-    ours = label == caption
+    # a previous Write's caption of ours (PAD-537: a spare one may have held another of ours)
+    ours = label in {v[1] for v in SETTINGS.values()}
     if not ours and not label.upper().startswith(DEPRECATED):
         raise MenuSettingError("the game's %s is \"%s\", not a setting it says it no longer uses"
                                % (ad, label))
@@ -297,37 +340,67 @@ def plan(table, key, values, names=()):
         raise MenuSettingError("%s's caption has no room for \"%s\"" % (ad, row_caption))
     if help_room < 12:
         raise MenuSettingError("%s's help line has no room to name the modes" % ad)
-    text = help_line(list(names)[:values] + ["Mode %d" % (k + 1) for k in range(len(names), values)],
-                     help_room)
+    if help_text is not None:
+        text = " ".join(str(help_text).split())[:help_room].rstrip()
+    else:
+        text = help_line(list(names)[:values] + ["Mode %d" % (k + 1) for k in range(len(names), values)],
+                         help_room)
     writes = {
         table._off(cap_va): caption.encode("ascii") + b"\x00" * (cap_room + 1 - len(caption)),
         row[0]: row_caption.encode("ascii") + b"\x00" * (row_room + 1 - len(row_caption)),
         table._off(help_va): text.encode("ascii", "replace") + b"\x00" * (help_room + 1 - len(text)),
     }
-    for off, v in ((OFF_DEFAULT, 1), (OFF_MIN, 1), (OFF_MAX, values), (OFF_STEP, 1)):
+    for off, v in ((OFF_DEFAULT, int(default)), (OFF_MIN, 1), (OFF_MAX, values), (OFF_STEP, 1)):
         writes[desc + off] = struct.pack("<i", v)
-    setting = MenuSetting(key, i, row_caption, text, values, live, category)
+    setting = MenuSetting(key, i, row_caption, text, values, live, category, int(default))
     return setting, writes, (None if cat.has(category, i) else cat)
 
 
 def plan_many(table, wanted):
     """Several settings of ours at once (PAD-495: MUSIC MODE and EDITION on one card).
 
-    *wanted* is ``[(key, values, names), ...]``. Returns ``(settings, writes, cat, refused)``:
-    the :class:`MenuSetting` of each that this program can take, their same-size writes merged,
-    the category table to grow (``None`` when every one of them is already listed) and
-    ``{key: reason}`` for the ones it cannot. One setting refused never stops another."""
+    *wanted* is ``[(key, values, names), ...]``, or ``(key, values, names, options)`` with
+    *options* :func:`plan`'s ``default``/``help_text``. Returns ``(settings, writes, cat,
+    refused)``: the :class:`MenuSetting` of each that this program can take, their same-size
+    writes merged, the category table to grow (``None`` when every one of them is already
+    listed) and ``{key: reason}`` for the ones it cannot. One setting refused never stops another.
+
+    PAD-537: the settings with an adjustment of their own go first; then each picture setting
+    takes the first spare one (:func:`spare`) none of them took, its own from a previous Write
+    first, in the order *wanted* names them."""
     settings, writes, refused, cat = [], {}, {}, None
-    for key, values, names in wanted:
+    taken = set()
+    rows = [tuple(w) + ({},) if len(w) == 3 else tuple(w) for w in wanted]
+    fixed = [r for r in rows if SETTINGS.get(r[0], (None,))[0] is not None or r[0] not in SETTINGS]
+    pooled = [r for r in rows if r not in fixed]
+    for key in [r[0] for r in fixed] + [r[0] for r in pooled]:
+        row = next(r for r in rows if r[0] == key)
+        _k, values, names, opts = row
+        ad = None
+        if row in pooled:
+            caption = SETTINGS[key][1]
+            free = spare(table, taken)
+            mine = [n for n in free if menu_label(table, table.by_name[n]) == caption]
+            others = {v[1] for k, v in SETTINGS.items() if k != key}
+            free = mine + [n for n in free if menu_label(table, table.by_name[n]) not in others
+                           and n not in mine]
+            if not free:
+                refused[key] = ("the game has no spare setting left for %s (the card's other menu "
+                                "settings of ours use them)" % caption)
+                continue
+            ad = free[0]
         try:
-            setting, w, c = plan(table, key, values, names)
+            setting, w, c = plan(table, key, values, names, ad=ad, **opts)
         except MenuSettingError as e:
             refused[key] = str(e)
             continue
+        taken.add(setting.id)
         settings.append(setting)
         writes.update(w)
         if c is not None:
             cat = c
+    order = [r[0] for r in rows]
+    settings.sort(key=lambda st: order.index(st.key))
     return settings, writes, cat, refused
 
 
@@ -377,7 +450,7 @@ def check(raw, setting):
         row = _row_caption_line(t, setting.id)
     except Exception as ex:                                   # noqa: BLE001
         return ["the program does not read back (%s)" % ex]
-    if (e["default"], e["min"], e["max"], e["step"]) != (1, 1, setting.values, 1):
+    if (e["default"], e["min"], e["max"], e["step"]) != (setting.default, 1, setting.values, 1):
         bad.append("its range reads %d..%d" % (e["min"], e["max"]))
     if menu_label(t, setting.id) != SETTINGS[setting.key][1]:
         bad.append("its caption reads \"%s\"" % menu_label(t, setting.id))
