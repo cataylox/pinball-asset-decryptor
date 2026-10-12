@@ -170,7 +170,8 @@ def test_the_selected_panel_keeps_every_section_greyed_out_not_gone():
     assert "disabled=${!(isText && p.font)}" in one
     words = src[src.index("function Words("):]
     words = words[:words.index("\n}\n")]
-    assert "disabled=${off}" in words and "const off = !p.words;" in words
+    # PAD-513: a line the game writes itself is locked, greyed out the same way
+    assert "disabled=${off}" in words and "const off = !p.words || !!p.words.locked;" in words
     fills = src[src.index("function GameFills("):]
     fills = fills[:fills.index("\n}\n")]
     # PAD-513: the button is greyed out too when the game writes words of its own
