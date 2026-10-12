@@ -170,6 +170,54 @@ def scan_image_groups(assets_path):
     return groups, occ, where
 
 
+_TREES = {"key": None, "trees": {}}
+_TREES_LOCK = threading.Lock()
+
+
+def scene_turns(assets_path, rel, cards):
+    """PAD-534 (DragonRR): ``{card: [(degrees clockwise, mirrored), ...]}``, how each scene
+    in *cards* turns picture *rel* where it draws it at rest (the Scenes window's still);
+    a scene that draws it upright, or not at rest, is left out.  Planet X's bridge pointer
+    is a south-pointing picture the game draws turned 48 degrees."""
+    from ...plugins.stern import scene_edit, scene_eval
+    stamp = scene_edit._trees_stamp(assets_path)
+    with _TREES_LOCK:
+        if _TREES["key"] != (assets_path, stamp):
+            _TREES["key"], _TREES["trees"] = (assets_path, stamp), scene_edit.trees_of(assets_path)
+        trees = _TREES["trees"]
+    image = rel[len("images/"):] if rel.startswith("images/") else rel
+    out = {}
+    for card in cards:
+        man = trees.get(card)
+        if not man:
+            continue
+        try:
+            draws = scene_eval.draw_list(man)
+        except Exception:                                # noqa: BLE001
+            log.exception("scene turns %s", card)
+            continue
+        turns = []
+        for d in draws:
+            if d.get("image") == image and d["kind"] in ("bitmap", "flip"):
+                deg, mirrored = scene_eval.turn_of(d["m"])
+                if (abs(deg) >= 0.5 or mirrored) and (deg, mirrored) not in turns:
+                    turns.append((deg, mirrored))
+        if turns:
+            out[card] = turns
+    return out
+
+
+def turn_words(deg, mirrored):
+    """``"turned 48° clockwise"`` (the Scenes panel's gameTurnText)."""
+    a = abs(deg)
+    a = int(a) if a == int(a) else a
+    turn = ("" if a < 0.5 else "turned upside down" if a == 180 else
+            "turned %s° %s" % (a, "clockwise" if deg > 0 else "anticlockwise"))
+    if mirrored:
+        return "mirrored and " + turn if turn else "mirrored"
+    return turn
+
+
 def compute_key_tails(groups, groups_all):
     """``{group_key(lower): distinguishing tail}`` (Tk
     ``_compute_image_key_tails``)."""
@@ -268,6 +316,8 @@ class ImagesTab(FindOriginalsMixin, TabService):
         self._groups_all = {}
         self._key_tails = {}
         self._group_tags = {}
+        self._turns = {}        # PAD-534: {(scan dir, rel): scene_turns}
+        self._turns_busy = set()
         self._scan_id = 0
         self._scan_dir = ""
         self._scan_dir_prev = ""
@@ -520,6 +570,7 @@ class ImagesTab(FindOriginalsMixin, TabService):
         self._groups = groups or {}
         self._group_occ = group_occ or {}
         self._groups_all = group_all or {}
+        self._turns = {}
         self._key_tails = compute_key_tails(self._groups, self._groups_all)
         self._keep_col_cache = None
         self._quiet += 1
@@ -1873,7 +1924,7 @@ class ImagesTab(FindOriginalsMixin, TabService):
     @staticmethod
     def _empty_preview():
         return {"rel": None, "group": None, "hdr": "Original",
-                "hdr_main": "Original", "hdr_note": "", "orig": "",
+                "hdr_main": "Original", "hdr_note": "", "scenes": "", "orig": "",
                 "rep": "", "rep_name": "", "empty": "", "keep": None,
                 "color": None, "has_pick": False, "clearable": False,
                 "ver": 0}
@@ -1928,6 +1979,7 @@ class ImagesTab(FindOriginalsMixin, TabService):
             note = ("shared by %d scenes (replacing it changes all of them)"
                     % n_occ)
         hdr = hdr_main + (("  ·  " + note) if note else "")
+        scenes = self._scene_note(rel) if slot else ""
         shown_rep = self._rep_pane_path(rel)
         empty = (self._rep_pane_empty_text(
             rel, "(no replacement assigned — double-click the row to pick "
@@ -1935,7 +1987,7 @@ class ImagesTab(FindOriginalsMixin, TabService):
         self._preview_ver += 1
         self.set(preview={
             "rel": rel, "group": None, "hdr": hdr, "hdr_main": hdr_main,
-            "hdr_note": note, "orig": opath or "",
+            "hdr_note": note, "scenes": scenes, "orig": opath or "",
             "rep": shown_rep or "",
             "rep_name": os.path.basename(shown_rep) if shown_rep else "",
             "empty": empty, "keep": self._keep_row(rel),
@@ -1945,6 +1997,50 @@ class ImagesTab(FindOriginalsMixin, TabService):
             if slot else False,
             "ver": self._preview_ver})
         self.publish_look()
+
+    def _scene_note(self, rel):
+        """PAD-534 (DragonRR): which scene(s) the picture is in, and how the game turns it
+        there ("In scene unnamed_instance_0 · 34856963, where the game draws it turned 48° clockwise").
+        The turns are worked out off the loop the first time a picture is shown."""
+        homes = [g for g in self._groups_of(rel) if g[0].startswith("rad::")]
+        if not homes:
+            return ""
+        key = (self._scan_dir, rel)
+        turns = self._turns.get(key)
+        if turns is None and key not in self._turns_busy:
+            self._turns_busy.add(key)
+            path, cards = self._scan_dir, [g[0][5:] for g in homes]
+            scan_id = self._scan_id
+
+            def _work():
+                try:
+                    got = scene_turns(path, rel, cards)
+                except Exception:                        # noqa: BLE001
+                    log.exception("scene turns %s", rel)
+                    got = {}
+                self.ctx.loop.post(_landed, got)
+
+            def _landed(got):
+                self._turns_busy.discard(key)
+                if self._scan_id == scan_id:    # a rescan may have new scene trees
+                    self._turns[key] = got
+                if self._current_rel == rel and self._scan_dir == key[0]:
+                    self._render_preview(rel)
+            threading.Thread(target=_work, daemon=True, name="images-turns").start()
+        turns = turns or {}
+
+        def _name(g):
+            words = self._group_tags.get(g[0]) or g[1]
+            how = "; ".join(turn_words(*t) for t in turns.get(g[0][5:], ()))
+            return (words, how)
+        named = [_name(g) for g in homes]
+        if len(named) == 1:
+            words, how = named[0]
+            return "In scene %s%s" % (
+                words, ", where the game draws it %s" % how if how else "")
+        shown = ", ".join("%s (%s)" % (w, h) if h else w for w, h in named[:4])
+        more = " and %d more" % (len(named) - 4) if len(named) > 4 else ""
+        return "In %d scenes: %s%s" % (len(named), shown, more)
 
     def _keep_row(self, rel):
         """Tk _image_refresh_keep_row: ``{on, text}`` or None (hidden)."""

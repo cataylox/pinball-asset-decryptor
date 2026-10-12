@@ -32,6 +32,8 @@ const CSV_TIP = "Save every row of the list as a spreadsheet (CSV), exactly as i
 const FOLDER_TIP = "Pick a folder of your own files and each one becomes the replacement for the slot with the same name — for a whole set you reworked outside the app, like every clip made black and white. The file type and capital letters don't have to match (Intro.mp4 is used for Intro.mov and converted to suit it), and subfolders are fine. Nothing changes until you confirm, and every file left out is named in the log.\n\nKeep the extract's own files where they are: files dropped into the project folder only count under the card's exact name.";
 const ORIGINALS_TIP = "Find the files your replacements were made from in a folder of your own, by how they look: the names don't matter.\n\nFor picks that are copies off a card, like the ones \"Transfer Mods to New Version\" takes from an extract of a built card: those pictures were already squeezed into the card's format once by the Write that built that card. With your own files picked instead, the next Write converts from them. Nothing changes until you press Use.";
 const CLEAR_TIP = "Drop every replacement picked on this tab in one go — for starting a project over without clearing 48 rows one at a time. It only drops the picks: your own files are untouched, and a slot already built into the project folder keeps the bytes it has (use “Revert all changes…” on the Write tab for those). To clear only some, select the rows — click, then Shift-click or Ctrl-click — and right-click the selection.";
+// PAD-534: the scene(s) a picture is in, and how the game turns it there
+const SCENES_TIP = "Where the game draws this picture. The picture here is the file as it is stored; a scene can draw it turned or mirrored, as the Scenes tab shows.";
 const KEEP_TIP = "Off: the replacement is scaled to the original picture's size, which squeezes a longer name. On: it keeps its own width and height, and the build grows the scene to fit it. The game draws it from the same top-left corner, so a wider picture reaches further right. Needs an image build (not a direct SD write). A picture nothing in its scene draws by size is fitted instead, and the log says so.";
 const REP_TIP = "Click to choose a replacement for this image (double-click the row does the same).";
 // PAD-312: the chosen-files color profile, baked into this picture as it is staged
@@ -702,7 +704,10 @@ export default function ImagesTab() {
           ${prevRel ? html`<${Button} size="sm" onClick=${() => call("images.choose", prevRel)}>Choose…<//>` : null}
           ${prevRel && p.clearable ? html`<${Button} size="sm" kind="ghost" onClick=${() => call("images.clear_one", prevRel)}>Clear replacement<//>` : null}
         </div>
-        ${p.hdr_note ? html`<div class="small img-shared img-on">${p.hdr_note}</div>` : null}
+        ${p.hdr_note || p.scenes ? html`<div class="small img-on">
+          ${p.hdr_note ? html`<div class="img-shared">${p.hdr_note}</div>` : null}
+          ${p.scenes ? html`<div class="muted img-scenes" ...${tip(SCENES_TIP)}>${p.scenes}</div>` : null}
+        </div>` : null}
         ${p.keep || p.color ? html`<div class="img-rk img-opts">
           ${p.keep ? html`<div class="img-keeprow">
             <${Check} checked=${!!p.keep.on} onChange=${(v) => call("images.set_keep", prevRel, v)}

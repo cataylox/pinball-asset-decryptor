@@ -1561,6 +1561,14 @@ function Words({ p, find, searching }) {
   </div>`;
 }
 
+// PAD-534: how the game itself turns a layer as it draws it ("turned 48° clockwise")
+function gameTurnText(g) {
+  const deg = Math.abs(g.deg);
+  const turn = deg < 0.5 ? "" : deg === 180 ? "turned upside down"
+    : `turned ${deg}° ${g.deg > 0 ? "clockwise" : "anticlockwise"}`;
+  return g.mirrored ? (turn ? `mirrored and ${turn}` : "mirrored") : turn;
+}
+
 function TreeSide({ t, play, playFrame, openFont, find, searching }) {
   const p = t.props;
   const [tint, setTint] = useState(p ? p.tint : "#ffffff");
@@ -1661,10 +1669,12 @@ function TreeSide({ t, play, playFrame, openFont, find, searching }) {
         ${num("Height %", p.scale_y, (v) => call("text_scenes.tree_set_size", p.id, null, v), "Stretch it up and down only")}
       </div>
       <div class="tree-row">
-        ${num("Turn °", p.rotate, (v) => call("text_scenes.tree_set_rotation", p.id, v), "How far it is turned from as shipped, in degrees clockwise (0 = as shipped)")}
+        ${num("Turn °", p.rotate, (v) => call("text_scenes.tree_set_rotation", p.id, v), "How far you have turned it from as shipped, in degrees clockwise (0 = as shipped), on top of any turn the game gives it")}
         <${Button} size="xs" title="Turn it 90° anticlockwise" onClick=${() => call("text_scenes.tree_rotate", p.id, -90)}>⟲ 90°<//>
         <${Button} size="xs" title="Turn it 90° clockwise" onClick=${() => call("text_scenes.tree_rotate", p.id, 90)}>⟳ 90°<//>
       </div>
+      ${p.game_turn ? html`<div class="small muted">The game draws it ${gameTurnText(p.game_turn)}${p.pic
+        ? ". The Images tab shows its picture as it is stored, not turned" : ""}. Turn ° is your own turn on top.</div>` : null}
       <div class="tree-row">
         <span class="lbl">Tint</span>
         <input type="color" class="tree-color" value=${tint} onInput=${(e) => setTint(e.target.value)}

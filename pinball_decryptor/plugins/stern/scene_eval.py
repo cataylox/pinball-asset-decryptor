@@ -29,6 +29,7 @@ A transform here is the 2-D affine ``(a, b, c, d, tx, ty)``: ``x' = a x + c y + 
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 
@@ -525,6 +526,19 @@ def invert(m):
 def apply(m, x, y):
     a, b, c, d, tx, ty = m
     return a * x + c * y + tx, b * x + d * y + ty
+
+
+def turn_of(m):
+    """``(degrees clockwise, mirrored)`` the affine *m* turns what it draws by (PAD-534,
+    DragonRR: Planet X's bridge pointer is a south-pointing picture the game draws turned
+    48 degrees).  A mirrored draw is read as flipped left to right, then turned."""
+    a, b, c, d = m[:4]
+    mirrored = a * d - b * c < 0
+    deg = math.degrees(math.atan2(-b, -a) if mirrored else math.atan2(b, a))
+    deg = round(deg, 1)
+    if deg <= -180:
+        deg += 360
+    return (0.0 if deg == 0 else deg), mirrored
 
 
 def to_parent(parent, dx, dy):
