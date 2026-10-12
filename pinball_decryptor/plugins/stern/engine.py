@@ -10411,8 +10411,17 @@ def _mode_long_call_lines(gr_path, staged, params, sites, used, log, found=None)
         frames = _wav_frames_44k(u["wav"]) or 0
         mode_units = min(int(frames), emitted_length(int(hp.get("length") or frames))) * _DESC_DUR_RATE // 44100
         slot_units = _duration_units_emitted(int(u.get("carrier_len") or 0))
-        d = _mode_descriptor(desc, sid, mask, bytes.fromhex(u["stock_key"]), bytes.fromhex(u["our_key"]),
+        slot = bytes.fromhex(u["stock_key"])
+        d = _mode_descriptor(desc, sid, mask, slot, bytes.fromhex(u["our_key"]),
                              max(1, mode_units), slot_units, extent=extent)
+        if d is None:
+            # the key's FIRST word is used whole on every build (_measured_key_mask); the second
+            # can carry a bit the measured mask keeps and the game's lookup does not (James Bond
+            # LE 1.06 request 1057: its payload derives ...70150000, the game looks up ...70050000)
+            keys = {_play_key(pl, sid, mask) for _o, pl in _own_payloads(desc, extent) if pl[:4] == slot[:4]}
+            if len(keys) == 1:
+                d = _mode_descriptor(desc, sid, mask, keys.pop(), bytes.fromhex(u["our_key"]),
+                                     max(1, mode_units), slot_units, extent=extent)
         if d is None:
             cut(u, "its carrier's descriptor cannot name the new record")
             continue

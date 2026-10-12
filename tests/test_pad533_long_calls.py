@@ -165,3 +165,40 @@ def test_the_runtime_reads_call_lines_and_plays_them_only_while_the_swap_is_arme
     assert "static struct sndc *sndc_live(unsigned id)" in src
     assert "key_is(swaps[k].ours, sndc[i].ours)" in src          # keyed on the armed swap's record
     assert "if (!n_sndm && !n_sndc)" in src                      # a card with long calls alone wraps
+
+
+def test_a_carrier_whose_payload_keeps_a_bit_the_lookup_drops_is_found_by_its_first_word(tmp_path, monkeypatch):
+    """James Bond LE 1.06 request 1057: under the build's mask its payload derives ...70150000, but the
+    game looks up (and the swap names) ...70050000 - the key's first word picks the payload."""
+    payload_key = _key("9ef94b2c17645a78", 2578)
+    w1, w2 = struct.unpack("<II", payload_key)
+    stock = struct.pack("<II", w1, w2 ^ 0x1000)                 # the bit the measured mask keeps
+    ours = _key("6f31228f15c03a10", 2547)
+    monkeypatch.setattr(MW, "request_sids", lambda elf, head, request: [2578])
+    monkeypatch.setattr(E, "_desc_key_mask", lambda params, sites: MASK)
+    gr, img = tmp_path / "game", tmp_path / "image.bin"
+    gr.write_bytes(b"\0" * 16)
+    img.write_bytes(b"\0" * 16)
+    wav = _wav(tmp_path / "long_b.wav", 20.0)
+    used = [{"name": "LONG CALLS", "key": "call:long_b", "long": True, "request": 1057, "idx": 46,
+             "carrier_len": int(44100 * 14.77), "wav": wav, "stock_key": stock.hex(), "our_key": ours.hex()}]
+    params = [{"idx": 46, "length": int(44100 * 20.0) + 4096, "grown": True, "findkey": ours}]
+    lines = E._mode_long_call_lines(str(gr), str(img), params, [], used, lambda *a, **k: None,
+                                    found=[(2578, 0x1000, D2578)])
+    assert len(lines) == 1
+    d = bytes.fromhex(lines[0].split("\t")[3])
+    assert E._play_key(E._op11_payloads(d)[0][1], 2578, MASK) == ours
+
+
+def test_try_it_counts_only_the_mode_files_as_mode_files(tmp_path, monkeypatch):
+    """A set of code modes alone carries no mode file, and its sounds.cfg (the long calls) is not one."""
+    from pinball_decryptor.plugins.stern import code_modes as CM
+    monkeypatch.setattr(CM, "profile_for", lambda project, code: MP.profile("james_bond_le_1_06"))
+    stage = tmp_path / ("set" + E.OVERRIDE_MODES_SUFFIX)
+    stage.mkdir()
+    (stage / "game.port").write_text("game james_bond_le\nversion 1.06\n", encoding="utf-8")
+    listed = {"modes": {"dir": str(stage), "files": ["pad_mode.so", "long_calls.assets", "sounds.cfg",
+                                                     "stock.cfg", "game.port"]}, "files": []}
+    got = MW._tryit_set_from_manifest(str(tmp_path), [], [("long_calls", None)], str(tmp_path / "set"), listed,
+                                      (0, 0, 0), E)
+    assert got.mode_files == [] and got.codes == ["long_calls"]
