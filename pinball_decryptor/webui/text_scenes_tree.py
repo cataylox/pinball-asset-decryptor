@@ -63,6 +63,7 @@ class TreeEditMixin:
         self._tlit = {}              # what is drawn without a peek (the game's + the eyes')
         self._tparents = {}
         self._tman = None
+        self._tbaked = {}             # (assets, card) -> (stock manifest, nodes it never draws)
         self._tonce = []             # notes for the next picture only (tree_show)
         self._ttoken = 0
         self._tdefault = {}          # card -> the stock scene's resting frame (costly to find)
@@ -310,8 +311,30 @@ class TreeEditMixin:
         return out
 
     def _tree_hidden(self, card):
-        """The nodes hidden in the game (Write leaves them out; their row's card mark)."""
-        return {op.get("node") for op in self._tree_ops(card) if op["op"] == "visible"}
+        """The nodes hidden in the game (Write leaves them out; their row's red stop sign): a
+        hide edit, or a node the card itself has hidden (_tree_baked) that is not put back."""
+        off, back = set(), set()
+        for op in self._tree_ops(card):
+            if op["op"] == "visible":
+                (back if op.get("on") else off).add(op.get("node"))
+        return off | (self._tree_baked(card) - back)
+
+    def _tree_baked(self, card):
+        """The nodes the card's own scene never draws (PAD-535, DragonRR): a hide an earlier
+        Write put on the card ("visible" sets its keyframes to never shown) that is part of the
+        scene once the project is extracted from that card.  No stock scene has one (0 of
+        2,777 nodes on Godzilla LE 1.16), so it is known by that alone."""
+        man = (self._load_trees() or {}).get(card)
+        if man is None:
+            return set()
+        key = (self.assets_dir, card)
+        got = self._tbaked.get(key)
+        if got is None or got[0] is not man:
+            got = (man, {n["id"] for n, _p, _d in _walk_man(man)
+                         if not n.get("added") and n.get("kf")
+                         and all(not v for _f, v in n["kf"])})
+            self._tbaked[key] = got
+        return got[1]
 
     def _tree_view_hidden(self, card):
         """The nodes hidden in the preview with their eye (the card is not changed).  As in
@@ -903,6 +926,7 @@ class TreeEditMixin:
             edited_nodes.setdefault(key, []).append(scene_edit.describe(op))
         drawn = {d["node"] for d in self._tdraws}
         view = self._tree_view_hidden(card)
+        game_hidden, baked = self._tree_hidden(card), self._tree_baked(card)
         layers = []
         index = scene_edit._man_index(man)
         looks = scene_eval.looks(man)
@@ -949,8 +973,8 @@ class TreeEditMixin:
                            "added": bool(n.get("added")),
                            "filled": filled.get(n["id"]),
                            "painted": n["id"] in painted,
-                           "hidden": any(op["op"] == "visible" and op.get("node") == n["id"]
-                                         for op in ops),
+                           "hidden": n["id"] in game_hidden,
+                           "baked": n["id"] in baked,
                            "view_off": n["id"] in view,
                            # PAD-531: the look of a switchable part it is drawn in
                            "look": _look_of(looks.get(n["id"])),
@@ -1010,7 +1034,8 @@ class TreeEditMixin:
                 "game_turn": self._tree_game_turn(nid, rotate),
                 "tint": "#%02x%02x%02x" % tuple(int(round(min(1, c) * 255)) for c in mul[:3]),
                 "alpha": round(mul[3] * 100),
-                "hidden": any(op["op"] == "visible" and op.get("node") == nid for op in ops),
+                "hidden": nid in self._tree_hidden(card),
+                "baked": nid in self._tree_baked(card),
                 "layer": sibs.index(n) + 1, "layers": len(sibs),
                 "drawn": nid in self._tworlds,
                 "peek": nid == self._tpeek and nid in self._tworlds and nid not in self._tlit,
@@ -1635,12 +1660,23 @@ class TreeEditMixin:
         nodes = self._tree_nodes(nodes)
         before = set(self._tree_view_hidden(card))
         self._tree_view_follow(card, nodes, on)
+        baked = self._tree_baked(card)
         if on:
             for node in nodes:
                 scene_edit.drop(self.assets_dir, card, node, "visible")
-            self._tree_refresh()
+            # one the card itself has hidden comes back by an edit of its own (PAD-535)
+            back = [{"op": "visible", "node": n, "on": True} for n in nodes if n in baked]
+            if not (back and self._tree_add_group(back)):
+                self._tree_refresh()
             return True
-        hidden = {op.get("node") for op in self._tree_ops(card) if op["op"] == "visible"}
+        if any(n in baked for n in nodes):
+            for node in nodes:
+                if node in baked:
+                    scene_edit.drop(self.assets_dir, card, node, "visible")
+            if all(n in baked for n in nodes):
+                self._tree_refresh()
+                return True
+        hidden = self._tree_hidden(card)
         if all(n in hidden for n in nodes):
             self._tree_eyes_moved(card)                   # its eye shut; nothing new to add
             return True
@@ -2757,8 +2793,12 @@ class TreeEditMixin:
         node = int(node)
         shut = node in self._tree_view_hidden(card)
         self._tree_view_follow(card, [node], on)
-        if on:
+        baked = node in self._tree_baked(card)
+        if on or baked:
             scene_edit.drop(self.assets_dir, card, node, "visible")
+        if on and baked:                                  # the card hid it (PAD-535)
+            return self._tree_add({"op": "visible", "node": node, "on": True}) or True
+        if on or baked:
             self._tree_refresh()
             return True
         if self._tree_add({"op": "visible", "node": node, "on": False}):

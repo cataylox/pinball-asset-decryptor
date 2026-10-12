@@ -978,6 +978,8 @@ def apply_manifest(man, ops):
                         n["kf"] = [[1, 0]]
                     elif "_kf" in n:
                         n["kf"] = n.pop("_kf")
+                    elif n["kf"] and all(not v for _f, v in n["kf"]):
+                        n["kf"] = [[1, 1]]        # hidden on the card it came from (PAD-535)
                 elif k == "order":
                     sibs.remove(n)
                     sibs.insert(max(0, min(len(sibs), int(op["index"]))), n)
@@ -1282,6 +1284,10 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
                 elif k == "visible":
                     if not op["on"]:
                         n.keyframes = [(1, 0)]
+                    elif n.keyframes and all(not v for _f, v in n.keyframes):
+                        # an earlier Write hid it on this card (PAD-535): shown again, as
+                        # every layer the game draws whenever its group is
+                        n.keyframes = [(1, 1)]
                 elif k == "order":
                     sibs.remove(n)
                     sibs.insert(max(0, min(len(sibs), int(op["index"]))), n)
