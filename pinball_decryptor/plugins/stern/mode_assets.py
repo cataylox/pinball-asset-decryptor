@@ -147,7 +147,14 @@ def render_title_clip(out, title, w, h, seconds, panel_color, title_color, ffmpe
         raise ModeAssetError("ffmpeg could not encode the title clip: %s" % err.strip()[-300:])
 
 
-def convert_clip(src, out, w, h, ffmpeg, max_seconds=30):
+#: PAD-530: a person's own video is kept up to this long. It was 30 s, so a video made as long as its
+#: mode ran out mid-mode (Jim-Beam's Bond mode: the clip ended at 30 000 ms and the game's own video
+#: played for the rest). 300 s is the longest a mode's clock runs (the Modes tab's seconds).
+#: A title card keeps its own 1-30 s, and a cut from a film its own limit (film_cut.MAX_SECONDS).
+MODE_CLIP_MAX_SECONDS = 300
+
+
+def convert_clip(src, out, w, h, ffmpeg, max_seconds=MODE_CLIP_MAX_SECONDS):
     """A user's own video, made into what the bank plays: the bank's size (letterboxed,
     never stretched), 30 fps, silent, and no longer than ``max_seconds``."""
     head, tail = _encode_args(ffmpeg, out)
@@ -234,7 +241,7 @@ def clip_key(job, ffmpeg):
                   _tool_identity(font) if font else "default font"]
     else:
         try:
-            parts += [_file_digest(job.src), 30]
+            parts += [_file_digest(job.src), MODE_CLIP_MAX_SECONDS]
         except OSError:
             parts += ["missing", job.src]     # the encode says what is wrong with it
     return hashlib.sha256(repr(parts).encode("utf-8")).hexdigest()

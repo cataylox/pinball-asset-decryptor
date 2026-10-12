@@ -95,6 +95,29 @@ def test_convert_clip_letterboxes_to_the_bank_size_and_drops_audio(tmp_path):
     assert (streams[0]["width"], streams[0]["height"]) == (320, 180)
 
 
+def test_convert_clip_keeps_a_video_longer_than_30_s(tmp_path):
+    """PAD-530: a person's own video was cut at 30 s, so one made as long as its mode ran out mid-mode
+    (Jim-Beam's Bond mode: the clip ended at 30 000 ms and the game's own video played for the rest)."""
+    ff = _ffmpeg()
+    src = str(tmp_path / "long.mp4")
+    subprocess.run([ff, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=64x36:rate=5:duration=35", src],
+                   check=True, capture_output=True)
+    out = str(tmp_path / "out.asset")
+    MA.convert_clip(src, out, 64, 36, ff)
+    probe = audio.find_ffprobe()
+    if not probe:
+        pytest.skip("no ffprobe")
+    dur = float(subprocess.run([probe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", out],
+                               capture_output=True, text=True, check=True).stdout.strip())
+    assert 34.5 < dur < 35.5
+    assert MA.MODE_CLIP_MAX_SECONDS == 300          # the longest a mode's clock runs (the Modes tab's seconds)
+
+
+def test_the_space_estimate_sizes_a_long_video_by_its_own_length():
+    from pinball_decryptor.plugins.stern import engine
+    assert engine._MODE_CLIP_MAX_S == MA.MODE_CLIP_MAX_SECONDS
+
+
 # ---- the whole build --------------------------------------------------------------------
 def _mode(project, name, **kw):
     slug, spec = MP.new_mode(project, name)
