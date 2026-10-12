@@ -131,7 +131,7 @@ def test_gear_menu_keeps_the_tk_cascades(tmp_path):
         want = ["check_updates", "Check automatically ▸"]
         if sys.platform == "win32":
             want.append("disk_space")
-        want += ["Logs ▸", "toggle_scenes_own_colours", "sep",
+        want += ["Logs ▸", "Save automatically ▸", "toggle_scenes_own_colours", "sep",
                  "clear_voice_models", "sep",
                  "Prerequisites ▸", "sep", "preview_features",
                  "view_disclaimer"]
