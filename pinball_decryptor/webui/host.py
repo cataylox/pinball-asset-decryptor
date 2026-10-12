@@ -168,6 +168,8 @@ def run_native(ctx, server, host):
     width, height, x, y, maximized = geo or (1280, 860, None, None, False)
     width = max(MIN_SIZE[0], width)
     height = max(MIN_SIZE[1], height)
+    width, height, x, y = fit_to_screens(width, height, x, y,
+                                         _screens(webview))
     # the App composed its title (version, the dev branch badge) before this
     # window existed, so its set_title found no window: open with it
     try:
@@ -251,6 +253,56 @@ def run_native(ctx, server, host):
     if not closing_done.is_set():
         _close_app(ctx)
     host._quit.set()
+
+
+#: how much of the window's top edge (its title bar) has to be on a screen
+#: for the saved place to count as one the user can see and drag from
+TITLE_BAR = (120, 40)
+
+
+def _screens(webview):
+    """The screens as (x, y, width, height), in the units the window's saved
+    x/y are in; [] when they cannot be had.  Windows only: there pywebview
+    reads them before it makes the process DPI aware, so they are logical
+    pixels like the saved place.  Elsewhere the window manager keeps a new
+    window on a screen itself."""
+    if sys.platform != "win32":
+        return []
+    try:
+        return [(s.x, s.y, s.width, s.height) for s in webview.screens]
+    except Exception:                                   # noqa: BLE001
+        log.warning("could not list the screens", exc_info=True)
+        return []
+
+
+def fit_to_screens(width, height, x, y, screens):
+    """(width, height, x, y) for the window to open with, so it opens where
+    the user can see it.  The saved place is kept while its title bar is on
+    one of the screens; a place on no screen any more (the display was made
+    smaller, or a monitor is gone: PAD-549) opens the window centred on the
+    main screen instead.  A window bigger than its screen is cut to fit."""
+    if not screens:
+        return width, height, x, y
+
+    def clamp(w, h, screen):
+        return min(w, max(MIN_SIZE[0], screen[2])), \
+            min(h, max(MIN_SIZE[1], screen[3]))
+
+    if x is not None and y is not None:
+        for screen in screens:
+            sx, sy, sw, sh = screen
+            seen = min(x + width, sx + sw) - max(x, sx)
+            if (seen >= min(TITLE_BAR[0], width)
+                    and sy <= y <= sy + sh - TITLE_BAR[1]):
+                w, h = clamp(width, height, screen)
+                return w, h, x, y
+    main = next((s for s in screens if s[0] <= 0 < s[0] + s[2]
+                 and s[1] <= 0 < s[1] + s[3]), screens[0])
+    w, h = clamp(width, height, main)
+    if x is None or y is None:
+        return w, h, x, y
+    return (w, h, main[0] + max(0, (main[2] - w) // 2),
+            main[1] + max(0, (main[3] - h) // 2))
 
 
 def _remember_geometry(ctx, host, w, h):
