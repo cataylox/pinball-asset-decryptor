@@ -368,6 +368,9 @@ site surface_position 0x00578260 0xe5d030d4 0xe92d40f0
 # Seen on the glass in the emulator 2026-10-11: a green bar named YOLT WIZARD, its wipe at 100 and 40, a blue one
 # with no wipe, the empty bar back when given back.
 site status_bar       0x001862dc 0xe92d4038 0xe30e48f8
+# PAD-547: where a mode's info line goes (the middle of the line, glass pixels): under the status bar, where the game's
+# own mini-wizards show theirs (Duel on the Disco Volante: "SUPER JACKPOT = 53,200,000", a node of each mode's own scene).
+text info_line_at 679 510
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Side ramp target

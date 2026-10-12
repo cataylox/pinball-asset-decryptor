@@ -1606,3 +1606,77 @@ def test_words_alone_show_the_name_then_a_line_then_the_total(tmp_path):
     out = play(tmp_path, dict(p, screen_style="panel"), "shot", "Left ramp", "secs", 6)
     assert not [t for t, on in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Screen (\d)$", out, re.M) if on == "0"
                 and int(t) > 100]
+
+
+# ---- PAD-547: an info line under its name ("SUPER JACKPOT = 53,200,000") --------------------------------------------
+def _jackpot(info=None, **kw):
+    """A Bond owner's mini-wizard (PAD-547): each Right ramp grows the super jackpot by 1,000 while it runs, and its info
+    line follows it."""
+    return prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]},
+                 {"hat": {"kind": "mode_start"}, "do": [{"op": "set", "var": "superjackpot", "value": num(5000)}]},
+                 {"hat": {"kind": "shot", "shot": "Right ramp", "when": "running"},
+                  "do": [{"op": "change", "var": "superjackpot", "by": num(1000)}]}],
+                vars=[{"name": "superjackpot", "reset": "mode"}], seconds=6,
+                info=info if info is not None else {"on": True, "text": "SUPER JACKPOT", "value": var("superjackpot")},
+                **kw)
+
+
+def test_the_info_line_is_off_unless_ticked_and_needs_words_or_a_value():
+    assert BM.normalize({})["info"] == {"on": False, "text": "", "value": None}
+    assert BM.normalize({"info": {"on": 1, "text": "  super jackpot ", "value": 3}})["info"] == {
+        "on": True, "text": "super jackpot", "value": None}
+    assert "INFO_NODE" not in BM.to_c(BM.starter("RAMP FRENZY", SHOTS), "ramp_frenzy")
+    assert BM.problems(_jackpot(), SHOTS, GZ.events) == []
+    assert any("info line has no words" in m for m in BM.problems(_jackpot({"on": True}), SHOTS, GZ.events))
+    bad = BM.problems(_jackpot({"on": True, "text": "X", "value": var("nope")}), SHOTS, GZ.events)
+    assert any(m.startswith("The info line uses a variable that is not there") for m in bad), bad
+    src = BM.to_c(_jackpot(), "blk")
+    assert '#define INFO_NODE    "PadMode_blk_Info"' in src
+    assert '#define INFO_FORMAT  "SUPER JACKPOT = %s"' in src
+    assert '#define INFO_FORMAT  "100%% = %s"' in BM.to_c(_jackpot({"on": True, "text": "100%", "value": num(1)}), "blk")
+    assert '#define INFO_FORMAT  "SHOOT THE RAMP"' in BM.to_c(_jackpot({"on": True, "text": "SHOOT THE RAMP"}), "blk")
+    used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", src))
+    assert used <= _header_calls(), used - _header_calls()
+
+
+def test_the_info_line_follows_its_value_while_it_runs_then_goes(tmp_path):
+    """The Bond owner (PAD-547): the game's own mini-wizards show SUPER JACKPOT = <value> under the bar, growing as shots
+    are made. Hidden until the mode starts; shown at its start with the value; written again only when it changes;
+    hidden at its end (time up) and at once at a drain."""
+    out = play(tmp_path, _jackpot(), "secs", 1, "shot", "Left ramp", "secs", 1, "shot", "Right ramp", "secs", 0.5,
+               "shot", "Right ramp", "secs", 1, "secs", 5)
+    shows = [(int(t), int(on)) for t, on in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Info (\d)$", out, re.M)]
+    words = re.findall(r"^\s*(\d+) WORDS PadMode_blk_Info_Words: (.*)$", out, re.M)
+    start = _at_any(out, r"START \(a block\)")
+    end = _at_any(out, r"END \(time ran out\)")
+    assert shows[0][1] == 0 and shows[0][0] < start                   # found and hidden before it ran
+    assert [w for _t, w in words] == ["SUPER JACKPOT = 5,000", "SUPER JACKPOT = 6,000", "SUPER JACKPOT = 7,000"]
+    assert abs(int(words[0][0]) - start) <= 40
+    assert [on for t, on in shows if t >= start] == [1, 0] and abs(shows[-1][0] - end) <= 40
+    out = play(tmp_path, _jackpot(), "secs", 1, "shot", "Left ramp", "secs", 1, "ball_end", "secs", 0.2)
+    shows = re.findall(r"^\s*(\d+) SHOW PadMode_blk_Info (\d)$", out, re.M)
+    assert shows[-1][1] == "0" and int(shows[-1][0]) - _at_any(out, r"END \(ball ended\)") <= 40
+
+
+def test_the_info_line_reaches_the_assets_and_goes_where_the_port_says(tmp_path):
+    from pinball_decryptor.plugins.stern import mode_assets as MA
+    project = str(tmp_path)
+    slug, _c = BM.new_blocks_mode(project, "DAF WIZARD")
+    BM.save(project, slug, BM.normalize(dict(_jackpot(), name="DAF WIZARD")))
+    spec = CM.load(project, slug)
+    assert spec.info_line is True
+    bond, gz = MP.profile("james_bond_le_1_06"), MP.profile("godzilla_le_1_16")
+    assert bond.info_at == (679.0, 510.0) and gz.info_at == ()
+    scr = MA._code_screens(project, [(slug, spec)], bond)[-1]
+    names = MP.asset_names(slug)
+    assert scr["name"] == names["info_node"] == "PadMode_%s_Info" % slug
+    assert scr["words_name"] == "PadMode_%s_Info_Words" % slug and scr["words_rgba"] == (1.0, 1.0, 1.0, 1.0)
+    w, h = MA.INFO_ART
+    assert scr["art_rgba"].shape == (h, w, 4) and not scr["art_rgba"].any()     # clear: the words alone
+    assert (scr["x"] + w / 2.0, scr["y"] + h / 2.0) == (679.0, 510.0)          # its middle on the port's place
+    scr = MA._code_screens(project, [(slug, spec)], gz)[-1]
+    assert (scr["x"] + w / 2.0, scr["y"] + h / 2.0) == MA.INFO_AT_DEFAULT      # a port that names none
+    BM.save(project, slug, BM.normalize(dict(_jackpot({"on": False}), name="DAF WIZARD")))
+    spec = CM.load(project, slug)
+    assert spec.info_line is False
+    assert not [s for s in MA._code_screens(project, [(slug, spec)], bond) if s["name"] == names["info_node"]]
