@@ -106,6 +106,7 @@ const TIP = {
   bar: "While it runs, its name goes in the game's own status bar under the screen, in this colour, with its clock draining along it, as the game shows its own modes (James Bond: Goldfinger's Jackpot in gold). At the end the bar stays full through its total, then the game has it back; a drain gives it back at once.",
   barOff: "This card's game has no status bar a mode can use: the mode runs the same without it.",
   info: "A line under its name while it runs: its words and a value as it changes, \"SUPER JACKPOT = 53,200,000\", as the game's own modes show one (James Bond: under the status bar). Out of the way of the game's own displays; gone at its end.",
+  infoPlace: "The Scenes editor on the game's screen with the line (and its own screen, if it has one) where they will show: drag or size it there, and it is saved into the mode. Untouched, it goes where the game shows its own (James Bond: under the status bar).",
   infoOff: "This card's game cannot take a mode's screens, so the line would not show: the mode runs the same without it.",
   screenStyle: "As a panel: its name on a panel in the middle of the screen, there all the time it runs, its TOTAL on it at the end. As words over the video: no panel, its words alone, large and white over the game's video as the game letters its own - its name over its intro for 4 s, a Words block's line for 3 s, its TOTAL over its end for 3 s.",
   gameWizard: "Hands the player one of the game's own mini-wizards, the game's mode itself with its own shots, lights, screens, sounds and award. Light it (where the game lights that one for a start shot): it waits for the game's own start shot, as when the game lights one. Start it: it begins at once, or the moment none of the game's own modes is in its way (nor this mode holding the game's modes off), that ball. On James Bond 007, until it starts it is the only one lit, so the game's own choosing cannot swap it for another, and the game no longer lights one named here by itself; on the other games the game's own rules still light and start their mini-wizards too. Works whether this mode runs or not: in When the game does an event it is a mini-wizard for that event. One the player has played this game plays again.",
@@ -642,13 +643,14 @@ function Hud({ prog, ed }) {
 }
 
 // PAD-547: the line under its name - its words, then " = " and the value it follows
-function InfoLine({ prog, ed }) {
+function InfoLine({ prog, ed, slug }) {
   const i = prog.info || {};
   return html`<div class="bk bk-hud bk-hudset">
     <div class="bk-line"><span class="bk-w b" ...${tip(TIP.info)}>Under its name</span>
       <${Text} value=${i.text} max=${40} width=${220} onChange=${(v) => ed.set(["info", "text"], v)} placeholder="SUPER JACKPOT" />
       <span class="bk-w">=</span><${Slot} kind="num" value=${i.value} path=${["info", "value"]} ed=${ed} empty="(words alone)" />
-      ${ed.ch.info_line === false ? html`<span class="bk-w small" ...${tip(TIP.infoOff)}>(not on this card's game)</span>` : null}</div>
+      ${ed.ch.info_line === false ? html`<span class="bk-w small" ...${tip(TIP.infoOff)}>(not on this card's game)</span>`
+        : html`<${Button} size="xs" kind="ghost" title=${TIP.infoPlace} onClick=${() => call("modes.lay_out_screen", slug)}>Place on the screen…<//>`}</div>
   </div>`;
 }
 
@@ -964,7 +966,7 @@ export function BlocksEditor({ s, c }) {
         <${Check} checked=${!!(prog.info || {}).on} label="a line under its name" title=${ed.ch.info_line === false ? TIP.infoOff : TIP.info}
           onChange=${(v) => ed.set(["info", "on"], v)} />
       </div>
-      ${(prog.info || {}).on ? html`<${InfoLine} prog=${prog} ed=${ed} />` : null}
+      ${(prog.info || {}).on ? html`<${InfoLine} prog=${prog} ed=${ed} slug=${c.slug} />` : null}
       <${GameModes} prog=${prog} ed=${ed} />
       <${Variables} prog=${prog} ed=${ed} />
       <${Timers} prog=${prog} ed=${ed} />

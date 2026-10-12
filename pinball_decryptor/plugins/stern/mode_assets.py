@@ -807,7 +807,7 @@ def _code_screens(project, code, prof):
     out = [with_layout(code_screen(project, slug, spec), getattr(spec, "screen_layout", None))
            for slug, spec in code or () if spec.screen and prof.can("screen")]
     # PAD-547: a mode's info line, a screen of its own wherever the title's port puts one
-    return out + [info_screen(MP.asset_names(slug), prof)
+    return out + [with_layout(info_screen(MP.asset_names(slug), prof), getattr(spec, "info_layout", None))
                   for slug, spec in code or () if getattr(spec, "info_line", False) and prof.can("screen")]
 
 

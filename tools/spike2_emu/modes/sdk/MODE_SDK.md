@@ -4110,6 +4110,11 @@ pixels. A port that names none gets it centred under where a mode's screen shows
 text info_line_at 679 510      # james_bond_le-1.06: under the status bar, where the game's own mini-wizards put theirs
 ```
 
+The port's place is where it starts. "Place on the screen…" beside the setting (or "Lay out on the screen…" on a mode's
+page) opens the Scenes editor on the title's HUD scene with the line in it beside the mode's screen (PAD-323), where the
+build will put it; dragging or sizing it there saves into the mode's `info_layout` (the same keys as `screen_layout`),
+and the build places it so. Emulator-proven: a line moved 40 px lower in the layout is drawn 40 px lower on the glass.
+
 A mode in C does the same with `pm_node("hud", "PadMode_<slug>_Info")`, `pm_text` and `pm_set_text`, its assets.json
 saying `"info_line": true`.
 

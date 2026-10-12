@@ -390,8 +390,8 @@ export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
         ${[s.card_note, editor && s.pic_note].filter(Boolean).map((t, i) => html`<div key=${"w" + i}
           class="note warn scenes-warn" role="status"><${Icon} name="warn" /><div class="body-text small">${t}</div></div>`)}
         ${editor && s.mode_layout && s.mode_layout.scene_dir === s.sel ? html`<div class="note scenes-warn scenes-modelay" role="status">
-          <${Icon} name="info" /><div class="body-text small grow">Laying out <b>${s.mode_layout.mode}</b>'s screen: drag the
-            picture or its words, size them, and Send to back to put the screen under the HUD's own pictures.
+          <${Icon} name="info" /><div class="body-text small grow">Laying out <b>${s.mode_layout.mode}</b>'s ${s.mode_layout.what || "screen"}: drag the
+            picture or its words, size them, and Send to back to put it under the HUD's own pictures.
             Saved into the mode as you go${s.mode_layout.under ? " (now under the HUD)" : ""}.</div>
           ${s.mode_layout.laid_out ? html`<${Button} size="xs" kind="ghost" title="Back to where the app places it by itself"
             onClick=${() => call("text_scenes.mode_layout_auto")}>Place automatically<//>` : null}

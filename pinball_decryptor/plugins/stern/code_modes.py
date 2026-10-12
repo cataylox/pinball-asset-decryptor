@@ -95,6 +95,7 @@ class CodeAssets:
     screen_layout: dict = field(default_factory=dict)   # PAD-323: as a form mode's (mode_assets.LAYOUT_KEYS)
     screen_style: str = ""                        # PAD-521: "words" = no panel, its words large and white
     info_line: bool = False                       # PAD-547: a line of words and a value under its name (PadMode_<slug>_Info)
+    info_layout: dict = field(default_factory=dict)     # PAD-547: where the Scenes editor put that line (LAYOUT_KEYS)
     clip: str = ""
     music: str = ""
     calls: dict = field(default_factory=dict)
