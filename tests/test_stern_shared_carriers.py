@@ -87,8 +87,9 @@ def test_a_call_longer_than_a_carriers_record_takes_a_longer_one(card, tmp_path)
     said = []
     got = _place(card, tmp_path, "oxygen", "won", 2.5, [902, 901, 900], said=said)
     assert got["request"] == 900 and not any("not put" in m for m in said)   # 1.0 s and 2.0 s are too short
-    none = _place(card, tmp_path, "maser", "long", 3.5, [900, 901, 902], said=said)
-    assert none is None and "record is 3.00 s" in said[-1]
+    # PAD-533: one longer than every carrier takes the longest - the game plays a swapped record whole
+    long_ = _place(card, tmp_path, "maser", "long", 3.5, [900, 901, 902], said=said)
+    assert long_["request"] == 900 and "the game plays it whole" in said[-1]
 
 
 def test_a_host_never_holds_two_sounds_or_a_replaced_one():
