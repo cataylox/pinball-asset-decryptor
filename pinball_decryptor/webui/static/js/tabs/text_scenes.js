@@ -1747,8 +1747,8 @@ function EditList({ list, t }) {
             ...${tip({ head: `${e.name}: ${e.what}`, lines: g.d ? [["Click", "go to its scene with it selected"],
               ["Reset", "take this edit back (Ctrl+Z on its scene puts it back)"]] : ["Its scene is not in this project."] })}>
           <span class="small muted sc-edit-n">${e.i + 1}</span>
-          <span class="ellip sc-edit-name">${e.name}</span>
-          <span class="ellip small muted sc-edit-what">${e.what}</span>
+          <span class="sc-edit-txt"><span class="ellip sc-edit-name">${e.name}</span>
+            <span class="ellip small muted sc-edit-what">${e.what}</span></span>
           <${Button} size="xs" kind="ghost" icon="undo" disabled=${!g.d}
             onClick=${(ev) => { ev.stopPropagation(); call("text_scenes.edit_list_reset", g.card, e.i, e.sig); }}>Reset<//>
         </div>`)}
