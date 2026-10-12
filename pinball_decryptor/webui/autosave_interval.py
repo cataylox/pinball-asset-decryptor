@@ -21,8 +21,9 @@ AUTOSAVE_INTERVAL_CHOICES = (
 AUTOSAVE_INTERVAL_DEFAULT = 5
 
 #: The menu rows' tooltip: what the timer saves, and what it never needed to.
+#: Every user sees it, so it never names the preview features (test_webui_concealment).
 AUTOSAVE_TIP = (
-    "Your changes to pictures, sounds, videos, text, scenes, modes and "
+    "Your changes to pictures, sounds, videos, text, scenes and "
     "default settings are saved the moment you make them, whatever this is "
     "set to. This saves the rest of the open project on a timer: the "
     "Multi-boot list, the Emulate card, the Extract options and the Write "
