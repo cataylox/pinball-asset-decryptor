@@ -463,6 +463,8 @@ class App:
             on_voice_quality_change=self._on_voice_quality_change,
             initial_update_interval=s.get("update_check_hours"),
             on_update_interval_change=self._on_update_interval_change,
+            initial_autosave_interval=s.get("autosave_minutes"),
+            on_autosave_interval_change=self._on_autosave_interval_change,
             initial_audio_advanced=s.get("audio_advanced") or {},
             on_audio_advanced_change=self._on_audio_advanced_change,
             initial_text_grow=self._text_grow_setting(),
@@ -509,6 +511,7 @@ class App:
         self._refresh_title()
         self._log_preview_startup()
         self.root.after(1500, self._check_for_update)
+        self._schedule_autosave()
 
     def accept_disclaimer(self, accepted):
         """The first-launch disclaimer, answered on the page.  Declining
@@ -5202,6 +5205,51 @@ class App:
         self.window.append_log(
             "Automatic update check: %s." % label.lower(), "info")
         self._schedule_update_recheck()
+
+    def _schedule_autosave(self):
+        """(Re-)arm the ⚙ "Save automatically" timer (PAD-541).
+
+        What it saves is :meth:`_save_session_state`, the quit's save: the
+        open project's anchor (only the fields that changed) and the
+        settings.  Edits to the files themselves never waited for it.  Re-armed
+        after each save and when the setting changes; ``0`` leaves it off.
+        """
+        after_id = getattr(self, "_autosave_after", None)
+        self._autosave_after = None
+        if after_id:
+            try:
+                self.root.after_cancel(after_id)
+            except ValueError:
+                pass
+        try:
+            minutes = int(self.window.autosave_interval_var.get())
+        except (AttributeError, ValueError):
+            return
+        if minutes <= 0:
+            return
+        try:
+            self._autosave_after = self.root.after(
+                minutes * 60 * 1000, self._autosave)
+        except RuntimeError:
+            pass                       # window gone
+
+    def _autosave(self):
+        """The timer firing: the quit's save, then the next one armed."""
+        self._autosave_after = None
+        self._save_session_state()
+        self._schedule_autosave()
+
+    def _on_autosave_interval_change(self, minutes):
+        """Persist the ⚙ "Save automatically" pick and re-arm the timer."""
+        from .webui.autosave_interval import (AUTOSAVE_INTERVAL_CHOICES,
+                                              normalize_autosave_interval)
+        minutes = normalize_autosave_interval(minutes)
+        self._settings["autosave_minutes"] = minutes
+        self._save_settings()
+        label = dict(AUTOSAVE_INTERVAL_CHOICES).get(minutes, str(minutes))
+        self.window.append_log("Save automatically: %s." % (
+            label[0].lower() + label[1:]), "info")
+        self._schedule_autosave()
 
     def _check_for_update_now(self):
         """User-triggered "Check for updates" button click.

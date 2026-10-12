@@ -3183,6 +3183,10 @@ GENERAL_CONTENT = [
      "- light / dark theme\n"
      "- **Check for updates**, and **Check automatically**: at startup only, hourly, "
      "every 6 hours or daily\n"
+     "- **Save automatically**: every 1, 5 (the default), 15 or 30 minutes, or never. "
+     "Changes to files are saved the moment you make them; this saves the rest of "
+     "the project (the Multi-boot list, the Emulate card, the Extract options, the "
+     "Write file name), which otherwise waits until PAD closes\n"
      "- disk-space management, and clearing the downloaded voice models\n"
      "- the prerequisite tools: status, re-check, install\n"
      "- **View disclaimer…**, the first-launch disclaimer again"),

@@ -34,6 +34,8 @@ from ..shellx_disk import DiskMixin
 from ..shellx_projects import ProjectsMixin
 from ..update_interval import (UPDATE_INTERVAL_CHOICES,
                                normalize_update_interval)
+from ..autosave_interval import (AUTOSAVE_INTERVAL_CHOICES, AUTOSAVE_TIP,
+                                 normalize_autosave_interval)
 from .base import TabService, rpc
 
 log = logging.getLogger(__name__)
@@ -82,7 +84,8 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
     group = ""
     icon = ""
     exports = (
-        "voice_quality_var", "update_interval_var", "show_log_history_var",
+        "voice_quality_var", "update_interval_var", "autosave_interval_var",
+        "show_log_history_var",
         "scenes_own_colours_var",
         "set_update_check_running", "show_update_banner",
         "show_up_to_date_toast", "open_update_download_dialog",
@@ -99,6 +102,9 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
         self.update_interval_var = self.var(
             "update_interval", "int",
             normalize_update_interval(cb.get("initial_update_interval")))
+        self.autosave_interval_var = self.var(
+            "autosave_interval", "int",
+            normalize_autosave_interval(cb.get("initial_autosave_interval")))
         self.show_log_history_var = self.var(
             "show_log_history", "bool",
             bool(cb.get("initial_show_log_history", True)))
@@ -165,6 +171,7 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
             "download_update": self._open_update_url,
             "check_updates": self._handle_check_updates,
             "update_interval": self._pick_update_interval,
+            "autosave_interval": self._pick_autosave_interval,
             "disk_space": lambda: self._open_dialog("disk_space"),
             "log_history": self._open_log_history,
             "open_log_file": self._open_log_history,
@@ -314,6 +321,11 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
             {"id": "toggle_log_history",
              "label": "Show previous sessions in the log",
              "checked": bool(self.show_log_history_var.get())}]})
+        cur = self._int(self.autosave_interval_var.get())
+        items.append({"label": "Save automatically", "submenu": [
+            {"id": "autosave_interval", "args": [minutes], "label": label,
+             "checked": cur == minutes, "radio": True, "title": AUTOSAVE_TIP}
+            for minutes, label in AUTOSAVE_INTERVAL_CHOICES]})
         items.append({"id": "toggle_scenes_own_colours",
                       "label": "Files with no color profile attached skip the Machine screen",
                       "checked": bool(self.scenes_own_colours_var.get()),
@@ -364,6 +376,15 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
         fn = self.window.cb.get("on_update_interval_change")
         if fn is not None:
             fn(self.update_interval_var.get())
+        self.publish_settings_items()
+        return True
+
+    def _pick_autosave_interval(self, minutes):
+        minutes = normalize_autosave_interval(minutes)
+        self.autosave_interval_var.set(minutes)
+        fn = self.window.cb.get("on_autosave_interval_change")
+        if fn is not None:
+            fn(self.autosave_interval_var.get())
         self.publish_settings_items()
         return True
 
