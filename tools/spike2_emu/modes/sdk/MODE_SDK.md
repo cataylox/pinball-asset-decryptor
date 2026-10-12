@@ -2653,7 +2653,11 @@ text backdrop_idle      MainPlayLoop   # the game's own main-play video: its cli
 
 The runtime hooks `surface_set_video`. When the game asks for a clip while the mode's clip
 plays, it notes how far in the mode's clip was. Once the game asks for its main-play video, or
-the surface is idle, it plays the mode's clip again and seeks it on. It does not come back if
+the surface is idle, it plays the mode's clip again and seeks it on. It hooks `surface_play`
+too, whose second argument is the game's loop flag: a clip the game LOOPS is a background
+(Bond Women's `BondWomen_007_Loop` runs for as long as its multiplier does), so it plays one
+pass, its own length and at most 3 s, and then the mode's clip takes the surface back. A clip
+the game plays once (a lock, a start, an award) is waited out. It does not come back if
 the mode ended, another mode of ours began, or its time ran out under the game's clip. James
 Bond LE and Pro 1.06 name them (LE at `surface_play` - 0x36c, - 0x6b4 and - 0x510, Pro the
 same distances). A port without them keeps the old way: the game's clip ends the mode's.

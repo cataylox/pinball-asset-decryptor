@@ -2095,8 +2095,15 @@ static void bd2_tick(void);               /* PAD-521: the backdrop on the bank's
  * film reels in step after its clips (PAD-456): set, play, then the surface's own seek. The port names the surface's
  * seek, length and position (`site surface_seek`, `surface_duration`, `surface_position`: the calls the game's own
  * reels make, all in ms); a port without them keeps the old way (the clip is gone). A clip whose time ran out under
- * the game's is not played again, nor one whose mode ended or another of ours began. */
+ * the game's is not played again, nor one whose mode ended or another of ours began.
+ * PAD-530 round 2 (Jim-Beam on v1.179.2): a Bond Women lane shot plays BondWomenStart_<name> and then LOOPS
+ * BondWomen_007_Loop on this surface for as long as the game's Bond Women multiplier runs, so the mode's clip waited
+ * the whole multiplier out and came back only after it. A clip the game LOOPS is a background, as its main-play video
+ * is: surface_play is hooked too (its second argument is the game's loop flag, LE 0x57b0b4 -> 0x578770), and a loop of
+ * the game's plays one pass (its own length, at most CK_LOOP_MS) before the mode's clip takes the surface back. A clip
+ * the game plays once (a lock, a start, an award) is waited out as before. */
 #define CK_END_MS 500                     /* this close to its end, a clip counts as over */
+#define CK_LOOP_MS 3000                   /* a loop of the game's is shown this long at most, then ours comes back */
 static struct {
     char name[96];
     const struct pm_mode *owner;
@@ -2106,8 +2113,13 @@ static struct {
     unsigned long lost_ms;                /* pm_ms() then */
     unsigned long zero_ms;                /* pm_ms() its frame 0 was (would have been) on: if the position is not told */
     unsigned backs;
+    int loop;                             /* the game's clip on the surface now is one it loops */
+    unsigned long loop_ms;                /* pm_ms() it began looping it */
+    long long loop_len;                   /* its length, once the surface tells it (0: not yet) */
+    char game[64];                        /* the game's clip on the surface now (for the log) */
+    unsigned asks;
 } ck;
-static int ck_can, ck_ours, ck_in, sv_ck;
+static int ck_can, ck_ours, ck_in, sv_ck, ck_play_hooked;
 static int sv_hook(void);
 static int have_sites(const char *const *names);
 
@@ -2126,7 +2138,7 @@ static void ck_drop(const char *why)
     if (!ck.name[0]) return;
     if (why) say("clip: \"%s\" is not put back - %s", ck.name, why);
     ck.name[0] = 0;
-    ck.on = ck.lost = ck.back = 0;
+    ck.on = ck.lost = ck.back = ck.loop = 0;
 }
 
 /* set and play `name` on the bank's surface: 0 when the bank has no such clip */
@@ -2136,11 +2148,12 @@ static int clip2_start(void *surf, const char *name)
     int ok;
     ck_ours = 1;
     ok = ((int (*)(void *, unsigned *))(unsigned long)fn("surface_set_video"))(surf, &str);
+    if (ok) {
+        clip2_show(1);
+        ((int (*)(void *, int, int))(unsigned long)fn("surface_play"))(surf, 0, -1);
+    }
     ck_ours = 0;
-    if (!ok) return 0;
-    clip2_show(1);
-    ((int (*)(void *, int, int))(unsigned long)fn("surface_play"))(surf, 0, -1);
-    return 1;
+    return ok;
 }
 
 /* the game asks the bank's surface for a clip of its own (the surface_set_video hook) */
@@ -2177,8 +2190,35 @@ static void ck_seen(unsigned *r)
         ck.lost_ms = pm_ms();
         say("clip: the game played its own clip \"%.60s\" on the one surface %u ms into \"%s\" (%u ms long) - ours "
             "comes back after it", name, (unsigned)at, ck.name, (unsigned)len);
+    } else if (ck.lost && !is_idle && ck.asks++ < 20) {
+        say("clip: the game asks for \"%.60s\" too - \"%s\" still waits", name, ck.name);
+    }
+    if (ck.lost) {                        /* a new clip of the game's: once, until its play says it loops */
+        for (i = 0; name[i] && i + 1 < sizeof ck.game; i++) ck.game[i] = name[i];
+        ck.game[i] = 0;
+        ck.loop = 0;
     }
     if (ck.lost && is_idle) ck.back = 1;  /* the game's clip is over: its main-play video is no clip to wait out */
+}
+
+/* surface_play(surface, loop, count) from the game while our clip is away: a loop of the game's is a background */
+static void ck_play_seen(unsigned *r)
+{
+    void *bank;
+    if (ck_ours || ck_in || !ck.lost || !r[1] || ck.loop || ck.back) return;   /* (back: its main-play video) */
+    ck_in = 1;
+    bank = clip2_surface();
+    ck_in = 0;
+    if (!bank || (unsigned)(unsigned long)bank != r[0]) return;
+    ck.loop = 1;
+    ck.loop_ms = pm_ms();
+    ck.loop_len = 0;
+    say("clip: the game loops \"%.60s\" - one pass of it (at most %u ms), then \"%s\" comes back", ck.game,
+        (unsigned)CK_LOOP_MS, ck.name);
+}
+static void on_surface_play(unsigned *r)
+{
+    ck_play_seen(r);
 }
 
 /* every tick, from clip_tick: put the clip back once the game's clip is over */
@@ -2194,6 +2234,11 @@ static void ck_tick(void)
     }
     surf = clip2_surface();
     if (!surf) return;
+    if (ck.loop && !ck.back) {            /* a loop of the game's: one pass of it, at most CK_LOOP_MS */
+        if (ck.loop_len <= 0) ck.loop_len = ck_ms("surface_duration", surf);
+        if (pm_ms() - ck.loop_ms >= (unsigned long)(ck.loop_len > 0 && ck.loop_len < CK_LOOP_MS ? ck.loop_len : CK_LOOP_MS))
+            ck.back = 1;
+    }
     if (!ck.back && ((int (*)(void *))(unsigned long)fn("surface_state"))(surf)
                     == (int)pm_port_value("surface_playing", 2)) return;   /* the game's clip still plays */
     want = ck.at + (long long)(pm_ms() - ck.lost_ms);
@@ -2204,7 +2249,7 @@ static void ck_tick(void)
         want = 0;
     }
     ck.on = 1;
-    ck.lost = ck.back = 0;
+    ck.lost = ck.back = ck.loop = 0;
     ck.zero_ms = pm_ms() - (unsigned long)want;
     clip.on = 1;
     clip.seen = 0;
@@ -2221,8 +2266,9 @@ static void ck_arm(void)
     if (!clip_v2 || !have_sites(s)) return;   /* a port without them: silent, the clip is gone as before */
     if ((sv_ck = 1, sv_hook())) {
         ck_can = 1;
-        say("clip: a mode's clip comes back after a clip of the game's, where it would be by then (seek 0x%08x)",
-            fn("surface_seek"));
+        ck_play_hooked = hook(fn("surface_play"), on_surface_play);
+        say("clip: a mode's clip comes back after a clip of the game's, where it would be by then (seek 0x%08x)%s",
+            fn("surface_seek"), ck_play_hooked ? "; a loop of the game's is shown one pass" : "");
     } else {
         sv_ck = 0;
     }
@@ -2265,8 +2311,8 @@ int pm_clip(const char *name)
             ck.owner = current;
             ck.begun = begun;
             ck.on = 1;
-            ck.lost = ck.back = 0;
-            ck.backs = 0;
+            ck.lost = ck.back = ck.loop = 0;
+            ck.backs = ck.asks = 0;
             ck.zero_ms = pm_ms();
         }
         return 1;
