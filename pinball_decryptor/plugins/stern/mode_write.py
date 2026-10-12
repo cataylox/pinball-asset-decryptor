@@ -638,13 +638,21 @@ def _call_ranks(entries):
     return ranks
 
 
+#: PAD-533: the titles whose game plays a SWAPPED call's record to its end, past the length its carrier's
+#: descriptor declares - proven in the emulator (C:/tmp/PAD-533/emu): on James Bond LE 1.06 an 18 s call
+#: on a 9.89 s carrier and a 20 s one on a 14.77 s carrier played whole (0.99 to their last second), and
+#: the request still read as playing past its own length. Elsewhere a call longer than every carrier is
+#: still left off the card.
+LONG_CALL_TITLES = frozenset({("james_bond_le", "1.06")})
+
+
 def long_calls(prof):
-    """PAD-533: True when a swapped call on *prof*'s title may run longer than its carrier's record:
-    its port names the game's descriptor resolver (``sound_resolve``), which the runtime wraps to
-    hand the carrier a descriptor declaring the call's own length (sounds.cfg ``call`` lines)."""
+    """PAD-533: True when a swapped call on *prof*'s title may run longer than its carrier's record
+    (:data:`LONG_CALL_TITLES`)."""
+    from . import mode_sounds as MS
     try:
-        return "sound_resolve" in MP.read_port(MP.port_path(prof))["site"]
-    except (OSError, ValueError, TypeError, AttributeError):
+        return MS.title_version(prof.key) in LONG_CALL_TITLES
+    except AttributeError:
         return False
 
 

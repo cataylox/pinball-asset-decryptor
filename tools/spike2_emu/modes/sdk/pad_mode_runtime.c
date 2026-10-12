@@ -9031,14 +9031,7 @@ static void clipv_arm(void)
  *     setting <TAB> <live> <TAB> <n>        the adjustment's live value (its address), modes 1..n
  *     sound <TAB> <m> <TAB> <id> <TAB> <hex> mode m's descriptor for asset id (the resolver's r0)
  *     force <TAB> <m>                      a rig run's own pick (the build never writes it)
- *     call <TAB> <id> <TAB> <key> <TAB> <hex>  PAD-533: a mode's own call longer than its carrier
  *
- * A `call` line is a mode's own call (item 163's swap) that runs longer than the record of the carrier
- * it is swapped in on: a swap of the key alone would cut it at the carrier's declared length (PAD-533:
- * Bond LE 1.06 has one call carrier over 10 s, so a mode's second long call was left off the card).
- * While a swap whose OUR key is <key> is armed (pm_sound_swap), asset <id> - the carrier's own - plays
- * <hex>: the carrier's descriptor naming our record and declaring its length. No swap armed, the game's
- * own. Read with the music modes' lines; a card can carry either alone.
  * The setting is read at every resolve (one word), so a change in the menu is heard from the next
  * sound the game starts; a value outside 1..n is mode 1. Read once at start, like clips.cfg. */
 #define SNDM_FILE_MAX   (512 * 1024)
@@ -9057,14 +9050,6 @@ static const unsigned char sndm_zeros[1024];    /* the keystream our descriptors
 static unsigned n_sndm, sndm_live, sndm_n, sndm_force;
 static int sndm_only, sndm_dropped, sndm_bad;
 static volatile unsigned sndm_last = 1;         /* the mode the last resolve played, for the log */
-#define SNDC_CALLS      256
-struct sndc {
-    unsigned id;
-    unsigned char ours[8], said;
-    unsigned char desc[SNDM_DESC];
-};
-static struct sndc sndc[SNDC_CALLS];
-static unsigned n_sndc;
 static unsigned (*sndm_orig)(unsigned, unsigned *);
 
 static void sndm_line(char *s)
@@ -9098,23 +9083,6 @@ static void sndm_line(char *s)
         return;
     }
     if (n < 4 || !str_eq(f[0], "sound")) return;
-    if (n >= 4 && str_eq(f[0], "call")) {
-        struct sndc *c;
-        if (n_sndc >= SNDC_CALLS) { sndm_dropped++; return; }
-        c = &sndc[n_sndc];
-        p = f[1];
-        c->id = (unsigned)number(&p, &ok);
-        if (!ok) { sndm_bad++; return; }
-        for (k = 0, p = f[2]; k < 8 && hexval(p[0]) >= 0 && hexval(p[1]) >= 0; k++, p += 2)
-            c->ours[k] = (unsigned char)(hexval(p[0]) << 4 | hexval(p[1]));
-        if (k < 8) { sndm_bad++; return; }
-        for (k = 0; k < SNDM_DESC; k++) c->desc[k] = 0;
-        for (k = 0, p = f[3]; k < SNDM_DESC && hexval(p[0]) >= 0 && hexval(p[1]) >= 0; k++, p += 2)
-            c->desc[k] = (unsigned char)(hexval(p[0]) << 4 | hexval(p[1]));
-        if (k < 8 || c->desc[0] != 5) { sndm_bad++; return; }
-        n_sndc++;
-        return;
-    }
     if (n_sndm >= SNDM_SOUNDS) { sndm_dropped++; return; }
     e = &sndm[n_sndm];
     p = f[1];
@@ -9159,40 +9127,12 @@ static unsigned sndm_mode(void)
     return v >= 1 && v <= sndm_n ? v : 1;
 }
 
-/* PAD-533: the `call` line for asset `id` whose record a live swap plays now, or 0 */
-static struct sndc *sndc_live(unsigned id)
-{
-    unsigned i;
-    int k;
-    if (!swaps_live) return 0;
-    for (i = 0; i < n_sndc; i++) {
-        if (sndc[i].id != id) continue;
-        for (k = 0; k < SWAPS_MAX; k++)
-            if (swaps[k].request && key_is(swaps[k].ours, sndc[i].ours)) return &sndc[i];
-    }
-    return 0;
-}
-
-/* get_asset_descriptor(id, out), wrapped: the game's own first, then a mode's own long call (PAD-533)
- * or mode m's bytes for the asset */
+/* get_asset_descriptor(id, out), wrapped: the game's own first, then mode m's bytes for the asset */
 static unsigned sndm_resolve(unsigned id, unsigned *out)
 {
     unsigned d = sndm_orig(id, out), m, i;
     struct sndm *e = 0;
-    struct sndc *c;
     if (!d || !out) return d;
-    c = sndc_live(id);
-    if (c) {
-        if (!c->said) {
-            c->said = 1;
-            say("long call: asset 0x%x plays the mode's own record %02x%02x%02x%02x%02x%02x%02x%02x for its "
-                "whole length (%u ms where the game's descriptor at 0x%08x says its own)", id, c->ours[0],
-                c->ours[1], c->ours[2], c->ours[3], c->ours[4], c->ours[5], c->ours[6], c->ours[7],
-                (unsigned)(c->desc[3] | c->desc[4] << 8 | c->desc[5] << 16) / 4, d);
-        }
-        out[0] = (unsigned)(unsigned long)sndm_zeros;
-        return (unsigned)(unsigned long)c->desc;
-    }
     m = sndm_mode();
     if (m != sndm_last) {
         sndm_last = m;
@@ -9217,7 +9157,7 @@ static void sndm_arm(void)
     if (sndm_dropped || sndm_bad)
         say("music modes: %d line(s) not read (the table holds %d sounds), %d not a sound line", sndm_dropped,
             SNDM_SOUNDS, sndm_bad);
-    if (!n_sndm && !n_sndc) {
+    if (!n_sndm) {
         say("music modes: %s has no sound line - nothing hooked", "sounds.cfg");
         return;
     }
@@ -9227,22 +9167,17 @@ static void sndm_arm(void)
         sndm_live = 0;
     }
     if (!fn("sound_resolve")) {
-        say("music modes: off - the port has no sound_resolve that matches this build; every sound plays mode 1's%s",
-            n_sndc ? ", and the modes' long calls stop at their carriers' length" : "");
-        n_sndm = n_sndc = 0;
+        say("music modes: off - the port has no sound_resolve that matches this build; every sound plays mode 1's");
+        n_sndm = 0;
         return;
     }
     sndm_orig = (unsigned (*)(unsigned, unsigned *))hook_wrap(fn("sound_resolve"), (void *)sndm_resolve);
     if (!sndm_orig) {
-        say("music modes: off - sound_resolve 0x%08x cannot be wrapped; every sound plays mode 1's%s", fn("sound_resolve"),
-            n_sndc ? ", and the modes' long calls stop at their carriers' length" : "");
-        n_sndm = n_sndc = 0;
+        say("music modes: off - sound_resolve 0x%08x cannot be wrapped; every sound plays mode 1's", fn("sound_resolve"));
+        n_sndm = 0;
         return;
     }
-    if (n_sndc)
-        say("long calls: %u of the modes' own calls play their whole length on a shorter carrier; "
-            "get_asset_descriptor 0x%08x is wrapped", n_sndc, fn("sound_resolve"));
-    if (n_sndm) say("music modes: %u sound(s) over %u mode(s), the setting at 0x%08x (now %u)%s; get_asset_descriptor "
+    say("music modes: %u sound(s) over %u mode(s), the setting at 0x%08x (now %u)%s; get_asset_descriptor "
         "0x%08x is wrapped", n_sndm, sndm_n, sndm_live, sndm_live ? *(volatile const unsigned *)(unsigned long)sndm_live : 0,
         sndm_force ? " - FORCED by the file" : "", fn("sound_resolve"));
 }
