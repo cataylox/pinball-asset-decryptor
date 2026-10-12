@@ -14,6 +14,8 @@ code mode, or one of its Examples). What it plays of its own sits beside it, nam
       "screen_layout": {"x": 40, ...},  where the screen goes (PAD-323; {} = placed automatically)
       "screen_style": "words",       PAD-521: no panel - its words alone, large and white, where the game
                                      letters its own (James Bond: over the TV); "" = the panel
+      "info_line": true,             PAD-547: a line of words and a value under its name (PadMode_<slug>_Info), where
+                                     the title's port puts one (James Bond: under the status bar)
       "clip": "clip.mp4",            its start clip ("" = none)
       "music": "music.wav",          its own music bed ("" = none)
       "calls": {"sever": "sever.wav", "spike": {"wav": "spike.wav", "priority": 3}},
@@ -92,6 +94,8 @@ class CodeAssets:
     title_color: str = "#ffe600"
     screen_layout: dict = field(default_factory=dict)   # PAD-323: as a form mode's (mode_assets.LAYOUT_KEYS)
     screen_style: str = ""                        # PAD-521: "words" = no panel, its words large and white
+    info_line: bool = False                       # PAD-547: a line of words and a value under its name (PadMode_<slug>_Info)
+    info_layout: dict = field(default_factory=dict)     # PAD-547: where the Scenes editor put that line (LAYOUT_KEYS)
     clip: str = ""
     music: str = ""
     calls: dict = field(default_factory=dict)

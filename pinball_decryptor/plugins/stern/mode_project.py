@@ -100,6 +100,9 @@ class TitleProfile:
     #                                  on Bond's Right ramp, shot or not); () = none it can light on this title
     status_bar: bool = False         # PAD-521: the port names the game's own status bar (`site status_bar`): a mode's
     #                                  name, colour and clock can go in it (Bond LE: the coloured bar under the TV)
+    info_at: tuple = ()              # PAD-547: (x, y) on the glass, the middle of a mode's info line (its words and a
+    #                                  value, "SUPER JACKPOT = 53,200,000"), from the port's `text info_line_at`: where
+    #                                  the game shows its own (Bond LE: under the status bar); () = INFO_AT_DEFAULT
 
     def lcd(self, which):
         """``assets/lcd/<tree>/<scene id>`` of the title's ``"bank"`` or ``"hud"`` scene."""
@@ -2007,7 +2010,19 @@ def profile_from_port(path):
         wizard_lights=_wizard_lights(port),                  # PAD-473
         wizard_claims=_wizard_route(port) == 1 and "wizard_light" in port["site"],
         status_bar=all(n in port["site"] for n in ("status_bar", "set_text", "string_new")),   # PAD-521
+        info_at=_info_at(port),                              # PAD-547
     )
+
+
+def _info_at(port):
+    """PAD-547: the port's ``text info_line_at <x> <y>`` (glass pixels, the middle of the line) as (x, y); () when the
+    port names none or a line that does not read as two numbers on the glass."""
+    words = port["text"].get("info_line_at", "").split("#")[0].replace(",", " ").split()
+    try:
+        x, y = (float(w) for w in words)
+    except ValueError:
+        return ()
+    return (x, y) if 0.0 <= x <= 4096.0 and 0.0 <= y <= 4096.0 else ()
 
 
 #: what pad_mode_runtime.c's lamps_arm needs besides the `lamp` lines before it lights an insert
@@ -4422,6 +4437,8 @@ def asset_names(slug):
     return {
         "screen_node": stem + "_Screen",
         "screen_text": stem + "_Screen." + stem + "_Screen_Words",
+        "info_node": stem + "_Info",                     # PAD-547: its info line ("SUPER JACKPOT = 53,200,000")
+        "info_text": stem + "_Info." + stem + "_Info_Words",
         "clip": stem + "_Clip",
     }
 

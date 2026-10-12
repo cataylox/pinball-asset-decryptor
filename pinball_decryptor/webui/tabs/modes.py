@@ -2757,6 +2757,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "inserts": list(getattr(p, "inserts", ()) or ()) if p is not None else [],
                 # PAD-521: the game's own status bar a mode's name, colour and clock can go in (Bond LE)
                 "status_bar": bool(getattr(p, "status_bar", False)) if p is not None else False,
+                # PAD-547: an info line is a screen of its own, so it goes on every title that takes screens
+                "info_line": p is None or bool(p.can("screen")),
                 "game_wizards_off": ("Not on this game: " + p.why_not("wizard")) if p is not None and not p.can("wizard")
                                     else "" if p is not None else "No card picked yet.",
                 "block_off": ("" if gms or p is None else

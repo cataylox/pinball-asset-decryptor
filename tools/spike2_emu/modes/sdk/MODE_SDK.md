@@ -4093,6 +4093,35 @@ under the TV with its clock full; its loop in the TV after the intro, the bar dr
 over the loop and its one-shot in the loop's place, the loop back after; ended, "TOTAL 2,000,000" over its total clip
 with the bar full, both given back 3 s later. No abort.
 
+### A line under its name (PAD-547)
+
+The game's own modes show a running value under their name: James Bond's Duel on the Disco Volante has
+"SUPER JACKPOT = 53,200,000" under its status bar, growing as shots are made. A blocks mode ticks "a line under its
+name" (`"info": {"on": true, "text": "SUPER JACKPOT", "value": {"k": "var", "name": "superjackpot"}}`) and shows its
+words, " = " and the value with commas while it runs, written again only when the value changes, hidden under a display
+of the game's and gone at its end (a drain: at once).
+
+Nothing in it is a title's own. The build adds the line as one more screen of the mode's, `PadMode_<slug>_Info` with
+its words `PadMode_<slug>_Info.PadMode_<slug>_Info_Words`, so it goes on every title that takes screens, in white in
+the HUD scene's lettering. Where it goes is the port's: `text info_line_at <x> <y>`, the middle of the line in glass
+pixels. A port that names none gets it centred under where a mode's screen shows its words (680, 450).
+
+```
+text info_line_at 679 510      # james_bond_le-1.06: under the status bar, where the game's own mini-wizards put theirs
+```
+
+The port's place is where it starts. "Place on the screen…" beside the setting (or "Lay out on the screen…" on a mode's
+page) opens the Scenes editor on the title's HUD scene with the line in it beside the mode's screen (PAD-323), where the
+build will put it; dragging or sizing it there saves into the mode's `info_layout` (the same keys as `screen_layout`),
+and the build places it so. Emulator-proven: a line moved 40 px lower in the layout is drawn 40 px lower on the glass.
+
+A mode in C does the same with `pm_node("hud", "PadMode_<slug>_Info")`, `pm_text` and `pm_set_text`, its assets.json
+saying `"info_line": true`.
+
+**Measured (emulator, stock Bond LE 1.06 card, 2026-10-12, rig 1):** a blocks DAF WIZARD built by Try it's own code,
+its name in the blue bar and SUPER JACKPOT = 5,000,000 under it at the start, 6,250,000 and 7,500,000 after two Side
+ramps, gone with the TOTAL over its end clip. With main's code the same mode showed the bar alone. No abort.
+
 ### A full-screen clip on a machine: drawn at the frame hand-over (PAD-301)
 
 On David's Premium 1.16 (2026-10-01, a traced card and a phone video) a mode's full-screen clip (`pm_clip`:

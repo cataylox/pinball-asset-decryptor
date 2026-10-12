@@ -670,6 +670,27 @@ def words_screen(names, words):
                 words_rgba=(1.0, 1.0, 1.0, 1.0))
 
 
+#: PAD-547: a mode's info line ("SUPER JACKPOT = 53,200,000"): a clear strip this size, its words in white across its
+#: middle at this size, centred on the title's place for it (the port's ``text info_line_at``; Bond LE: under its status
+#: bar) or, on a title whose port names none, under where a mode's screen shows its words
+INFO_ART = (920, 40)
+INFO_SCALE = 1.0
+INFO_AT_DEFAULT = (680.0, 450.0)
+
+
+def info_screen(names, prof):
+    """PAD-547: a mode's info line - a line of words and a value under its name, as the game's own modes show one (James
+    Bond's mini-wizards: their SUPER JACKPOT under the status bar). Built as a screen of its own (``PadMode_<slug>_Info``)
+    so it goes on every title that takes screens; where it goes is the title's (:attr:`TitleProfile.info_at`)."""
+    w, h = INFO_ART
+    cx, cy = getattr(prof, "info_at", ()) or INFO_AT_DEFAULT
+    words_at = (w / 2.0 - w * INFO_SCALE / 2.0, h / 2.0 + 16.0 * INFO_SCALE)    # as words_screen: centred on the strip
+    return dict(name=names["info_node"], art_rgba=np.zeros((h, w, 4), dtype=np.uint8), words=" ",
+                words_name=names["info_text"].split(".", 1)[1],
+                x=cx - w / 2.0, y=cy - h / 2.0, words_at=words_at, words_scale=INFO_SCALE,
+                words_rgba=(1.0, 1.0, 1.0, 1.0))
+
+
 #: PAD-323: what a mode's ``screen_layout`` holds (MODE_PARAMETERS.md), all optional: the
 #: picture's top-left on the glass, the whole screen's size, the words' place on the picture and
 #: their own size, and the HUD scene's root child the screen is drawn under (0 = under all of it)
@@ -783,8 +804,11 @@ def code_words_at(art):
 def _code_screens(project, code, prof):
     """The screens of the project's code modes (:func:`code_screen`, laid out as each one's
     ``screen_layout`` says), for :func:`build`'s one pass over the HUD scene."""
-    return [with_layout(code_screen(project, slug, spec), getattr(spec, "screen_layout", None))
-            for slug, spec in code or () if spec.screen and prof.can("screen")]
+    out = [with_layout(code_screen(project, slug, spec), getattr(spec, "screen_layout", None))
+           for slug, spec in code or () if spec.screen and prof.can("screen")]
+    # PAD-547: a mode's info line, a screen of its own wherever the title's port puts one
+    return out + [with_layout(info_screen(MP.asset_names(slug), prof), getattr(spec, "info_layout", None))
+                  for slug, spec in code or () if getattr(spec, "info_line", False) and prof.can("screen")]
 
 
 def _add_code_clips(project, code_clips, bank, parsed, prof, out_dir, ffmpeg, result, made=None):

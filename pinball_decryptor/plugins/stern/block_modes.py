@@ -38,6 +38,10 @@ THE PROGRAM (``blocks.json``)::
                                   game's own look: a name over its intro, the TOTAL over its end); "panel" = the panel
       "bar": {"on": true, "color": "#00c040"},   PAD-521: its name in the game's own status bar (James Bond: the
                                   coloured bar under the TV), in this colour, its clock draining along it
+      "info": {"on": true, "text": "SUPER JACKPOT", "value": {"k": "var", "name": "superjackpot"}},   PAD-547: a line
+                                  under its name while it runs, its words and the value as it changes ("SUPER
+                                  JACKPOT = 53,200,000"), where the title's port puts one (James Bond: under the
+                                  status bar, as the game's own mini-wizards show theirs); on every title with screens
       "scripts": [
         {"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"},
          "do": [{"op": "if", "cond": {...}, "then": [...], "else": [...]}, ...]}
@@ -374,6 +378,7 @@ def normalize(data):
     out["scripts"] = [s for s in (out.get("scripts") or []) if isinstance(s, dict)]
     out["hud"] = _norm_hud(out.get("hud"))
     out["bar"] = _norm_bar(out.get("bar"))
+    out["info"] = _norm_info(out.get("info"))
     for s in out["scripts"]:
         for b in _walk(s.get("do")):
             # PAD-372: Add seconds takes a value; one saved before held a plain number
@@ -394,6 +399,25 @@ def _norm_bar(b):
     b = b if isinstance(b, dict) else {}
     return {"on": bool(b.get("on", False)),
             "color": b.get("color") if COLOR_RE.match(str(b.get("color") or "")) else BAR_COLOR}
+
+
+INFO_TEXT_MAX = 40               # PAD-547: the info line's words; its value follows them
+
+
+def _norm_info(i):
+    """PAD-547: the info line under its name - off unless ticked; its words (capitals, as the game letters them) and the
+    value it follows (None = words alone; problems names a bad one)."""
+    i = i if isinstance(i, dict) else {}
+    return {"on": bool(i.get("on", False)), "text": str(i.get("text") or "").strip()[:INFO_TEXT_MAX],
+            "value": i.get("value") if isinstance(i.get("value"), dict) else None}
+
+
+def info_line_c(text, with_value):
+    """PAD-547: the printf the info line is made with: "SUPER JACKPOT = %s" (the value with commas), the words alone, or
+    the value alone - as the game's own: "SUPER JACKPOT = %,02llu"."""
+    if not with_value:
+        return text
+    return (text + " = %s") if text else "%s"
 
 
 def _norm_hud(h):
@@ -532,7 +556,8 @@ def _sync_assets(project, slug, program):
                or spec.seconds != max(1, program["seconds"] or 60)
                or (spec.clips or {}) != clips or (spec.calls or {}) != calls
                or (spec.music or "") != program["music"] or dict(spec.hud or {}) != hud
-               or (getattr(spec, "screen_style", "") or "panel") != program["screen_style"])
+               or (getattr(spec, "screen_style", "") or "panel") != program["screen_style"]
+               or bool(getattr(spec, "info_line", False)) != program["info"]["on"])
     if changed or not os.path.isfile(os.path.join(MP.mode_folder(project, slug), CM.ASSETS_FILE)):
         spec.name = program["name"] or slug.upper()
         spec.screen = program["screen"]
@@ -542,6 +567,7 @@ def _sync_assets(project, slug, program):
         spec.calls = calls
         spec.music = program["music"]
         spec.screen_style = "words" if program["screen_style"] == "words" else ""
+        spec.info_line = program["info"]["on"]          # PAD-547: the build adds PadMode_<slug>_Info
         CM.save(project, slug, spec)
 
 
@@ -724,6 +750,11 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
                 _check_num(c["value"], "The HUD's counter %d" % (k + 1), ctx)
         if hud["gauge"]["on"] and hud["gauge"]["value"] is not None:
             _check_num(hud["gauge"]["value"], "The HUD's gauge", ctx)
+    info = program["info"]
+    if info["on"] and info["value"] is not None:              # PAD-547
+        _check_num(info["value"], "The info line", ctx)
+    elif info["on"] and not info["text"]:
+        out.append("The info line has no words and no value: give it one or untick it.")
     for i, s in enumerate(program["scripts"]):
         _check_hat(s.get("hat") or {}, i + 1, ctx)
         _check_stack(s.get("do") or [], 1, "Script %d" % (i + 1), ctx)
@@ -1654,6 +1685,9 @@ def to_c(program, slug):
     # kit_display): its words step aside under one, so it holds a display priority while it runs
     watch = has_hud or program["screen"]
     has_bar = program["bar"]["on"]          # PAD-521: its name, colour and clock in the game's own status bar
+    info = program["info"]                  # PAD-547: a line of words and a value under its name
+    has_info = info["on"]
+    info_live = g.num(info["value"]) if has_info and info["value"] is not None else None
     live = []                           # (counter 0-2, C of its value): counters that follow a value
     gauge_live = None
     if has_hud:
@@ -1717,6 +1751,12 @@ def to_c(program, slug):
     L.append("/* The screen a build added for this mode (its folder is \"%s\"). Not there = no screen. */" % slug)
     L.append('#define SCREEN_NODE  "PadMode_%s_Screen"' % slug)
     L.append('#define SCREEN_TEXT  "PadMode_%s_Screen.PadMode_%s_Screen_Words"' % (slug, slug))
+    if has_info:
+        L.append("/* PAD-547: its info line, a screen of its own the build put where the title's port says (James Bond: under")
+        L.append(" * the status bar). Not there = no line. */")
+        L.append('#define INFO_NODE    "PadMode_%s_Info"' % slug)
+        L.append('#define INFO_TEXT    "PadMode_%s_Info.PadMode_%s_Info_Words"' % (slug, slug))
+        L.append("#define INFO_FORMAT  %s" % _c_str(info_line_c(info["text"].replace("%", "%%"), info_live is not None)))
     L.append("")
     L.append("/* ---- the shots, events and variables the blocks name ---- */")
     nshots, nevents, nvars, nhits = max(1, len(g.shots)), max(1, len(g.events)), max(1, len(g.var_names)), max(1, len(g.hits))
@@ -1763,6 +1803,10 @@ def to_c(program, slug):
         L.append("static unsigned bar_max, bar_hold;     /* PAD-521: the clock's most ticks; the bar kept through the total */")
     if watch:
         L.append("static int screen_away;                /* its screen hidden: a game display or mode has the middle */")
+    if has_info:
+        L.append("static void *info, *info_words;       /* PAD-547: its info line and that line's words */")
+        L.append("static int info_up;                    /* shown now */")
+        L.append("static char info_now[96];              /* what it says now */")
     if has_hud:
         L.append("")
         L.append("/* ---- the HUD at the glass's edges (PAD-375): the build's PadMode_%s_Hud group, driven by" % slug)
@@ -1801,6 +1845,8 @@ def to_c(program, slug):
     L.append("")
     if has_bar:
         L.extend(_BAR_C.split("\n"))
+    if has_info:
+        L.extend((_INFO_C % {"value": info_live or "0"}).split("\n"))
     L.append("/* a timer: ms from now (0 or less stops it); the milliseconds it has left */")
     L.append("UNUSED static void timer_start(int i, long long ms)")
     L.append("{")
@@ -2072,6 +2118,8 @@ def to_c(program, slug):
         L.append("    }")
     L.append('    pm_log("START (%s): player %u", why, run.player);')
     L.append("    on_mode_start();")
+    if has_info:
+        L.append("    if (run.on) info_show(1);          /* PAD-547: what the start's blocks set, on the first frame */")
     if has_hud:
         L.append("    if (run.on) hud_show();            /* what the start's blocks set, on the first frame */")
     L.append("}")
@@ -2091,6 +2139,8 @@ def to_c(program, slug):
         L.append("    }")
         L.append("    pa_end(&own);                     /* its music fades, the game's comes back */")
     L.append("    unlight_all();                    /* a show it ends with paints on, then hands back */")
+    if has_info:
+        L.append("    info_show(0);                     /* PAD-547: its line goes with it */")
     if has_bar:
         L.append("    bar_show(0);                      /* PAD-521: the bar full, kept through its total */")
         L.append("    bar_hold = ENDING_MS / 1000 * TICKS_PER_SECOND;")
@@ -2137,6 +2187,8 @@ def to_c(program, slug):
         L.append("    bar_hold = 0;")
         L.append("    pm_status_bar(0, 0, 0);           /* PAD-521: the game's display comes at once */")
     L.append("    if (screen) pm_show(screen, 0);")
+    if has_info:
+        L.append("    info_show(0);")
     L.append("    if (DISPLAY_PRIORITY) pm_display_priority(0);")
     if has_hud:
         L.append("    kit_hud_drop_now();")
@@ -2172,6 +2224,19 @@ def to_c(program, slug):
     L.append("    if (!run.on) pm_show(screen, 0);")
     L.append("}")
     L.append("")
+    if has_info:
+        L.append("static void find_info(void)           /* PAD-547 */")
+        L.append("{")
+        L.append("    static unsigned tries;")
+        L.append("    if (info || !pm_can(PM_CAN_SCREENS) || (tries++ % 30) != 0) return;")
+        L.append('    info = pm_node("hud", INFO_NODE);')
+        L.append("    if (!info) return;")
+        L.append('    info_words = pm_text("hud", INFO_TEXT);')
+        L.append("    info_up = 1;                      /* built shown, as every screen is */")
+        L.append("    info_now[0] = 0;")
+        L.append("    if (!run.on) info_show(0);")
+        L.append("}")
+        L.append("")
     L.append("static void on_shot(uint64_t shot)")
     L.append("{")
     L.append("    unsigned p = pm_player();")
@@ -2199,6 +2264,8 @@ def to_c(program, slug):
     L.append("    unsigned seconds = 0;")
     L.append("    int in_game = pm_in_game();")
     L.append("    find_screen();")
+    if has_info:
+        L.append("    find_info();")
     if has_hud:
         L.append("    kit_hud_tick(&hud);                /* finds it, expires an award, writes what changed */")
     if media:
@@ -2285,6 +2352,8 @@ def to_c(program, slug):
         L.append("    }")
     if has_hud:
         L.append("    if (run.on) hud_show();")
+    if has_info:
+        L.append("    if (run.on) info_show(!pm_display_covered() && !pm_aside());   /* PAD-547: out of the way of the game's */")
     L.append("}")
     L.append("")
     L.append("static void on_ball_end(void)")
@@ -2685,6 +2754,36 @@ static void bar_show(int clock)
         pct = bar_max ? (int)((run.ticks_left * 100u + bar_max - 1) / bar_max) : 0;
     }
     pm_status_bar(MODE_NAME, BAR_RGB, pct);
+}
+"""
+
+#: PAD-547: the info line under its name; %(value)s = the C of the value it follows
+_INFO_C = r"""/* PAD-547: its info line under its name while it runs (James Bond: under the status bar, where the game's own
+ * mini-wizards show their SUPER JACKPOT): its words and the value as it changes, written only when it changed. Hidden
+ * under a display of the game's and at its end. A card built with no line for it shows nothing. */
+static void info_show(int on)
+{
+    char number[32], line[96];
+    long long value = %(value)s;
+    int k;
+    if (!info) return;
+    if (!on) {
+        if (info_up) pm_show(info, 0);
+        info_up = 0;
+        return;
+    }
+    pm_commas(number, sizeof number, value < 0 ? 0 : (uint64_t)value);
+    pm_snprintf(line, sizeof line, INFO_FORMAT, number);
+    for (k = 0; line[k] && line[k] == info_now[k]; k++)
+        ;
+    if (line[k] != info_now[k] && info_words) {
+        pm_set_text(info_words, line);
+        for (k = 0; k < (int)sizeof info_now - 1 && (info_now[k] = line[k]) != 0; k++)
+            ;
+        info_now[sizeof info_now - 1] = 0;
+    }
+    if (!info_up) pm_show(info, 1);
+    info_up = 1;
 }
 """
 
