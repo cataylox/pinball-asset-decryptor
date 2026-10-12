@@ -80,6 +80,7 @@ class TreeEditMixin:
         self._tlive_lock = threading.Lock()
         self._thist = {}             # (project, card) -> undo / redo lists of (ops, eyes) steps
         self._tbatches = []          # changes made to several scenes at once (PAD-528)
+        self._telist = False         # the list of edits is open (PAD-540)
 
     def _tree_reset(self):
         self._trees = None
@@ -3141,6 +3142,96 @@ class TreeEditMixin:
         self._tree_refresh()
         return True
 
+    # -- the list of edits (DragonRR, PAD-540) ------------------------------
+    # The "N edits, not written yet" line opens it in place of the scene list: every scene's
+    # edits, the selected scene's first.  Clicking one goes to its scene and selects what it
+    # changed; Reset takes that one edit back, on its own scene, as one undo step there.
+    @rpc
+    def edit_list(self, on=True):
+        self._telist = bool(on)
+        self._edit_list_sync()
+        return True
+
+    def _edit_list_sync(self):
+        if not self._telist:
+            if self.store.get(self.ns, "edit_list") is not None:
+                self.set(edit_list=None)
+            return
+        from ..plugins.stern import scene_edit
+        trees = self._load_trees()
+        here, _m = self._tree_card()
+        dirs = {d.replace("\\", "/").rstrip("/"): d for d in (self._scenes or {})}
+        groups = []
+        for card, ops in scene_edit.load(self.assets_dir).items():
+            names = scene_edit.names_of(trees[card]) if card in trees else {}
+            for op in ops:
+                if op["op"] in scene_edit._MAKES and op.get("id") is not None:
+                    names[op["id"]] = (op.get("name") or ('"%s"' % op["text"] if op.get("text")
+                                       else "drop shadow"))
+            rows = []
+            for i, op in enumerate(ops):
+                node = op.get("node", op.get("id"))
+                rows.append({"i": i, "node": node, "sig": _op_sig(op),
+                             "name": names.get(node) or "layer %s" % node,
+                             "what": scene_edit.describe(op), "group": op.get("group")})
+            d = dirs.get(scene_edit.scene_dir(card))
+            groups.append({"card": card, "d": d, "label": self._scene_label(card),
+                           "here": card == here, "edits": rows})
+        groups.sort(key=lambda g: (not g["here"], g["label"].lower()))
+        self.set(edit_list=groups)
+
+    def _edit_list_go(self, card):
+        """Go to *card*'s scene (selected already, or picked in the list); False when this
+        project has no such scene."""
+        from ..plugins.stern import scene_edit
+        d = {k.replace("\\", "/").rstrip("/"): k for k in (self._scenes or {})}.get(
+            scene_edit.scene_dir(card))
+        if d is None:
+            return False
+        if d != self._sel and not self.select(d):
+            return False
+        return self._tree_card()[0] == card
+
+    @rpc
+    def edit_list_pick(self, card, index):
+        """Go to the scene of the edit at *index* of *card*'s list and select what it changed."""
+        from ..plugins.stern import scene_edit
+        ops = scene_edit.ops_for(self.assets_dir, card)
+        index = int(index)
+        if not 0 <= index < len(ops) or not self._edit_list_go(card):
+            return False
+        node = ops[index].get("node", ops[index].get("id"))
+        if node is None or self._tman is None or int(node) not in scene_edit._man_index(self._tman):
+            return True                               # (a node the scene no longer has)
+        return self.tree_select(int(node))
+
+    @rpc
+    def edit_list_reset(self, card, index, sig):
+        """Take back the one edit at *index* of *card*'s list (*sig*: the edit the page saw,
+        so a list that has changed since never drops another), on its own scene: Undo there
+        puts it back."""
+        from ..plugins.stern import scene_edit
+        ops = scene_edit.ops_for(self.assets_dir, card)
+        index = int(index)
+        if not 0 <= index < len(ops) or _op_sig(ops[index]) != sig:
+            self._edit_list_sync()
+            return False
+        if not self._edit_list_go(card):
+            return False
+        self._tree_track(card)
+        was = self._tree_hidden(card)
+        try:
+            scene_edit.set_ops(self.assets_dir, card, scene_edit.without(ops, index))
+        except OSError as e:
+            compat.messagebox.showerror("Scene edit", str(e))
+            return False
+        # a hide taken back takes its preview eye with it, as an undone hide does (PAD-407)
+        now = self._tree_hidden(card)
+        self._tree_view_follow(card, was - now, True)
+        self._tree_view_follow(card, now - was, False)
+        self._tree_refresh()
+        return True
+
     @rpc
     def tree_remove(self, node):
         """An ADDED node is removed; the game's own is hidden (its code finds it by name)."""
@@ -3822,6 +3913,11 @@ def _kept_size(pick, assets_dir, rel, stock=None):
     if pick.get("keep") or scene_render.own_size(size, stock):
         return size
     return None
+
+
+def _op_sig(op):
+    """An edit as the list of edits shows it, to know it again (PAD-540)."""
+    return json.dumps(op, sort_keys=True)
 
 
 def _walk_man(man):

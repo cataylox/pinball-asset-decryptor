@@ -294,6 +294,7 @@ export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
   const bodyStyle = [split.left != null ? `--sc-left:${split.left}px` : "",
     split.right != null ? `--sc-right:${split.right}px` : ""].filter(Boolean).join(";");
   useEffect(() => { if (!s.alive) setColor(null); }, [s.alive]);
+  useEffect(() => { if (s.edit_list && wide) setWide(false); }, [!!s.edit_list]);
   const tips = s.tips || {};
   const layout = s.layout_dialog;               // Move… / Font size…, shown in the side column
   const startColor = async (text) => {
@@ -374,7 +375,8 @@ export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
           <span class="sc-key" title=${STATE_TIP.all}><span class="sc-dot all"></span>profile on all</span>
           <span class="sc-key" title=${STATE_TIP.written}><span class="sc-dot written"></span>written to a card</span>
         </div>` : null}
-        <div class="scenes-list-wrap" ref=${listRef} ...${tip(tips.list)}>
+        ${s.edit_list ? html`<${EditList} list=${s.edit_list} t=${s.tree_view} />` : null}
+        <div class=${cx("scenes-list-wrap", s.edit_list && "sc-off")} ref=${listRef} ...${tip(tips.list)}>
           <${Table} key=${sceneCols(listW).length} cls="scenes-list" columns=${sceneCols(listW)}
             rowClass=${(r) => (r.state ? "sc-" + r.state : "")} rows=${s.scenes || []} rowKey=${(r) => r.d}
             selected=${s.sel} onSelect=${(r) => call("text_scenes.select", r.d)} rowHeight=${30}
@@ -1718,6 +1720,43 @@ function TreeSide({ t, play, playFrame, openFont, find, searching }) {
   </div>`;
 }
 
+// The list of edits (DragonRR, PAD-540): opened from "N edits, not written yet", it stands in
+// for the scene list.  Every scene's edits, the selected scene's first: click one to go to its
+// scene with what it changed selected; Reset takes that one edit back (Undo puts it back).
+function EditList({ list, t }) {
+  const n = list.reduce((a, g) => a + g.edits.length, 0);
+  const sel = t && t.sel;
+  return html`<div class="sc-edits">
+    <div class="row sc-edits-hd">
+      <span class="h2 grow">Edits${n ? ` (${n})` : ""}</span>
+      <${Button} size="sm" icon="left" cls="sc-list-hide" title="Back to the scene list"
+        onClick=${() => call("text_scenes.edit_list", false)}>Scenes<//>
+    </div>
+    <div class="sc-edits-body">
+      ${n ? null : html`<p class="small muted sc-edits-none">No scene has an edit: every one is as the game shipped it.</p>`}
+      ${list.map((g) => html`<div key=${g.card} class="sc-edits-scene">
+        <div class="row sc-edits-sh" ...${tip(g.d || g.card)}>
+          <span class="ellip grow">${g.label}</span>
+          ${g.here ? html`<span class="small acc-ink nw">this scene</span>` : null}
+          <span class="small muted nw">${g.edits.length}</span>
+        </div>
+        ${g.edits.map((e) => html`<div key=${e.i + ":" + e.sig} role="button" tabindex="0"
+            class=${cx("sc-edit-row", g.here && sel === e.node && "on", !g.d && "gone")}
+            onClick=${() => g.d && call("text_scenes.edit_list_pick", g.card, e.i)}
+            onKeyDown=${(ev) => { if ((ev.key === "Enter" || ev.key === " ") && g.d) { ev.preventDefault(); call("text_scenes.edit_list_pick", g.card, e.i); } }}
+            ...${tip({ head: `${e.name}: ${e.what}`, lines: g.d ? [["Click", "go to its scene with it selected"],
+              ["Reset", "take this edit back (Ctrl+Z on its scene puts it back)"]] : ["Its scene is not in this project."] })}>
+          <span class="small muted sc-edit-n">${e.i + 1}</span>
+          <span class="ellip sc-edit-name">${e.name}</span>
+          <span class="ellip small muted sc-edit-what">${e.what}</span>
+          <${Button} size="xs" kind="ghost" icon="undo" disabled=${!g.d}
+            onClick=${(ev) => { ev.stopPropagation(); call("text_scenes.edit_list_reset", g.card, e.i, e.sig); }}>Reset<//>
+        </div>`)}
+      </div>`)}
+    </div>
+  </div>`;
+}
+
 // The whole scene's actions, in the bar under the preview: add a picture or a line of text,
 // undo, put the scene back as shipped.
 function TreeActions({ t }) {
@@ -1751,9 +1790,13 @@ function TreeActions({ t }) {
           title: "Put every scene in this project back the way the game shipped it.",
           onClick: () => call("text_scenes.tree_clear_all") },
       ])}>Reset<//>
-    ${t.built === "same" && t.edits ? html`<span class="small nw ok-ink" title=${STATE_TIP.written}><span class="sc-dot written"></span> Written to a card</span>`
-      : t.edits || t.built === "changed" ? html`<span class="small nw warn-ink" title="Edits are kept as you make them; there is nothing to save. The next Write puts them on the card.">
-          <span class="sc-dot edited"></span> ${t.edits ? `${t.edits} edit${t.edits === 1 ? "" : "s"}` : "Back as shipped"}, not written yet</span>` : null}
+    ${t.built === "same" && t.edits ? html`<button type="button" class="small nw ok-ink sc-edits-open"
+        onClick=${() => call("text_scenes.edit_list", true)} ...${tip({ head: STATE_TIP.written,
+          lines: [["Click", "list every edit: go to one, or Reset it"]] })}><span class="sc-dot written"></span> Written to a card</button>`
+      : t.edits || t.built === "changed" ? html`<button type="button" class="small nw warn-ink sc-edits-open"
+          onClick=${() => call("text_scenes.edit_list", true)} ...${tip({ head: "Edits are kept as you make them; there is nothing to save. The next Write puts them on the card.",
+            lines: [["Click", "list every edit: go to one, or Reset it"]] })}>
+          <span class="sc-dot edited"></span> ${t.edits ? `${t.edits} edit${t.edits === 1 ? "" : "s"}` : "Back as shipped"}, not written yet</button>` : null}
     ${(t.hidden_names || []).length ? html`<span class="small nw warn-ink"
         title=${`Hidden in the game, so the machine never draws it: ${t.hidden_names.join(", ")}. Click the red stop sign at the end of its row in Layers to put it back.`}>
         <${Icon} name="eye-off" /> ${t.hidden_names.length} hidden in game</span>` : null}
