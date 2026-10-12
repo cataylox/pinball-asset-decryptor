@@ -80,8 +80,9 @@ image whenever an image's game carries an adjustable color profile;
 the tab's preview draws it in exactly those cases. On the machine,
 Settings > Color correction lets the operator change each game's
 color correction without a computer: Start from (As built,
-Recommended, No change, Black and white), middle shades and color
-level per channel, color strength and darkest shades, with the Color
+Recommended, No change, Black and white), brightness, contrast and
+saturation, middle shades and color level per channel and darkest
+shades, with the Color
 profile tab's test card on the glass corrected live as the values
 move, then Save for this game or Save for every game. The saved
 values reach the game at its next start: the boot hook copies the

@@ -41,6 +41,24 @@ void colour_identity(struct colour *c)
         c->lift[k] = 0.0f;
     }
     c->sat = 1.0f;
+    c->bright = c->contrast = 1.0f;
+}
+
+void colour_folded(const struct colour *c, struct colour *out)
+{
+    double b = c->bright, ct = c->contrast, k;
+    int ch;
+    *out = *c;
+    out->bright = out->contrast = 1.0f;
+    if (b == 1.0 && ct == 1.0) return;
+    if (ct < 0.01) ct = 0.01;
+    k = (b > 0.0 ? b : 0.0) * 2.0 * pow(0.5, 1.0 / ct);
+    for (ch = 0; ch < 3; ch++) {
+        double g = c->gamma[ch] * ct;
+        double n = k * pow(c->gain[ch] > 0.0f ? c->gain[ch] : 0.0f, 1.0 / ct);
+        out->gamma[ch] = (float)(g < SLOT_MAX ? g : SLOT_MAX);
+        out->gain[ch] = (float)(n < SLOT_MAX ? n : SLOT_MAX);
+    }
 }
 
 static void slot_text(float v, char out[SLOT + 1])
@@ -68,12 +86,14 @@ static void slot_values(const struct colour *c, float v[NSLOTS])
 
 int colour_equal(const struct colour *a, const struct colour *b)
 {
-    float va[NSLOTS], vb[NSLOTS];
+    float va[NSLOTS + 2], vb[NSLOTS + 2];
     char sa[SLOT + 1], sb[SLOT + 1];
     int k;
     slot_values(a, va);
     slot_values(b, vb);
-    for (k = 0; k < NSLOTS; k++) {
+    va[NSLOTS] = a->bright, va[NSLOTS + 1] = a->contrast;
+    vb[NSLOTS] = b->bright, vb[NSLOTS + 1] = b->contrast;
+    for (k = 0; k < NSLOTS + 2; k++) {
         slot_text(va[k], sa);
         slot_text(vb[k], sb);
         if (strcmp(sa, sb)) return 0;
@@ -105,6 +125,14 @@ int colour_valid(const struct colour *c, char *why, int whylen)
     }
     if (!in_range(c->sat, 0.0f, 4.0f)) {
         snprintf(why, (size_t)whylen, "saturation must be between 0 and 4");
+        return -1;
+    }
+    if (!in_range(c->bright, 0.0f, 4.0f)) {
+        snprintf(why, (size_t)whylen, "brightness must be between 0 and 4");
+        return -1;
+    }
+    if (!in_range(c->contrast, 0.1f, 4.0f)) {
+        snprintf(why, (size_t)whylen, "contrast must be between 0.1 and 4");
         return -1;
     }
     return 0;
@@ -143,6 +171,7 @@ int colour_parse(char *const fld[4], struct colour *out, char *why, int whylen)
     dst[1] = c.gain;
     dst[2] = c.lift;
     dst[3] = &c.sat;
+    c.bright = c.contrast = 1.0f;
     for (k = 0; k < 4; k++) {
         if (!fld[k] || parse_nums(fld[k], dst[k], k == 3 ? 1 : 3) < 0) {
             snprintf(why, (size_t)whylen, "%s needs %s number%s", NAMES[k],
@@ -157,17 +186,24 @@ int colour_parse(char *const fld[4], struct colour *out, char *why, int whylen)
 
 void colour_format(const struct colour *c, char *out, int outlen)
 {
-    snprintf(out, (size_t)outlen, "%.4f %.4f %.4f|%.4f %.4f %.4f|%.4f %.4f %.4f|%.4f",
-             (double)c->gamma[0], (double)c->gamma[1], (double)c->gamma[2],
-             (double)c->gain[0], (double)c->gain[1], (double)c->gain[2],
-             (double)c->lift[0], (double)c->lift[1], (double)c->lift[2], (double)c->sat);
+    int n = snprintf(out, (size_t)outlen, "%.4f %.4f %.4f|%.4f %.4f %.4f|%.4f %.4f %.4f|%.4f",
+                     (double)c->gamma[0], (double)c->gamma[1], (double)c->gamma[2],
+                     (double)c->gain[0], (double)c->gain[1], (double)c->gain[2],
+                     (double)c->lift[0], (double)c->lift[1], (double)c->lift[2], (double)c->sat);
+    /* the plain controls only when they are in use: a line without them reads
+     * the way it always did */
+    if (n > 0 && n < outlen && (fabsf(c->bright - 1.0f) > 5e-5f || fabsf(c->contrast - 1.0f) > 5e-5f))
+        snprintf(out + n, (size_t)(outlen - n), "|%.4f %.4f", (double)c->bright, (double)c->contrast);
 }
 
 /* ----------------------------------------------------------------- preview */
 
-void colour_lut_build(struct colour_lut *l, const struct colour *c)
+void colour_lut_build(struct colour_lut *l, const struct colour *raw)
 {
+    struct colour f;
+    const struct colour *c = &f;
     int ch, v;
+    colour_folded(raw, &f);
     for (ch = 0; ch < 3; ch++) {
         double g = c->gamma[ch], k = c->gain[ch], lo = c->lift[ch];
         for (v = 0; v < 256; v++) {
@@ -223,11 +259,12 @@ static char *trim(char *s)
     return s;
 }
 
-/* a values-file line: "<device>|<four fields>" -> the device (trimmed, in
- * place) and the colour; 0 ok, -1 not a usable line */
+/* a values-file line: "<device>|<four fields>[|<brightness> <contrast>]" ->
+ * the device (trimmed, in place) and the colour; 0 ok, -1 not a usable line */
 static int parse_line(char *line, char **device, struct colour *c)
 {
     char *s = trim(line), *fld[4], *p, why[120];
+    float bc[2];
     int k;
     if (!*s || *s == '#') return -1;
     p = strchr(s, '|');
@@ -243,7 +280,14 @@ static int parse_line(char *line, char **device, struct colour *c)
             p = bar;
         }
     }
-    return colour_parse(fld, c, why, sizeof why);
+    if (colour_parse(fld, c, why, sizeof why) < 0) return -1;
+    if (p) {
+        if (strchr(p, '|') || parse_nums(trim(p), bc, 2) < 0) return -1;
+        c->bright = bc[0];
+        c->contrast = bc[1];
+        if (colour_valid(c, why, sizeof why) < 0) return -1;
+    }
+    return 0;
 }
 
 int colour_file_get(const char *path, const char *device, struct colour *out)
@@ -289,7 +333,7 @@ int colour_file_put(const char *path, const char *device, const struct colour *c
     f = fopen(tmp, "w");
     if (!f) return -1;
     fprintf(f, "# Color correction set on this machine in the boot menu (Settings > Color correction).\n"
-               "# <image device>|<gamma r g b>|<gain r g b>|<lift r g b>|<saturation>\n"
+               "# <image device>|<gamma r g b>|<gain r g b>|<lift r g b>|<saturation>[|<brightness> <contrast>]\n"
                "# An image with no line here draws with the colors it was built with.\n");
     for (k = 0; k < nkeep; k++) fprintf(f, "%s\n", keep[k]);
     if (c) {
@@ -412,7 +456,11 @@ int colour_apply_program(const char *program, const char *out, const struct colo
                  (long long)st.st_size >> 20, ram >> 20);
         return -1;
     }
-    slot_values(c, vals);
+    {
+        struct colour f;
+        colour_folded(c, &f);
+        slot_values(&f, vals);
+    }
     for (i = 0; i < NSLOTS; i++) slot_text(vals[i], slots[i]);
     snprintf(tmp, sizeof tmp, "%s.tmp", out);
     in = open(program, O_RDONLY);
