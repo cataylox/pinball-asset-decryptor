@@ -6452,12 +6452,14 @@ _SPACE_SLACK_BLOCKS = 1
 _HUGE_FILE_FL = 0x40000
 
 #: A mode's own clip, sized before it is encoded: mode_assets encodes every
-#: one at an average of 2500 kbit/s (``-b:v 2500k``), at most 30 s long (a
-#: title card's own limit, and convert_clip's ``-t 30``).  An average is not
+#: one at an average of 2500 kbit/s (``-b:v 2500k``); a title card runs at most
+#: 30 s, a person's own video as long as it is, up to convert_clip's limit
+#: (mode_assets.MODE_CLIP_MAX_SECONDS, 300 s since PAD-530).  An average is not
 #: a cap, so the allowance leaves the encoder a quarter over it, and the
 #: container its own room.
 _MODE_CLIP_BYTES_PER_S = 2500 * 1000 // 8
-_MODE_CLIP_MAX_S = 30.0
+_MODE_CLIP_MAX_S = 300.0
+_MODE_TITLE_MAX_S = 30.0
 _MODE_CLIP_OVERSHOOT = 1.25
 _MODE_CLIP_CONTAINER = 64 << 10
 #: A mode's own screen: its picture, at most 1360x768 (mode_assets.load_art)
@@ -6645,7 +6647,7 @@ def _unsized_bytes(assets_dir, mode_list, code_list, radimg_edits, variants=None
 
         def clip(kind, seconds, name, folder):
             if kind == "title":
-                s = min(max(float(seconds or 0), 0.0), _MODE_CLIP_MAX_S)
+                s = min(max(float(seconds or 0), 0.0), _MODE_TITLE_MAX_S)
             elif kind == "file" and name:
                 s = _clip_seconds(os.path.join(folder, name), _MODE_CLIP_MAX_S)
             else:

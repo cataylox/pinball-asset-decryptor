@@ -157,7 +157,7 @@ becomes. A key a newer editor wrote is kept in `extra` and written back, never d
 | `screen_layout` | {} (placed automatically) | Screen > Lay out on the screen... (the Scenes editor, PAD-323) | where the screen node goes in the HUD scene, every key optional: `x`, `y` the picture's top-left on the 1360x768 glass; `scale` the whole screen's size (1 = as made); `words_x`, `words_y` the words' place on the picture (both or neither); `words_scale` the words' own size; `order` the HUD scene's root child the screen is drawn under (0 = under all of the HUD's own pictures; absent = over them, as before). A key not given stays automatic, so a mode without it builds byte for byte as before. A change rebuilds the scene: never a settings-only Try it. A code mode's `assets.json` takes the same key |
 | `clip` | "none" | Clip > None / A title card / My video | `clip_start` or `clip_end` = `PadMode_<folder>_Clip` |
 | `clip_title` | "" (the name) | Clip > Card title | the title card |
-| `clip_file` | "" | Clip > My video | the converted clip |
+| `clip_file` | "" | Clip > My video | the converted clip, as long as the video, up to 300 s (PAD-530; it was cut at 30 s) |
 | `clip_seconds` | 4.0 | Clip > seconds | the title card's length (1-30) |
 | `clip_when` | "start" | Clip > Plays | which of `clip_start` / `clip_end` |
 | `countdown` | true | Sound > Count down | `callout_at 10 <ten seconds>`, `callout_count` |
