@@ -1452,6 +1452,47 @@ def test_the_in_game_mark_warns_on_the_first_hide_until_dont_ask_again(tmp_path)
         w.call("text_scenes.close")
 
 
+def test_a_layer_an_earlier_write_hid_on_the_card_shows_hidden_and_comes_back(tmp_path):
+    """PAD-535 round 2 (DragonRR: "the two text lines under Ebirah are greyed out ... I can't
+    undelete or unhide them"): a project extracted from a card an earlier Write hid a layer on
+    has that hide in the game's own scene (never-shown keyframes), not in its edits.  Layers
+    still marks it hidden in the game, and a click puts it back: an edit of its own that the
+    preview and the next Write both show."""
+    from pinball_decryptor.plugins.stern import scene_edit, scene_eval, scene_tree
+    from pinball_decryptor.webui.text_scenes_tree import _walk_man
+    from tests.test_stern_scene_tree import scene
+    sc = scene_tree.parse(scene())
+    title = next(n["id"] for n, _p, _d in _walk_man(scene_eval.manifest(sc, {}))
+                 if n["name"] == "Title")
+    assert scene_edit.apply_scene(sc, [{"op": "visible", "node": title, "on": False}])[0] == 1
+    written = scene_tree.serialize(sc)                   # the card that Write made
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder, written)                               # ...extracted again
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        lay = lambda: {l["name"]: l for l in _tv(w)["layers"]}  # noqa: E731
+        assert lay()["Title"]["hidden"] and lay()["Title"]["baked"]
+        assert not lay()["Art"]["hidden"] and not lay()["Art"]["baked"]
+        assert _tv(w)["hidden_names"] == ["Title"] and _ops(folder) == []
+        assert not any(h["id"] == title for h in _tv(w)["hits"])
+
+        assert w.call("text_scenes.tree_game_mark", [title], True)     # put back: no question
+        assert _ops(folder) == [{"op": "visible", "node": title, "on": True}]
+        assert not lay()["Title"]["hidden"] and _tv(w)["hidden_names"] == []
+        assert any(h["id"] == title for h in _tv(w)["hits"])            # drawn in the preview
+        back = scene_tree.parse(written)                                # and by the next Write
+        scene_edit.apply_scene(back, _ops(folder))
+        assert scene_edit._tree_index(back)[title][0].keyframes == [(1, 1)]
+
+        w.answers.append("yes")
+        assert w.call("text_scenes.tree_game_mark", [title], False)    # hidden again
+        assert _ops(folder) == [] and lay()["Title"]["hidden"]
+        assert w.call("text_scenes.tree_undo")
+        assert not lay()["Title"]["hidden"]
+        w.call("text_scenes.close")
+
+
 def test_a_layers_picture_button_lands_on_it_on_the_images_tab(tmp_path):
     """PAD-287: every layer that draws a picture - itself or through what it holds - names
     it, and the button lands on it on the Images tab, even on the tab's first visit (the

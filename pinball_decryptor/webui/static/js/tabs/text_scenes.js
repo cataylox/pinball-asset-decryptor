@@ -753,11 +753,14 @@ const eyeTip = (l, solo) => ({
 const gameTip = (l, n) => ({
   head: l.hidden ? "Hidden in the game (deleted)" : "In the game",
   lines: l.hidden ? [
-    "Write leaves it out of the card, so the machine never draws it. Nothing is lost: it stays in the scene, since the game's code still looks for it.",
+    // PAD-535: hidden by an earlier Write on the card this project was extracted from
+    l.baked ? "The card this project was extracted from already has it hidden: an earlier Write hid it, so the game's own scene never draws it now. Nothing is lost: it stays in the scene, since the game's code still looks for it."
+      : "Write leaves it out of the card, so the machine never draws it. Nothing is lost: it stays in the scene, since the game's code still looks for it.",
     ["Click", n > 1 ? `put the ${n} selected layers back in the game (and in the preview)` : "put it back in the game (and in the preview)"],
     l.view_off ? "Its eye is shut too; open the eye to see it here anyway." : "Its eye is open, so the preview still shows it.",
   ] : [
-    "Write puts it on the card, so the machine draws it.",
+    l.baked ? "Put back: the card this project was extracted from had it hidden by an earlier Write, and Write shows it again whenever the game shows its group."
+      : "Write puts it on the card, so the machine draws it.",
     ["Click", n > 1 ? `hide the ${n} selected layers in the game and in the preview` : "hide it in the game (Write leaves it out of the card) and in the preview"],
     ["Delete", "hide it in the game and the preview, after asking"],
     `The eye on its own hides it here only.${l.part_off ? " It shows only when the look it sits in is on." : ""}`,
@@ -1634,7 +1637,8 @@ function TreeSide({ t, play, playFrame, openFont, find, searching }) {
       ${p.peek && p.view_off ? html`<div class="small muted">Hidden in the preview with its eye. It is shown on top while it is selected.</div>`
       : p.peek && p.view_in ? html`<div class="small muted">It sits in ${p.view_in}, hidden in the preview with its eye. It is shown on top while it is selected.</div>`
       : p.peek ? html`<div class="small muted">The game does not draw this at this moment. It is shown on top while it is selected; an edit holds wherever the game shows it.</div>` : null}
-      ${p.hidden ? html`<div class="small in-game">Hidden in the game: Write leaves it out of the card.${p.view_off ? "" : " Its eye is open, so the preview still shows it."}</div>`
+      ${p.hidden ? html`<div class="small in-game">${p.baked ? "Hidden in the game: an earlier Write hid it on the card this project was extracted from. Click its red stop sign in Layers to put it back."
+        : "Hidden in the game: Write leaves it out of the card."}${p.view_off ? "" : " Its eye is open, so the preview still shows it."}</div>`
       : p.hid_in ? html`<div class="small in-game">It sits in ${p.hid_in}, hidden in the game: Write leaves it out of the card.</div>` : null}
       <${LookNote} k=${p.look} />
       <${GameFills} p=${p} />
