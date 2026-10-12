@@ -7723,6 +7723,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # PAD-494: the music modes' files that went into the bank, and the runtime's table
         sound_mode_used = []
         sound_modes_cfg = ""
+        long_call_lines = []    # PAD-533: sounds.cfg lines for the modes' long calls
         if audio_edits or music_edits or mode_sound or mode_own or sound_modes:
             phase(1)  # Re-encode audio (Direct-SD phase index; no-op for file Write)
             if cancel():                # before the sound bank is read (PAD-489)
@@ -8144,6 +8145,14 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                             not (mode_list or code_list),
                             os.path.join(grow_work, "sound_modes"), log)
                         _stage_done(log, "reading the music modes' sound ids", t0)
+                    if any(u.get("long") for u in mode_own_used or ()):
+                        # PAD-533: each own call longer than its carrier,
+                        # the carrier's descriptor declaring the call's length
+                        t0 = time.monotonic()
+                        long_call_lines = _mode_long_call_lines(
+                            gr_path, img_path, params, desc_sites,
+                            mode_own_used, log)
+                        _stage_done(log, "reading the long calls' sound ids", t0)
                     # Keep the firmware's master-directory forward-chain intact.
                     # Blip-free (default): patch game_real so the boot-derive reads
                     # STOCK window bytes for the replaced sounds -- fully-stock
@@ -8663,7 +8672,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                               if _hudfont_node is not None else b""),
                     modes_on=_modes_on, variants=bool(variant_slots),
                     variants_prof=variant_prof, cancel=cancel,
-                    sound_modes=sound_modes_cfg, sound_modes_prof=sound_modes_prof)
+                    sound_modes=_with_long_calls(sound_modes_cfg, long_call_lines,
+                                                 os.path.join(grow_work, "long_calls")),
+                    sound_modes_prof=sound_modes_prof)
                 if mode_plan is None:
                     raise _MW.ModeWriteError("none of the project's random clips can go on "
                                              "this card")
@@ -10319,9 +10330,16 @@ def _sound_mode_descriptors(gr_path, staged, params, sites, used, log):
     mask) and its declared length moved to the mode file's (bytes 3..6, 1/4000 s; a one-sound
     descriptor declares the file's own length, a sequence moves by the difference)
     (:func:`_mode_descriptor_table`)."""
+    mask = _desc_key_mask(params, sites)
+    return _mode_descriptor_table(_resolved_descriptors(gr_path, staged), params, mask, used, log)
+
+
+def _resolved_descriptors(gr_path, staged):
+    """``[(sid, offset in the bank, descriptor window)]`` - every sound id's descriptor, read
+    through the game's own resolver off the bank *staged*. Raises RuntimeError when the resolver
+    cannot be located."""
     from .spike2 import sfx_names as SN
     from .spike2.emulator import Spike2Emu
-    mask = _desc_key_mask(params, sites)
     found = []
     emu = Spike2Emu(gr_path, staged)
     try:
@@ -10335,7 +10353,92 @@ def _sound_mode_descriptors(gr_path, staged, params, sites, used, log):
                 found.append((sid, r[0], r[2]))
     finally:
         emu.close()
-    return _mode_descriptor_table(found, params, mask, used, log)
+    return found
+
+
+def _mode_long_call_lines(gr_path, staged, params, sites, used, log, found=None):
+    """PAD-533: sounds.cfg ``call`` lines for the modes' own calls swapped in on a carrier shorter
+    than themselves (*used* entries marked ``long``, their keys from :func:`_mode_swap_keys`):
+    ``call <sid> <our key> <descriptor>``, the carrier's own descriptor (read through the game's
+    resolver off the finished bank, or *found*) naming the call's record and declaring its
+    length. While the mode's swap is armed the runtime hands the game that descriptor, so the
+    voice plays the whole call; without its line a long call stops at its carrier's length (and
+    the log says so)."""
+    from .spike2 import sfx_names as SN
+    from .spike2.emulator import emitted_length
+    from . import mode_write as _MW
+    longs = [u for u in used or () if u.get("long")]
+    if not longs:
+        return []
+
+    def cut(u, why):
+        log("Modes: %s's own %s plays only its first %.2f s on this card (its carrier's length): %s." % (
+            u.get("name"), _MW.sound_words(u.get("key")), int(u.get("carrier_len") or 0) / 44100.0, why),
+            "warning")
+
+    try:
+        with open(_lp(gr_path), "rb") as f:
+            elf = f.read()
+        with open(_lp(staged), "rb") as f:
+            head = f.read(1 << 16)
+        if found is None:
+            found = _resolved_descriptors(gr_path, staged)
+    except (RuntimeError, OSError, ValueError, struct.error) as e:
+        for u in longs:
+            cut(u, "the game's play table could not be read (%s)" % e)
+        return []
+    mask = _desc_key_mask(params, sites)
+    byidx = {p["idx"]: p for p in params}
+    extents = _descriptor_extents([o for _s, o, _d in found], SN.DESC_WINDOW)
+    by_sid = {sid: (desc, extents[off]) for sid, off, desc in found}
+    lines = []
+    for u in longs:
+        if not u.get("stock_key") or not u.get("our_key"):
+            cut(u, "its record's key did not come out of the grown bank")
+            continue
+        try:
+            sids = _MW.request_sids(elf, head, int(u["request"]))
+        except (RuntimeError, OSError, ValueError, LookupError, struct.error) as e:
+            sids, err = [], e
+        else:
+            err = "request %d plays %d sound ids" % (int(u["request"]), len(sids))
+        if len(sids) != 1 or int(sids[0]) not in by_sid:
+            cut(u, "its carrier's descriptor was not found (%s)" % err)
+            continue
+        sid = int(sids[0])
+        desc, extent = by_sid[sid]
+        hp = byidx.get(int(u["idx"])) or {}
+        frames = _wav_frames_44k(u["wav"]) or 0
+        mode_units = min(int(frames), emitted_length(int(hp.get("length") or frames))) * _DESC_DUR_RATE // 44100
+        slot_units = _duration_units_emitted(int(u.get("carrier_len") or 0))
+        d = _mode_descriptor(desc, sid, mask, bytes.fromhex(u["stock_key"]), bytes.fromhex(u["our_key"]),
+                             max(1, mode_units), slot_units, extent=extent)
+        if d is None:
+            cut(u, "its carrier's descriptor cannot name the new record")
+            continue
+        lines.append("call\t%d\t%s\t%s" % (sid, u["our_key"], d.hex()))
+        log("Modes: %s's own %s (%.2f s) plays its whole length on request %d (sound id %d)." % (
+            u.get("name"), _MW.sound_words(u.get("key")), frames / 44100.0, int(u["request"]), sid), "info")
+    return lines
+
+
+def _with_long_calls(cfg, lines, out_dir):
+    """PAD-533: the ``sounds.cfg`` a card carries - the music modes' *cfg* (a path, or ``""``)
+    with the modes' long-call *lines* added, written into *out_dir*; *cfg* as it is when there
+    are none."""
+    if not lines:
+        return cfg
+    from . import sound_modes as _SMo
+    head = ""
+    if cfg:
+        with open(_lp(cfg), "r", encoding="utf-8") as f:
+            head = f.read()
+    os.makedirs(_lp(out_dir), exist_ok=True)
+    path = os.path.join(out_dir, _SMo.CFG_NAME)
+    with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
+        f.write(head + "# PAD-533: the modes' own calls longer than their carriers\n"
+                + "\n".join(lines) + "\n")
+    return path
 
 
 def _mode_descriptor_table(found, params, mask, used, log):
@@ -17277,8 +17380,11 @@ def _mode_host_record(pc, clen, params, mine, audio_edits):
 def _mode_shared_sound(s, what, ctx, audio_edits, grows, mine, work_dir, log):
     """One SHARED carrier's sound (hud-layers): the first of its ``candidates`` its own mode does
     not use, that resolves to one record and (a call) is long enough for it; its WAV grown into a
-    host record (:func:`_mode_host_record`, the carrier's own when free). Returns its *used* entry
-    (``request``, ``idx`` the host, ``carrier_idx``), or ``None`` after logging why not."""
+    host record (:func:`_mode_host_record`, the carrier's own when free). PAD-533: a call no
+    carrier is long enough for takes the longest one when it is marked ``long_ok``
+    (:func:`.mode_write.long_calls`), ``long`` in its entry: the runtime plays it through a
+    descriptor of its own (:func:`_mode_long_call_lines`). Returns its *used* entry (``request``,
+    ``idx`` the host, ``carrier_idx``, ``carrier_len``), or ``None`` after logging why not."""
     from . import mode_sounds as _MS
     from . import mode_write as _MW
     from .spike2.emulator import emitted_length
@@ -17293,6 +17399,7 @@ def _mode_shared_sound(s, what, ctx, audio_edits, grows, mine, work_dir, log):
     why = []
     picked = None
     fits = []                       # a call: every carrier that takes it, the shortest one wins
+    longs = []                      # PAD-533: the shorter ones, the longest wins when none fits
     for req in (int(r) for r in s["candidates"]):
         if req in taken:
             continue
@@ -17311,7 +17418,8 @@ def _mode_shared_sound(s, what, ctx, audio_edits, grows, mine, work_dir, log):
             why.append("request %d's record is unknown" % req)
             continue
         clen = int(pc.get("length", 0) or 0)
-        if not s.get("music") and want > clen:
+        short = not s.get("music") and want > clen
+        if short and not s.get("long_ok"):
             why.append("request %d's record is %.2f s" % (req, clen / 44100.0))
             continue
         host = cidx if (cidx not in mine and cidx not in audio_edits) else \
@@ -17322,9 +17430,15 @@ def _mode_shared_sound(s, what, ctx, audio_edits, grows, mine, work_dir, log):
         if s.get("music"):
             picked = (req, cidx, clen, host)            # the music: the title's order
             break
+        if short:
+            longs.append((-clen, len(longs), (req, cidx, clen, host)))
+            continue
         fits.append((clen, len(fits), (req, cidx, clen, host)))
     if picked is None and fits:
         picked = min(fits)[2]
+    long_ = picked is None and bool(longs)
+    if long_:
+        picked = min(longs)[2]
     if picked is None:
         log("Modes: %s is not put on this card: no carrier takes it (%s)." % (
             what, "; ".join(why[:3]) or "every carrier of its kind is taken by the mode's other sounds"),
@@ -17350,11 +17464,13 @@ def _mode_shared_sound(s, what, ctx, audio_edits, grows, mine, work_dir, log):
     mine.add(host)
     taken.add(req)
     log("Modes: %s (%s, %.2f s) goes on the card as a new record (a copy of sound idx %d%s) that "
-        "request %d plays for the mode alone; the game still plays its own on that request%s." % (
+        "request %d plays for the mode alone; the game still plays its own on that request%s%s." % (
             what, os.path.basename(s["wav"]), _wav_frames_44k(s["wav"]) / 44100.0, host,
             ", the carrier's own" if host == cidx else "", req,
-            "" if host == cidx else ", which other modes' sounds share"), "info")
-    return dict(s, request=req, idx=host, carrier_idx=cidx,
+            "" if host == cidx else ", which other modes' sounds share",
+            "; that request's record is %.2f s, so the mode hands the game a play of its own "
+            "length" % (clen / 44100.0) if long_ else ""), "info")
+    return dict(s, request=req, idx=host, carrier_idx=cidx, carrier_len=clen, long=long_,
                 ms=None if s.get("music") else _MS.sound_ms(_lp(s["wav"])))
 
 

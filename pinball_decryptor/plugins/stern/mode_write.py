@@ -638,11 +638,22 @@ def _call_ranks(entries):
     return ranks
 
 
-def _share_swapped(entries, c, taken):
+def long_calls(prof):
+    """PAD-533: True when a swapped call on *prof*'s title may run longer than its carrier's record:
+    its port names the game's descriptor resolver (``sound_resolve``), which the runtime wraps to
+    hand the carrier a descriptor declaring the call's own length (sounds.cfg ``call`` lines)."""
+    try:
+        return "sound_resolve" in MP.read_port(MP.port_path(prof))["site"]
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
+
+
+def _share_swapped(entries, c, taken, long_ok=False):
     """Each SWAPPED entry (``swap``) gets ``candidates``: the title's carriers of its kind, less the
     requests re-pointed for good (*taken*), from its rank on; ``request`` is the first. The carriers
     are shared across modes; the engine keeps them distinct within one (hud-layers). An entry with
-    no carrier at all is left out, and returned in the second list."""
+    no carrier at all is left out, and returned in the second list. With *long_ok*
+    (:func:`long_calls`) each call is marked ``long_ok``: it may take a carrier shorter than itself."""
     from . import mode_sounds as MS
     ranks = _call_ranks([e for e in entries if e.get("swap")])
     kept, dropped = [], []
@@ -656,6 +667,8 @@ def _share_swapped(entries, c, taken):
             dropped.append(e)
             continue
         e["request"], e["candidates"] = cands[0], cands
+        if long_ok and not e.get("music"):
+            e["long_ok"] = True
         kept.append(e)
     return kept, dropped
 
@@ -719,7 +732,7 @@ def choose_own_sounds(project, modes, sound_ok, end_sound=None, log=None):
         if MS.carriers(game, version).swap:
             entry["swap"] = True        # item 163: swapped in at run time, no stock sound id changes
         out.append(entry)
-    out, dropped = _share_swapped(out, c, taken)
+    out, dropped = _share_swapped(out, c, taken, long_calls(prof))
     for e in dropped:
         log("Modes: %s's %s is not put on this card: %s %s has no %s carrier." % (
             e["name"], SOUND_WORDS[e["key"]], game, version, "music" if e["music"] else "call"), "warning")
@@ -2058,7 +2071,7 @@ def choose_code_sounds(project, code, sound_ok, prof, taken=(), taken_beds=(), l
             entry["swap"] = True        # item 163: swapped in at run time
         entry.pop("priority", None)
         out.append(entry)
-    out, dropped = _share_swapped(out, c, taken)
+    out, dropped = _share_swapped(out, c, taken, long_calls(prof))
     for e in dropped:
         log("Modes: %s's %s is not put on this card: %s %s has no %s carrier." % (
             e["name"], sound_words(e["key"]), game, version, "music" if e["music"] else "call"), "warning")
