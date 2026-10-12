@@ -52,9 +52,10 @@ jobs:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     # A wedged or looping test should fail the job, not hang for the
-    # 6-hour default and hold up a release.  Healthy runs take about 2
-    # minutes per leg.
-    timeout-minutes: 15
+    # 6-hour default and hold up a release.  Healthy runs take about 10
+    # minutes on Linux and 11-15 on macOS, whose slower runners passed the
+    # old 15-minute cap at 98% with nothing failing (PAD-550).
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
