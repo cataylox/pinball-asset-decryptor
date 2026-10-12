@@ -643,6 +643,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         new = [dict(r, state=states.get(r["d"], "")) for r in rows]
         if new != rows:
             self.set(scenes=new)
+        self._edit_list_sync()                   # PAD-540: the list of edits, if open
 
     def _sorted_dirs(self):
         key = _SORT_KEYS.get(self._sort_col, _SORT_KEYS["#0"])
@@ -891,6 +892,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         self._tree_unselect()
         self._sel = d
         self._on_select()
+        self._edit_list_sync()                   # its edits go to the top (PAD-540)
         if not self._find_stepping and self._find_at and self._find_at[0] != d:
             # another scene picked by hand: Next goes to its first line (PAD-468)
             self._find_at = None

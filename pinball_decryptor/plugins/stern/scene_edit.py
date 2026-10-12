@@ -251,6 +251,31 @@ def drop(assets_dir, card, node, kind):
     save(assets_dir, edits)
 
 
+def without(ops, index):
+    """*ops* less the one at *index* (PAD-540: one edit Reset from the list of them), and the
+    ones that would be left with nothing to act on: an edit of a node an add or a drop shadow
+    made goes with it, and so does whatever was then added inside it."""
+    ops = [dict(op) for op in ops or ()]
+    if not 0 <= index < len(ops):
+        return ops
+    gone = ops.pop(index)
+    made = {gone["id"]} if gone.get("id") is not None and gone["op"] in _MAKES else set()
+    while made:
+        keep, more = [], set()
+        for op in ops:
+            if op.get("node") in made or (op["op"] in _MAKES and op.get("parent") in made):
+                if op.get("id") is not None and op["op"] in _MAKES:
+                    more.add(op["id"])
+            else:
+                keep.append(op)
+        ops, made = keep, more
+    return ops
+
+
+#: the edits that make a node of their own (its id is the op's ``id``)
+_MAKES = ("add_picture", "add_text", "shadow")
+
+
 def undone(ops):
     """*ops* without its last edit (a group's ops go together)."""
     ops = list(ops or ())
