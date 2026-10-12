@@ -1945,7 +1945,9 @@ def _tryit_set_from_manifest(project, modes, code, set_dir, listed, counts, E, r
         reused=reused,
         files=[r.get("path", "").lstrip("/") for r in listed.get("files") or ()],
         new_files=[str(r).strip("/") for r in carried.get("added") or ()],
-        mode_files=[n for n in carried.get("files") or () if n.endswith(".cfg")],
+        # the mode files alone: stock.cfg, clips.cfg and sounds.cfg sit beside them (PAD-533: a
+        # code mode's long calls bring sounds.cfg to a set of no form mode)
+        mode_files=[n for n in carried.get("files") or () if re.fullmatch(r"mode\d*\.cfg", n)],
         slots=[(slot, slug, spec.name) for slot, (slug, spec) in enumerate(modes)],
         port=port, end_sound=carried.get("end_sound"), counts=tuple(counts),
         own_sounds=own_sounds_by_slug(carried.get("own_sounds")),

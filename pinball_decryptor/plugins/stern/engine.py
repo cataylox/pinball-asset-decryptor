@@ -17277,8 +17277,11 @@ def _mode_host_record(pc, clen, params, mine, audio_edits):
 def _mode_shared_sound(s, what, ctx, audio_edits, grows, mine, work_dir, log):
     """One SHARED carrier's sound (hud-layers): the first of its ``candidates`` its own mode does
     not use, that resolves to one record and (a call) is long enough for it; its WAV grown into a
-    host record (:func:`_mode_host_record`, the carrier's own when free). Returns its *used* entry
-    (``request``, ``idx`` the host, ``carrier_idx``), or ``None`` after logging why not."""
+    host record (:func:`_mode_host_record`, the carrier's own when free). PAD-533: a call no
+    carrier is long enough for takes the longest one - the game plays a swapped record to its
+    end, past the length its carrier's descriptor declares (emulator-proven on James Bond LE and
+    Pro 1.06 and Godzilla LE 1.16). Returns its *used* entry (``request``, ``idx``
+    the host, ``carrier_idx``), or ``None`` after logging why not."""
     from . import mode_sounds as _MS
     from . import mode_write as _MW
     from .spike2.emulator import emitted_length
@@ -17293,6 +17296,7 @@ def _mode_shared_sound(s, what, ctx, audio_edits, grows, mine, work_dir, log):
     why = []
     picked = None
     fits = []                       # a call: every carrier that takes it, the shortest one wins
+    longs = []                      # PAD-533: the shorter ones, the longest wins when none fits
     for req in (int(r) for r in s["candidates"]):
         if req in taken:
             continue
@@ -17311,9 +17315,7 @@ def _mode_shared_sound(s, what, ctx, audio_edits, grows, mine, work_dir, log):
             why.append("request %d's record is unknown" % req)
             continue
         clen = int(pc.get("length", 0) or 0)
-        if not s.get("music") and want > clen:
-            why.append("request %d's record is %.2f s" % (req, clen / 44100.0))
-            continue
+        short = not s.get("music") and want > clen
         host = cidx if (cidx not in mine and cidx not in audio_edits) else \
             _mode_host_record(pc, clen, ctx["params"], mine, audio_edits)
         if host is None:
@@ -17322,9 +17324,15 @@ def _mode_shared_sound(s, what, ctx, audio_edits, grows, mine, work_dir, log):
         if s.get("music"):
             picked = (req, cidx, clen, host)            # the music: the title's order
             break
+        if short:
+            longs.append((-clen, len(longs), (req, cidx, clen, host)))
+            continue
         fits.append((clen, len(fits), (req, cidx, clen, host)))
     if picked is None and fits:
         picked = min(fits)[2]
+    long_ = picked is None and bool(longs)
+    if long_:
+        picked = min(longs)[2]
     if picked is None:
         log("Modes: %s is not put on this card: no carrier takes it (%s)." % (
             what, "; ".join(why[:3]) or "every carrier of its kind is taken by the mode's other sounds"),
@@ -17350,10 +17358,12 @@ def _mode_shared_sound(s, what, ctx, audio_edits, grows, mine, work_dir, log):
     mine.add(host)
     taken.add(req)
     log("Modes: %s (%s, %.2f s) goes on the card as a new record (a copy of sound idx %d%s) that "
-        "request %d plays for the mode alone; the game still plays its own on that request%s." % (
+        "request %d plays for the mode alone; the game still plays its own on that request%s%s." % (
             what, os.path.basename(s["wav"]), _wav_frames_44k(s["wav"]) / 44100.0, host,
             ", the carrier's own" if host == cidx else "", req,
-            "" if host == cidx else ", which other modes' sounds share"), "info")
+            "" if host == cidx else ", which other modes' sounds share",
+            "; it runs past that request's own %.2f s, and the game plays it whole" % (
+                clen / 44100.0) if long_ else ""), "info")
     return dict(s, request=req, idx=host, carrier_idx=cidx,
                 ms=None if s.get("music") else _MS.sound_ms(_lp(s["wav"])))
 
@@ -17439,12 +17449,6 @@ def _mode_own_sounds_grow(gr_path, img_path, params, sites, audio_edits, grows,
                 "%s is not a WAV this app can read" % os.path.basename(wav)), "warning")
             continue
         length = int(p.get("length", 0))
-        if s.get("swap") and not s.get("music") and want > length:
-            # item 163: the carrier's descriptor still says how long it plays
-            log("Modes: %s is not put on this card: %s (%.2f s) is longer than its carrier's own "
-                "record (request %d, %.2f s), which says how long it plays." % (
-                    what, os.path.basename(wav), want / 44100.0, s["request"], length / 44100.0), "warning")
-            continue
         if s.get("music"):
             # item 150 follow-up: always a seamless loop, a whole number of 10 ms steps (so the
             # record's declared duration ends exactly on it), repeated past the stock record
