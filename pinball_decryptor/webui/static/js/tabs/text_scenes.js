@@ -747,17 +747,25 @@ const eyeTip = (l, solo) => ({
     ["Ctrl+Z", "take an eye click back, as any edit"],
     "The game is not changed.",
   ] });
-const gameTip = (l) => ({
-  head: l.hidden ? "Game: hidden" : "Game: shown",
+// PAD-535 (DragonRR: "no real indication items have deleted status"): every row says whether
+// it is in the game, a green tick or a red stop sign at its end; with several rows selected a
+// click on one of theirs sets them all
+const gameTip = (l, n) => ({
+  head: l.hidden ? "Hidden in the game (deleted)" : "In the game",
   lines: l.hidden ? [
-    "Write leaves it out of the card, so the machine never draws it.",
-    ["Click", "put it back in the game (and in the preview)"],
+    "Write leaves it out of the card, so the machine never draws it. Nothing is lost: it stays in the scene, since the game's code still looks for it.",
+    ["Click", n > 1 ? `put the ${n} selected layers back in the game (and in the preview)` : "put it back in the game (and in the preview)"],
     l.view_off ? "Its eye is shut too; open the eye to see it here anyway." : "Its eye is open, so the preview still shows it.",
   ] : [
-    ["Click", "hide it in the game (Write leaves it out of the card) and in the preview"],
+    "Write puts it on the card, so the machine draws it.",
+    ["Click", n > 1 ? `hide the ${n} selected layers in the game and in the preview` : "hide it in the game (Write leaves it out of the card) and in the preview"],
     ["Delete", "hide it in the game and the preview, after asking"],
     `The eye on its own hides it here only.${l.part_off ? " It shows only when the look it sits in is on." : ""}`,
   ] });
+const gameMarkIds = (t, l) => {
+  const sels = t.sels || [];
+  return sels.includes(l.id) && sels.length > 1 ? sels : [l.id];
+};
 // PAD-451 (DragonRR): a line in a font whose letters carry their own colors (c.art) has a
 // palette of its own: the Write gives it its own copy of the font.  What that means, and how
 // to reach every line in the font at once (its pictures, on the Images tab)
@@ -1049,10 +1057,6 @@ function TreeLayers({ t }) {
       <span class="sc-t ellip">${l.filled ? html`<span class="ly-filled" aria-label="Filled in by the game" ...${tip(filledTip(l.filled))}><${Icon} name="gear" /></span>`
         : l.painted ? html`<span class="ly-filled ly-painted" aria-label="Painted by the game" ...${tip(GAME_COLORS_TIP)}><${Icon} name="brush" /></span>` : null}${l.name}${l.added ? " (added)" : ""}</span>
       <span class=${cx("sc-i small ellip", l.hidden ? "in-game" : "muted")}>${l.edits || (l.filled ? "game fills it" : l.painted ? "game paints it" : l.look ? l.look.short : l.kind)}</span>
-      <button type="button" class=${cx("ly-game", l.hidden && "on")} aria-label="Hidden in the game"
-        aria-pressed=${l.hidden ? "true" : "false"} ...${tip(gameTip(l))}
-        onClick=${(e) => { e.stopPropagation(); call("text_scenes.tree_visible", l.id, l.hidden); }}>
-        <${Icon} name="sd" /></button>
       ${l.color ? html`<button type="button" class=${cx("ly-color", l.color.locked ? "locked" : l.color.on || l.color.font_on ? "on" : "off", l.color.font_on && "via-font")}
         aria-label=${l.color.line ? "Color profile on this line" : "Color profile on this picture"} aria-pressed=${l.color.on || l.color.font_on ? "true" : "false"} ...${tip(colorTip(l, cs))}
         onClick=${(e) => { e.stopPropagation(); if (!l.color.locked) call("text_scenes.tree_color", l.id, !l.color.on, true); }}>
@@ -1069,6 +1073,10 @@ function TreeLayers({ t }) {
         aria-label="Find on the Replace Text tab" ...${tip("Find these words on the Replace Text tab")}
         onClick=${(e) => { e.stopPropagation(); call("text_scenes.activate", "str::" + l.text); }}><${Icon} name="text" /></button>`
         : html`<span></span>`}
+      <button type="button" class=${cx("ly-ingame", l.hidden ? "gone" : "in")} aria-label=${l.hidden ? "Hidden in the game" : "In the game"}
+        aria-pressed=${l.hidden ? "true" : "false"} ...${tip(gameTip(l, gameMarkIds(t, l).length))}
+        onClick=${(e) => { e.stopPropagation(); call("text_scenes.tree_game_mark", gameMarkIds(t, l), l.hidden); }}>
+        <${Icon} name=${l.hidden ? "ban" : "check"} /></button>
     </div>`)}
   </div>`;
 }
@@ -1743,7 +1751,7 @@ function TreeActions({ t }) {
       : t.edits || t.built === "changed" ? html`<span class="small nw warn-ink" title="Edits are kept as you make them; there is nothing to save. The next Write puts them on the card.">
           <span class="sc-dot edited"></span> ${t.edits ? `${t.edits} edit${t.edits === 1 ? "" : "s"}` : "Back as shipped"}, not written yet</span>` : null}
     ${(t.hidden_names || []).length ? html`<span class="small nw warn-ink"
-        title=${`Hidden in the game, so the machine never draws it: ${t.hidden_names.join(", ")}. Click the card at the end of its row in Layers to put it back.`}>
+        title=${`Hidden in the game, so the machine never draws it: ${t.hidden_names.join(", ")}. Click the red stop sign at the end of its row in Layers to put it back.`}>
         <${Icon} name="eye-off" /> ${t.hidden_names.length} hidden in game</span>` : null}
     ${adding ? html`<${Modal} title="Add a line of text" onClose=${() => setAdding(false)}
         footer=${html`<${Button} onClick=${() => setAdding(false)}>Cancel<//><${Button} kind="primary"

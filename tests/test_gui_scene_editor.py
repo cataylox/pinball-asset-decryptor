@@ -1409,6 +1409,49 @@ def test_several_picked_at_once_move_and_hide_together(tmp_path):
         w.call("text_scenes.close")
 
 
+def test_the_in_game_mark_warns_on_the_first_hide_until_dont_ask_again(tmp_path):
+    """PAD-535 (DragonRR: "no real indication items have deleted status"): the mark at every
+    Layers row's end (a green tick, a red stop sign) sets the row, or every selected row, in
+    the game or hidden in it.  A hide asks first, until "Don't ask again" (kept in
+    settings.json); putting one back never asks."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        tv = _tv(w)
+        art = next(h for h in tv["hits"] if h["name"] == "Art")["id"]
+        title = next(h for h in tv["hits"] if h["name"] == "Title")["id"]
+        hidden = lambda: {l["id"] for l in _tv(w)["layers"] if l["hidden"]}  # noqa: E731
+
+        w.answers.append("cancel")
+        assert not w.call("text_scenes.tree_game_mark", [art], False)
+        assert w.asked[-1]["title"] == "Hide in the game" and '"Art"' in w.asked[-1]["message"]
+        assert "Nothing is lost" in w.asked[-1]["detail"]
+        assert [b["id"] for b in w.asked[-1]["buttons"]] == ["yes", "always", "cancel"]
+        assert hidden() == set() and _ops(folder) == []
+
+        w.answers.append("yes")
+        assert w.call("text_scenes.tree_game_mark", [art], False)
+        assert hidden() == {art}
+        n = len(w.asked)
+        assert w.call("text_scenes.tree_game_mark", [art], True)      # back: no question
+        assert len(w.asked) == n and hidden() == set()
+
+        # a plain yes asks again next time; several selected rows go together, one undo step
+        w.answers.append("always")
+        assert w.call("text_scenes.tree_game_mark", [art, title], False)
+        assert "these 2 layers" in w.asked[-1]["message"]
+        assert hidden() == {art, title}
+        assert w.app._settings.get("scenes_hide_warned") is True
+        assert w.call("text_scenes.tree_undo")
+        assert hidden() == set()
+        n = len(w.asked)
+        assert w.call("text_scenes.tree_game_mark", [title], False)    # never asked again
+        assert len(w.asked) == n and hidden() == {title}
+        w.call("text_scenes.close")
+
+
 def test_a_layers_picture_button_lands_on_it_on_the_images_tab(tmp_path):
     """PAD-287: every layer that draws a picture - itself or through what it holds - names
     it, and the button lands on it on the Images tab, even on the tab's first visit (the

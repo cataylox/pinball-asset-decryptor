@@ -692,8 +692,10 @@ HELP_CONTENT = {
                  "text": "Hides a layer **in the preview only**. **H** toggles the "
                          "selection; **Alt+click** an eye solos it."},
                 {"icon": "x", "tone": "warn", "title": "Hide in the game",
-                 "text": "The card mark at a row's end (or right-click). Write leaves it "
-                         "off the card; the row is struck through."},
+                 "text": "The mark at a row's end: a green tick is in the game, a red "
+                         "stop sign hidden (click to swap; with several rows selected, "
+                         "all of them). Write leaves a hidden one off the card; the row "
+                         "is struck through."},
                 {"icon": "trash", "tone": "err", "title": "Delete",
                  "text": "**Delete** (or right-click) asks first. A layer you added is "
                          "taken out; the game's own are hidden in both. **Undo** brings "

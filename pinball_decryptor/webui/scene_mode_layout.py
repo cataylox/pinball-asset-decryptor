@@ -459,6 +459,12 @@ class ModeLayoutMixin:
         return super().tree_visible_many(nodes, on)
 
     @rpc
+    def tree_game_mark(self, nodes, on):
+        if self._mlay_refuse(self._tree_nodes(nodes)):     # before the first-hide warning
+            return False
+        return super().tree_game_mark(nodes, on)
+
+    @rpc
     def tree_undo(self):
         """Back one step: while a mode's screen is laid out, its layout's steps first."""
         if self._mlay is not None and self._mlay["undo"]:
