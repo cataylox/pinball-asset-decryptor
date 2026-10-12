@@ -29,6 +29,7 @@ _TREE_DISPLAY = (1360, 768)          # the canvas image is drawn full size: it i
 _ORDER = ("up", "down", "front", "back")
 _DROP = ("before", "after", "into")
 _GROUP_KINDS = ("Sprite", "StreamingFlipbook")
+_HIDE_WARNED = "scenes_hide_warned"  # settings.json: the first hide in the game has warned (PAD-535)
 
 
 #: a sprite state that is on its way in or out (tree_show tries these last)
@@ -1650,6 +1651,46 @@ class TreeEditMixin:
         return False
 
     @rpc
+    def tree_game_mark(self, nodes, on):
+        """The mark at a Layers row's end (PAD-535, DragonRR): a green tick in the game, a red
+        stop sign hidden in it.  A click puts *nodes* (the row, or every selected row) back in
+        the game or hides them there; the first hide warns, until "Don't ask again"."""
+        nodes = self._tree_nodes(nodes)
+        if not nodes:
+            return False
+        if not on and not self._tree_hide_warned(nodes):
+            return False
+        return self.tree_visible_many(nodes, on)
+
+    def _tree_hide_warned(self, nodes):
+        """True to go on hiding *nodes* in the game: asked once, or never again."""
+        app = getattr(self.ctx, "app", None)
+        settings = getattr(app, "_settings", None)
+        if isinstance(settings, dict) and settings.get(_HIDE_WARNED):
+            return True
+        byid = {n["id"]: n for n, _p, _d in _walk_man(self._tman)} if self._tman else {}
+        what = ('"%s"' % byid[nodes[0]]["name"] if len(nodes) == 1 and nodes[0] in byid
+                else "these %d layers" % len(nodes))
+        answer = self.ctx.dialogs.message(
+            "warning", "Hide in the game",
+            "Hide %s in the game?" % what,
+            [{"id": "yes", "label": "Hide in the game", "style": "primary"},
+             {"id": "always", "label": "Hide, and don't ask again"},
+             {"id": "cancel", "label": "Cancel"}],
+            default="yes",
+            detail="Write leaves it out of the card, so the machine never draws it, and the "
+                   "preview hides it too. Nothing is lost: it stays in the scene (the game's "
+                   "code still looks for it), its row gets a red stop sign, and a click on "
+                   "that puts it back. Undo (Ctrl+Z) takes it back too.")
+        if answer == "always" and isinstance(settings, dict):
+            settings[_HIDE_WARNED] = True
+            try:
+                app._save_settings()
+            except Exception:                           # noqa: BLE001
+                pass
+        return answer in ("yes", "always")
+
+    @rpc
     def tree_delete(self, nodes):
         """The Delete key, in Layers or on the preview (PAD-391, DragonRR): asks first, then
         removes what was added and hides the game's own in the game and the preview (its code
@@ -1675,7 +1716,7 @@ class TreeEditMixin:
                          "game still looks for them): %s." % ", ".join(
                              byid[n]["name"] for n in own[:6])
                          + (" and %d more" % (len(own) - 6) if len(own) > 6 else "")
-                         + " Click the card mark at the end of a row to put one back.")
+                         + " Click the red stop sign at the end of its row to put one back.")
         lines.append("Undo (Ctrl+Z) takes it back.")
         if not compat.messagebox.askyesno("Delete layer" if len(nodes) == 1 else "Delete layers",
                                           "Delete %s?\n\n%s" % (what, "\n\n".join(lines))):

@@ -193,7 +193,7 @@
 .tree-states-hint { margin: 6px 0; }
 .tree-state { display: grid; grid-template-columns: 22px minmax(0, 1fr) 150px; gap: 6px; align-items: center; margin: 3px 0; }
 .tree-state-n { text-align: right; }
-.ly-item { grid-template-columns: 20px minmax(0, 1.2fr) minmax(0, 1fr) 16px 16px 20px; cursor: pointer; }
+.ly-item { grid-template-columns: 20px minmax(0, 1.2fr) minmax(0, 1fr) 16px 20px 20px; cursor: pointer; }
 /* PAD-312: the picture's colour switch - green corrected, red its own colours, blue lock for
    the game's own picture (no switch) */
 .ly-color { all: unset; cursor: pointer; display: inline-flex; color: var(--ink-3); }
@@ -214,19 +214,22 @@
 .sc-views > .seg button { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: var(--bg); }
 .sc-views > .seg button:hover { background: var(--panel); }
 .sc-views > .seg button.on { background: var(--accent-soft); box-shadow: inset 0 -2px 0 var(--accent); }
-.ly-off { opacity: .5; }
+.ly-off > :not(.ly-ingame) { opacity: .5; }
 .ly-eye { all: unset; cursor: pointer; display: inline-flex; color: var(--ink-3); }
 .ly-eye:hover { color: var(--ink); }
 .ly-eye.solo { color: var(--accent); }
 .ly-solo { all: unset; cursor: pointer; margin-left: auto; color: var(--accent); }
 .ly-solo:hover { text-decoration: underline; }
-/* PAD-293: hidden in the game is its own mark, like Fusion's Suppress: the card at the row's
-   end, and the row struck through; the eye is the preview only */
-.ly-game { all: unset; cursor: pointer; display: inline-flex; color: var(--ink-3); opacity: 0; }
-.ly-item:hover .ly-game, .ly-game:focus-visible { opacity: .7; }
-.ly-game:hover { opacity: 1; color: var(--ink); }
-.ly-game.on, .ly-game.on:hover { opacity: 1; color: var(--err); }
-.ly-game:focus-visible { outline: 2px solid var(--accent); }
+/* PAD-293: hidden in the game is its own mark, like Fusion's Suppress, and the row is struck
+   through; the eye is the preview only.  PAD-535: the mark is always there at the row's end, a
+   green tick in the game, a red stop sign hidden, never dimmed with the row */
+.ly-ingame { all: unset; cursor: pointer; display: inline-flex; justify-content: center; border-radius: 4px; }
+.ly-ingame .i { width: 16px; height: 16px; stroke-width: 2.6; }
+.ly-ingame.in { color: #3fb950; }
+.ly-ingame.gone { color: #f85149; }
+.ly-ingame.gone .i { stroke-width: 3; }
+.ly-ingame:hover { filter: brightness(1.25); }
+.ly-ingame:focus-visible { outline: 2px solid var(--accent); }
 .ly-item.not-in-game .sc-t { text-decoration: line-through; color: var(--err); }
 .ly-item .sc-i.in-game, .tree-props .in-game { color: var(--err); }
 /* PAD-391: a row dragged in Layers - a line where it lands, a lit group it goes into; red
