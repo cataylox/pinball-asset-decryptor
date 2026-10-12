@@ -640,7 +640,7 @@ HELP_CONTENT = {
             "layers stay in their group.\n"
             "- **Ctrl+Z** undo, **Ctrl+Y** or **Ctrl+Shift+Z** redo.",
             "### The panel\n"
-            "- Position, size (**W px / H px**), **Turn °** (clockwise; 90° buttons), "
+            "- Position, size (**W px / H px**), **Turn °** (clockwise; 90° buttons; your own turn, on top of any turn the game gives it, which the panel names under it), "
             "tint and opacity, hide, and layer order (later draws on top).\n"
             "- A picture shows its size and scale; **Draw 1:1** draws it pixel for pixel.\n"
             "- Text: a corner or **W px / H px** resizes its box and the words wrap inside "
