@@ -53,14 +53,17 @@ static int seek_ok = 1;
 static void *clip2_surface(void) { return &surf_obj; }
 static long long length_of(const char *v)
 {
-    if (!strcmp(v, "PadMode_long_Clip")) return 20000;
+    if (!strcmp(v, "PadMode_long_Clip")) return 40000;
     if (!strncmp(v, "MainPlayLoop", 12)) return 60000;
     if (!strcmp(v, "LeftRamp")) return 2000;
+    if (!strcmp(v, "BondWomen_007_Loop")) return 8000;
     return 3000;
 }
 static long long position(void *s) { return state == 2 ? offset + (long long)(now_ms - played_at) : 0; }
 static long long duration(void *s) { return state == 2 ? length_of(video) : 0; }
 static void ck_seen(unsigned *r);
+static void ck_play_seen(unsigned *r);
+static int looping;
 static int set_video(void *s, unsigned *str)
 {
     static unsigned held;                          /* (a 32-bit game passes its own: low, as the hook's words are) */
@@ -74,7 +77,14 @@ static int set_video(void *s, unsigned *str)
     state = 0;
     return strcmp(video, "Nope") != 0;
 }
-static int play(void *s, int a, int b) { printf("PLAY %s\n", video); state = 2; played_at = now_ms; offset = 0; return 1; }
+static int play(void *s, int a, int b)
+{
+    unsigned r[2] = { (unsigned)(unsigned long)s, (unsigned)a };
+    ck_play_seen(r);                               /* the surface_play hook: its second argument is the loop flag */
+    printf("PLAY %s%s\n", video, a ? " (looped)" : "");
+    state = 2; played_at = now_ms; offset = 0; looping = a;
+    return 1;
+}
 static int seek(void *s, long long ms) { if (!seek_ok) return 0; printf("SEEK %lld\n", ms); offset = ms; played_at = now_ms; return 1; }
 static int get_state(void *s) { return state; }
 static unsigned fn(const char *n)
@@ -95,13 +105,19 @@ static void tick(unsigned long ms)
     now_ms += ms;
     if (clip.on && state != 2) clip.on = 0;        /* clip_tick: the surface is idle */
     ck_tick();
-    if (state == 2 && position(&surf_obj) >= length_of(video)) state = 0;   /* its end */
+    if (state == 2 && !looping && position(&surf_obj) >= length_of(video)) state = 0;   /* its end */
 }
 static void game(const char *name)                 /* the game puts a clip of its own on the surface */
 {
     unsigned str = std_string(name);
     set_video(&surf_obj, &str);
     play(&surf_obj, 0, -1);
+}
+static void game_loop(const char *name)            /* ... and one it loops (a background) */
+{
+    unsigned str = std_string(name);
+    set_video(&surf_obj, &str);
+    play(&surf_obj, 1, -1);
 }
 static void begin(const struct pm_mode *m) { current = running = m; begun++; }
 int main(void)
@@ -121,18 +137,26 @@ int main(void)
     printf("on %d\n", clip.on);
     game("Something"); game("MainPlayLoop_DrNo");  /* two of the game's in a row: back once */
     tick(16); tick(16);
+    printf("-- Bond Women: a start clip once, then a loop for as long as the game's multiplier runs\n");
+    tick(2000);
+    game("BondWomenStart_Honey"); tick(1000); tick(1000); tick(500);
+    game_loop("BondWomen_007_Loop");
+    tick(1000); tick(1000); printf("waits %d\n", !clip.on || ck.lost); tick(1000); tick(16);
+    printf("on %d\n", clip.on);
+    game("BondWomen_007Scoring_2X"); tick(16);      /* a scoring clip over ours: waited out */
+    tick(3000); tick(16);
     printf("-- the mode ends under the game's clip\n");
     game("BallLock"); tick(1000);
     running = 0;
     tick(16); game("MainPlayLoop_DrNo"); tick(16); tick(16);
     printf("-- its time runs out under the game's clip\n");
     begin(&mode_a);
-    pm_clip("PadMode_long_Clip"); tick(16); tick(18000);
+    pm_clip("PadMode_long_Clip"); tick(16); tick(38000);
     game("BallLock"); tick(3000); game("MainPlayLoop_DrNo"); tick(16); tick(16);
     printf("-- it plays to its end\n");
     begin(&mode_a);
     pm_clip("PadMode_long_Clip"); tick(16);
-    for (int k = 0; k < 21; k++) tick(1000);
+    for (int k = 0; k < 41; k++) tick(1000);
     game("MainPlayLoop_DrNo"); tick(16); tick(16);
     printf("-- another of ours began\n");
     pm_clip("PadMode_long_Clip"); tick(16); tick(2000);
@@ -155,7 +179,7 @@ int main(void)
 
 
 def _ck_struct(src):
-    m = re.search(r"#define CK_END_MS.*?\n\} ck;\nstatic int ck_can, ck_ours, ck_in, sv_ck;\n", src, re.S)
+    m = re.search(r"#define CK_END_MS.*?\n\} ck;\nstatic int ck_can, ck_ours, ck_in, sv_ck, ck_play_hooked;\n", src, re.S)
     assert m
     return m.group(0)
 
@@ -165,7 +189,7 @@ def test_a_modes_clip_comes_back_where_it_would_be_after_the_games(tmp_path):
     parts = [_ck_struct(src)] + [_lift(src, s) for s in (
         "static long long ck_ms(const char *which, void *surf)", "static int ck_mode_runs(void)",
         "static void ck_drop(const char *why)", "static int clip2_start(void *surf, const char *name)",
-        "static void ck_seen(unsigned *r)", "static void ck_tick(void)\n{", "int pm_clip(const char *name)")]
+        "static void ck_seen(unsigned *r)", "static void ck_play_seen(unsigned *r)", "static void ck_tick(void)\n{", "int pm_clip(const char *name)")]
     out = _host_run(tmp_path, PRELUDE + "\n".join(parts) + MAIN, flags=("-no-pie", "-fno-pie")).splitlines()
     if not out:
         pytest.skip("this host links above 4 GB even with -no-pie")
@@ -177,6 +201,12 @@ def test_a_modes_clip_comes_back_where_it_would_be_after_the_games(tmp_path):
         "PLAY LeftRamp", "PLAY PadMode_long_Clip", "SEEK",    # the surface idle after the game's: back again
         "on 1",
         "PLAY Something", "PLAY MainPlayLoop_DrNo", "PLAY PadMode_long_Clip", "SEEK",
+        "-- Bond Women: a start clip once, then a loop for as long as the game's multiplier runs",
+        "PLAY BondWomenStart_Honey",                          # once: waited out
+        "PLAY BondWomen_007_Loop (looped)", "waits 1",        # its loop: one pass, at most 3 s
+        "PLAY PadMode_long_Clip", "SEEK", "on 1",
+        "PLAY BondWomen_007Scoring_2X",                       # a scoring clip: waited out
+        "PLAY PadMode_long_Clip", "SEEK",                     # 3 s, its end: the surface idle
         "-- the mode ends under the game's clip",
         "PLAY BallLock", "PLAY MainPlayLoop_DrNo",            # never back: its mode ended
         "-- its time runs out under the game's clip",
@@ -194,12 +224,15 @@ def test_a_modes_clip_comes_back_where_it_would_be_after_the_games(tmp_path):
     assert 8000 <= seeks[0] <= 8100
     assert 12000 <= seeks[1] <= 12200
     assert seeks[2] > seeks[1]
+    # Bond Women: back 3 s into the 8 s loop, 2 + 2.5 + 3 s after the last return: where it would be by then
+    assert seeks[3] - seeks[2] >= 2000 + 2500 + 3000
 
 
 def test_the_runtime_hooks_it_on_clip_v2_with_the_ports_seek_only():
     src = RUNTIME.read_text(encoding="utf-8")
     arm = _lift(src, "static void ck_arm(void)")
     assert '"surface_seek", "surface_duration", "surface_position"' in arm and "!clip_v2" in arm
+    assert 'hook(fn("surface_play"), on_surface_play)' in arm and src.count('hook(fn("surface_play")') == 1
     assert "ck_arm();" in src and "ck_tick();" in _lift(src, "static void clip_tick(void)")
     one = _lift(src, "static void on_surface_set_video(unsigned *r)")
     assert one.index("ck_seen(r)") < one.index("on_clipv_set_video(r)")   # before a variant swaps the name
