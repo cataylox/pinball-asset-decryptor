@@ -1006,6 +1006,7 @@ class TreeEditMixin:
                 "h": round(box[3] - box[1]) if box else None,
                 "scale": round(scale * 100), "scale_y": round(scale_y * 100),
                 "rotate": round(rotate, 2),
+                "game_turn": self._tree_game_turn(nid, rotate),
                 "tint": "#%02x%02x%02x" % tuple(int(round(min(1, c) * 255)) for c in mul[:3]),
                 "alpha": round(mul[3] * 100),
                 "hidden": any(op["op"] == "visible" and op.get("node") == nid for op in ops),
@@ -1305,6 +1306,22 @@ class TreeEditMixin:
         a, b, c, dd = d["m"][:4]
         return {"w": w, "h": h, "sx": round(math.hypot(a, b) * 100, 1),
                 "sy": round(math.hypot(c, dd) * 100, 1)}
+
+    def _tree_game_turn(self, nid, rotate):
+        """PAD-534 (DragonRR): ``{deg, mirrored}`` the game itself turns node *nid*'s picture
+        or line by as it draws it (Turn counts only the user's own turn on top), or None when
+        it draws it upright.  Planet X's bridge pointer is a south-pointing picture drawn
+        turned 48 degrees, and the Images tab shows the picture's file, unturned."""
+        from ..plugins.stern import scene_eval
+        for d in self._tdraws:
+            if d["node"] == nid and d["kind"] in ("bitmap", "flip", "text", "video"):
+                deg, mirrored = scene_eval.turn_of(d["m"])
+                deg = round((deg + rotate if mirrored else deg - rotate) % 360, 1)
+                deg = deg - 360 if deg > 180 else deg
+                if abs(deg) < 0.5 and not mirrored:
+                    return None
+                return {"deg": deg, "mirrored": mirrored}
+        return None
 
     def _fit_kept(self, draws, worlds):
         """A pick that keeps its own size is written at that size (the Write regrows the
