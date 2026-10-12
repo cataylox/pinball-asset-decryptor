@@ -168,7 +168,8 @@ the blades two columns, left and right (pixel 1 at the bottom). The side panel's
 boards and carries an **Expression lights (blades and speakers)** tick
 box: untick it to hide them (on a title with no artwork their blocks
 leave the LED grid too). The window remembers the choice; it changes
-the display only, never the game.
+the display only, never the game. The box folds like GAME HARDWARE, and
+the window remembers whether it was open.
 **The window can start a game, and it says what each press did.**
 From v0.208.0 the row begins with **Insert coin**: pressing Start on a machine with
 no credits does nothing, and does it silently, so a mouse-only session
