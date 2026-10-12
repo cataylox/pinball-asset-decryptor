@@ -926,6 +926,13 @@ def expression_on():
     return load_state().get("expression_lights", True) is not False
 
 
+def cab_panel_open():
+    """Whether the CABINET LIGHTS box is unfolded (PAD-532). In the state file
+    like the tick box inside it, because the page's own storage is private to
+    one run; open until it is first folded."""
+    return load_state().get("cab_panel_open", True) is not False
+
+
 def cabinet_names(boards=None, expression=True):
     """{(node, channel): name} for the cabinet's own lights (cablights.py),
     which GROUP_NODE has no node for - so the swatch grid can name a blade or a
@@ -2781,7 +2788,7 @@ class CabinetLights:
         if not lines and not self.has_expression:
             return None
         return {"lines": lines, "expression": self.expression,
-                "has_expression": self.has_expression}
+                "has_expression": self.has_expression, "open": cab_panel_open()}
 
     def describe(self, cid):
         try:
@@ -4822,6 +4829,19 @@ class Playfield:
                 S["alive"] = S["key"] in alive
             self.view.cab = new
             self.publish("layout")
+        return on
+
+    def api_cab_open(self, on):
+        """PAD-532: the CABINET LIGHTS box folded or unfolded, kept for the
+        next run beside the tick box. Nothing to redraw: the page did it."""
+        on = bool(on)
+        try:
+            st = load_state()
+            st["cab_panel_open"] = on
+            with open(STATE, "w") as f:
+                json.dump(st, f, indent=1)
+        except Exception:                                   # noqa: BLE001
+            pass
         return on
 
     def api_clear_alerts(self):

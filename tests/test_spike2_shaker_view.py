@@ -42,12 +42,40 @@ def test_a_named_shaker_row_is_the_shaker(tmp_path):
     assert coilmap.shaker_address(p) == (1, 0)
 
 
+#: godzilla_le's own group-5 rows: the cabinet board's lamps and buttons, on
+#: the test menu's cabinet picture, and not one coil.
+GODZILLA_CABINET = (
+    "led COIN ENABLE 0 0 0 0 5 0 - -",
+    "led COIN DOOR GI 268 255 30 30 5 1 - System/TestMode/spike_2_cabinet_front_cropped",
+    "led START BUTTON 102 228 30 30 5 2 - System/TestMode/spike_2_cabinet_front_cropped",
+    "led TOURNAMENT START 102 277 30 30 5 3 - System/TestMode/spike_2_cabinet_front_cropped",
+    "led LOCKDOWN BUTTON-G 250 169 30 30 5 4 - System/TestMode/spike_2_cabinet_front_cropped",
+    "led LOCKDOWN BUTTON-R 250 169 30 30 5 5 - System/TestMode/spike_2_cabinet_front_cropped",
+    "led LOCKDOWN BUTTON-B 250 169 30 30 5 7 - System/TestMode/spike_2_cabinet_front_cropped",
+    "switch LEFT COIN 261 334 30 30 5 16 - System/TestMode/spike_2_cabinet_front_cropped",
+    "switch CENTER COIN 203 342 51 50 5 17 - System/TestMode/spike_2_cabinet_front_cropped",
+    "switch RIGHT COIN 299 334 30 30 5 18 - System/TestMode/spike_2_cabinet_front_cropped",
+)
+
+
 def test_a_table_without_the_cabinet_board_gets_group_5_index_0(tmp_path):
     # godzilla_le: its table names no cabinet coil, and its game's drive 7 reached
     # the rig's board as node 1 coil 0 (PAD-414)
     p = _table(tmp_path, "coil TROUGH 260 613 20 20 6 1 - playfield",
-               "coil VUK 132 43 20 20 7 1 - playfield")
+               "coil VUK 132 43 20 20 7 1 - playfield", *GODZILLA_CABINET)
     assert coilmap.shaker_address(p) == (1, 0)
+
+
+def test_the_cabinet_boards_lamps_and_buttons_are_not_a_use(tmp_path):
+    # PAD-532: the group-5 LEDs and switches above are the cabinet board itself;
+    # counting them hid the Shaker panel on godzilla_le and eleven other titles.
+    # Only a group-5 COIL says group 5 is a playfield board.
+    p = _table(tmp_path, "coil TROUGH 260 613 20 20 6 1 - playfield",
+               *GODZILLA_CABINET)
+    assert coilmap.shaker_address(p) == (1, 0)
+    p = _table(tmp_path, "coil AUTO PLUNGER 219 453 20 20 5 4 - Test/pf",
+               *GODZILLA_CABINET)
+    assert coilmap.shaker_address(p) is None
 
 
 def test_the_coin_door_lockout_is_not_a_use_of_the_cabinet_board(tmp_path):

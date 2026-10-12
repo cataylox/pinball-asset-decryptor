@@ -682,10 +682,17 @@ def shaker_address(table_path):
     """(node, index) of the cabinet's shaker motor for a device_xy.txt, or None.
 
     The named row when the table has one. Otherwise group 5 index 0 - but only
-    when no row of the table uses group 5 at all, which is what keeps the HOME
+    when no COIL of the table is on group 5, which is what keeps the HOME
     EDITIONS out: their whole machine is group 5 (fixed_group_node()), so index
-    0 there is a playfield coil or nothing, and they have no shaker. A platform
-    record every cabinet has (SHAKER_GROUP_IGNORED) does not count as a use.
+    0 there is a playfield coil, and they have no shaker. A platform record
+    every cabinet has (SHAKER_GROUP_IGNORED) does not count as a use.
+
+    ONLY COILS RULE IT OUT (PAD-532). The cabinet board's own lamps and
+    buttons - COIN DOOR GI, START BUTTON, LOCKDOWN BUTTON - are group-5 LEDs
+    and switches on twelve titles whose table names no cabinet coil at all
+    (godzilla_le, jaws_le, john_wick_le, king_kong_le...); counting them
+    turned the Shaker panel off on every one, when they are the best evidence
+    there is that group 5 IS the cabinet board.
     """
     coils = load(table_path)
     got = address(coils, SHAKER)
@@ -693,7 +700,7 @@ def shaker_address(table_path):
         return got
     rows = parse_rows(_maybe_lines(table_path) or [])
     if not rows or any(
-            r.get("group") == SHAKER_GROUP
+            r.get("group") == SHAKER_GROUP and r.get("kind") == "coil"
             and (r.get("name") or "").upper().strip() not in SHAKER_GROUP_IGNORED
             for r in rows):
         return None

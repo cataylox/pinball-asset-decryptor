@@ -146,6 +146,25 @@ def board_for_group(group, board_map):
     return None
 
 
+#: Why a group found no board when the directory could not have said
+#: (PAD-532). A directory read before PAD-500 (nbdir v1) has no `group=` on any
+#: line, so no group can match - every cabinet light on godzilla_le read "group
+#: 3 has no board", when the run that rebuilds it places all three boards.
+#: nbdir.py refuses to reuse a v1 table, so the next start of the game is the
+#: whole cure; the box should say that rather than blame the title.
+NO_DIRECTORY = "this title's node directory has not been read yet; start the game to read it"
+OLD_DIRECTORY = ("this title's node directory was read before boards had places;"
+                 " start the game again to re-read it")
+
+
+def _unplaced(group, board_map):
+    if not board_map:
+        return NO_DIRECTORY
+    if all(b.get("group") is None for b in board_map.values()):
+        return OLD_DIRECTORY
+    return "group %s has no board in the title's node directory" % group
+
+
 def resolve(which, group, group_node, board_map):
     """(node, how) for a row of role `which` in device-table `group`.
 
@@ -159,7 +178,7 @@ def resolve(which, group, group_node, board_map):
         return node, "measured"
     node = board_for_group(group, board_map or {})
     if node is None:
-        return None, "group %s has no board in the title's node directory" % group
+        return None, _unplaced(group, board_map or {})
     b = board_map[node]
     if which == TOPPER:
         ok = "TOPPER" in b["name"].upper()
